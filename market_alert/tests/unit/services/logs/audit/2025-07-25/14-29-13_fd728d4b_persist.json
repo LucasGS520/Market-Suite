@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-07-25T14:29:13.628379+00:00z",
+  "stage": "persist",
+  "url": "https://example.com/item",
+  "payload": {
+    "monitored_product_id": "b1ac2832-f500-4943-bd7f-8e5dd776bbb0",
+    "product_url": "https://example.com/item"
+  },
+  "html_length": null,
+  "details": {
+    "competitor_id": "<test_scraper_headers_competitor.Obj object at 0x000001BC9392ABA0>",
+    "current_price": "1.00"
+  },
+  "error": null
+}

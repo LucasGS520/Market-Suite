@@ -1,0 +1,57 @@
+{
+  "uid": "marketalert_logging",
+  "title": "Métricas de Logs - MarketAlert",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "timezone": "",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Entradas de Log Totais",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(log_entries_total)",
+          "legendFormat": "Total de Logs",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"] },
+          "textMode": "value_and_name",
+          "colorMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Taxa de Logs por Nível (min)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 6, "y": 0, "w": 18, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum(rate(log_entries_total[1m])) by (level)",
+          "legendFormat": "{{level}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      }
+    }
+  ],
+  "time": { "from": "now-1h", "to": "now" },
+  "annotations": { "list": [] },
+  "tags": ["logging", "marketalert"],
+  "templating": { "list": [] },
+  "links": []
+}

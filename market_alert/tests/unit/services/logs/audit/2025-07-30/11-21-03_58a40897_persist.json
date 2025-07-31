@@ -1,0 +1,16 @@
+{
+  "timestamp": "2025-07-30T11:21:03.692635+00:00z",
+  "stage": "persist",
+  "url": "https://example.com/item",
+  "payload": {
+    "name_identification": "Prod",
+    "product_url": "https://example.com/item",
+    "target_price": "1.00"
+  },
+  "html_length": null,
+  "details": {
+    "product_id": "07601438-eaee-4f41-87c4-2f31fe94a2d5",
+    "current_price": "1.00"
+  },
+  "error": null
+}

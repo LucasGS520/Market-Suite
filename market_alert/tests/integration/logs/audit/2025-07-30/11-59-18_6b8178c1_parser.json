@@ -1,0 +1,20 @@
+{
+  "timestamp": "2025-07-30T11:59:18.084885+00:00z",
+  "stage": "parser",
+  "url": "https://example.com/item",
+  "payload": {
+    "name_identification": "Produto Teste",
+    "product_url": "https://example.com/item",
+    "target_price": 10.0
+  },
+  "html_length": null,
+  "details": {
+    "name": "Produto Teste",
+    "current_price": "R$ 10,00",
+    "old_price": null,
+    "shipping": "Frete Grátis",
+    "seller": "Loja X",
+    "thumbnail": "img.jpg"
+  },
+  "error": null
+}

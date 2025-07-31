@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-07-21T19:02:33.165375+00:00z",
+  "stage": "get",
+  "url": "http://example.com/",
+  "payload": {
+    "name_identification": "Prod",
+    "product_url": "http://example.com/",
+    "target_price": "1.00"
+  },
+  "html_length": 13,
+  "details": null,
+  "error": null
+}

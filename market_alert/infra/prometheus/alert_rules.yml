@@ -1,0 +1,75 @@
+groups:
+  - name: scraping_alerts
+    rules:
+
+      #Alerta de pico de bloqueios HTTP 403/429 (metric: scraper_http_blocked_total)
+      - alert: HighHttpBlockRate
+        expr: rate(scraper_http_blocked_total[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alta taxa de bloqueios HTTP (403/429)"
+          description: >
+            A taxa de bloqueios HTTP (403 ou 429) está em mais de 1 por minuto nos últimos 5 minutos,
+            indicando possível bloqueio de IP ou excesso de requisições.
+
+      #Alerta de falhas em tasks de scraping (itens monitorados)
+      - alert: ScrapingTaskFailures
+        expr: rate(celery_tasks_total{task_name="collect_product_task",status="failure"}[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Falhas frequentes em tarefas de scraping de monitorados"
+          description: >
+            Mais de 0.1 falhas por minuto em tarefas collect_product_task nos últimos 5 minutos,
+            sugerindo problemas recorrentes no scraping.
+
+      #Alerta de falhas em tasks de scraping de concorrentes
+      - alert: CompetitorScrapingFailures
+        expr: rate(celery_tasks_total{task_name="collect_competitor_task",status="failure"}[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Falhas frequentes em scraping de concorrentes"
+          description: >
+            Mais de 0.1 falhas por minuto em tarefas collect_competitor_task nos últimos 5 minutos,
+            sugerindo problemas recorrentes no scraping.
+
+      #Alerta de circuito aberto (assumindo gauge scraper_circuit_open {stage="open"})
+      - alert: ScraperCircuitOpen
+        expr: scraper_circuit_open{state="open"} == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker de scraping está aberto"
+          description: >
+            O circuit breaker de scraping está aberto há mais de 5 minutos,
+            bloqueando todas as requisições de scraping.
+
+      #Alerta de scraping suspenso (flag Redis exposta como métrica)
+      - alert: ScrapingSuspendedTooLong
+        expr: scraping_suspended_flag == 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scraping suspenso por mais de 15 minutos"
+          description: >
+            A flag de suspensão de scraping está ativa há mais de 15 minutos,
+            pode indicar bloqueio prolongado ou indisponibilidade do Mercado Livre.
+
+      #Alerta de alto volume de cache misses
+      - alert: CacheMissRateHigh
+        expr: rate(cache_misses_total[5m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alta taxa de falhas de cache"
+          description: >
+            Mais de 5 falhas de cache por minuto no último 5 minutos,
+            indicando baixo reaproveitamento de dados.

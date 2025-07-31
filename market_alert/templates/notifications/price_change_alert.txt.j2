@@ -1,0 +1,2 @@
+{% set direction = 'aumentou' if alert.type == 'price_increase' else 'reduziu' %}
+Produto: {{ monitored.name_identification }} - Concorrente: {{ alert.name }} -Preço anterior: {{ alert.old_price|currency }} - Novo preço: {{ alert.price|currency }} - Variação: {{ direction }} {{ alert.change|signed_decimal }}

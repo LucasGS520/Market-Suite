@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-07-15T13:57:24.177956+00:00z",
+  "stage": "get",
+  "url": "https://example.com/item",
+  "payload": {
+    "monitored_product_id": "232f0791-7fd3-4bbc-bf60-e63917d53b56",
+    "product_url": "https://example.com/item"
+  },
+  "html_length": 13,
+  "details": null,
+  "error": null
+}

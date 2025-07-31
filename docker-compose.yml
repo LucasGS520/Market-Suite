@@ -1,0 +1,265 @@
+services:
+
+  db:
+    image: postgres:15
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d marketalert"]
+      interval: 10s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - monitoring-net
+
+
+  redis:
+    image: redis:7
+    env_file:
+      - .env
+    command:
+      - redis-server
+      - "--requirepass"
+      - "${REDIS_PASSWORD}"
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis-scripts:/etc/redis/scripts:ro
+    networks:
+      - monitoring-net
+
+
+  redis-init:
+    image: redis:7
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until redis-cli -h redis -a "$REDIS_PASSWORD" ping; do sleep 1; done
+        redis-cli -h redis -a "$REDIS_PASSWORD" SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+    volumes:
+      - ./redis-scripts:/etc/redis/scripts:ro
+    networks:
+      - monitoring-net
+
+
+  migrations:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ../:/app
+    working_dir: /app
+    command:
+      - alembic
+      - "-c"
+      - "alembic.ini"
+      - "upgrade"
+      - "head"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - monitoring-net
+
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    command:
+      - uvicorn
+      - "main:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+      - redis-init
+    volumes:
+      - ../:/app
+      - audit-logs:/app/logs/audit
+    networks:
+      - monitoring-net
+
+
+  celery_beat:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    command:
+      - python
+      - "beat_with_metrics.py"
+    ports:
+      - "8001:8001"
+    depends_on:
+      - db
+      - redis
+      - redis-init
+    networks:
+      - monitoring-net
+
+
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    command:
+      - celery
+      - "-A"
+      - "app.core.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=debug"
+      - "--pool=threads"
+      - "--concurrency=4"
+      - "-Q"
+      - "celery,scraping,monitor"
+    ports:
+      - "8002:8002"
+    depends_on:
+      - redis
+      - redis-init
+      - db
+    volumes:
+      - ../:/app
+      - audit-logs:/app/logs/audit
+    networks:
+      - monitoring-net
+
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - monitoring-net
+
+
+  alertmanager:
+    build:
+      context: ./alertmanager
+      dockerfile: Dockerfile
+    image: alertmanager-envsubst
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+    env_file:
+      - .env
+    ports:
+      - "9093:9093"
+    networks:
+      - monitoring-net
+
+
+  loki:
+    image: grafana/loki:2.9.8
+    user: root
+    entrypoint:
+      - sh
+      - -c
+      - |
+        chown -R root:root /tmp/loki && \
+        exec /usr/bin/loki -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/tmp/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - monitoring-net
+
+
+  promtail:
+    image: grafana/promtail:2.9.8
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/log:/var/log:ro
+    networks:
+      - monitoring-net
+
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    pid: host
+    volumes:
+      - /:/host:ro
+    command:
+      - '--path.rootfs=/host'
+    networks:
+      - monitoring-net
+
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - monitoring-net
+
+
+  grafana:
+    image: grafana/grafana:latest
+    env_file:
+      - .env
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-storage:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring-net
+
+
+  locust:
+    image: locustio/locust
+    depends_on:
+      - api
+    volumes:
+      - ../:/mnt/locust
+    working_dir: /mnt/locust
+    command:
+      - "-f"
+      - "tests/load/locustfile.py"
+      - "--host"
+      - "http://api:8000"
+    ports:
+      - "8089:8089"
+    networks:
+      - monitoring-net
+
+
+volumes:
+  db-data:
+  grafana-storage:
+  audit-logs:
+  loki-data:
+
+networks:
+  monitoring-net:
+    driver: bridge

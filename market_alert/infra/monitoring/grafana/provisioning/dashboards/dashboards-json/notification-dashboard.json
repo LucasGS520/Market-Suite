@@ -1,0 +1,144 @@
+{
+  "uid": "marketalert_notification",
+  "title": "Métricas de Notificações - MarketAlert",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "timezone": "",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Notificações Enviadas por Canal/Sucesso (min)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(notifications_sent_total[1m])) by (channel, success)",
+          "legendFormat": "Canal: {{channel}} | Sucesso: {{success}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom"}
+      }
+    },
+    {
+      "id": 2,
+      "title": "Distribuição da Duração de Envio (s)",
+      "type": "heatmap",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(notification_send_duration_seconds_bucket[5m])) by (le, channel)",
+          "format": "heatmap",
+          "legendFormat": "Canal: {{channel}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" },
+        "heatmap": { "minBucket": "0.001", "maxBucket": "5" }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Regras de Alerta Ativas",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "alert_rules_active",
+          "legendFormat": "Regras",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        }
+      },
+      "options": {
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Alertas Disparados",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 6, "y": 8, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(alert_rules_triggered_total)",
+          "legendFormat": "Acionados",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Alertas Suprimidos",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(alert_rules_suppressed_total)",
+          "legendFormat": "Suprimidos",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Notificações Ignoradas por Motivo (min)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(notifications_skipped_total[1m])) by (reason)",
+          "legendFormat": "Motivo: {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      }
+    }
+  ],
+  "time": { "from": "now-1h", "to": "now" },
+  "annotations": { "list": [] },
+  "tags": ["notification", "marketalert"],
+  "templating": { "list": [] },
+  "links": []
+}

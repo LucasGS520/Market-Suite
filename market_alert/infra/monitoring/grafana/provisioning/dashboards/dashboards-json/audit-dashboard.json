@@ -1,0 +1,140 @@
+{
+  "uid": "marketalert_audit",
+  "title": "Métricas Auditoria – MarketAlert",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "15s",
+  "timezone": "",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Registro de Auditorias Totais",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(audit_records_total)",
+          "refId": "A",
+          "legendFormat": "Total de Registros"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Taxa de Registros por Etapa",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 6, "y": 0, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum(rate(audit_records_total[1m])) by (stage)",
+          "legendFormat": "Etapa: {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": { "showLegend": true }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Erros de Auditoria Totais",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(audit_errors_total)",
+          "refId": "A",
+          "legendFormat": "Total de Erros"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Taxa de Erros por Etapa",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum(rate(audit_errors_total[1m])) by (stage)",
+          "legendFormat": "Etapa: {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": { "showLegend": true }
+      }
+    },
+    {
+      "id": 5,
+      "title": "P95 Tamanho HTML (bytes)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(audit_html_length_bytes_bucket[5m])) by (le))",
+          "legendFormat": "P95 HTML (bytes)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": { "showLegend": true }
+      }
+    },
+    {
+      "id": 6,
+      "title": "P95 Duração de Escrita (s)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(audit_record_duration_seconds_bucket[5m])) by (le, stage))",
+          "legendFormat": "Etapa: {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": { "showLegend": true }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Gravações de Auditoria por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 10, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(audit_record_duration_seconds_count[1m]))",
+          "refId": "A",
+          "legendFormat": "Gravações/min"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value"
+      }
+    }
+  ],
+  "time": { "from": "now-1h", "to": "now" },
+  "annotations": { "list": [] },
+  "tags": ["audit", "marketalert"],
+  "templating": { "list": [] },
+  "links": []
+}

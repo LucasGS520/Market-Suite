@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-07-30T19:02:29.860443+00:00z",
+  "stage": "block_recovered",
+  "url": "https://example.com/item",
+  "payload": {
+    "name_identification": "Prod",
+    "product_url": "https://example.com/item",
+    "target_price": "1.00"
+  },
+  "html_length": null,
+  "details": null,
+  "error": null
+}

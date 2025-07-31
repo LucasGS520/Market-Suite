@@ -1,0 +1,23 @@
+#Ignora repositório Git
+.git/
+
+#Ignora Testes
+tests/
+
+#Ignora arquivos de configuração de ambiente
+.env
+infra/.env
+
+#Ignora ambientes virtuais
+venv*/
+.venv/
+
+#Ignora arquivos de log e caches extras
+logs/
+*.log
+.pytest_cache/
+.mypy_cache/
+.benchmarks/
+
+#Ignora Python cache directories
+__pycache__/

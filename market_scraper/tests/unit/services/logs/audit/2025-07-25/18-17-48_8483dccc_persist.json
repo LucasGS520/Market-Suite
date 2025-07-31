@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-07-25T18:17:48.591472+00:00z",
+  "stage": "persist",
+  "url": "https://example.com/item",
+  "payload": {
+    "monitored_product_id": "108b6d0e-bc42-4354-86d7-7179d1f14d95",
+    "product_url": "https://example.com/item"
+  },
+  "html_length": null,
+  "details": {
+    "competitor_id": "<Mock name='mock.query().filter().first()' id='2077407785856'>",
+    "current_price": "1.00"
+  },
+  "error": null
+}

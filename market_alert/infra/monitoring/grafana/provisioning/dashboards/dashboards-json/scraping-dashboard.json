@@ -1,0 +1,514 @@
+{
+  "uid": "marketalert_scraping_latency",
+  "title": "Métricas de Scraping – MarketAlert",
+  "schemaVersion": 39,
+  "version": 8,
+  "refresh": "15s",
+  "timezone": "",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total de Scrapes por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_requests_total[1m]))",
+          "legendFormat": "Scrapes/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Circuit Breaker Aberto (0 ou 1)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 5, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "max(scraper_circuit_open)",
+          "legendFormat": "Circuito Aberto",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": false },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "red" }
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Latência Média do Scraper (s)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 9 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraping_latency_seconds_sum[5m])) / sum(rate(scraping_latency_seconds_count[5m]))",
+          "legendFormat": "Média (s)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Latência P99 do Scraper (s)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 9 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(scraping_latency_seconds_bucket[5m])) by (le, source))",
+          "legendFormat": "Fonte: {{source}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Distribuição de Latência do Scraper",
+      "type": "heatmap",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraping_latency_seconds_bucket[5m])) by (le, source)",
+          "format": "heatmap",
+          "legendFormat": "Fonte: {{source}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" },
+        "heatmap": { "minBucket": "0.01", "maxBucket": "10" }
+      }
+    },
+
+
+
+
+
+    {
+      "id": 6,
+      "title": "Bloqueios HTTP (403/429) por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 9, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_http_blocked_total[1m]))",
+          "legendFormat": "Bloqueios HTTP/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 7,
+      "title": "CAPTCHAs Detectados por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 13, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_captcha_total[1m]))",
+          "legendFormat": "CAPTCHAs/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Requisições em Andamento",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(scraper_in_flight_requests)",
+          "legendFormat": "In flight",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "min": 0, "max": 50 }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false
+      }
+    },
+    {
+      "id": 9,
+      "title": "Retries por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 18, "y": 4, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_retry_total[1m]))",
+          "legendFormat": "Retries/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Fator de Backoff Atual",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "avg(scraper_backoff_factor)",
+          "legendFormat": "Backoff factor",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 11,
+      "title": "Jitter P95 (s)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 18, "y": 12, "w": 6, "h": 5 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(scraper_jitter_seconds_bucket[5m])) by (le))",
+          "legendFormat": "Jitter P95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": false }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Falhas de Scraping por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 17, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_head_failures_total[1m]))",
+          "legendFormat": "falhas/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Fallback para Browser por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 6, "y": 17, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_browser_fallback_total[1m]))",
+          "legendFormat": "Fallback/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Scraping Suspenso (0 ou 1)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 17, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "max(scraping_suspended_flag)",
+          "legendFormat": "Suspenso",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": false },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "red" }
+          ]
+        }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Circuit Breaker ao Longo do Tempo",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 21, "w": 24, "h": 6 },
+      "targets": [
+        {
+          "expr": "scraper_circuit_open",
+          "legendFormat": "Estado: {{state}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "title": "Parses Bem-Sucedidos por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 27, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(parser_success_total[1m]))",
+          "legendFormat": "Sucessos/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 17,
+      "title": "Falhas de Parser por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 18, "y": 27, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(parser_failure_total[1m]))",
+          "legendFormat": "Falhas/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Rechecks Agendados por Minuto",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 31, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(recheck_scheduled_total[1m]))",
+          "legendFormat": "Rechecks/min",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "sparkline": { "show": true }
+      }
+    },
+    {
+      "id": 19,
+      "title": "Tamanho Médio das Requisições (bytes)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 6, "y": 31, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_request_size_bytes_sum[1m])) / sum(rate(scraper_request_size_bytes_count[1m]))",
+          "legendFormat": "req",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "title": "Tamanho Médio das Respostas (bytes)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 31, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_response_size_bytes_sum[1m])) / sum(rate(scraper_response_size_bytes_count[1m]))",
+          "legendFormat": "resp",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "title": "Mudanças de Circuit Breaker /min",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 18, "y": 31, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_circuit_state_changes_total[1m])) by (state)",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": [ "lastNotNull" ] }
+      },
+      "textMode": "value_and_name",
+      "colorMode": "value",
+      "sparkline": { "show": true }
+    },
+    {
+      "id": 22,
+      "title": "Taxa de Sucesso por URL",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 35, "w": 24, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum(rate(scraper_url_status_total{status=\"success\"}[1m])) by (url)",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    }
+  ],
+  "time": { "from": "now-1h", "to": "now" },
+  "annotations": { "list": [] },
+  "tags": ["scraping", "marketalert"],
+  "templating": { "list": [] },
+  "links": []
+}
