@@ -5,7 +5,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 #Copia só as dependencias e instala
-COPY requirements.txt .
+COPY ../requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir playwright
 RUN playwright install --with-deps chromium
