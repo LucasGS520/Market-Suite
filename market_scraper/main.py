@@ -40,6 +40,7 @@ from app.routes.routes_notifications import router as notifications_router
 from app.routes.routes_comparisons import router as comparisons_router
 from app.routes.routes_alerts import router as alerts_router
 from app.routes.routes_health import router as health_router
+from app.routes.routes_scraper import router as scraper_router
 
 #Rotas de auth
 from app.routes.auth.routes_login import router as login_router
@@ -194,6 +195,8 @@ def create_app() -> FastAPI:
 
     #Health check
     app.include_router(health_router)
+    #Endpoint externo de scraping
+    app.include_router(scraper_router)
 
 # ---------- ---------- ---------- ----------
 

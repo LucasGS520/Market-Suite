@@ -46,5 +46,10 @@ class Settings(ConfigBase):
     )
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
 
+    #URL base do serviço externo de scraping
+    SCRAPER_SERVICE_URL: str = os.getenv(
+        "SCRAPER_SERVICE_URL", "http://market_scraper:8000"
+    )
+
 #Instância única de settings para a aplicação
 settings = Settings()
