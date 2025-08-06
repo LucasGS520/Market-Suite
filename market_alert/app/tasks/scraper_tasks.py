@@ -29,8 +29,8 @@ from app.crud.crud_comparison import get_latest_comparisons
 
 from app.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
-from app.services.services_scraper_monitored import scrape_monitored_product
-from app.services.services_scraper_competitor import scrape_competitor_product
+from market_scraper.app.services.services_scraper_monitored import scrape_monitored_product
+from market_scraper.app.services.services_scraper_competitor import scrape_competitor_product
 from app.tasks.compare_prices_tasks import compare_prices_task
 from app.crud import crud_errors
 from app.enums.enums_error_codes import ScrapingErrorType
