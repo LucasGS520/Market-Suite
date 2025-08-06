@@ -7,8 +7,6 @@ WORKDIR /app
 #Copia só as dependencias e instala
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir playwright
-RUN playwright install --with-deps chromium
 
 COPY beat_with_metrics.py /app/beat_with_metrics.py
 

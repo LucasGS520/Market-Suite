@@ -5,14 +5,13 @@ FROM python:3.11-slim
 WORKDIR /app
 
 #Copia só as dependencias e instala
-COPY ../requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir playwright
+#Inclui Playwright e BeautifulSoup para o scraping
 RUN playwright install --with-deps chromium
 
-COPY beat_with_metrics.py /app/beat_with_metrics.py
 
-#copia todo o codigo da aplicação
+#Copia todo o codigo da aplicação
 COPY . .
 
 #Documenta a porta que o container vai usar
