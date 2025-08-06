@@ -8,8 +8,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY beat_with_metrics.py /app/beat_with_metrics.py
-
 #copia todo o codigo da aplicação
 COPY . .
 
