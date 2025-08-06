@@ -26,11 +26,12 @@ from app.utils.rate_limiter import RateLimiter
 from app.utils.adaptive_recheck import AdaptiveRecheckManager
 from app.crud.crud_monitored import get_monitored_product_by_id
 from app.crud.crud_comparison import get_latest_comparisons
+from market_scraper.app.core.config import settings as scraper_settings #COnfigurações do módulo de scraping
 
 from app.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
-from market_scraper.app.services.services_scraper_monitored import scrape_monitored_product
-from market_scraper.app.services.services_scraper_competitor import scrape_competitor_product
+from app.services.services_scraper_monitored import scrape_monitored_product
+from app.services.services_scraper_competitor import scrape_competitor_product
 from app.tasks.compare_prices_tasks import compare_prices_task
 from app.crud import crud_errors
 from app.enums.enums_error_codes import ScrapingErrorType
@@ -41,7 +42,10 @@ logger = structlog.get_logger("scraper_tasks")
 redis_client = get_redis_client()
 
 circuit_breaker = CircuitBreaker()
-adaptive_recheck = AdaptiveRecheckManager(base_interval=settings.ADAPTIVE_RECHECK_BASE_INTERVAL)
+#Intervalo base definido nas configurações do scraper
+adaptive_recheck = AdaptiveRecheckManager(
+    base_interval=scraper_settings.ADAPTIVE_RECHECK_BASE_INTERVAL
+)
 
 def _observe_metrics(start: datetime, task_name: str, status: str) -> None:
     """ Registra latência e contagem de tasks no Prometheus """

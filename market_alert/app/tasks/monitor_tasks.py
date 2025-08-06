@@ -17,7 +17,7 @@ from app.utils.circuit_breaker import CircuitBreaker
 from app.utils.redis_client import get_redis_client, is_scraping_suspended
 from app.utils.rate_limiter import RateLimiter
 from app.utils.adaptive_recheck import AdaptiveRecheckManager
-from app.core.config import settings
+from market_scraper.app.core.config import settings as scraper_settings #Configurações do módulo de scraping
 
 from app.enums.enums_products import MonitoringType
 from app.crud.crud_monitored import get_products_by_type
@@ -30,7 +30,10 @@ logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()
 
 circuit_breaker = CircuitBreaker()
-adaptive_recheck = AdaptiveRecheckManager(base_interval=settings.ADAPTIVE_RECHECK_BASE_INTERVAL)
+#Intervalo base definido nas configurações do scraper
+adaptive_recheck = AdaptiveRecheckManager(
+    base_interval=scraper_settings.ADAPTIVE_RECHECK_BASE_INTERVAL
+)
 
 #Batch sizes configurado via .env
 BATCH_SIZE_SCRAPING = int(os.getenv("BATCH_SIZE_SCRAPING", "10"))

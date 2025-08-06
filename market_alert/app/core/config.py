@@ -40,28 +40,9 @@ class Settings(BaseSettings):
     ROBOTS_CACHE_KEY: str = os.getenv("ROBOTS_CACHE_KEY", "robots.txt:content")
     ROBOTS_CACHE_TTL: int = int(os.getenv("ROBOTS_CACHE_TTL", str(24 * 3600)))
 
-    #TTL base do cache de scraping
-    CACHE_BASE_TTL: int = int(os.getenv("CACHE_BASE_TTL", str(3600)))
-
-    #Brute-force protection
+    #Proteção contra tentativas de brute-force
     BRUTE_FORCE_MAX_ATTEMPTS: int = int(os.getenv("BRUTE_FORCE_MAX_ATTEMPTS", "5"))
     BRUTE_FORCE_BLOCK_DURATION: int = int(os.getenv("BRUTE_FORCE_BLOCK_DURATION", "900"))
-
-    #Parâmetros para o HumanizedDelayManager
-    HUMAN_AVG_WPM: int = int(os.getenv("HUMAN_AVG_WPM", "200"))
-    HUMAN_BASE_DELAY: float = float(os.getenv("HUMAN_BASE_DELAY", "1.0"))
-    HUMAN_FATIGUE_MIN: float = float(os.getenv("HUMAN_FATIGUE_MIN", "0.5"))
-    HUMAN_FATIGUE_MAX: float = float(os.getenv("HUMAN_FATIGUE_MAX", "2.0"))
-
-    #Parametros do Throttle e Rate Limiter
-    THROTTLE_RATE: float = float(os.getenv("THROTTLE_RATE", "0.2"))
-    THROTTLE_CAPACITY: float = float(os.getenv("THROTTLE_CAPACITY", "3"))
-    JITTER_MIN: float = float(os.getenv("JITTER_MIN", "2.0"))
-    JITTER_MAX: float = float(os.getenv("JITTER_MAX", "7.0"))
-
-    MONITORED_RATE_LIMIT: int = int(os.getenv("MONITORED_RATE_LIMIT", "100"))
-    COMPETITOR_SERVICE_RATE_LIMIT: int = int(os.getenv("COMPETITOR_SERVICE_RATE_LIMIT", "200"))
-    RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "3600"))
 
     #Rate limits para tasks Celery
     SCRAPER_RATE_LIMIT: str = os.getenv("SCRAPER_RATE_LIMIT", "10/m")
@@ -71,19 +52,12 @@ class Settings(BaseSettings):
     ALERT_DUPLICATE_WINDOW: int = int(os.getenv("ALERT_DUPLICATE_WINDOW", 600))
     ALERT_RULE_COOLDOWN: int = int(os.getenv("ALERT_RULE_COOLDOWN", "3600"))
 
-    #Parametros para comparação de preços
+    #Parâmetros para comparação de preços
     PRICE_TOLERANCE: float = float(os.getenv("PRICE_TOLERANCE", "0.01"))
     PRICE_CHANGE_THRESHOLD: float = float(os.getenv("PRICE_CHANGE_THRESHOLD", "0.01"))
 
     #TTL em segundos do registro Redis de última comparação bem-sucedida
     COMPARISON_LAST_SUCCESS_TTL: int = int(os.getenv("COMPARISON_LAST_SUCCESS_TTL", str(86400)))
-
-    #Parametros do Playwright
-    PLAYWRIGHT_HEADLESS: bool = os.getenv("PLAYWRIGHT_HEADLESS", "1") == "1"
-    PLAYWRIGHT_TIMEOUT: int = int(os.getenv("PLAYWRIGHT_TIMEOUT", "30000"))
-
-    #Intervalo base para o AdaptiveRecheckManager
-    ADAPTIVE_RECHECK_BASE_INTERVAL: int = int(os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200"))
 
     #Configurações de email SMTP
     SMTP_HOST: str | None = os.getenv("SMTP_HOST")
