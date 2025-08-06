@@ -13,7 +13,6 @@ from typing import Callable, Optional, Any
 from app.utils.circuit_breaker import CircuitBreaker
 
 import structlog
-from sqlalchemy.orm import Session
 
 from app.utils.intelligent_cache import IntelligentCacheManager
 from app.core.config import settings
@@ -28,11 +27,10 @@ logger = structlog.get_logger("scraper_common")
 cache_manager = IntelligentCacheManager(base_ttl=settings.CACHE_BASE_TTL)
 
 def use_cache_if_not_modified(
-    db: Session,
     target_url: str,
     html: str | None,
     payload,
-    persist_fn: Callable[[dict], Any],
+    persist_fn: Callable[[dict], Any] | None,
     circuit_breaker: CircuitBreaker,
     circuit_key: str,
     id_key: str,
@@ -40,23 +38,8 @@ def use_cache_if_not_modified(
 ) -> Optional[dict]:
     """ Retorna dados do cache quando o HTML não sofreu alterações
 
-    Parametros
-    ----------
-    db: Session
-        Sessão do banco para persistência
-    target_url: str
-        URL utilizada como chave de cache.
-    payload: BaseModel
-        Dados originais usados no scraping
-    persist_fn: Callable[[dict], Any]
-        Função que salva os dados do cache e retorna o identificador
-        (product_id ou competitor_id)
-    circuit_breaker: CircuitBreaker
-        Circuit breaker do fluxo
-    circuit_key: str
-        Chave para registro no circuit breaker
-    id_key: str
-        Nome do campo retornado ("product_id" ou "competitor_id")
+    Quando ``persist_fn`` é informada, cabe ao chamador realizar
+    persistência dos dados do cache
     """
     cached = cache_manager.get(target_url)
     if not cached or html is None:
@@ -70,7 +53,6 @@ def use_cache_if_not_modified(
         CACHE_HITS_TOTAL.inc()
         if endpoint:
             CACHE_HITS_ENDPOINT_TOTAL.labels(endpoint=endpoint).inc()
-        new_id = persist_fn(cached.get("data", {}))
         audit_scrape(
             stage="cache",
             url=target_url,
@@ -81,7 +63,10 @@ def use_cache_if_not_modified(
         )
         circuit_breaker.record_success(circuit_key)
         logger.info("cache_hit", url=target_url)
-        return {"status": "cached", id_key: str(new_id)}
+        if persist_fn:
+            new_id = persist_fn(cached.get("data", {}))
+            return {"status": "cached", id_key: str(new_id)}
+        return {"status": "cached", "details": cached.get("data", {})}
 
     CACHE_MISSES_TOTAL.inc()
     if endpoint:

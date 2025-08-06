@@ -33,7 +33,6 @@ def test_use_cache_returns_cached_data(monkeypatch):
         return uuid.uuid4()
 
     result = use_cache_if_not_modified(
-        db=Mock(),
         target_url="http://example.com",
         html=html,
         payload=_payload(),
@@ -60,7 +59,6 @@ def test_use_cache_returns_none_when_cache_empty(monkeypatch):
         nonlocal was_called
         was_called = True
     result = use_cache_if_not_modified(
-        db=Mock(),
         target_url="http://example.com",
         html=html,
         payload=_payload(),
@@ -79,7 +77,6 @@ def test_use_cache_returns_none_with_other_hash(monkeypatch):
     monkeypatch.setattr(cache_scraper.cache_manager, "get", lambda url: cached)
     cb = DummyCB()
     result = use_cache_if_not_modified(
-        db = Mock(),
         target_url="http://example.com",
         html=html,
         payload=_payload(),

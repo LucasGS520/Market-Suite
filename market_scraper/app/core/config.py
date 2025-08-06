@@ -1,8 +1,14 @@
-""" Carrega variáveis de ambiente e configurações da aplicação. """
+""" Carrega variáveis de ambiente e configurações da aplicação
+
+Este módulo provê apenas parâmetros relacionados ao processo de
+*scraping*. Ele não cuida de persistência de dados e nem
+de autenticação, responsabilidades delegadas a outros componentes
+do sistema.
+"""
 
 import os
 from dotenv import load_dotenv
-from pydantic import AnyHttpUrl, ConfigDict, Field
+from pydantic import AnyHttpUrl, ConfigDict
 from pydantic_settings import BaseSettings
 
 
@@ -84,35 +90,6 @@ class Settings(BaseSettings):
 
     #Intervalo base para o AdaptiveRecheckManager
     ADAPTIVE_RECHECK_BASE_INTERVAL: int = int(os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200"))
-
-    #Configurações de email SMTP
-    SMTP_HOST: str | None = os.getenv("SMTP_HOST")
-    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
-    SMTP_USERNAME: str | None = os.getenv("SMTP_USERNAME")
-    SMTP_PASSWORD: str | None = os.getenv("SMTP_PASSWORD")
-    SMTP_TLS: bool = os.getenv("SMTP_TLS", "1") == "1"
-    SMTP_FROM: str | None = os.getenv("SMTP_FROM")
-
-    #Credenciais do Twilio (SMS e WhatsApp)
-    TWILIO_ACCOUNT_SID: str | None = os.getenv("TWILIO_ACCOUNT_SID")
-    TWILIO_AUTH_TOKEN: str | None = os.getenv("TWILIO_AUTH_TOKEN")
-    TWILIO_SMS_FROM: str | None = os.getenv("TWILIO_SMS_FROM")
-    TWILIO_WHATSAPP_FROM: str | None = os.getenv("TWILIO_WHATSAPP_FROM")
-
-    #Chave do Firebase Cloud Messaging (FCM)
-    FCM_SERVER_KEY: str | None = os.getenv("FCM_SERVER_KEY")
-
-    #Le a URL do banco
-    DATABASE_URL: str = os.getenv("DATABASE_URL")
-    if not DATABASE_URL:
-        #Impede inicialização sem URL de banco
-        raise ValueError("DATABASE_URL não foi encontrada no .env")
-
-    #Segurança e tokens
-    SECRET_KEY: str = os.getenv("SECRET_KEY")
-    ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
-    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
 
     #Parâmetros extras de configurações Pydantic
     model_config = ConfigDict(
