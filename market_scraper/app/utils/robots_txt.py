@@ -10,7 +10,7 @@ import re
 from typing import Optional
 
 from app.core.config import settings
-from app.utils.redis_client import get_redis_client
+from utils.redis_client import get_redis_client
 
 
 ROBOTS_CACHE_KEY = settings.ROBOTS_CACHE_KEY

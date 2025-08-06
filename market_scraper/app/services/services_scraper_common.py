@@ -19,20 +19,21 @@ from fastapi.encoders import jsonable_encoder
 
 from app.core.config import settings
 
+from utils.circuit_breaker import CircuitBreaker
+from utils.redis_client import get_redis_client, is_scraping_suspended, suspend_scraping
+from utils.rate_limiter import RateLimiter
+from utils.ml_url import canonicalize_ml_url, is_product_url
+
 from app.utils.constants import to_mobile_url, THROTTLE_RATE, THROTTLE_CAPACITY, JITTER_RANGE, PRODUCT_HOSTS
 from app.utils.user_agent_manager import IntelligentUserAgentManager
 from app.utils.humanized_delay import HumanizedDelayManager
 from app.utils.throttle_manager import ThrottleManager
-from app.utils.circuit_breaker import CircuitBreaker
-from app.utils.redis_client import get_redis_client, is_scraping_suspended, suspend_scraping
 from app.utils.http_utils import extract_hostname
 from app.utils.block_detector import detect_block, BlockResult
 from app.utils.block_recovery import BlockRecoveryManager
 from app.utils.audit_logger import audit_scrape
 from app.utils.price import parse_price_str
-from app.utils.rate_limiter import RateLimiter
 from app.utils.robots_txt import RobotsTxtParser
-from app.utils.ml_url import canonicalize_ml_url, is_product_url
 from app.utils.cookie_manager import cookie_manager
 from app.utils.playwright_client import get_playwright_client
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError

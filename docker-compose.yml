@@ -27,7 +27,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./redis-scripts:/etc/redis/scripts:ro
+      - ./core/infra/redis-scripts:/etc/redis/scripts:ro
     networks:
       - monitoring-net
 
@@ -45,7 +45,7 @@ services:
         until redis-cli -h redis -a "$REDIS_PASSWORD" ping; do sleep 1; done
         redis-cli -h redis -a "$REDIS_PASSWORD" SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
     volumes:
-      - ./redis-scripts:/etc/redis/scripts:ro
+      - ./core/infra/redis-scripts:/etc/redis/scripts:ro
     networks:
       - monitoring-net
 

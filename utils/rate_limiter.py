@@ -2,10 +2,9 @@
 
 import time
 import os
-
 from typing import Optional
 
-from app.utils.redis_client import get_redis_client
+from utils.redis_client import get_redis_client
 
 
 def _load_lua_script(redis):
@@ -17,7 +16,7 @@ def _load_lua_script(redis):
             os.pardir,
             "infra",
             "redis-scripts",
-            "sliding_window.lua"
+            "sliding_window.lua",
         )
 
         with open(lua_path, "r", encoding="utf-8") as f:
@@ -39,14 +38,11 @@ class RateLimiter:
         self.lua_sha = _load_lua_script(self.redis)
 
     def _format_key(self, identifier: Optional[str]) -> str:
-        """ Se necessário sub-limits (por usuário, por endpoint) é utilizado identifier """
+        """ Se necessário sub-limits (por usuário, por endpoint) é utilizado ``identifier`` """
         return f"{self.key}:{identifier}" if identifier else self.key
 
     def allow_request(self, identifier: Optional[str] = None) -> bool:
-        """
-        Executa o script Lua para sliding-window rate limiting, retorna True se o número de requisições
-        dentro da janela estiver abaixo ou igual ao limite.
-        """
+        """ Executa o script Lua e retorna ``True`` se estiver dentro do limite """
         redis_key = self._format_key(identifier)
         now_ms = int(time.time() * 1000)
 
@@ -54,10 +50,7 @@ class RateLimiter:
         return allowed == 1
 
     def get_count(self, identifier: Optional[str] = None) -> int:
-        """
-        Retorna quantas requisições foram feitas na janela atual,
-        limpando entradas antigas antes de contar
-        """
+        """ Retorna quantas requisições foram feitas na janela atual """
         redis_key = self._format_key(identifier)
         now_ms = int(time.time() * 1000)
         window_start = now_ms - self.window_ms
@@ -67,5 +60,5 @@ class RateLimiter:
         return self.redis.zcard(redis_key)
 
     def reset(self, identifier: Optional[str] = None) -> None:
-        """ Limpa completamente o estado do rate limiter (para testes e reinicialização) """
+        """ Limpa completamente o estado do rate limiter """
         self.redis.delete(self._format_key(identifier))

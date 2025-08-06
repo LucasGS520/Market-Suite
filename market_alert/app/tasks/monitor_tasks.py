@@ -13,9 +13,9 @@ import structlog
 
 from app.core.celery_app import celery_app
 from infra.db import SessionLocal
-from app.utils.circuit_breaker import CircuitBreaker
-from app.utils.redis_client import get_redis_client, is_scraping_suspended
-from app.utils.rate_limiter import RateLimiter
+from utils.circuit_breaker import CircuitBreaker
+from utils.redis_client import get_redis_client, is_scraping_suspended
+from utils.rate_limiter import RateLimiter
 from app.utils.adaptive_recheck import AdaptiveRecheckManager
 from market_scraper.app.core.config import settings as scraper_settings #Configurações do módulo de scraping
 

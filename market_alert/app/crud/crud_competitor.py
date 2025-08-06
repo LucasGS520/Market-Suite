@@ -7,7 +7,7 @@ from typing import List
 from sqlalchemy.orm import Session
 
 from app.models.models_products import CompetitorProduct, MonitoredProduct
-from app.utils.ml_url import canonicalize_ml_url
+from utils.ml_url import canonicalize_ml_url
 from app.enums.enums_products import ProductStatus, MonitoringType
 from app.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 

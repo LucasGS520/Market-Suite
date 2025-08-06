@@ -12,7 +12,7 @@ from app.schemas.schemas_products import CompetitorProductCreateScraping, Compet
 from app.crud.crud_monitored import get_monitored_product_by_id
 from app.crud.crud_competitor import get_competitors_by_monitored_id, delete_competitors_by_monitored_id
 from app.tasks.scraper_tasks import collect_competitor_task
-from app.utils.ml_url import canonicalize_ml_url, is_product_url
+from utils.ml_url import canonicalize_ml_url, is_product_url
 from app.core.security import get_current_user
 
 

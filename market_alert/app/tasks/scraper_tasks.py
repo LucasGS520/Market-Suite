@@ -20,9 +20,9 @@ from app.exceptions import ScraperError
 from app.core.config import settings
 from app.core.celery_app import celery_app
 from infra.db import SessionLocal
-from app.utils.redis_client import get_redis_client, is_scraping_suspended
-from app.utils.circuit_breaker import CircuitBreaker
-from app.utils.rate_limiter import RateLimiter
+from utils.redis_client import get_redis_client, is_scraping_suspended
+from utils.circuit_breaker import CircuitBreaker
+from utils.rate_limiter import RateLimiter
 from app.utils.adaptive_recheck import AdaptiveRecheckManager
 from app.crud.crud_monitored import get_monitored_product_by_id
 from app.crud.crud_comparison import get_latest_comparisons

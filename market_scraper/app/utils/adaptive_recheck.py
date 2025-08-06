@@ -12,7 +12,7 @@ from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any
 
-import app.utils.redis_client as _rc
+import utils.redis_client as _rc
 from app.metrics import RECHECK_SCHEDULED_TOTAL
 
 

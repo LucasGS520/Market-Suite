@@ -2,12 +2,26 @@
 
 import json
 import threading
+import importlib
 
-import app.metrics as metrics
-from app.utils.redis_client import get_redis_client
-from app.core.config import settings
 import requests
 
+from core.config_base import ConfigBase
+from utils.redis_client import get_redis_client
+
+#Tenta carregar o módulo de métricas exposto pelo serviço
+try:
+    metrics = importlib.import_module("app.metrics")
+except ModuleNotFoundError:
+    class _MetricsStub:
+        """ Fallback quando não há módulo de métricas """
+        def __getattr__(self, name):
+            def _noop(*args, **kwargs):
+                return None
+            return _noop
+    metrics = _MetricsStub()
+
+_settings = ConfigBase()
 
 class CircuitBreaker:
     """ Circuit Breaker com três níveis de severidade, usando Redis """
@@ -16,13 +30,13 @@ class CircuitBreaker:
     def __init__(self, redis=None, levels=None, webhook=None):
         """ Inicializa o Circuit Breaker
 
-        Parameters
+        Parâmetros
         ----------
         redis: Redis | None
             Instância do Redis utilizada para armazenar o estado.
         levels: list[tuple[int, int]] | None
             Lista de tuplas ``(limite_de_falhas, tempo_de_suspensao)``.
-            Caso ``None``, serão utilizados os valores definidos em ```settings``.
+            Caso ``None``, são utilizados os valores de ``ConfigBase``.
         webhook: str | None
             URL para envio de notificação ao Slack quando o nível máximo é atingido.
         """
@@ -33,27 +47,27 @@ class CircuitBreaker:
             self.levels = levels
         else:
             self.levels = [
-                (settings.CIRCUIT_LVL1_THRESHOLD, settings.CIRCUIT_LVL1_SUSPEND),
-                (settings.CIRCUIT_LVL2_THRESHOLD, settings.CIRCUIT_LVL2_SUSPEND),
-                (settings.CIRCUIT_LVL3_THRESHOLD, settings.CIRCUIT_LVL3_SUSPEND)
+                (_settings.CIRCUIT_LVL1_THRESHOLD, _settings.CIRCUIT_LVL1_SUSPEND),
+                (_settings.CIRCUIT_LVL2_THRESHOLD, _settings.CIRCUIT_LVL2_SUSPEND),
+                (_settings.CIRCUIT_LVL3_THRESHOLD, _settings.CIRCUIT_LVL3_SUSPEND),
             ]
 
-        self.webhook = webhook or settings.SLACK_WEBHOOK_URL
+        self.webhook = webhook or _settings.SLACK_WEBHOOK_URL
 
     def _gets_keys(self, key: str):
         return f"{key}:failures", f"{key}:suspend"
 
     def allow_request(self, key: str) -> bool:
-        """ Retorna True se o circuito estiver fechado (permitindo requisições), ou False se estiver aberto/suspenso """
+        """ Retorna ``True`` se o circuito estiver fechado ou ``False`` se aberto """
         _, suspend_key = self._gets_keys(key)
         return not self.redis.exists(suspend_key)
 
     def record_failure(self, key: str) -> None:
-        """ Incrementa contador de falhas. Se atingir o limite, abre o circuito (seta suspend_key com TTL)"""
+        """ Incrementa contador de falhas e abre o circuito se necessário """
         with self._lock:
             failures_key, suspend_key = self._gets_keys(key)
 
-            #Incrementa falhas e garante que expire após o período de suspensão
+            #Incrementa falhas e garante expiração após o período de suspensão
             count = self.redis.incr(failures_key)
 
             #Na primeira falha, ajusta o TTL do contador para recover timeout

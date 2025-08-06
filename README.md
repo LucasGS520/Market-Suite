@@ -375,7 +375,7 @@ ferramentas de observabilidade.
 - `promtail/` – define como o Promtail coleta logs dos containers.
 - `monitoring/grafana/` – dashboards e datasource provisionados
   automaticamente no Grafana.
-- `redis-scripts/` – scripts auxiliares carregados pelo Redis na inicialização.
+- `core/infra/redis-scripts/` – scripts auxiliares carregados pelo Redis na inicialização.
 
 ### Serviço ``redis-init``
 Container que carrega os scripts Lua em tempo de inicialização. Ele guarda o Redis responder e executa:

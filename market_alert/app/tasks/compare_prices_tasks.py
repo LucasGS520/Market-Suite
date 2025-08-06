@@ -14,7 +14,7 @@ from decimal import Decimal
 
 from app.core.celery_app import celery_app
 from infra.db import SessionLocal
-from app.utils.redis_client import get_redis_client
+from utils.redis_client import get_redis_client
 from app.utils.logging_utils import mask_identifier
 from app.services.services_comparison import run_price_comparison
 from app.tasks.alert_tasks import send_notification_task

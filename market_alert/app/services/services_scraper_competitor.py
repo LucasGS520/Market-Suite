@@ -16,8 +16,8 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.utils.circuit_breaker import CircuitBreaker
-from app.utils.rate_limiter import RateLimiter
+from utils.circuit_breaker import CircuitBreaker
+from utils.rate_limiter import RateLimiter
 from app.utils.block_recovery import BlockRecoveryManager
 
 from app.schemas.schemas_products import (

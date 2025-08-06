@@ -5,8 +5,9 @@ from typing import List, Optional
 
 import structlog
 
+from utils.redis_client import suspend_scraping, get_redis_client
+
 from app.utils.humanized_delay import HumanizedDelayManager
-from app.utils.redis_client import suspend_scraping, get_redis_client
 from app.utils.user_agent_manager import IntelligentUserAgentManager
 from app.utils.cookie_manager import CookieManager
 from app.utils.playwright_client import get_playwright_client

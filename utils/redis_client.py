@@ -2,19 +2,32 @@
 
 import redis
 from typing import Optional
+import importlib
 
-import app.metrics as metrics
-from app.core.config import settings
+import redis
+from core.config_base import ConfigBase
 
+#Tenta carregar o módulo de métricas do serviço atual
+try:
+    metrics = importlib.import_module("app.metrics")
+except ModuleNotFoundError:
+    class _MetricsStub:
+        """ Fallback simples quando métricas não estão disponíveis """
+        def __getattr__(self, name):
+            def _noop(*args, **kwargs):
+                return None
+            return _noop
+    metrics = _MetricsStub()
 
 _redis_client: Optional[redis.Redis] = None
 SCRAPING_SUSPENDED_KEY = "scraping:suspended"
+_settings = ConfigBase()
 
 def get_redis_client() -> redis.Redis:
     """ Retorna uma instância singleton de Redis, usando a URL configurada """
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+        _redis_client = redis.Redis.from_url(_settings.redis_url, decode_responses=True)
     return _redis_client
 
 def is_scraping_suspended() -> bool:
@@ -26,7 +39,7 @@ def is_scraping_suspended() -> bool:
     return active
 
 def suspend_scraping(duration_seconds: int) -> None:
-    """ Ativa a flag de suspensão de scraping por duration_seconds """
+    """ Ativa a flag de suspensão de scraping por ``duration_seconds`` """
     client = get_redis_client()
     setter = getattr(client, "set", None)
     if setter:

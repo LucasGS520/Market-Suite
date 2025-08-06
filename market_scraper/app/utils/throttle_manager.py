@@ -9,8 +9,8 @@ import app.metrics as metrics
 
 from fastapi import HTTPException, status
 
-from app.utils.circuit_breaker import CircuitBreaker
-from app.utils.rate_limiter import RateLimiter
+from utils.circuit_breaker import CircuitBreaker
+from utils.rate_limiter import RateLimiter
 
 
 class ThrottleManager:

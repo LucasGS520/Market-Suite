@@ -9,7 +9,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models.models_products import MonitoredProduct
-from app.utils.ml_url import canonicalize_ml_url
+from utils.ml_url import canonicalize_ml_url
 from app.enums.enums_products import MonitoringType, MonitoredStatus
 from app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from app.enums.enums_alerts import AlertType

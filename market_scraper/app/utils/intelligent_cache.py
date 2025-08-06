@@ -9,7 +9,7 @@ import json
 import hashlib
 from typing import Optional
 
-from app.utils.redis_client import get_redis_client
+from utils.redis_client import get_redis_client
 from app.core.config import settings
 
 

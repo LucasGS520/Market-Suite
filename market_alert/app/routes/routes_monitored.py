@@ -11,7 +11,7 @@ from app.models import User
 from app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredProductResponse
 from app.crud.crud_monitored import get_all_monitored_products, get_monitored_product_by_id, delete_monitored_product
 from app.tasks.scraper_tasks import collect_product_task
-from app.utils.ml_url import canonicalize_ml_url, is_product_url
+from utils.ml_url import canonicalize_ml_url, is_product_url
 from app.core.security import get_current_user
 
 

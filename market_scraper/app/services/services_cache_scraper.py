@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional, Any
 
-from app.utils.circuit_breaker import CircuitBreaker
+from utils.circuit_breaker import CircuitBreaker
 
 import structlog
 
