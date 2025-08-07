@@ -12,5 +12,10 @@ try:
     from market_alert import alert_app as _alert_app
     _sys.modules.setdefault("alert_app", _alert_app)
     _sys.modules.setdefault("alert_app.utils", _utils)
+
+    #Permite que os testes importem ``market_scraper.app`` apontando para ``alert_app``
+    _sys.modules.setdefault("scraper_app", _scraper_app)
+    _sys.modules.setdefault("scraper_app.utils", _utils)
+
 except Exception:
     pass
