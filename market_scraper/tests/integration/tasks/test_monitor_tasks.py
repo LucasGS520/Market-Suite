@@ -6,9 +6,8 @@ from unittest.mock import Mock
 import pytest
 
 import alert_app.utils.redis_client as _rc_mod
-import alert_app.utils.rate_limiter as _rl_mod
-import alert_app.utils.circuit_breaker as _cb_mod
 import alert_app.tasks.compare_prices_tasks as _cp_mod
+
 
 class DummyRedis:
     def get(self, *a, **k):
@@ -18,140 +17,116 @@ class DummyRedis:
     def set(self, *a, **k):
         pass
 
-
-class DummyRateLimiter:
-    def __init__(self, *a, **k):
-        pass
-    def allow_request(self, *a, **k):
-        return True
-    def reset(self, *a, **k):
-        pass
-    def get_count(self, *a, **k):
-        return 0
-
-
-class DummyCircuitBreaker:
-    def allow_request(self, *a, **k):
-        return True
-    def record_success(self, *a, **k):
-        pass
-    def record_failure(self, *a, **k):
-        pass
-
-
 class DummyCompare:
     @staticmethod
     def delay(*args, **kwargs):
         pass
 
-# ---------- IMPORTAÇÃO MONITOR_TASKS ----------
+
 @pytest.fixture(autouse=True)
 def setup_env(monkeypatch):
+    """ Recarrega módulo de monitoramento com dependência simuladas """
     monkeypatch.setattr(_rc_mod, "get_redis_client", lambda: DummyRedis())
-    monkeypatch.setattr(_rl_mod, "RateLimiter", DummyRateLimiter)
-    monkeypatch.setattr(_cb_mod, "CircuitBreaker", lambda: DummyCircuitBreaker())
     monkeypatch.setattr(_cp_mod, "compare_prices_task", DummyCompare)
 
     monitor_tasks = importlib.reload(importlib.import_module("alert_app.tasks.monitor_tasks"))
-    monkeypatch.setattr(monitor_tasks, "redis_client", DummyRedis())
-    monkeypatch.setattr(monitor_tasks, "circuit_breaker", DummyCircuitBreaker())
-    monkeypatch.setattr(monitor_tasks, "scraping_dispatch_limiter", DummyRateLimiter())
-    monkeypatch.setattr(monitor_tasks, "competitor_dispatch_limiter", DummyRateLimiter())
+    monitor_tasks.redis_client = DummyRedis()
     return monitor_tasks
 
-# ---------- BLOCO PARA RECHECK MONITORED ----------
-def test_recheck_monitored_circuitbreaker_open(setup_env, monkeypatch):
-    """ Circuit breaker não permite -> deve retornar silenciosamente """
-    monitor_tasks = setup_env
-
-    monkeypatch.setattr(monitor_tasks.circuit_breaker, "allow_request", lambda *a, **k: False)
-    monitor_tasks.recheck_monitored_products()
-
 def test_recheck_monitored_scraping_suspended(setup_env, monkeypatch):
-    """ Flag global Redis 'scraping_suspended' ativa -> task encerra silenciosamente """
+    """ Flag global ativa deve impedir chamadas ao serviço externo """
     monitor_tasks = setup_env
 
     monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: True)
+    called = []
+
+    def fake_post(*args, **kwargs):
+        called.append(kwargs.get("json"))
+        class Resp:
+            def raise_for_status(self):
+                pass
+        return Resp()
+
+    monkeypatch.setattr(monitor_tasks.requests, "post", fake_post)
     monitor_tasks.recheck_monitored_products()
+    assert called == []
 
-def test_recheck_monitored_dispatch_limit_exceeded(setup_env):
-    """ Scraping_dispatch_limiter -> allow_request=False -> não dispara subtasks """
+def test_recheck_monitored_call_service(setup_env, monkeypatch):
+    """ Quando permitido, deve chamar o market_scraper para cada produto """
     monitor_tasks = setup_env
-
-    monitor_tasks.scraping_dispatch_limiter.allow_request = lambda *a, **k: False
-    monitor_tasks.recheck_monitored_products()
-
-def test_recheck_monitored_calls_collect(setup_env, monkeypatch):
-    """ Quando tudo está permitido, deve buscar produtos e chamar collect_product_task.delay() """
-    monitor_tasks = setup_env
-
-    monkeypatch.setattr(monitor_tasks.circuit_breaker, "allow_request", lambda *a, **k: True)
-    monitor_tasks.redis_client = DummyRedis()
-    monitor_tasks.scraping_dispatch_limiter.allow_request = lambda *a, **k: True
 
     fake_products = [
-        Mock(product_url="u1", user_id="user1", name_identification="n1", target_price=10),
-        Mock(product_url="u2", user_id="user2", name_identification="n2", target_price=20)
+        Mock(id="1", product_url="u1"),
+        Mock(id="2", product_url="u2"),
     ]
     monkeypatch.setattr(monitor_tasks, "get_products_by_type", lambda *a, **k: fake_products)
-
     called = []
-    class FakeTask:
-        @staticmethod
-        def delay(url, user_id, name_identification, target_price):
-            called.append((url, user_id, name_identification, target_price))
 
-    monkeypatch.setattr(monitor_tasks, "collect_product_task", FakeTask)
+    def fake_post(url, json=None, timeout=0):
+        called.append(json)
+        class Resp:
+            def raise_for_status(self):
+                pass
+        return Resp()
+
+    monkeypatch.setattr(monitor_tasks.requests, "post", fake_post)
+    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
+
     monitor_tasks.recheck_monitored_products()
-
     assert called == [
-        ("u1", "user1", "n1", 10),
-        ("u2", "user2", "n2", 20)
+        {"url": "u1", "product_type": "monitored", "monitored_id": "1"},
+        {"url": "u2", "product_type": "monitored", "monitored_id": "2"},
     ]
 
-
-# ---------- BLOCO PARA RECHECK COMPETITOR ----------
-def test_recheck_competitor_circuitbreaker_open(setup_env, monkeypatch):
-    monitor_tasks = setup_env
-
-    monkeypatch.setattr(monitor_tasks.circuit_breaker, "allow_request", lambda *a, **k: False)
-    monitor_tasks.recheck_competitor_products()
-
 def test_recheck_competitor_scraping_suspended(setup_env, monkeypatch):
+    """ Flag global ativa deve impedir chamadas para concorrentes """
     monitor_tasks = setup_env
 
     monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: True)
+    called = []
+
+    def fake_post(*args, **kwargs):
+        called.append(kwargs.get("json"))
+        class Resp:
+            def raise_for_status(self):
+                pass
+        return Resp()
+
+    monkeypatch.setattr(monitor_tasks.requests, "post", fake_post)
     monitor_tasks.recheck_competitor_products()
+    assert called == []
 
-def test_recheck_competitor_dispatch_limit_exceeded(setup_env):
+def test_recheck_competitor_call_service(setup_env, monkeypatch):
+    """ Deve chamar o market_scraper para cada concorrente e agendar comparação """
     monitor_tasks = setup_env
-
-    monitor_tasks.competitor_dispatch_limiter.allow_request = lambda *a, **k: False
-    monitor_tasks.recheck_competitor_products()
-
-def test_recheck_competitor_calls_collect(setup_env, monkeypatch):
-    monitor_tasks = setup_env
-
-    monkeypatch.setattr(monitor_tasks.circuit_breaker, "allow_request", lambda *a, **k: True)
-    monitor_tasks.redis_client = DummyRedis()
-    monitor_tasks.competitor_dispatch_limiter.allow_request = lambda *a, **k: True
 
     fake_products = [
-        Mock(product_url="c1", monitored_product_id="m1"),
-        Mock(product_url="c2", monitored_product_id="m2")
+        Mock(id="c1", monitored_product_id="m1", product_url="u1"),
+        Mock(id="c2", monitored_product_id="m2", product_url="u2"),
     ]
     monkeypatch.setattr(monitor_tasks, "get_all_competitor_products", lambda *a, **k: fake_products)
 
     called = []
-    class FakeTask:
+    def fake_post(url, json=None, timeout=0):
+        called.append(json)
+        class Resp:
+            def raise_for_status(self):
+                pass
+        return Resp()
+
+    compare_calls = []
+    class DummyCompareTask:
         @staticmethod
-        def delay(monitored_id=None, url=None, **k):
-            called.append((monitored_id, url))
+        def delay(mid):
+            compare_calls.append(mid)
 
-    monkeypatch.setattr(monitor_tasks, "collect_competitor_task", FakeTask)
+    monkeypatch.setattr(monitor_tasks.requests, "post", fake_post)
+    monkeypatch.setattr(monitor_tasks, "compare_prices_task", DummyCompareTask)
+    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
+
     monitor_tasks.recheck_competitor_products()
-
     assert called == [
-        ("m1", "c1"),
-        ("m2", "c2")
+        {"url": "u1", "product_type": "competitor", "competitor_id": "c1", "monitored_id": "m1"},
+        {"url": "u2", "product_type": "competitor", "competitor_id": "c2", "monitored_id": "m2"},
     ]
+    assert compare_calls == ["m1", "m2"]

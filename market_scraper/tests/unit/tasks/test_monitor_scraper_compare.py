@@ -51,46 +51,6 @@ def test_compare_prices_task_records_metrics(monkeypatch):
     assert captured["args"] == (uid, ["a"])
     assert gauge.values
 
-def test_recheck_monitored_circuit_breaker(monkeypatch):
-    module = importlib.reload(importlib.import_module("alert_app.tasks.monitor_tasks"))
-    gauge = DummyGauge()
-    monkeypatch.setattr(module, "SCRAPING_LATENCY_SECONDS", gauge)
-    monkeypatch.setattr(module.circuit_breaker, "allow_request", lambda *a, **k: False)
-    module.recheck_monitored_products()
-    assert not gauge.values
-
-def test_recheck_monitored_rate_limited(monkeypatch):
-    module = importlib.reload(importlib.import_module("alert_app.tasks.monitor_tasks"))
-    gauge = DummyGauge()
-    monkeypatch.setattr(module, "SCRAPING_LATENCY_SECONDS", gauge)
-    monkeypatch.setattr(module.circuit_breaker, "allow_request", lambda *a, **k: True)
-    monkeypatch.setattr(module, "is_scraping_suspended", lambda: False)
-    module.scraping_dispatch_limiter.allow_request = lambda *a, **k: False
-    module.recheck_monitored_products()
-    assert not gauge.values
-
-def test_recheck_monitored_dispatches(monkeypatch):
-    module = importlib.reload(importlib.import_module("alert_app.tasks.monitor_tasks"))
-    gauge = DummyGauge()
-    monkeypatch.setattr(module, "SCRAPING_LATENCY_SECONDS", gauge)
-    monkeypatch.setattr(module.circuit_breaker, "allow_request", lambda *a, **k: True)
-    monkeypatch.setattr(module, "is_scraping_suspended", lambda: False)
-    module.scraping_dispatch_limiter.allow_request = lambda *a, **k: True
-    monkeypatch.setattr(module, "SessionLocal", lambda: DummySession())
-    product = SimpleNamespace(id="1", product_url="u", user_id="u", name_identification="n", target_price=1.0)
-    monkeypatch.setattr(module, "get_products_by_type", lambda *a, **k: [product])
-    monkeypatch.setattr(module.adaptive_recheck, "should_recheck", lambda *a, **k: True)
-    calls = []
-    class DummyCollect:
-        @staticmethod
-        def delay(url=None, user_id=None, name_identification=None, target_price=None):
-            calls.append((url, user_id, name_identification, target_price))
-    monkeypatch.setattr(module, "collect_product_task", DummyCollect)
-    monkeypatch.setattr(module, "redis_client", SimpleNamespace(set=lambda *a, **k: None))
-    module.recheck_monitored_products()
-    assert calls == [("u", "u", "n", 1.0)]
-    assert gauge.values
-
 def test_collect_product_rate_limited(monkeypatch):
     module = importlib.reload(importlib.import_module("alert_app.tasks.scraper_tasks"))
     gauge = DummyGauge()

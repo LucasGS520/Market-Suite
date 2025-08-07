@@ -19,9 +19,9 @@ from utils.redis_client import get_redis_client, is_scraping_suspended
 from alert_app.enums.enums_products import MonitoringType
 from alert_app.crud.crud_monitored import get_products_by_type
 from alert_app.crud.crud_competitor import get_all_competitor_products
-from alert_app.tasks.scraper_tasks import collect_product_task, collect_competitor_task
 from alert_app.tasks.compare_prices_tasks import compare_prices_task
 from alert_app.metrics import SCRAPING_LATENCY_SECONDS
+import requests
 
 
 logger = structlog.get_logger("monitor_tasks")
@@ -52,13 +52,29 @@ def recheck_monitored_products() -> None:
             batch = products[:BATCH_SIZE_SCRAPING]
 
             for p in batch:
-                log.info("dispatch_scraping_task", product_url=p.product_url, user_id=str(p.user_id))
-                collect_product_task.delay(
-                    url=p.product_url,
-                    user_id=str(p.user_id),
-                    name_identification=p.name_identification,
-                    target_price=float(p.target_price)
+                log.info(
+                    "chamada_market_scraper",
+                    product_url=p.product_url,
+                    monitored_id=str(p.id),
                 )
+                try:
+                    resp = requests.post(
+                        f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
+                        json={
+                            "url": p.product_url,
+                            "product_type": "monitored",
+                            "monitored_id": str(p.id),
+                        },
+                        timeout=30,
+                    )
+                    resp.raise_for_status()
+                except requests.RequestException as exc:
+                    status = "failure"
+                    log.error(
+                        "scraper_request_failed",
+                        error=str(exc),
+                        url=p.product_url,
+                    )
 
             elapsed_ms = int((time.time() - start) * 1000)
             log.info("recheck_monitored_completed", status=status, duration_ms=elapsed_ms, dispatched=len(batch))
@@ -97,12 +113,31 @@ def recheck_competitor_products():
 
             for c in batch:
                 monitored_ids.add(c.monitored_product_id)
-                log.info("recheck_competitor_item", monitored_id=str(c.monitored_product_id), url=c.product_url)
-                #Dispara scraping do concorrente
-                collect_competitor_task.delay(
+                log.info(
+                    "chamada_market_scraper_competitor",
                     monitored_id=str(c.monitored_product_id),
-                    url=c.product_url
+                    competitor_id=str(c.id),
+                    url=c.product_url,
                 )
+                try:
+                    resp = requests.post(
+                        f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
+                        json={
+                            "url": c.product_url,
+                            "product_type": "competitor",
+                            "competitor_id": str(c.id),
+                            "monitored_id": str(c.monitored_product_id),
+                        },
+                        timeout=30
+                    )
+                    resp.raise_for_status()
+                except requests.RequestException as exc:
+                    status = "failure"
+                    log.error(
+                        "scraper_competitor_failed",
+                        error=str(exc),
+                        url=c.product_url,
+                    )
 
             elapsed_ms = int((time.time() - start) * 1000)
             log.info("recheck_competitors_completed", status=status, duration_ms=elapsed_ms, count=len(batch))
