@@ -11,6 +11,7 @@ import os
 
 import structlog
 
+from alert_app.core.config import settings
 from alert_app.core.celery_app import celery_app
 from infra.db import SessionLocal
 from utils.redis_client import get_redis_client, is_scraping_suspended
@@ -29,6 +30,9 @@ redis_client = get_redis_client()
 #Batch sizes configurado via .env
 BATCH_SIZE_SCRAPING = int(os.getenv("BATCH_SIZE_SCRAPING", "10"))
 BATCH_SIZE_COMPETITOR = int(os.getenv("BATCH_SIZE_COMPETITOR", "20"))
+
+#Intervalo base usado para reagendamentos automáticos adaptativos
+ADAPTIVE_RECHECK_BASE_INTERVAL = settings.ADAPTIVE_RECHECK_BASE_INTERVAL
 
 @celery_app.task(name="alert_app.tasks.monitor_tasks.recheck_monitored_products")
 def recheck_monitored_products() -> None:

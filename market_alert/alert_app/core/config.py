@@ -46,6 +46,11 @@ class Settings(ConfigBase):
     )
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
 
+    #Intervalo base utilizado pelo AdaptiveRecheckManager
+    ADAPTIVE_RECHECK_BASE_INTERVAL: int = int(
+        os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200")
+    )
+
     #URL base do serviço externo de scraping
     SCRAPER_SERVICE_URL: str = os.getenv(
         "SCRAPER_SERVICE_URL", "http://market_scraper:8000"

@@ -93,6 +93,8 @@ TWILIO_WHATSAPP_FROM=+5511999999999
 
 FCM_SERVER_KEY=AAAxxxxxxxxxxxxxxxxxxxx:APA91bG...
 
+ADAPTIVE_RECHECK_BASE_INTERVAL=7200
+
 SECRET_KEY=sua_chave_secreta
 
 LOCUST_HOST=http://host:0000
@@ -114,7 +116,7 @@ Além das credenciais mostradas acima, o projeto suporta diversas outras configu
 #### Celery e Monitoramento
 - `CELERY_WORKER_CONCURRENCY` - número de threads do worker.
 - `BATCH_SIZE_SCRAPING`, `BATCH_SIZE_COMPETITOR` - quantidade de itens rechecados por ciclo.
-- `ADAPTIVE_RECHECK_BASE_INTERVAL` - intervalo base (segundos) para reagendamento automático.
+- `ADAPTIVE_RECHECK_BASE_INTERVAL` - intervalo base (segundos) para reagendamento automático (padrão `7200`).
 - `SCRAPER_RATE_LIMIT`, `COMPETITOR_RATE_LIMIT`, `COMPARE_RATE_LIMIT`, `ALERT_RATE_LIMIT` - limites de tarefas por minuto.
 - `ALERT_DUPLICATE_WINDOW`, `ALERT_RULE_COOLDOWN` - controle de duplicidade e *cooldown* dos alertas.
 - `MONITORED_RATE_LIMIT`, `COMPETITOR_SERVICE_RATE_LIMIT`, `RATE_LIMIT_WINDOW` - parâmetros do `RateLimiter`.
