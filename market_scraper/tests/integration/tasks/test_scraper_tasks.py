@@ -3,11 +3,11 @@ import pytest
 import pickle
 from fastapi import HTTPException
 
-from app.exceptions import ScraperError
+from alert_app.exceptions import ScraperError
 from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 
-from app.tasks.scraper_tasks import collect_product_task, collect_competitor_task, adaptive_recheck
+from alert_app.tasks.scraper_tasks import collect_product_task, collect_competitor_task, adaptive_recheck
 from tests.integration.tasks.test_monitor_tasks import DummyCompare
 
 class DummySession:

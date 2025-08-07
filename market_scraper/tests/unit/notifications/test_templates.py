@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from app.notifications.templates import render_price_alert, render_price_change_alert, render_listing_alert, render_error_alert
+from alert_app.notifications.templates import render_price_alert, render_price_change_alert, render_listing_alert, render_error_alert
 
 def test_render_price_alert_includes_information():
     monitored = SimpleNamespace(name_identification="Produto X")

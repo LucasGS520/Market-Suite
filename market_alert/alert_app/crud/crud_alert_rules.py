@@ -6,10 +6,10 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 
-from app.models.models_alerts import AlertRule
-from app.enums.enums_alerts import AlertType
-from app.schemas.schemas_alert_rules import AlertRuleCreate
-import app.metrics as metrics
+from alert_app.models.models_alerts import AlertRule
+from alert_app.enums.enums_alerts import AlertType
+from alert_app.schemas.schemas_alert_rules import AlertRuleCreate
+import alert_app.metrics as metrics
 
 
 def create_alert_rule(db: Session, rule_data: AlertRuleCreate) -> AlertRule:

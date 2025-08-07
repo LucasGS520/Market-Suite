@@ -2,9 +2,9 @@ from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 import httpx
 
-from app.notifications.channels.email import EmailChannel
-from app.notifications.manager import get_notification_manager, dispatch_price_alerts
-from app.enums.enums_alerts import AlertType
+from alert_app.notifications.channels.email import EmailChannel
+from alert_app.notifications.manager import get_notification_manager, dispatch_price_alerts
+from alert_app.enums.enums_alerts import AlertType
 from tests.unit.utils.test_audit_logger import DummyLogger
 
 

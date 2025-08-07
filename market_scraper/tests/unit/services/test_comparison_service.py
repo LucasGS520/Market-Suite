@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from decimal import Decimal
-from app.services.services_comparison import run_price_comparison
+from alert_app.services.services_comparison import run_price_comparison
 
 def test_run_price_comparison_success(monkeypatch):
     db = Mock()

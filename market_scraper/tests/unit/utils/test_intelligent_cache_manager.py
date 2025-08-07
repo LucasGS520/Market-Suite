@@ -1,4 +1,4 @@
-from app.utils.intelligent_cache import IntelligentCacheManager
+from scraper_app.utils.intelligent_cache import IntelligentCacheManager
 
 def test_adaptive_ttl_and_retrieval(patch_rate_limiter):
     cache = IntelligentCacheManager(base_ttl=10, max_multiplier=3)

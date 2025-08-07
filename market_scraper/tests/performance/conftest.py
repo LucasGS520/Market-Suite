@@ -14,7 +14,7 @@ import time
 os.environ.setdefault("DATABASE_URL", "sqlite:///benchmark.db")
 os.environ.setdefault("SECRET_KEY", "benchmark-secret")
 
-from app.utils.rate_limiter import RateLimiter
+from alert_app.utils.rate_limiter import RateLimiter
 
 class FakeRedis:
     def __init__(self):
@@ -72,7 +72,7 @@ def patch_rate_limiter(monkeypatch):
 
     monkeypatch.setattr(RateLimiter, "__init__", fake_init)
     monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("alert_app.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("scraper_app.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
     return fake_redis
 
 @pytest.fixture(autouse=True)

@@ -1,7 +1,7 @@
 import time
 import pytest
 
-from app.utils.humanized_delay import HumanizedDelayManager
+from scraper_app.utils.humanized_delay import HumanizedDelayManager
 
 def test_calculate_delay_range(monkeypatch):
     """ Verifica cálculo de delay para um texto grande """

@@ -1,7 +1,7 @@
 import requests
 
-from app.utils.cookie_manager import CookieManager
-from app.utils.constants import GENERIC_COOKIES
+from scraper_app.utils.cookie_manager import CookieManager
+from scraper_app.utils.constants import GENERIC_COOKIES
 
 def test_cookie_manager_persists_and_updates():
     """ Valida persistência e atualização de cookies por sessão """

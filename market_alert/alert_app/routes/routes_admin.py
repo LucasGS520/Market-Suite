@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from infra.db import get_db
-from app.core.security import get_current_admin_user
-from app.models.models_users import User
+from alert_app.core.security import get_current_admin_user
+from alert_app.models.models_users import User
 
 
 logger = structlog.get_logger("http_route")

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models.models_comparisons import PriceComparison
+from alert_app.models.models_comparisons import PriceComparison
 
 
 def create_price_comparison(db: Session, monitored_product_id: UUID, data: dict) -> PriceComparison:

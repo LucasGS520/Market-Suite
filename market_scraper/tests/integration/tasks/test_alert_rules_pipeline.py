@@ -1,11 +1,11 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from app.tasks.compare_prices_tasks import compare_prices_task
-from app.tasks import alert_tasks
-from app.notifications.manager import NotificationManager
-from app.notifications.channels.base import NotificationChannel
-from app.enums.enums_alerts import AlertType
+from alert_app.tasks.compare_prices_tasks import compare_prices_task
+from alert_app.tasks import alert_tasks
+from alert_app.notifications.manager import NotificationManager
+from alert_app.notifications.channels.base import NotificationChannel
+from alert_app.enums.enums_alerts import AlertType
 
 
 class DummyRedis:

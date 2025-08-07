@@ -15,27 +15,27 @@ from datetime import datetime, timezone
 import structlog
 from fastapi import HTTPException
 
-from app.exceptions import ScraperError
+from alert_app.exceptions import ScraperError
 
-from app.core.config import settings
-from app.core.celery_app import celery_app
+from alert_app.core.config import settings
+from alert_app.core.celery_app import celery_app
 from infra.db import SessionLocal
 from utils.redis_client import get_redis_client, is_scraping_suspended
 from utils.circuit_breaker import CircuitBreaker
 from utils.rate_limiter import RateLimiter
-from app.utils.adaptive_recheck import AdaptiveRecheckManager
-from app.crud.crud_monitored import get_monitored_product_by_id
-from app.crud.crud_comparison import get_latest_comparisons
+from alert_app.utils.adaptive_recheck import AdaptiveRecheckManager
+from alert_app.crud.crud_monitored import get_monitored_product_by_id
+from alert_app.crud.crud_comparison import get_latest_comparisons
 from market_scraper.scraper_app.core.config import settings as scraper_settings #COnfigurações do módulo de scraping
 
-from app.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
-from app.services.services_scraper_monitored import scrape_monitored_product
-from app.services.services_scraper_competitor import scrape_competitor_product
-from app.tasks.compare_prices_tasks import compare_prices_task
-from app.crud import crud_errors
-from app.enums.enums_error_codes import ScrapingErrorType
-from app.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
+from alert_app.services.services_scraper_monitored import scrape_monitored_product
+from alert_app.services.services_scraper_competitor import scrape_competitor_product
+from alert_app.tasks.compare_prices_tasks import compare_prices_task
+from alert_app.crud import crud_errors
+from alert_app.enums.enums_error_codes import ScrapingErrorType
+from alert_app.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
 
 
 logger = structlog.get_logger("scraper_tasks")

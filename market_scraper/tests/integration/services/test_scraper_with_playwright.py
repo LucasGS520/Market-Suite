@@ -4,9 +4,9 @@ from uuid import uuid4
 from decimal import Decimal
 from sqlalchemy.orm import Session
 
-from app.services.services_scraper_monitored import scrape_monitored_product
-from app.schemas.schemas_products import MonitoredProductCreateScraping
-from app.utils.playwright_client import PlaywrightClient
+from alert_app.services.services_scraper_monitored import scrape_monitored_product
+from alert_app.schemas.schemas_products import MonitoredProductCreateScraping
+from scraper_app.utils.playwright_client import PlaywrightClient
 
 
 @pytest.fixture(autouse=True)

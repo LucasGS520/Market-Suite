@@ -3,7 +3,7 @@
 import pytest
 from bs4 import BeautifulSoup
 
-from app.services.services_parser import (
+from scraper_app.services.services_parser import (
     parse_product_details,
     RobustProductParser,
     CaptchaDetectedError
@@ -163,7 +163,7 @@ def test_looks_like_product_page_returns_false_for_search_results():
     </html>
     """
 
-    from app.services.services_parser import looks_like_product_page
+    from scraper_app.services.services_parser import looks_like_product_page
 
     assert looks_like_product_page(html) is False
 
@@ -179,6 +179,6 @@ def test_looks_like_product_page_returns_false_when_og_type_not_product():
     </html>
     """
 
-    from app.services.services_parser import looks_like_product_page
+    from scraper_app.services.services_parser import looks_like_product_page
 
     assert looks_like_product_page(html) is False

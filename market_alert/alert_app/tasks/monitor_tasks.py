@@ -11,20 +11,20 @@ import os
 
 import structlog
 
-from app.core.celery_app import celery_app
+from alert_app.core.celery_app import celery_app
 from infra.db import SessionLocal
 from utils.circuit_breaker import CircuitBreaker
 from utils.redis_client import get_redis_client, is_scraping_suspended
 from utils.rate_limiter import RateLimiter
-from app.utils.adaptive_recheck import AdaptiveRecheckManager
+from alert_app.utils.adaptive_recheck import AdaptiveRecheckManager
 from market_scraper.scraper_app.core.config import settings as scraper_settings #Configurações do módulo de scraping
 
-from app.enums.enums_products import MonitoringType
-from app.crud.crud_monitored import get_products_by_type
-from app.crud.crud_competitor import get_all_competitor_products
-from app.tasks.scraper_tasks import collect_product_task, collect_competitor_task
-from app.tasks.compare_prices_tasks import compare_prices_task
-from app.metrics import SCRAPING_LATENCY_SECONDS
+from alert_app.enums.enums_products import MonitoringType
+from alert_app.crud.crud_monitored import get_products_by_type
+from alert_app.crud.crud_competitor import get_all_competitor_products
+from alert_app.tasks.scraper_tasks import collect_product_task, collect_competitor_task
+from alert_app.tasks.compare_prices_tasks import compare_prices_task
+from alert_app.metrics import SCRAPING_LATENCY_SECONDS
 
 logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()

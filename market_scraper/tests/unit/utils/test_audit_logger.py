@@ -3,7 +3,7 @@ import builtins
 
 import pytest
 
-from app.utils import audit_logger as audit_logger_mod
+from scraper_app.utils import audit_logger as audit_logger_mod
 
 class DummyLogger:
     def __init__(self):

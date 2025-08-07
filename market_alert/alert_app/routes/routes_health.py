@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone
 
 from infra.db import get_engine
-from app.core.config import settings
+from alert_app.core.config import settings
 
 
 router = APIRouter(prefix="/health", tags=["Health"])

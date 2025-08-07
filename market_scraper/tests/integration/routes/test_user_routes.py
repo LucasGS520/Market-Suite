@@ -1,4 +1,4 @@
-from app.models.models_users import User
+from alert_app.models.models_users import User
 
 def test_create_user(client, db_session, prepare_test_database):
     payload = {

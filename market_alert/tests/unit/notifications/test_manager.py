@@ -1,10 +1,10 @@
 from types import SimpleNamespace
 
-from app.notifications.manager import NotificationManager, dispatch_price_alerts
-from app.notifications.channels.base import NotificationChannel
-from app.notifications.channels.email import EmailChannel
-from app.enums.enums_alerts import ChannelType
-from app.enums.enums_alerts import AlertType
+from alert_app.notifications.manager import NotificationManager, dispatch_price_alerts
+from alert_app.notifications.channels.base import NotificationChannel
+from alert_app.notifications.channels.email import EmailChannel
+from alert_app.enums.enums_alerts import ChannelType
+from alert_app.enums.enums_alerts import AlertType
 
 class DummyChannel(NotificationChannel):
     def __init__(self, fail: bool = False):

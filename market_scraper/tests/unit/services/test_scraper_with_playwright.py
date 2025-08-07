@@ -4,9 +4,9 @@ from uuid import uuid4
 from decimal import Decimal
 from sqlalchemy.orm import Session
 
-from app.services.services_scraper_monitored import scrape_monitored_product
-from app.schemas.schemas_products import MonitoredProductCreateScraping
-from app.utils.playwright_client import PlaywrightClient
+from alert_app.services.services_scraper_monitored import scrape_monitored_product
+from alert_app.schemas.schemas_products import MonitoredProductCreateScraping
+from scraper_app.utils.playwright_client import PlaywrightClient
 
 
 def test_scraper_monitored_uses_playwright(monkeypatch):
@@ -27,18 +27,18 @@ def test_scraper_monitored_uses_playwright(monkeypatch):
         yield PlaywrightClient()
 
     with patch(
-        "alert_app.utils.playwright_client.PlaywrightClient.fetch_html",
+        "scraper_app.utils.playwright_client.PlaywrightClient.fetch_html",
         new=AsyncMock(return_value=html)
     ) as fetch_mock, \
         patch(
-            "alert_app.services.services_scraper_common.get_playwright_client",
+            "scraper_app.services.services_scraper_common.get_playwright_client",
             fake_client,
         ), \
         patch(
-            "alert_app.services.services_scraper_common.parser.looks_like_product_page",
+            "scraper_app.services.services_scraper_common.parser.looks_like_product_page",
             return_value=True
         ), \
-        patch("alert_app.services.services_scraper_common.parser.parse_product_details", return_value={
+        patch("scraper_app.services.services_scraper_common.parser.parse_product_details", return_value={
             "name": "Produto Teste",
             "current_price": "R$ 10,00",
             "old_price": None,

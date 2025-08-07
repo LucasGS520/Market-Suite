@@ -7,12 +7,12 @@ from typing import List
 from uuid import UUID
 
 from infra.db import get_db
-from app.models import User
-from app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredProductResponse
-from app.crud.crud_monitored import get_all_monitored_products, get_monitored_product_by_id, delete_monitored_product
-from app.tasks.scraper_tasks import collect_product_task
+from alert_app.models import User
+from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredProductResponse
+from alert_app.crud.crud_monitored import get_all_monitored_products, get_monitored_product_by_id, delete_monitored_product
+from alert_app.tasks.scraper_tasks import collect_product_task
 from utils.ml_url import canonicalize_ml_url, is_product_url
-from app.core.security import get_current_user
+from alert_app.core.security import get_current_user
 
 
 router = APIRouter(prefix="/monitored", tags=["Monitoramento"])

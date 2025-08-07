@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 import requests
 
-import app.services.services_cache_scraper as cache_scraper
-from app.services.services_cache_scraper import use_cache_if_not_modified, update_cache
+import scraper_app.services.services_cache_scraper as cache_scraper
+from scraper_app.services.services_cache_scraper import use_cache_if_not_modified, update_cache
 
 def _html():
     return "<html></html>"

@@ -6,10 +6,10 @@ from typing import List
 
 from sqlalchemy.orm import Session
 
-from app.models.models_products import CompetitorProduct, MonitoredProduct
+from alert_app.models.models_products import CompetitorProduct, MonitoredProduct
 from utils.ml_url import canonicalize_ml_url
-from app.enums.enums_products import ProductStatus, MonitoringType
-from app.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
+from alert_app.enums.enums_products import ProductStatus, MonitoringType
+from alert_app.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 
 def create_or_update_competitor_product_scraped(db: Session, product_data: CompetitorProductCreateScraping, scraped_info: CompetitorScrapedInfo, last_checked: datetime) -> CompetitorProduct:

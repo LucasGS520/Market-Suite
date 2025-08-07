@@ -1,6 +1,6 @@
 import requests
 
-from app.utils.cookie_manager import CookieManager
+from scraper_app.utils.cookie_manager import CookieManager
 
 
 def test_get_cookies_performance(benchmark):

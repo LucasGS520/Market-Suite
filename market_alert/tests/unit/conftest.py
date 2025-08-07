@@ -1,7 +1,7 @@
 import pytest
 import time
 
-from app.utils.rate_limiter import RateLimiter
+from alert_app.utils.rate_limiter import RateLimiter
 
 #FakeRedis universal para testes unitarios
 class FakeRedis:
@@ -80,7 +80,7 @@ def patch_rate_limiter(monkeypatch):
     monkeypatch.setattr("alert_app.services.services_scraper_common.redis_client", fake_redis, raising=False)
     monkeypatch.setattr("alert_app.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
     #Garante que o cache inteligente use FakeRedis criado
-    import app.services.services_cache_scraper as cache_scraper
+    import alert_app.services.services_cache_scraper as cache_scraper
     monkeypatch.setattr(cache_scraper.cache_manager, "redis", fake_redis)
 
     class DummyCircuitBreaker:

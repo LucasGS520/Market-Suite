@@ -15,16 +15,16 @@ import requests
 import structlog
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from alert_app.core.config import settings
 from utils.circuit_breaker import CircuitBreaker
 from utils.rate_limiter import RateLimiter
-from app.utils.block_recovery import BlockRecoveryManager
+from alert_app.utils.block_recovery import BlockRecoveryManager
 
-from app.schemas.schemas_products import (
+from alert_app.schemas.schemas_products import (
     CompetitorProductCreateScraping,
     CompetitorScrapedInfo,
 )
-from app.crud.crud_competitor import create_or_update_competitor_product_scraped
+from alert_app.crud.crud_competitor import create_or_update_competitor_product_scraped
 
 
 #Logger específico para o scraping de concorrentes

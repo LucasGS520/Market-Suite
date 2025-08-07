@@ -10,7 +10,7 @@ from typing import Iterable, List, TYPE_CHECKING
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from app.models.models_alerts import AlertRule
+    from alert_app.models.models_alerts import AlertRule
 
 from datetime import datetime, timezone
 import asyncio
@@ -19,9 +19,9 @@ import time
 import structlog
 from sqlalchemy.orm import Session
 
-from app.crud.crud_user import get_user_by_id
-from app.crud.crud_alert_rules import update_last_notified, get_alert_rules_or_default, get_active_alert_rules_for_product as crud_get_active_rules
-from app.crud.crud_notification_logs import create_notification_log, has_recent_duplicate_notification
+from alert_app.crud.crud_user import get_user_by_id
+from alert_app.crud.crud_alert_rules import update_last_notified, get_alert_rules_or_default, get_active_alert_rules_for_product as crud_get_active_rules
+from alert_app.crud.crud_notification_logs import create_notification_log, has_recent_duplicate_notification
 from .matching import alert_matches_rule
 from .templates import render_price_alert, render_price_change_alert, render_listing_alert, render_error_alert
 
@@ -32,9 +32,9 @@ from .channels.push import PushChannel
 from .channels.whatsapp import WhatsAppChannel
 from .channels.slack import SlackChannel
 
-from app.enums.enums_alerts import ChannelType, AlertType
-from app.core.config import settings
-from app import metrics
+from alert_app.enums.enums_alerts import ChannelType, AlertType
+from alert_app.core.config import settings
+from alert_app import metrics
 
 logger = structlog.get_logger("alerts")
 

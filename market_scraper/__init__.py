@@ -15,7 +15,6 @@ try:
 
     #Permite que os testes importem ``market_scraper.app`` apontando para ``alert_app``
     _sys.modules.setdefault("scraper_app", _scraper_app)
-    _sys.modules.setdefault("scraper_app.utils", _utils)
 
 except Exception:
     pass

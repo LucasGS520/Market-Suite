@@ -1,4 +1,4 @@
-from app.utils.humanized_delay import HumanizedDelayManager
+from scraper_app.utils.humanized_delay import HumanizedDelayManager
 
 
 def test_calculate_delay_performance(benchmark, monkeypatch):

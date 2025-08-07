@@ -1,6 +1,6 @@
 from random import gauss
 from types import SimpleNamespace
-from app.tasks import metrics_tasks
+from alert_app.tasks import metrics_tasks
 from infra.db.database import checkout
 
 

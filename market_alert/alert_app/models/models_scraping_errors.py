@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Session, relationship
 
 from infra.db import Base
-from app.enums.enums_error_codes import ScrapingErrorType
+from alert_app.enums.enums_error_codes import ScrapingErrorType
 
 
 class ScrapingError(Base):

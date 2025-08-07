@@ -8,13 +8,13 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.models.models_products import MonitoredProduct
+from alert_app.models.models_products import MonitoredProduct
 from utils.ml_url import canonicalize_ml_url
-from app.enums.enums_products import MonitoringType, MonitoredStatus
-from app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
-from app.enums.enums_alerts import AlertType
-from app.schemas.schemas_alert_rules import AlertRuleCreate
-from app.crud import crud_alert_rules
+from alert_app.enums.enums_products import MonitoringType, MonitoredStatus
+from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from alert_app.enums.enums_alerts import AlertType
+from alert_app.schemas.schemas_alert_rules import AlertRuleCreate
+from alert_app.crud import crud_alert_rules
 
 
 def create_or_update_monitored_product_scraped(db: Session, user_id: UUID, product_data: MonitoredProductCreateScraping, scraped_info: MonitoredScrapedInfo, last_checked: datetime) -> MonitoredProduct:

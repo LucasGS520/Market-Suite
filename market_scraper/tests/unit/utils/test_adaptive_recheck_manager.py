@@ -2,7 +2,7 @@ from uuid import uuid4
 from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 
-from app.utils.adaptive_recheck import AdaptiveRecheckManager
+from scraper_app.utils.adaptive_recheck import AdaptiveRecheckManager
 
 def make_product(price=100):
     return SimpleNamespace(id=uuid4(), target_price=price)

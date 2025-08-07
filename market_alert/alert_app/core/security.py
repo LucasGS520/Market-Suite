@@ -7,9 +7,9 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from app.core.jwt import verify_access_token
+from alert_app.core.jwt import verify_access_token
 from infra.db import get_db
-from app.models.models_users import User
+from alert_app.models.models_users import User
 
 
 logger = structlog.get_logger("core.security")

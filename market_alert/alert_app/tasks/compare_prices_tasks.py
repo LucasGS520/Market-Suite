@@ -12,14 +12,14 @@ from uuid import UUID
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.core.celery_app import celery_app
+from alert_app.core.celery_app import celery_app
 from infra.db import SessionLocal
 from utils.redis_client import get_redis_client
-from app.utils.logging_utils import mask_identifier
-from app.services.services_comparison import run_price_comparison
-from app.tasks.alert_tasks import send_notification_task
-from app.metrics import SCRAPING_LATENCY_SECONDS
-from app.core.config import settings
+from alert_app.utils.logging_utils import mask_identifier
+from alert_app.services.services_comparison import run_price_comparison
+from alert_app.tasks.alert_tasks import send_notification_task
+from alert_app.metrics import SCRAPING_LATENCY_SECONDS
+from alert_app.core.config import settings
 
 
 logger = structlog.get_logger("compare_prices")

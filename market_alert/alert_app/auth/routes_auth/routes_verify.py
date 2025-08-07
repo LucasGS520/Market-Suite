@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from infra.db import get_db
-from app.schemas.schemas_auth import EmailTokenRequest
-from app.services.services_auth import send_verification_email_service, confirm_email_verification_service
-from app.core.security import get_current_user
-from app.models.models_users import User
+from alert_app.schemas.schemas_auth import EmailTokenRequest
+from alert_app.services.services_auth import send_verification_email_service, confirm_email_verification_service
+from alert_app.core.security import get_current_user
+from alert_app.models.models_users import User
 
 
 logger = structlog.get_logger("route.auth.verify")

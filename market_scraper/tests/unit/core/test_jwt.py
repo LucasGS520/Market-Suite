@@ -1,7 +1,7 @@
 from datetime import timedelta
 import pytest
 from fastapi import HTTPException
-from app.core.jwt import create_access_token, verify_access_token
+from alert_app.core.jwt import create_access_token, verify_access_token
 
 def test_create_and_verify_token():
     token = create_access_token({"sub": "user1"})

@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-import app.metrics as metrics
+import alert_app.metrics as metrics
 from infra.db import get_db
-from app.schemas.schemas_auth import TokenResponse
-from app.services.services_auth import login_user
+from alert_app.schemas.schemas_auth import TokenResponse
+from alert_app.services.services_auth import login_user
 
 
 logger = structlog.get_logger("route.auth.login")

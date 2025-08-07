@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.notifications.matching import alert_matches_rule
-from app.enums.enums_alerts import AlertType
-from app.enums.enums_products import ProductStatus
+from alert_app.notifications.matching import alert_matches_rule
+from alert_app.enums.enums_alerts import AlertType
+from alert_app.enums.enums_products import ProductStatus
 
 
 def make_rule(rule_type, value=None, percent=None, target_price=None, status=None):

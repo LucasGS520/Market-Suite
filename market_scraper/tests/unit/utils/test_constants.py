@@ -1,6 +1,6 @@
 import pytest
 
-from app.utils.constants import to_mobile_url, MOBILE_DOMAIN
+from scraper_app.utils.constants import to_mobile_url, MOBILE_DOMAIN
 
 
 def test_to_mobile_url_converts_mercadolivre_domain():

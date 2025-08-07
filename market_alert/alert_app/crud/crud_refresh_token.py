@@ -9,8 +9,8 @@ from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
-from app.models.models_refresh_token import RefreshToken
+from alert_app.core.config import settings
+from alert_app.models.models_refresh_token import RefreshToken
 
 
 logger = structlog.get_logger("crud.refresh_tokens")

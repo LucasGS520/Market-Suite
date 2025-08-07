@@ -1,4 +1,4 @@
-from app.utils.data_quality_validator import DataQualityValidator
+from scraper_app.utils.data_quality_validator import DataQualityValidator
 import pytest
 
 VALID_DATA = {

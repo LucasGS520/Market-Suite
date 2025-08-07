@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 import asyncio
 
-from app.notifications.manager import NotificationManager
-from app.notifications.channels.base import NotificationChannel
+from alert_app.notifications.manager import NotificationManager
+from alert_app.notifications.channels.base import NotificationChannel
 
 
 class DummyChannel(NotificationChannel):

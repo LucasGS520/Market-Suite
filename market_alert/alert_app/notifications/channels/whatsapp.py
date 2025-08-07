@@ -3,8 +3,8 @@ from __future__ import annotations
 from twilio.http.async_http_client import AsyncTwilioHttpClient
 from twilio.rest import Client
 
-from app.core.config import settings
-from app import metrics
+from alert_app.core.config import settings
+from alert_app import metrics
 from .base import NotificationChannel, logger
 
 

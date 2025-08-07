@@ -6,8 +6,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models.models_alerts import NotificationLog
-from app.enums.enums_alerts import ChannelType, AlertType
+from alert_app.models.models_alerts import NotificationLog
+from alert_app.enums.enums_alerts import ChannelType, AlertType
 
 
 def create_notification_log(db: Session, user_id: UUID, channel: ChannelType, subject: str, message: str, alert_rule_id: UUID | None = None,

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.tasks.compare_prices_tasks import compare_prices_task
+from alert_app.tasks.compare_prices_tasks import compare_prices_task
 
 class DummyRedis:
     def set(self, *a, **k):

@@ -1,11 +1,11 @@
 from fastapi import HTTPException
 
-from app.routes.auth import routes_login as r_login
-from app.routes.auth import routes_refresh as r_refresh
-from app.routes.auth import routes_logout as r_logout
-from app.routes.auth import routes_profile as r_profile
-from app.routes.auth import routes_verify as r_verify
-from app.routes.auth import routes_reset_password as r_reset
+from alert_app.routes.auth import routes_login as r_login
+from alert_app.routes.auth import routes_refresh as r_refresh
+from alert_app.routes.auth import routes_logout as r_logout
+from alert_app.routes.auth import routes_profile as r_profile
+from alert_app.routes.auth import routes_verify as r_verify
+from alert_app.routes.auth import routes_reset_password as r_reset
 
 
 class Dummy:

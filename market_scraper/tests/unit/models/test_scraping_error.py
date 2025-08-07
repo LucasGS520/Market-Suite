@@ -1,5 +1,5 @@
 import uuid
-from app.models.models_scraping_errors import ScrapingError, ScrapingErrorType
+from alert_app.models.models_scraping_errors import ScrapingError, ScrapingErrorType
 
 class DummyLogger:
     def __init__(self):

@@ -8,7 +8,7 @@ from jose.exceptions import ExpiredSignatureError
 
 from fastapi import HTTPException, status
 
-from app.core.config import settings
+from alert_app.core.config import settings
 
 
 logger = structlog.get_logger("core.jwt")

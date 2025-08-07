@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from infra.db import get_db
-from app.schemas.schemas_auth import RefreshRequest, TokenPairResponse
-from app.services.services_auth import refresh_token_service
+from alert_app.schemas.schemas_auth import RefreshRequest, TokenPairResponse
+from alert_app.services.services_auth import refresh_token_service
 
 
 logger = structlog.get_logger("route.auth.refresh")

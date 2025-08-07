@@ -7,11 +7,11 @@ from typing import List
 from uuid import UUID
 
 from infra.db import get_db
-from app.models import User
-from app.schemas.schemas_alert_rules import AlertRuleCreate, QuickAlertRuleCreate, AlertRuleUpdate, AlertRuleResponse
-from app.crud.crud_alert_rules import create_alert_rule, get_alert_rule, get_user_alert_rules, toggle_alert_rule, update_alert_rule, delete_alert_rule
-from app.crud.crud_monitored import get_monitored_product_by_id
-from app.core.security import get_current_user
+from alert_app.models import User
+from alert_app.schemas.schemas_alert_rules import AlertRuleCreate, QuickAlertRuleCreate, AlertRuleUpdate, AlertRuleResponse
+from alert_app.crud.crud_alert_rules import create_alert_rule, get_alert_rule, get_user_alert_rules, toggle_alert_rule, update_alert_rule, delete_alert_rule
+from alert_app.crud.crud_monitored import get_monitored_product_by_id
+from alert_app.core.security import get_current_user
 
 
 router = APIRouter(prefix="/alert_rules", tags=["Regras de Alertas"])

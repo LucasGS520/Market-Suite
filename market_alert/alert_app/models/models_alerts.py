@@ -8,8 +8,8 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 
 from infra.db import Base
-from app.enums.enums_alerts import AlertType, ChannelType
-from app.enums.enums_products import ProductStatus
+from alert_app.enums.enums_alerts import AlertType, ChannelType
+from alert_app.enums.enums_products import ProductStatus
 
 
 class AlertRule(Base):

@@ -12,13 +12,13 @@ from uuid import uuid4
 from infra.db import Base
 from infra.db import get_db
 
-from main import app
-from app.core.security import get_current_user
-from app.core.password import hash_password
-from app.models.models_users import User
+from main import alert_app
+from alert_app.core.security import get_current_user
+from alert_app.core.password import hash_password
+from alert_app.models.models_users import User
 
-from app.utils import rate_limiter as rate_limiter_module
-from app.tasks import scraper_tasks
+from alert_app.utils import rate_limiter as rate_limiter_module
+from alert_app.tasks import scraper_tasks
 
 #Utiliza banco SQLite em memória para testes
 db_url = "sqlite:///:memory:"

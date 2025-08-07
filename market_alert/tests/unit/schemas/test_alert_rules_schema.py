@@ -3,8 +3,8 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.schemas_alert_rules import AlertRuleCreate
-from app.enums.enums_alerts import AlertType
+from alert_app.schemas.schemas_alert_rules import AlertRuleCreate
+from alert_app.enums.enums_alerts import AlertType
 
 
 def base_data(**k):

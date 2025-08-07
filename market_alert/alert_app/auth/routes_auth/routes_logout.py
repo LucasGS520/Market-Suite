@@ -6,8 +6,8 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from infra.db import get_db
-from app.schemas.schemas_auth import RefreshRequest
-from app.services.services_auth import logout_service
+from alert_app.schemas.schemas_auth import RefreshRequest
+from alert_app.services.services_auth import logout_service
 
 
 logger = structlog.get_logger("route.auth.logout")

@@ -2,8 +2,8 @@ import types
 import pytest
 from fastapi import HTTPException, status
 
-import app.routes.routes_monitored as rm
-import app.routes.routes_competitors as rc
+import alert_app.routes.routes_monitored as rm
+import alert_app.routes.routes_competitors as rc
 
 
 def _request():

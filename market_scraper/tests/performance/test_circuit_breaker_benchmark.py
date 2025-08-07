@@ -1,4 +1,4 @@
-from app.utils.circuit_breaker import CircuitBreaker
+from alert_app.utils.circuit_breaker import CircuitBreaker
 
 
 class FakeRedis:

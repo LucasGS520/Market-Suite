@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from app.utils.block_recovery import BlockRecoveryManager
+from scraper_app.utils.block_recovery import BlockRecoveryManager
 
 
 def test_escalates_suspend_duration(monkeypatch):

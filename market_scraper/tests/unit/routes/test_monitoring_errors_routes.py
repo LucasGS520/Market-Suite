@@ -1,7 +1,7 @@
 import types
 from uuid import UUID
 
-from app.routes import routes_monitoring_errors as r
+from alert_app.routes import routes_monitoring_errors as r
 
 
 def _request():

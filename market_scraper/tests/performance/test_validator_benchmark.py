@@ -1,4 +1,4 @@
-from app.utils.data_quality_validator import DataQualityValidator
+from scraper_app.utils.data_quality_validator import DataQualityValidator
 
 def test_data_quality_validator_performance(benchmark):
     validator = DataQualityValidator()

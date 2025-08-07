@@ -4,8 +4,8 @@ from decimal import Decimal
 
 import pytest
 
-from app.crud import crud_monitored, crud_competitor, crud_alert_rules
-from app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
+from alert_app.crud import crud_monitored, crud_competitor, crud_alert_rules
+from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 
 class DummyQuery:

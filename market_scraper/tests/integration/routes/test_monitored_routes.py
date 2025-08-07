@@ -1,10 +1,10 @@
 import uuid
 from decimal import Decimal
 
-from app.models.models_users import User
-from app.models.models_products import MonitoredProduct
-from app.enums.enums_products import MonitoringType, MonitoredStatus
-from app.core.password import hash_password
+from alert_app.models.models_users import User
+from alert_app.models.models_products import MonitoredProduct
+from alert_app.enums.enums_products import MonitoringType, MonitoredStatus
+from alert_app.core.password import hash_password
 
 
 # --- /monitored/scrape ---

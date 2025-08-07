@@ -1,7 +1,7 @@
 import pytest
 from types import SimpleNamespace
 
-from app.tasks.alert_tasks import send_notification_task, dispatch_price_alert_task
+from alert_app.tasks.alert_tasks import send_notification_task, dispatch_price_alert_task
 
 
 class DummySession:

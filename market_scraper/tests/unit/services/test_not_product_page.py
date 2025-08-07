@@ -4,8 +4,8 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from app.services.services_scraper_competitor import scrape_competitor_product
-from app.schemas.schemas_products import CompetitorProductCreateScraping
+from alert_app.services.services_scraper_competitor import scrape_competitor_product
+from alert_app.schemas.schemas_products import CompetitorProductCreateScraping
 
 
 class DummyRedis:
@@ -24,20 +24,20 @@ class FakeRobots:
 
 def _patch_common(monkeypatch):
     module = "alert_app.services.services_scraper_competitor"
-    monkeypatch.setattr("alert_app.services.services_scraper_common.RobotsTxtParser", lambda *a, **k: FakeRobots())
+    monkeypatch.setattr("scraper_app.services.services_scraper_common.RobotsTxtParser", lambda *a, **k: FakeRobots())
     monkeypatch.setattr(
         f"{module}.create_or_update_competitor_product_scraped",
         lambda *a, **k: None,
         raising=False
     )
-    monkeypatch.setattr("alert_app.services.services_scraper_common.HumanizedDelayManager.wait", lambda self, *a, **k: None)
+    monkeypatch.setattr("scraper_app.services.services_scraper_common.HumanizedDelayManager.wait", lambda self, *a, **k: None)
     class DummyRecovery:
         async def handle_block(self, *a, **k):
             pass
 
-    monkeypatch.setattr("alert_app.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: DummyRecovery())
+    monkeypatch.setattr("scraper_app.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: DummyRecovery())
     redis = DummyRedis()
-    monkeypatch.setattr("alert_app.services.services_scraper_common.redis_client", redis, raising=False)
+    monkeypatch.setattr("scraper_app.services.services_scraper_common.redis_client", redis, raising=False)
     monkeypatch.setattr("alert_app.utils.circuit_breaker.get_redis_client", lambda: redis)
 
 def _payload():
@@ -56,7 +56,7 @@ def test_not_product_page_raises_bad_request(monkeypatch):
         raising=False
     )
     monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: redis)
-    import app.services.services_cache_scraper as cache_scraper
+    import scraper_app.services.services_cache_scraper as cache_scraper
 
     monkeypatch.setattr(cache_scraper.cache_manager, "redis", redis)
 
@@ -64,8 +64,8 @@ def test_not_product_page_raises_bad_request(monkeypatch):
     async def fake_playwright(url: str):
         return html
 
-    monkeypatch.setattr("alert_app.services.services_scraper_common.fetch_html_playwright", fake_playwright)
-    monkeypatch.setattr("alert_app.services.services_scraper_common.parser.looks_like_product_page", lambda _html: False)
+    monkeypatch.setattr("scraper_app.services.services_scraper_common.fetch_html_playwright", fake_playwright)
+    monkeypatch.setattr("scraper_app.services.services_scraper_common.parser.looks_like_product_page", lambda _html: False)
 
     called = {"parse": False}
 
@@ -74,7 +74,7 @@ def test_not_product_page_raises_bad_request(monkeypatch):
         return {}
 
     monkeypatch.setattr(
-        "alert_app.services.services_scraper_common.parser.parse_product_details",
+        "scraper_app.services.services_scraper_common.parser.parse_product_details",
         fake_parse
     )
 

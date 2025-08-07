@@ -1,12 +1,12 @@
 import uuid
 
-from app.models.models_users import User
-from app.models.models_alerts import AlertRule
-from app.models.models_products import MonitoredProduct
-from app.enums.enums_products import MonitoringType, MonitoredStatus
-from app.core.password import hash_password
-from app.enums.enums_alerts import AlertType
-from app.crud.crud_alert_rules import get_alert_rule
+from alert_app.models.models_users import User
+from alert_app.models.models_alerts import AlertRule
+from alert_app.models.models_products import MonitoredProduct
+from alert_app.enums.enums_products import MonitoringType, MonitoredStatus
+from alert_app.core.password import hash_password
+from alert_app.enums.enums_alerts import AlertType
+from alert_app.crud.crud_alert_rules import get_alert_rule
 
 
 def test_cannot_delete_other_users_rule(client, db_session, test_user, prepare_test_database):

@@ -6,11 +6,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from app.models.models_users import User
-from app.schemas.schemas_users import UserResponse, UserCreate, UserUpdate
-from app.enums.enums_alerts import AlertType
-from app.schemas.schemas_alert_rules import AlertRuleCreate
-from app.crud import crud_alert_rules
+from alert_app.models.models_users import User
+from alert_app.schemas.schemas_users import UserResponse, UserCreate, UserUpdate
+from alert_app.enums.enums_alerts import AlertType
+from alert_app.schemas.schemas_alert_rules import AlertRuleCreate
+from alert_app.crud import crud_alert_rules
 
 
 logger = structlog.get_logger("crud.user")

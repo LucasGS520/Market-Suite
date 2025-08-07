@@ -1,8 +1,8 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
-from app.utils.comparator import compare_prices, calculate_discrepancies, detect_price_changes, detect_listing_status
-from app.enums.enums_products import ProductStatus
+from scraper_app.utils.comparator import compare_prices, calculate_discrepancies, detect_price_changes, detect_listing_status
+from alert_app.enums.enums_products import ProductStatus
 
 def test_compare_prices_no_competitors():
     monitored = SimpleNamespace(id="m1", current_price=Decimal("10.00"), target_price=Decimal("9.00"))

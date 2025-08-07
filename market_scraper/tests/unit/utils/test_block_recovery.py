@@ -8,7 +8,7 @@ import pytest
 os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
 os.environ.setdefault("SECRET_KEY", "dummy")
 
-from app.utils.block_recovery import BlockRecoveryManager
+from scraper_app.utils.block_recovery import BlockRecoveryManager
 
 
 @pytest.mark.parametrize(
@@ -27,7 +27,7 @@ def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
     mgr = BlockRecoveryManager(ua_manager=ua, cookie_manager=cookie, delay_manager=delay)
 
     called = []
-    monkeypatch.setattr("alert_app.utils.block_recovery.suspend_scraping", lambda s: called.append(s))
+    monkeypatch.setattr("scraper_app.utils.block_recovery.suspend_scraping", lambda s: called.append(s))
 
     asyncio.run(mgr.handle_block(block_type, session_id="sess"))
 

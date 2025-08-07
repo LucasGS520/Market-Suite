@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from infra.db import get_db
-from app.schemas.schemas_users import UserCreate, UserResponse, UserUpdate
-from app.crud import crud_user as crud
-from app.models.models_users import User
-from app.core.security import get_current_user
+from alert_app.schemas.schemas_users import UserCreate, UserResponse, UserUpdate
+from alert_app.crud import crud_user as crud
+from alert_app.models.models_users import User
+from alert_app.core.security import get_current_user
 
 
 router = APIRouter(prefix="/users", tags=["Usuários"]) #Cria um agrupador/organizador de rotas

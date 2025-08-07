@@ -4,11 +4,11 @@ from decimal import Decimal
 
 import pytest
 
-from app.crud import crud_user, crud_monitored, crud_alert_rules
-from app.models.models_users import User
-from app.schemas.schemas_users import UserCreate
-from app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
-from app.enums.enums_alerts import AlertType
+from alert_app.crud import crud_user, crud_monitored, crud_alert_rules
+from alert_app.models.models_users import User
+from alert_app.schemas.schemas_users import UserCreate
+from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from alert_app.enums.enums_alerts import AlertType
 
 
 class DummyQuery:

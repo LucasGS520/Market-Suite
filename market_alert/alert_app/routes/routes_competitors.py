@@ -7,13 +7,13 @@ from typing import List
 from uuid import UUID
 
 from infra.db import get_db
-from app.models import User
-from app.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorProductResponse
-from app.crud.crud_monitored import get_monitored_product_by_id
-from app.crud.crud_competitor import get_competitors_by_monitored_id, delete_competitors_by_monitored_id
-from app.tasks.scraper_tasks import collect_competitor_task
+from alert_app.models import User
+from alert_app.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorProductResponse
+from alert_app.crud.crud_monitored import get_monitored_product_by_id
+from alert_app.crud.crud_competitor import get_competitors_by_monitored_id, delete_competitors_by_monitored_id
+from alert_app.tasks.scraper_tasks import collect_competitor_task
 from utils.ml_url import canonicalize_ml_url, is_product_url
-from app.core.security import get_current_user
+from alert_app.core.security import get_current_user
 
 
 router = APIRouter(prefix="/competitors", tags=["Concorrentes"])

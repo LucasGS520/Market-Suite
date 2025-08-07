@@ -2,8 +2,8 @@
 
 from uuid import UUID
 from sqlalchemy.orm import Session
-from app.models.models_scraping_errors import ScrapingError
-from app.enums.enums_error_codes import ScrapingErrorType
+from alert_app.models.models_scraping_errors import ScrapingError
+from alert_app.enums.enums_error_codes import ScrapingErrorType
 
 def create_scraping_error(db: Session, product_id: UUID, url: str, message: str, error_type: ScrapingErrorType) -> ScrapingError:
     """ Grava um erro de scraping ocorrido durante a coleta de preços """

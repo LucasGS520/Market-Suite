@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from app.utils.adaptive_recheck import AdaptiveRecheckManager
+from scraper_app.utils.adaptive_recheck import AdaptiveRecheckManager
 
 def test_schedule_next_performance(benchmark, patch_rate_limiter):
     manager = AdaptiveRecheckManager()

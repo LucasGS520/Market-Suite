@@ -1,4 +1,4 @@
-from app.core.password import hash_password, verify_password
+from alert_app.core.password import hash_password, verify_password
 
 
 def test_hash_and_verify_password():

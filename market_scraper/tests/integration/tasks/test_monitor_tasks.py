@@ -5,10 +5,10 @@ from unittest.mock import Mock
 
 import pytest
 
-import app.utils.redis_client as _rc_mod
-import app.utils.rate_limiter as _rl_mod
-import app.utils.circuit_breaker as _cb_mod
-import app.tasks.compare_prices_tasks as _cp_mod
+import alert_app.utils.redis_client as _rc_mod
+import alert_app.utils.rate_limiter as _rl_mod
+import alert_app.utils.circuit_breaker as _cb_mod
+import alert_app.tasks.compare_prices_tasks as _cp_mod
 
 class DummyRedis:
     def get(self, *a, **k):

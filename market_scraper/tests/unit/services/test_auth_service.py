@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.services import services_auth as auth
+from alert_app.services import services_auth as auth
 
 
 class DummyDB:

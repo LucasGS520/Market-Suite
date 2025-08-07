@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from infra.db import get_db
-from app.schemas.schemas_auth import ChangePasswordRequest, ChangeEmailRequest
-from app.services.services_auth import change_password_service, change_email_service
-from app.core.security import get_current_user
-from app.models.models_users import User
+from alert_app.schemas.schemas_auth import ChangePasswordRequest, ChangeEmailRequest
+from alert_app.services.services_auth import change_password_service, change_email_service
+from alert_app.core.security import get_current_user
+from alert_app.models.models_users import User
 
 
 logger = structlog.get_logger("route.auth.profile")

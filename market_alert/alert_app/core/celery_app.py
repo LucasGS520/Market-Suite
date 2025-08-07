@@ -1,7 +1,7 @@
 """ Configuração da aplicação Celery e registro de métricas """
 
 #Registra métricas antes de iniciar o HTTP server
-import app.metrics as metrics_module
+import alert_app.metrics as metrics_module
 import os
 
 from kombu import Exchange, Queue
@@ -15,7 +15,7 @@ try:
 except Exception:
     CeleryInstrumentor = None
 
-from app.core.config import settings
+from alert_app.core.config import settings
 
 
 #Cria a aplicação Celery

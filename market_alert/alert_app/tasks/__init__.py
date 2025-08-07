@@ -1,6 +1,6 @@
 """Registro de tasks Celery utilizadas na aplicação."""
 
-from app.core.celery_app import celery_app
+from alert_app.core.celery_app import celery_app
 
 #As tasks são registradas via ''include'' em ''alert_app.core.celery_app''
 #Evitamos importar submódulos aqui para não executar código pesado

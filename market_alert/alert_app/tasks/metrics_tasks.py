@@ -6,15 +6,15 @@ from celery import shared_task, signals
 from celery.app.control import Inspect
 
 from utils.redis_client import get_redis_client
-from app.core.celery_app import celery_app
+from alert_app.core.celery_app import celery_app
 from infra.db import get_engine
-from app.metrics import (
+from alert_app.metrics import (
     CELERY_QUEUE_LENGTH, CELERY_WORKERS_TOTAL,
     CELERY_WORKER_CONCURRENCY, CELERY_TASK_DURATION_SECONDS,
     REDIS_QUEUE_MESSAGES, REDIS_MEMORY_USAGE_BYTES,
     DB_POOL_SIZE, DB_POOL_CHECKOUTS
 )
-from app.services.services_cache_scraper import cache_manager
+from alert_app.services.services_cache_scraper import cache_manager
 
 
 logger = structlog.get_logger("metrics_tasks")

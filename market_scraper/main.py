@@ -1,7 +1,7 @@
 """ Aplicação principal FastAPI com configuração de métricas e rotas """
 from itertools import count
 
-import alert_app.metrics as metrics_module
+import scraper_app.metrics as metrics_module
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 try:
@@ -90,7 +90,7 @@ def configure_logging():
     root.setLevel(logging.INFO)
 
 
-#Invoca antes de criar o alert_app
+#Invoca antes de criar o scraper_app
 configure_logging()
 #Logger para startup da API
 logger = structlog.get_logger("marketalert")

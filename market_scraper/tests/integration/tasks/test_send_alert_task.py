@@ -1,9 +1,9 @@
 import pytest
 from types import SimpleNamespace
 
-from app.tasks.alert_tasks import send_alert_task
-from app.models.models_alerts import NotificationLog
-from app.enums.enums_alerts import ChannelType
+from alert_app.tasks.alert_tasks import send_alert_task
+from alert_app.models.models_alerts import NotificationLog
+from alert_app.enums.enums_alerts import ChannelType
 
 
 class DummyDB:

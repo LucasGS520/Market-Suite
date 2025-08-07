@@ -1,6 +1,6 @@
 import json
-from app.utils import audit_exporter
-from app.utils import audit_logger
+from scraper_app.utils import audit_exporter
+from scraper_app.utils import audit_logger
 
 
 def test_metrics_counts(monkeypatch, tmp_path):

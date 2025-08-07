@@ -1,6 +1,6 @@
 """ Executor do Celery Beat com endpoint de métricas Prometheus """
 
-import alert_app.metrics
+import scraper_app.metrics
 from prometheus_client import start_http_server
 from scraper_app.core.celery_app import celery_app
 

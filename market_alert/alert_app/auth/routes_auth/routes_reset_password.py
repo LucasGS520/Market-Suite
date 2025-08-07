@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from infra.db import get_db
-from app.schemas.schemas_auth import ResetPasswordRequest, ResetPasswordConfirmRequest
-from app.services.services_auth import request_password_reset_service, confirm_password_service
+from alert_app.schemas.schemas_auth import ResetPasswordRequest, ResetPasswordConfirmRequest
+from alert_app.services.services_auth import request_password_reset_service, confirm_password_service
 
 
 logger = structlog.get_logger("route.auth.reset")

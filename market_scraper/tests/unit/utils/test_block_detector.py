@@ -1,6 +1,6 @@
 import requests
 
-from app.utils.block_detector import detect_block, BlockResult
+from scraper_app.utils.block_detector import detect_block, BlockResult
 
 def _fake_response(status=200, text="<html></html>"):
     r = requests.Response()

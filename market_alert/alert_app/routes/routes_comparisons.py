@@ -8,12 +8,12 @@ from uuid import UUID
 from decimal import Decimal
 
 from infra.db import get_db
-from app.models import User
-from app.schemas.schemas_comparisons import PriceComparisonResponse
-from app.core.security import get_current_user
-from app.crud.crud_monitored import get_monitored_product_by_id
-from app.crud.crud_comparison import get_latest_comparisons, get_comparison_by_id
-from app.services.services_comparison import run_price_comparison
+from alert_app.models import User
+from alert_app.schemas.schemas_comparisons import PriceComparisonResponse
+from alert_app.core.security import get_current_user
+from alert_app.crud.crud_monitored import get_monitored_product_by_id
+from alert_app.crud.crud_comparison import get_latest_comparisons, get_comparison_by_id
+from alert_app.services.services_comparison import run_price_comparison
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
