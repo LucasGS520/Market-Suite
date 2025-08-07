@@ -1,7 +1,7 @@
 """ Tarefas agendadas para monitoramento periódico.
 
-Estas tasks são executadas pelo Celery Beat e servem para despachar de forma
-controlada novas coletas de produtos e concorrentes, além de acionar a
+As funções deste Módulo são executadas pelo Celery Beat e têm como objetivo
+despachar novas coletas de produtos e concorrentes, além de iniciar a
 comparação de preços.
 """
 
@@ -13,11 +13,7 @@ import structlog
 
 from alert_app.core.celery_app import celery_app
 from infra.db import SessionLocal
-from utils.circuit_breaker import CircuitBreaker
 from utils.redis_client import get_redis_client, is_scraping_suspended
-from utils.rate_limiter import RateLimiter
-from alert_app.utils.adaptive_recheck import AdaptiveRecheckManager
-from market_scraper.scraper_app.core.config import settings as scraper_settings #Configurações do módulo de scraping
 
 from alert_app.enums.enums_products import MonitoringType
 from alert_app.crud.crud_monitored import get_products_by_type
@@ -26,30 +22,13 @@ from alert_app.tasks.scraper_tasks import collect_product_task, collect_competit
 from alert_app.tasks.compare_prices_tasks import compare_prices_task
 from alert_app.metrics import SCRAPING_LATENCY_SECONDS
 
+
 logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()
-
-circuit_breaker = CircuitBreaker()
-#Intervalo base definido nas configurações do scraper
-adaptive_recheck = AdaptiveRecheckManager(
-    base_interval=scraper_settings.ADAPTIVE_RECHECK_BASE_INTERVAL
-)
 
 #Batch sizes configurado via .env
 BATCH_SIZE_SCRAPING = int(os.getenv("BATCH_SIZE_SCRAPING", "10"))
 BATCH_SIZE_COMPETITOR = int(os.getenv("BATCH_SIZE_COMPETITOR", "20"))
-
-#Rate limiters de taxa para o envio de sub tarefas do throttle manager
-scraping_dispatch_limiter = RateLimiter(
-    redis_key="rate:alert_app.tasks.monitor_tasks.recheck_monitored_products",
-    max_requests=BATCH_SIZE_SCRAPING,
-    window_seconds=60
-)
-competitor_dispatch_limiter = RateLimiter(
-    redis_key="rate:alert_app.tasks.monitor_tasks.recheck_competitor_products",
-    max_requests=BATCH_SIZE_COMPETITOR,
-    window_seconds=60
-)
 
 @celery_app.task(name="alert_app.tasks.monitor_tasks.recheck_monitored_products")
 def recheck_monitored_products() -> None:
@@ -58,26 +37,15 @@ def recheck_monitored_products() -> None:
     status = "success"
     log = logger.bind(phase="recheck_scraping")
 
-    # Circuit breaker: evita sobrecarga em caso de erros consecutivos
-    if not circuit_breaker.allow_request("recheck_monitored_products"):
-        log.error("circuit_open_skip_scraping", detail="circuit breaker open")
-        return
-
     # Flag de suspensão global controlada via Redis
     if is_scraping_suspended():
         log.warning("suspended_via_flag", detail="scraping suspended flag is set")
         return
 
-    # Rate limiter limita quantas tasks são despachadas por minuto
-    if not scraping_dispatch_limiter.allow_request():
-        log.warning("dispatch_rate_limited", detail="too many scraping dispatch calls")
-        return
-
     with SessionLocal() as db:
         try:
             products = get_products_by_type(db, MonitoringType.scraping)
-            due = [p for p in products if adaptive_recheck.should_recheck(str(p.id))]
-            batch = due[:BATCH_SIZE_SCRAPING]
+            batch = products[:BATCH_SIZE_SCRAPING]
 
             for p in batch:
                 log.info("dispatch_scraping_task", product_url=p.product_url, user_id=str(p.user_id))
@@ -112,19 +80,9 @@ def recheck_competitor_products():
     status = "success"
     log = logger.bind(phase="recheck_competitors")
 
-    # Circuit breaker: evita sobrecarga em caso de erros consecutivos
-    if not circuit_breaker.allow_request("recheck_competitor_products"):
-        log.error("circuit_open_skip_competitors", detail="circuit breaker open")
-        return
-
     # Flag de suspensão global controlada via Redis
     if is_scraping_suspended():
         log.warning("suspended_via_flag", detail="scraping suspended flag is set")
-        return
-
-    # Rate limiter limita quantas tasks são despachadas por minuto
-    if not competitor_dispatch_limiter.allow_request():
-        log.warning("dispatch_rate_limited", detail="too many competitor dispatch calls")
         return
 
     with SessionLocal() as db:
