@@ -8,34 +8,36 @@ controla quantas vezes cada worker pode iniciar essas tarefas em determinado
 período independente do agendamento adaptativo que define quando cada
 produto será verificado novamente
 """
+from asyncio import timeout
 
 from uuid import UUID
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import structlog
-from fastapi import HTTPException
+import requests
+
+from infra.db import SessionLocal
+from utils.redis_client import get_redis_client, is_scraping_suspended
+from utils.circuit_breaker import CircuitBreaker
+from utils.rate_limiter import RateLimiter
 
 from alert_app.exceptions import ScraperError
 
 from alert_app.core.config import settings
 from alert_app.core.celery_app import celery_app
-from infra.db import SessionLocal
-from utils.redis_client import get_redis_client, is_scraping_suspended
-from utils.circuit_breaker import CircuitBreaker
-from utils.rate_limiter import RateLimiter
+
 from alert_app.utils.adaptive_recheck import AdaptiveRecheckManager
-from alert_app.crud.crud_monitored import get_monitored_product_by_id
-from alert_app.crud.crud_comparison import get_latest_comparisons
-from market_scraper.scraper_app.core.config import settings as scraper_settings #COnfigurações do módulo de scraping
-
-from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
-
-from alert_app.services.services_scraper_monitored import scrape_monitored_product
-from alert_app.services.services_scraper_competitor import scrape_competitor_product
-from alert_app.tasks.compare_prices_tasks import compare_prices_task
 from alert_app.crud import crud_errors
+from alert_app.crud.crud_monitored import get_monitored_product_by_id, create_or_update_monitored_product_scraped
+from alert_app.crud.crud_competior import create_or_update_competitor_product_scraped
+from alert_app.crud.crud_comparison import get_latest_comparisons
+from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
+from alert_app.tasks.compare_prices_tasks import compare_prices_task
 from alert_app.enums.enums_error_codes import ScrapingErrorType
 from alert_app.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
+
+from market_scraper.scraper_app.core.config import settings as scraper_settings #Configurações do módulo de scraping
 
 
 logger = structlog.get_logger("scraper_tasks")
@@ -113,18 +115,40 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
     product_id = monitored_id
     with SessionLocal() as db:
         try:
-            result = scrape_monitored_product(db, url, UUID(user_id), payload)
-            product_id = result.get("product_id", monitored_id)
+            #Envia requisição ao serviço externo de scraping
+            resp = requests.post(
+                f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
+                json={"url": url, "product_type": "monitored"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            details = resp.json()
+
+            #Persiste ou atualiza o produto monitorado com as informações obtidas
+            product = create_or_update_monitored_product_scraped(
+                db=db,
+                user_id=UUID(user_id),
+                product_data=payload,
+                scraped_info=MonitoredScrapedInfo(
+                    current_price=Decimal(str(details.get("current_price", 0))),
+                    thumbnail=details.get("thumbnail"),
+                    free_shipping=details.get("free_shipping", False),
+                ),
+                last_checked=datetime.now(timezone.utc),
+            )
+            product_id = str(product.id)
+            compare_prices_task.delay(product_id)
+
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
             task_logger.info("collect_product_completed", duration_ms=elapsed_ms)
             redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
             circuit_breaker.record_success("collect_product_task")
             if product_id:
                 adaptive_recheck.record_result(product_id, True)
-        except HTTPException as http_err:
+        except requests.RequestException as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
-            task_logger.error("collect_product_http_error", error=str(http_err), monitored_product_id=product_id, url=url)
+            task_logger.error("collect_product_http_error", error=str(req_err), monitored_product_id=product_id, url=url)
             circuit_breaker.record_failure("collect_product_task")
             if product_id:
                 adaptive_recheck.record_result(product_id, False)
@@ -133,12 +157,13 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
                         db,
                         UUID(product_id),
                         url,
-                        str(http_err.detail),
-                        ScrapingErrorType.http_error
+                        str(req_err),
+                        ScrapingErrorType.http_error,
                     )
                 except Exception as err:
                     task_logger.warning("error_persist_failed", error=str(err))
-            raise ScraperError(status_code=http_err.status_code, detail=str(http_err.detail))
+            status_code = req_err.response.status_code if req_err.response else 500
+            raise ScraperError(status_code=status_code, detail=str(req_err))
         except Exception as exc:
             status = "failure"
             task_logger.error("collect_product_failed", error=str(exc))
@@ -151,7 +176,7 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
                         UUID(product_id),
                         url,
                         str(exc),
-                        ScrapingErrorType.parsing_error
+                        ScrapingErrorType.parsing_error,
                     )
                 except Exception as err:
                     task_logger.warning("error_persist_failed", error=str(err))
@@ -170,7 +195,7 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
                             "user_id": str(product.user_id),
                             "name_identification": product.name_identification,
                             "target_price": float(product.target_price),
-                            "monitored_id": str(product.id)
+                            "monitored_id": str(product.id),
                         }
                     )
             _observe_metrics(start, "collect_product_task", status)
@@ -232,7 +257,33 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
     # Scraping propriamente dito e agendamento de comparação de preços
     with SessionLocal() as db:
         try:
-            scrape_competitor_product(db, UUID(monitored_product_id), url, payload)
+            #Requisição ao serviço de scraping para coletar dados do concorrente
+            resp = requests.post(
+                f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
+                json={"url": url, "product_type": "competitor"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            details = resp.json()
+
+            #Persiste ou atualiza o concorrente com as informações obtidas
+            create_or_update_competitor_product_scraped(
+                db=db,
+                product_data=payload,
+                scraped_info=CompetitorScrapedInfo(
+                    name=details.get("name", ""),
+                    current_price=Decimal(str(details.get("current_price", 0))),
+                    old_price=Decimal(str(details.get("old_price")))
+                    if details.get("old_price") is not None
+                    else None,
+                    thumbnail=details.get("thumbnail"),
+                    free_shipping=details.get("free_shipping", False),
+                    seller=details.get("seller"),
+                    seller_rating=None,
+                ),
+                last_checked=datetime.now(timezone.utc)
+            )
+
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
             task_logger.info("collect_competitor_completed", duration_ms=elapsed_ms)
 
@@ -241,10 +292,10 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
             circuit_breaker.record_success("collect_competitor_task")
             adaptive_recheck.record_result(monitored_product_id, True)
 
-        except HTTPException as http_err:
+        except requests.RequestException as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
-            task_logger.error("collect_competitor_http_error", error=str(http_err), monitored_product_id=monitored_product_id, url=url)
+            task_logger.error("collect_competitor_http_error", error=str(req_err), monitored_product_id=monitored_product_id, url=url)
             circuit_breaker.record_failure("collect_competitor_task")
             adaptive_recheck.record_result(monitored_product_id, False)
             try:
@@ -252,12 +303,13 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                     db,
                     UUID(monitored_product_id),
                     url,
-                    str(http_err.detail),
-                    ScrapingErrorType.http_error
+                    str(req_err),
+                    ScrapingErrorType.http_error,
                 )
             except Exception as err:
                 task_logger.warning("error_persist_failed", error=str(err))
-            raise ScraperError(status_code=http_err.status_code, detail=str(http_err.detail))
+            status_code = req_err.response.status_code if req_err.response else 500
+            raise ScraperError(status_code=status_code, detail=str(req_err))
 
         except Exception as exc:
             status = "failure"
@@ -279,7 +331,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                         eta=next_time,
                         kwargs={
                             "monitored_product_id": str(product.id),
-                            "url": url
+                            "url": url,
                         },
                     )
 
