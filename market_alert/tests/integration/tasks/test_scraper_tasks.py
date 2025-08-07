@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 
 from alert_app.tasks.scraper_tasks import collect_product_task, collect_competitor_task, adaptive_recheck
-from tests.integration.tasks.test_monitor_tasks import DummyCompare
+from .test_monitor_tasks import DummyCompare
 
 class DummySession:
     """ Gerente de contexto simples emulando uma sessão SQLAlchemy """

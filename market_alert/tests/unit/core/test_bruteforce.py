@@ -2,9 +2,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from alert_app.core import bruteforce
-from alert_app.core.celery_app import monitor_exchange
 from alert_app.core.config import settings
-from tests.integration.conftest import client
 
 
 class FakeRedis:
