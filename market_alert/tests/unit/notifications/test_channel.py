@@ -5,8 +5,17 @@ import httpx
 from alert_app.notifications.channels.email import EmailChannel
 from alert_app.notifications.manager import get_notification_manager, dispatch_price_alerts
 from alert_app.enums.enums_alerts import AlertType
-from tests.unit.utils.test_audit_logger import DummyLogger
 
+class DummyLogger:
+    def __init__(self):
+        self.called = False
+        self.args = None
+        self.kwargs = None
+
+    def error(self, *args, **kwargs):
+        self.called = True
+        self.args = args
+        self.kwargs = kwargs
 
 class DummyCounter:
     def __init__(self):
@@ -53,7 +62,7 @@ def test_email_channel_warns_when_missing_email(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "email_missing"
 
 def test_get_notification_manager_returns_new_instance(monkeypatch):
-    from app.core.config import settings
+    from alert_app.core.config import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", None)
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", None)
@@ -262,7 +271,7 @@ def test_dispatch_price_alerts_updates_timestamp(monkeypatch):
     assert "time" in updated and isinstance(updated["time"], datetime)
 
 def test_slack_channel_posts_message(monkeypatch):
-    from app.notifications.channels.slack import SlackChannel
+    from alert_app.notifications.channels.slack import SlackChannel
 
     posted = {}
 
@@ -293,8 +302,8 @@ def test_slack_channel_posts_message(monkeypatch):
     assert posted["timeout"] == 5
 
 def test_slack_channel_handles_http_error(monkeypatch):
-    from app.notifications.channels import slack as slack_mod
-    from app.notifications.channels.slack import SlackChannel
+    from alert_app.notifications.channels import slack as slack_mod
+    from alert_app.notifications.channels.slack import SlackChannel
 
     dummy = DummyLogger()
     monkeypatch.setattr(slack_mod, "logger", dummy)
@@ -325,9 +334,9 @@ def test_slack_channel_handles_http_error(monkeypatch):
     assert dummy.called
 
 def test_push_channel_handles_http_error(monkeypatch):
-    from app.notifications.channels import push as push_mod
-    from app.notifications.channels.push import PushChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import push as push_mod
+    from alert_app.notifications.channels.push import PushChannel
+    from alert_app.core.config import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(push_mod, "logger", dummy)
@@ -359,8 +368,8 @@ def test_push_channel_handles_http_error(monkeypatch):
     assert dummy.called
 
 def test_get_notification_manager_includes_slack(monkeypatch):
-    from app.notifications.manager import get_notification_manager
-    from app.core.config import settings
+    from alert_app.notifications.manager import get_notification_manager
+    from alert_app.core.config import settings
 
     monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "http://hook")
 
@@ -375,9 +384,9 @@ def test_get_notification_manager_includes_slack(monkeypatch):
     assert "SlackChannel" in names
 
 def test_sms_channel_missing_phone_increments_counter(monkeypatch):
-    from app.notifications.channels import sms as sms_mod
-    from app.notifications.channels.sms import SMSChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import sms as sms_mod
+    from alert_app.notifications.channels.sms import SMSChannel
+    from alert_app.core.config import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "sid")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "token")
@@ -400,9 +409,9 @@ def test_sms_channel_missing_phone_increments_counter(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "phone_missing"
 
 def test_whatsapp_channel_missing_number_increments_counter(monkeypatch):
-    from app.notifications.channels import whatsapp as wa_mod
-    from app.notifications.channels.whatsapp import WhatsAppChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import whatsapp as wa_mod
+    from alert_app.notifications.channels.whatsapp import WhatsAppChannel
+    from alert_app.core.config import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "sid")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "token")
@@ -425,9 +434,9 @@ def test_whatsapp_channel_missing_number_increments_counter(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "phone_missing"
 
 def test_push_channel_missing_token_increments_counter(monkeypatch):
-    from app.notifications.channels import push as push_mod
-    from app.notifications.channels.push import PushChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import push as push_mod
+    from alert_app.notifications.channels.push import PushChannel
+    from alert_app.core.config import settings
 
     monkeypatch.setattr(settings, "FCM_SERVER_KEY", "key")
     counter = DummyCounter()
@@ -439,9 +448,9 @@ def test_push_channel_missing_token_increments_counter(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "push_token_missing"
 
 def test_slack_channel_missing_webhook_increments_counter(monkeypatch):
-    from app.notifications.channels import slack as slack_mod
-    from app.notifications.channels.slack import SlackChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import slack as slack_mod
+    from alert_app.notifications.channels.slack import SlackChannel
+    from alert_app.core.config import settings
 
     counter = DummyCounter()
     monkeypatch.setattr(slack_mod.metrics, "NOTIFICATIONS_SKIPPED_TOTAL", counter)
@@ -452,9 +461,9 @@ def test_slack_channel_missing_webhook_increments_counter(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "slack_webhook_missing"
 
 def test_email_channel_missing_provider_skips(monkeypatch):
-    from app.notifications.channels import email as email_mod
-    from app.notifications.channels.email import EmailChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import email as email_mod
+    from alert_app.notifications.channels.email import EmailChannel
+    from alert_app.core.config import settings
 
     called = {}
     def dummy_smtp(*a, **k):
@@ -484,9 +493,9 @@ def test_email_channel_missing_provider_skips(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "smtp_not_configured"
 
 def test_sms_channel_missing_provider_skips(monkeypatch):
-    from app.notifications.channels import sms as sms_mod
-    from app.notifications.channels.sms import SMSChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import sms as sms_mod
+    from alert_app.notifications.channels.sms import SMSChannel
+    from alert_app.core.config import settings
 
     called = {}
     def dummy_http_client(*a, **k):
@@ -512,9 +521,9 @@ def test_sms_channel_missing_provider_skips(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "twilio_not_configured"
 
 def test_whatsapp_channel_missing_provider_skips(monkeypatch):
-    from app.notifications.channels import whatsapp as wa_mod
-    from app.notifications.channels.whatsapp import WhatsAppChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import whatsapp as wa_mod
+    from alert_app.notifications.channels.whatsapp import WhatsAppChannel
+    from alert_app.core.config import settings
 
     called = {}
     def dummy_http_client(*a, **k):
@@ -540,9 +549,9 @@ def test_whatsapp_channel_missing_provider_skips(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "twilio_not_configured"
 
 def test_push_channel_missing_provider_skips(monkeypatch):
-    from app.notifications.channels import push as push_mod
-    from app.notifications.channels.push import PushChannel
-    from app.core.config import settings
+    from alert_app.notifications.channels import push as push_mod
+    from alert_app.notifications.channels.push import PushChannel
+    from alert_app.core.config import settings
 
     called = {}
     def dummy_client(*a, **k):

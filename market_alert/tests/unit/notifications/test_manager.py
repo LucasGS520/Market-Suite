@@ -96,8 +96,8 @@ class DummyCounter:
         self.calls.append(self.kw)
 
 def test_get_notification_manager_logs_missing_settings(monkeypatch):
-    from app.notifications import manager as manager_mod
-    from app.core.config import settings
+    from alert_app.notifications import manager as manager_mod
+    from alert_app.core.config import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(manager_mod, "logger", dummy)
@@ -119,8 +119,8 @@ def test_get_notification_manager_logs_missing_settings(monkeypatch):
     assert len(counter.calls) == 5
 
 def test_get_notification_manager_no_logs_when_configured(monkeypatch):
-    from app.notifications import manager as manager_mod
-    from app.core.config import settings
+    from alert_app.notifications import manager as manager_mod
+    from alert_app.core.config import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(manager_mod, "logger", dummy)
@@ -150,7 +150,7 @@ def test_get_notification_manager_no_logs_when_configured(monkeypatch):
     assert counter.calls == []
 
 def test_dispatch_price_alerts_handles_rule_without_id(monkeypatch):
-    from app.notifications import manager as manager_mod
+    from alert_app.notifications import manager as manager_mod
 
     logs = []
 

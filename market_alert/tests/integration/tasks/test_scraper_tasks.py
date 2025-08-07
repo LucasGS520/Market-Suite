@@ -3,7 +3,7 @@ import pytest
 import pickle
 from fastapi import HTTPException
 
-from alert_app.exceptions import ScraperError
+from market_alert.exceptions import ScraperError
 from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 

@@ -1,6 +1,6 @@
 import importlib
 import pytest
-import alert_app.utils.circuit_breaker as cb_mod
+import utils.circuit_breaker as cb_mod
 
 #Recarregar o módulo para evitar alterações feitas por outros testes
 CircuitBreaker = importlib.reload(cb_mod).CircuitBreaker

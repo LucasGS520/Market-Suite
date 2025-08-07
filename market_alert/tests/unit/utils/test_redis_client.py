@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from alert_app.utils import redis_client as rc
+from utils import redis_client as rc
 
 
 class FakeRedis:
