@@ -9,15 +9,18 @@ from core.config_base import ConfigBase
 
 #Tenta carregar o módulo de métricas do serviço atual
 try:
-    metrics = importlib.import_module("app.metrics")
+    metrics = importlib.import_module("alert_app.metrics")
 except ModuleNotFoundError:
-    class _MetricsStub:
-        """ Fallback simples quando métricas não estão disponíveis """
-        def __getattr__(self, name):
-            def _noop(*args, **kwargs):
-                return None
-            return _noop
-    metrics = _MetricsStub()
+    try:
+        metrics = importlib.import_module("scraper_app.metrics")
+    except ModuleNotFoundError:
+        class _MetricsStub:
+            """ Fallback simples quando métricas não estão disponíveis """
+            def __getattr__(self, name):
+                def _noop(*args, **kwargs):
+                    return None
+                return _noop
+        metrics = _MetricsStub()
 
 _redis_client: Optional[redis.Redis] = None
 SCRAPING_SUSPENDED_KEY = "scraping:suspended"

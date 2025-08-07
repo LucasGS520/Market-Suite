@@ -70,26 +70,26 @@ def patch_rate_limiter_and_redis(monkeypatch):
     fake_redis = FakeRedis()
     cache = DummyCacheManager()
 
-    monkeypatch.setattr("app.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("app.utils.redis_client._redis_client", fake_redis)
+    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("alert_app.utils.redis_client._redis_client", fake_redis)
     #Usa raising False pois esses atributos podem não existir nos módulos
-    monkeypatch.setattr("app.services.services_scraper_monitored.redis_client", fake_redis, raising=False)
-    monkeypatch.setattr("app.services.services_scraper_competitor.redis_client", fake_redis, raising=False)
-    monkeypatch.setattr("app.services.services_scraper_common.redis_client", fake_redis)
+    monkeypatch.setattr("alert_app.services.services_scraper_monitored.redis_client", fake_redis, raising=False)
+    monkeypatch.setattr("alert_app.services.services_scraper_competitor.redis_client", fake_redis, raising=False)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.redis_client", fake_redis)
     monkeypatch.setattr(scraper_tasks, "redis_client", fake_redis)
-    monkeypatch.setattr("app.services.services_cache_scraper.cache_manager", cache)
+    monkeypatch.setattr("alert_app.services.services_cache_scraper.cache_manager", cache)
 
     #Substitui o RateLimiter em todos os módulos
     monkeypatch.setattr(rate_limiter_module, "RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("app.services.services_scraper_monitored.RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("app.services.services_scraper_competitor.RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("app.services.services_scraper_common.RateLimiter", MockRateLimiter)
+    monkeypatch.setattr("alert_app.services.services_scraper_monitored.RateLimiter", MockRateLimiter)
+    monkeypatch.setattr("alert_app.services.services_scraper_competitor.RateLimiter", MockRateLimiter)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.RateLimiter", MockRateLimiter)
     monkeypatch.setattr(scraper_tasks, "RateLimiter", MockRateLimiter)
 
     #Substitui CircuitBreaker nos serviços e tasks
-    monkeypatch.setattr("app.services.services_scraper_monitored.CircuitBreaker", lambda: MockCircuitBreaker())
-    monkeypatch.setattr("app.services.services_scraper_competitor.CircuitBreaker", lambda: MockCircuitBreaker())
-    monkeypatch.setattr("app.services.services_scraper_common.CircuitBreaker", lambda: MockCircuitBreaker())
+    monkeypatch.setattr("alert_app.services.services_scraper_monitored.CircuitBreaker", lambda: MockCircuitBreaker())
+    monkeypatch.setattr("alert_app.services.services_scraper_competitor.CircuitBreaker", lambda: MockCircuitBreaker())
+    monkeypatch.setattr("alert_app.services.services_scraper_common.CircuitBreaker", lambda: MockCircuitBreaker())
     monkeypatch.setattr(scraper_tasks, "circuit_breaker", MockCircuitBreaker())
 
 @pytest.fixture(scope="session")

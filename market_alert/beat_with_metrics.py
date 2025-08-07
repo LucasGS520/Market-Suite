@@ -1,8 +1,8 @@
 """Executor do Celery Beat com endpoint de métricas Prometheus."""
 
-import app.metrics
+import alert_app.metrics
 from prometheus_client import start_http_server
-from app.core.celery_app import celery_app
+from alert_app.core.celery_app import celery_app
 
 if __name__ == "__main__":
     #Expõe HTTP server de métricas UMA UNICA VEZ

@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 __all__ = ["canonicalize_ml_url", "is_product_url"]
 
-from market_scraper.app.utils.constants import PRODUCT_HOSTS
+from market_scraper.scraper_app.utils.constants import PRODUCT_HOSTS
 
 #Hosts válidos para páginas de produto do Mercado Livre
 PRODUCT_HOSTS = {

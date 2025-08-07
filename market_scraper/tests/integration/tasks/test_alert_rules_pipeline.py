@@ -25,27 +25,27 @@ class DummySession:
 def test_alerts_logged_after_comparison(monkeypatch):
     mp_id = str(uuid4())
 
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.redis_client", DummyRedis())
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.SessionLocal", DummySession)
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: SimpleNamespace(id=pid, name_identification="prod", user_id=user.id))
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.redis_client", DummyRedis())
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.SessionLocal", DummySession)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: SimpleNamespace(id=pid, name_identification="prod", user_id=user.id))
 
     user = SimpleNamespace(id="u1")
-    monkeypatch.setattr("app.notifications.manager.get_user_by_id", lambda db, uid: user)
+    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: user)
 
     sent = []
     class DummyChannel(NotificationChannel):
         async def send_async(self, u, subject, message) -> dict | None:
             sent.append((subject, message))
             return None
-    monkeypatch.setattr("app.notifications.manager.get_notification_manager", lambda: NotificationManager([DummyChannel()]))
+    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: NotificationManager([DummyChannel()]))
 
     logs = []
-    monkeypatch.setattr("app.notifications.manager.create_notification_log", lambda db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None: logs.append((channel, subject)))
+    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", lambda db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None: logs.append((channel, subject)))
     rule = SimpleNamespace(id="r1", rule_type=AlertType.PRICE_TARGET, threshold_value=6, threshold_percent=None, enabled=True)
-    monkeypatch.setattr("app.notifications.manager.get_active_alert_rules_for_product", lambda *a, **k: [rule])
-    monkeypatch.setattr("app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
-    monkeypatch.setattr("app.notifications.manager.update_last_notified", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.notifications.manager.get_active_alert_rules_for_product", lambda *a, **k: [rule])
+    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("alert_app.notifications.manager.update_last_notified", lambda *a, **k: None)
 
     dispatched = {}
     orig_dispatch = alert_tasks.dispatch_price_alerts
@@ -68,7 +68,7 @@ def test_alerts_logged_after_comparison(monkeypatch):
             "highest_competitor": {},
             "alerts": alerts
         }, alerts
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.run_price_comparison", fake_run)
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.run_price_comparison", fake_run)
 
     compare_prices_task.run(mp_id)
 

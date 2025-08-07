@@ -70,15 +70,15 @@ def patch_rate_limiter(monkeypatch):
         self.lua_sha = "fake-sha"
 
     monkeypatch.setattr(RateLimiter, "__init__", fake_init)
-    monkeypatch.setattr("app.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("app.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("app.utils.robots_txt.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("alert_app.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("alert_app.utils.robots_txt.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(
-        "app.utils.robots_txt.requests.get",
+        "alert_app.utils.robots_txt.requests.get",
         lambda *a, **k: type("Resp", (), {"status_code": 200, "text": ""})()
     )
-    monkeypatch.setattr("app.services.services_scraper_common.redis_client", fake_redis, raising=False)
-    monkeypatch.setattr("app.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.redis_client", fake_redis, raising=False)
+    monkeypatch.setattr("alert_app.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
     #Garante que o cache inteligente use FakeRedis criado
     import app.services.services_cache_scraper as cache_scraper
     monkeypatch.setattr(cache_scraper.cache_manager, "redis", fake_redis)
@@ -93,7 +93,7 @@ def patch_rate_limiter(monkeypatch):
         def record_failure(self, *a, **k):
             pass
 
-    monkeypatch.setattr("app.services.services_scraper_common.CircuitBreaker", lambda: DummyCircuitBreaker())
+    monkeypatch.setattr("alert_app.services.services_scraper_common.CircuitBreaker", lambda: DummyCircuitBreaker())
 
     return fake_redis
 

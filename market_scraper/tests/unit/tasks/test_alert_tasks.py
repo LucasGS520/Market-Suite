@@ -8,11 +8,11 @@ from app.enums.enums_alerts import ChannelType
 def test_notification_task_success(monkeypatch):
     called = {}
     fake_db = SimpleNamespace(close=lambda: called.setdefault("closed", True))
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: fake_db)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: fake_db)
     mid = "123e4567-e89b-12d3-a456-426614174000"
     monitored = SimpleNamespace(id=mid, user_id="u1", name_identification="prod")
     monkeypatch.setattr(
-        "app.tasks.alert_tasks.get_monitored_product_by_id",
+        "alert_app.tasks.alert_tasks.get_monitored_product_by_id",
         lambda db, pid: monitored
     )
 
@@ -21,7 +21,7 @@ def test_notification_task_success(monkeypatch):
         called["alerts"] = alerts
         called["db"] = db
 
-    monkeypatch.setattr("app.tasks.alert_tasks.dispatch_price_alerts", dummy_dispatch)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.dispatch_price_alerts", dummy_dispatch)
 
     alerts = [{"type": "price", "payload": {"a": 1}}]
     send_notification_task.run(monitored.id, alerts)
@@ -33,13 +33,13 @@ def test_notification_task_success(monkeypatch):
 
 def test_send_notification_task_retry(monkeypatch):
     fake_db = SimpleNamespace(close=lambda: None)
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: fake_db)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: fake_db)
     monkeypatch.setattr(
-        "app.tasks.alert_tasks.get_monitored_product_by_id",
+        "alert_app.tasks.alert_tasks.get_monitored_product_by_id",
         lambda db, pid: None
     )
     called = {}
-    monkeypatch.setattr("app.tasks.alert_tasks.dispatch_price_alerts", lambda *a, **k: called.setdefault("dispatched", True))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.dispatch_price_alerts", lambda *a, **k: called.setdefault("dispatched", True))
 
     def fake_retry(*a, **k):
         called["retry"] = True
@@ -55,11 +55,11 @@ def test_send_notification_task_retry(monkeypatch):
 def test_dispatch_price_alert_task_success(monkeypatch):
     called = {}
     fake_db = SimpleNamespace(close=lambda: called.setdefault("closed", True))
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: fake_db)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: fake_db)
     mid = "123e4567-e89b-12d3-a456-426614174000"
     monitored = SimpleNamespace(id=mid, user_id="u1", name_identification="prod")
     monkeypatch.setattr(
-        "app.tasks.alert_tasks.get_monitored_product_by_id",
+        "alert_app.tasks.alert_tasks.get_monitored_product_by_id",
         lambda db, pid: monitored
     )
 
@@ -68,7 +68,7 @@ def test_dispatch_price_alert_task_success(monkeypatch):
         called["alerts"] = alerts
         called["db"] = db
 
-    monkeypatch.setattr("app.tasks.alert_tasks.dispatch_price_alerts", dummy_dispatch)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.dispatch_price_alerts", dummy_dispatch)
 
     alert = {"type": "price", "payload": {"a": 1}}
     dispatch_price_alert_task.run(monitored.id, alert)
@@ -80,13 +80,13 @@ def test_dispatch_price_alert_task_success(monkeypatch):
 
 def test_dispatch_price_alert_task_retry(monkeypatch):
     fake_db = SimpleNamespace(close=lambda: None)
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal",lambda: fake_db)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal",lambda: fake_db)
     monkeypatch.setattr(
-        "app.tasks.alert_tasks.get_monitored_product_by_id",
+        "alert_app.tasks.alert_tasks.get_monitored_product_by_id",
         lambda db, pid: None
     )
     called = {}
-    monkeypatch.setattr("app.tasks.alert_tasks.dispatch_price_alerts", lambda *a, **k: called.setdefault("dispatched", True))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.dispatch_price_alerts", lambda *a, **k: called.setdefault("dispatched", True))
 
     def fake_retry(*a, **k):
         called["retry"] = True
@@ -130,15 +130,15 @@ def test_send_alert_task_success(monkeypatch):
         def close(self):
             called["closed"] = True
 
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: DummyDB())
-    monkeypatch.setattr("app.tasks.alert_tasks.get_user_by_id", lambda db, uid: SimpleNamespace(id=uid))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummyDB())
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.get_user_by_id", lambda db, uid: SimpleNamespace(id=uid))
 
     def fake_send(self, db_, user, subject, message, alert_rule_id=None, alert_type=None):
         called["user"] = user.id
         called["subject"] = subject
         called["db"] = db_
 
-    monkeypatch.setattr("app.tasks.alert_tasks.NotificationManager.send", fake_send)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.NotificationManager.send", fake_send)
 
     send_alert_task.run(log.id)
 
@@ -161,7 +161,7 @@ def test_send_alert_task_retry(monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: DummyDB())
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummyDB())
 
     called = {}
 

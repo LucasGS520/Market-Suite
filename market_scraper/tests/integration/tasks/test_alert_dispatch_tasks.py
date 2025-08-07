@@ -13,19 +13,19 @@ class DummySession:
 
 def test_send_notification_task_dispatches(monkeypatch):
     called = {}
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: DummySession(called))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummySession(called))
 
     mid = "123e4567-e89b-12d3-a456-426614174000"
     monitored = SimpleNamespace(id=mid, user_id="u1", name_identification="prod")
-    monkeypatch.setattr("app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: monitored)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: monitored)
 
     def dummy_dispatch(db, mp, alerts):
         called["monitored"] = mp.id
         called["alerts"] = alerts
         called["db"] = db
 
-    monkeypatch.setattr("app.tasks.alert_tasks.dispatch_price_alerts", dummy_dispatch)
-    monkeypatch.setattr("app.notifications.manager.NotificationManager.send", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.dispatch_price_alerts", dummy_dispatch)
+    monkeypatch.setattr("alert_app.notifications.manager.NotificationManager.send", lambda *a, **k: None)
 
     alerts = [{"type": "price", "payload": {"a": 1}}]
     send_notification_task.run(mid, alerts)
@@ -37,10 +37,10 @@ def test_send_notification_task_dispatches(monkeypatch):
 
 def test_send_notification_task_retry(monkeypatch):
     called = {}
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: DummySession(called))
-    monkeypatch.setattr("app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: None)
-    monkeypatch.setattr("app.tasks.alert_tasks.dispatch_price_alerts", lambda *a, **k: called.setdefault("dispatched", True))
-    monkeypatch.setattr("app.notifications.manager.NotificationManager.send", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummySession(called))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: None)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.dispatch_price_alerts", lambda *a, **k: called.setdefault("dispatched", True))
+    monkeypatch.setattr("alert_app.notifications.manager.NotificationManager.send", lambda *a, **k: None)
 
     def fake_retry(*a, **k):
         called["retry"] = True
@@ -55,19 +55,19 @@ def test_send_notification_task_retry(monkeypatch):
 
 def test_dispatch_price_alert_task_dispatches(monkeypatch):
     called = {}
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: DummySession(called))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummySession(called))
 
     mid = "123e4567-e89b-12d3-a456-426614174000"
     monitored = SimpleNamespace(id=mid, user_id="u1", name_identification="prod")
-    monkeypatch.setattr("app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: monitored)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: monitored)
 
     def dummy_dispatch(db, mp, alerts):
         called["monitored"] = mp.id
         called["alerts"] = alerts
         called["db"] = db
 
-    monkeypatch.setattr("app.tasks.alert_tasks.dispatch_price_alerts", dummy_dispatch)
-    monkeypatch.setattr("app.notifications.manager.NotificationManager.send", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.dispatch_price_alerts", dummy_dispatch)
+    monkeypatch.setattr("alert_app.notifications.manager.NotificationManager.send", lambda *a, **k: None)
 
     alert = {"type": "price", "payload": {"a": 1}}
     dispatch_price_alert_task.run(mid, alert)
@@ -79,10 +79,10 @@ def test_dispatch_price_alert_task_dispatches(monkeypatch):
 
 def test_dispatch_price_alert_task_retry(monkeypatch):
     called = {}
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: DummySession(called))
-    monkeypatch.setattr("app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: None)
-    monkeypatch.setattr("app.tasks.alert_tasks.dispatch_price_alerts", lambda *a, **k: called.setdefault("dispatched", True))
-    monkeypatch.setattr("app.notifications.manager.NotificationManager.send", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummySession(called))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.get_monitored_product_by_id", lambda db, pid: None)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.dispatch_price_alerts", lambda *a, **k: called.setdefault("dispatched", True))
+    monkeypatch.setattr("alert_app.notifications.manager.NotificationManager.send", lambda *a, **k: None)
 
     def fake_retry(*a, **k):
         called["retry"] = True

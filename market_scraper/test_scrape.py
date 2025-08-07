@@ -3,8 +3,8 @@ from uuid import UUID, uuid4
 from decimal import Decimal
 
 from infra.db import SessionLocal
-from app.services.services_scraper_monitored import scrape_monitored_product
-from app.schemas.schemas_products import MonitoredProductCreateScraping
+from scraper_app.services.services_scraper_monitored import scrape_monitored_product
+from scraper_app.schemas.schemas_products import MonitoredProductCreateScraping
 
 
 def main() -> None:

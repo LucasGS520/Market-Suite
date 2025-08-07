@@ -40,15 +40,15 @@ def test_send_alert_task_dispatches(monkeypatch):
     )
     called = {}
 
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: DummyDB(log, called))
-    monkeypatch.setattr("app.tasks.alert_tasks.get_user_by_id", lambda db, uid: SimpleNamespace(id=uid))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummyDB(log, called))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.get_user_by_id", lambda db, uid: SimpleNamespace(id=uid))
 
     def fake_send(self, db, user, subject, message, alert_rule_id=None, alert_type=None):
         called["user"] = user.id
         called["subject"] = subject
         called["db"] = db
 
-    monkeypatch.setattr("app.tasks.alert_tasks.NotificationManager.send", fake_send)
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.NotificationManager.send", fake_send)
 
     send_alert_task.run(log.id)
 
@@ -65,8 +65,8 @@ def test_send_alert_task_retry(monkeypatch):
         def __init__(self):
             super().__init__(log=None, called=called)
 
-    monkeypatch.setattr("app.tasks.alert_tasks.SessionLocal", lambda: Dummy())
-    monkeypatch.setattr("app.tasks.alert_tasks.NotificationManager.send", lambda self, *a, **k: called.setdefault("send_called", True))
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: Dummy())
+    monkeypatch.setattr("alert_app.tasks.alert_tasks.NotificationManager.send", lambda self, *a, **k: called.setdefault("send_called", True))
 
     def fake_retry(*a, **k):
         called["retry"] = True

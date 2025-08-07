@@ -40,8 +40,8 @@ def test_recover_html_success(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             pass
 
-    monkeypatch.setattr("app.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
-    monkeypatch.setattr("app.utils.block_recovery.suspend_scraping", lambda s: None)
+    monkeypatch.setattr("alert_app.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
+    monkeypatch.setattr("alert_app.utils.block_recovery.suspend_scraping", lambda s: None)
     counter = DummyCounter()
     monkeypatch.setattr(metrics, "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
 
@@ -67,8 +67,8 @@ def test_recover_html_failure(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             pass
 
-    monkeypatch.setattr("app.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
-    monkeypatch.setattr("app.utils.block_recovery.suspend_scraping", lambda s: None)
+    monkeypatch.setattr("alert_app.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
+    monkeypatch.setattr("alert_app.utils.block_recovery.suspend_scraping", lambda s: None)
     counter = DummyCounter()
     monkeypatch.setattr(metrics, "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
 

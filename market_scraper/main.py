@@ -1,7 +1,7 @@
 """ Aplicação principal FastAPI com configuração de métricas e rotas """
 from itertools import count
 
-import app.metrics as metrics_module
+import alert_app.metrics as metrics_module
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 try:
@@ -26,29 +26,29 @@ from slowapi.util import get_remote_address
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.config import settings
+from scraper_app.core.config import settings
 from infra.db import get_engine, SessionLocal
-from app.models.models_alerts import AlertRule
+from scraper_app.models.models_alerts import AlertRule
 
 #Rotas
-from app.routes.routes_users import router as users_router
-from app.routes.routes_admin import router as admin_router
-from app.routes.routes_monitored import router as monitored_router
-from app.routes.routes_competitors import router as competitor_router
-from app.routes.routes_monitoring_errors import router as monitoring_errors_router
-from app.routes.routes_notifications import router as notifications_router
-from app.routes.routes_comparisons import router as comparisons_router
-from app.routes.routes_alerts import router as alerts_router
-from app.routes.routes_health import router as health_router
-from app.routes.routes_scraper import router as scraper_router
+from scraper_app.routes.routes_users import router as users_router
+from scraper_app.routes.routes_admin import router as admin_router
+from scraper_app.routes.routes_monitored import router as monitored_router
+from scraper_app.routes.routes_competitors import router as competitor_router
+from scraper_app.routes.routes_monitoring_errors import router as monitoring_errors_router
+from scraper_app.routes.routes_notifications import router as notifications_router
+from scraper_app.routes.routes_comparisons import router as comparisons_router
+from scraper_app.routes.routes_alerts import router as alerts_router
+from scraper_app.routes.routes_health import router as health_router
+from scraper_app.routes.routes_scraper import router as scraper_router
 
 #Rotas de auth
-from app.routes.auth.routes_login import router as login_router
-from app.routes.auth.routes_verify import router as verify_router
-from app.routes.auth.routes_reset_password import router as reset_router
-from app.routes.auth.routes_profile import router as profile_router
-from app.routes.auth.routes_refresh import router as refresh_router
-from app.routes.auth.routes_logout import router as logout_router
+from scraper_app.routes.auth.routes_login import router as login_router
+from scraper_app.routes.auth.routes_verify import router as verify_router
+from scraper_app.routes.auth.routes_reset_password import router as reset_router
+from scraper_app.routes.auth.routes_profile import router as profile_router
+from scraper_app.routes.auth.routes_refresh import router as refresh_router
+from scraper_app.routes.auth.routes_logout import router as logout_router
 
 
 def configure_logging():
@@ -90,7 +90,7 @@ def configure_logging():
     root.setLevel(logging.INFO)
 
 
-#Invoca antes de criar o app
+#Invoca antes de criar o alert_app
 configure_logging()
 #Logger para startup da API
 logger = structlog.get_logger("marketalert")
@@ -169,7 +169,7 @@ def create_app() -> FastAPI:
         return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
     #Monta o Audit Exporter em /audit
-    from app.utils.audit_exporter import app as audit_exporter_app
+    from scraper_app.utils.audit_exporter import app as audit_exporter_app
     app.mount("/audit", audit_exporter_app)
 
 # ---------- REGISTRO DE ROTAS ----------

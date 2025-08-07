@@ -73,7 +73,7 @@ def test_backoff_reduces_rate_and_calls_circuit_breaker(monkeypatch):
 
     #Mock do CircuitBraker
     fake_cb = Mock()
-    monkeypatch.setattr("app.utils.throttle_manager.CircuitBreaker", lambda: fake_cb)
+    monkeypatch.setattr("alert_app.utils.throttle_manager.CircuitBreaker", lambda: fake_cb)
 
     #Cria manager com taxa inicial
     tm = ThrottleManager(rate=2.0, capacity=2)

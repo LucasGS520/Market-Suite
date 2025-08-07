@@ -52,7 +52,7 @@ def setup_env(monkeypatch):
     monkeypatch.setattr(_cb_mod, "CircuitBreaker", lambda: DummyCircuitBreaker())
     monkeypatch.setattr(_cp_mod, "compare_prices_task", DummyCompare)
 
-    monitor_tasks = importlib.reload(importlib.import_module("app.tasks.monitor_tasks"))
+    monitor_tasks = importlib.reload(importlib.import_module("alert_app.tasks.monitor_tasks"))
     monkeypatch.setattr(monitor_tasks, "redis_client", DummyRedis())
     monkeypatch.setattr(monitor_tasks, "circuit_breaker", DummyCircuitBreaker())
     monkeypatch.setattr(monitor_tasks, "scraping_dispatch_limiter", DummyRateLimiter())

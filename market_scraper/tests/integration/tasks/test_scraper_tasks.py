@@ -40,16 +40,16 @@ def test_collect_product_task_scraping_http_exception(monkeypatch):
     def raise_http_exception(*args, **kwargs):
         raise HTTPException(status_code=429)
 
-    monkeypatch.setattr("app.tasks.scraper_tasks.scrape_monitored_product", raise_http_exception)
-    monkeypatch.setattr("app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_monitored_product", raise_http_exception)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
 
     captured = {}
     def fake_create(db, product_id, url, message, error_type):
         captured["args"] = (str(product_id), url, message, error_type)
 
-    monkeypatch.setattr("app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
 
     with pytest.raises(ScraperError) as exc:
         collect_product_task.run(
@@ -74,7 +74,7 @@ def test_scraper_error_is_picklable():
 def test_collect_product_task_rate_limited(monkeypatch):
     """ Se monitored_rate_limiter.allow_request retornar False, a task captura erro, registrar falha """
     monkeypatch.setattr(
-        "app.tasks.scraper_tasks.RateLimiter.allow_request",
+        "alert_app.tasks.scraper_tasks.RateLimiter.allow_request",
         lambda self: False
     )
 
@@ -92,15 +92,15 @@ def test_collect_product_task_generic_exception_creates_error(monkeypatch):
 
     captured = {}
 
-    monkeypatch.setattr("app.tasks.scraper_tasks.scrape_monitored_product", raise_exc)
-    monkeypatch.setattr("app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_monitored_product", raise_exc)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
 
     def fake_create(db, product_id, url, message, error_type):
         captured["args"] = (str(product_id), url, message, error_type)
 
-    monkeypatch.setattr("app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
 
     collect_product_task.run(
         "https://ml.com/x",
@@ -127,16 +127,16 @@ def test_collect_competitor_task_scraping_http_exception(monkeypatch):
     def raise_http_exception(*args, **kwargs):
         raise HTTPException(status_code=429)
 
-    monkeypatch.setattr("app.tasks.scraper_tasks.scrape_competitor_product", raise_http_exception)
-    monkeypatch.setattr("app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_competitor_product", raise_http_exception)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
 
     captured = {}
     def fake_create(db, product_id, url, message, error_type):
         captured["args"] = (str(product_id), url, message, error_type)
 
-    monkeypatch.setattr("app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
 
     with pytest.raises(ScraperError) as exc:
         collect_competitor_task.run(
@@ -151,7 +151,7 @@ def test_collect_competitor_task_scraping_http_exception(monkeypatch):
 def test_collect_competitor_task_rate_limited(monkeypatch):
     """ Se o competitor_rate_limiter não permitir, a task encerra sem scraping """
     monkeypatch.setattr(
-        "app.tasks.scraper_tasks.RateLimiter.allow_request",
+        "alert_app.tasks.scraper_tasks.RateLimiter.allow_request",
         lambda self: False
     )
 
@@ -172,10 +172,10 @@ def test_collect_product_task_schedules_next(monkeypatch):
     )
     comparisons = [SimpleNamespace(id="c1")]
 
-    monkeypatch.setattr("app.tasks.scraper_tasks.scrape_monitored_product", lambda *a, **k: {"product_id": prod.id})
-    monkeypatch.setattr("app.tasks.scraper_tasks.SessionLocal", DummySession)
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: prod)
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: comparisons)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_monitored_product", lambda *a, **k: {"product_id": prod.id})
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", DummySession)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: prod)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: comparisons)
     monkeypatch.setattr(adaptive_recheck, "redis", type("FR", (), {"get": lambda *a, **k: None, "set": lambda *a, **k: None, "delete": lambda *a, **k: None})())
 
     called = {}
@@ -207,11 +207,11 @@ def test_collect_competitor_task_schedules_next(monkeypatch):
     )
     comparisons = [SimpleNamespace(id="c1")]
 
-    monkeypatch.setattr("app.tasks.scraper_tasks.scrape_competitor_product", lambda *a, **k: None)
-    monkeypatch.setattr("app.tasks.scraper_tasks.SessionLocal", DummySession)
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: prod)
-    monkeypatch.setattr("app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: comparisons)
-    monkeypatch.setattr("app.tasks.scraper_tasks.compare_prices_task", DummyCompare)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_competitor_product", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", DummySession)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: prod)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: comparisons)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.compare_prices_task", DummyCompare)
     monkeypatch.setattr(adaptive_recheck, "redis", type("FR", (), {"get": lambda *a, **k: None, "set": lambda *a, **k: None, "delete": lambda *a, **k: None})())
 
     called = {}

@@ -15,11 +15,11 @@ def test_run_price_comparison_success(monkeypatch):
     result_data = {"ok": True}
 
     monkeypatch.setattr(
-        "app.services.services_comparison.get_monitored_product_by_id",
+        "alert_app.services.services_comparison.get_monitored_product_by_id",
         lambda db_, mid: monitored
     )
     monkeypatch.setattr(
-        "app.services.services_comparison.get_competitors_by_monitored_id",
+        "alert_app.services.services_comparison.get_competitors_by_monitored_id",
         lambda db_, mid: competitors
     )
     captured = {}
@@ -29,7 +29,7 @@ def test_run_price_comparison_success(monkeypatch):
         return result_data
 
     monkeypatch.setattr(
-        "app.services.services_comparison.compare_prices",
+        "alert_app.services.services_comparison.compare_prices",
         fake_compare
     )
     created = {}
@@ -39,7 +39,7 @@ def test_run_price_comparison_success(monkeypatch):
         return SimpleNamespace()
 
     monkeypatch.setattr(
-        "app.services.services_comparison.create_price_comparison",
+        "alert_app.services.services_comparison.create_price_comparison",
         fake_create
     )
 
@@ -57,7 +57,7 @@ def test_run_price_comparison_not_found(monkeypatch):
     mp_id = uuid.uuid4()
 
     monkeypatch.setattr(
-        "app.services.services_comparison.get_monitored_product_by_id",
+        "alert_app.services.services_comparison.get_monitored_product_by_id",
         lambda db_, mid: None
     )
 
@@ -77,19 +77,19 @@ def test_run_price_comparison_custom_params(monkeypatch):
         return {}
 
     monkeypatch.setattr(
-        "app.services.services_comparison.get_monitored_product_by_id",
+        "alert_app.services.services_comparison.get_monitored_product_by_id",
         lambda db_, mid: monitored
     )
     monkeypatch.setattr(
-        "app.services.services_comparison.get_competitors_by_monitored_id",
+        "alert_app.services.services_comparison.get_competitors_by_monitored_id",
         lambda db_, mid: competitors
     )
     monkeypatch.setattr(
-        "app.services.services_comparison.compare_prices",
+        "alert_app.services.services_comparison.compare_prices",
         fake_compare
     )
     monkeypatch.setattr(
-        "app.services.services_comparison.create_price_comparison",
+        "alert_app.services.services_comparison.create_price_comparison",
         lambda *a, **k: None
     )
 

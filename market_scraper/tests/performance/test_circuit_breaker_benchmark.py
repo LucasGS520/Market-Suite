@@ -30,13 +30,13 @@ class FakeRedis:
 
 def test_record_failure_performance(benchmark, monkeypatch):
     redis = FakeRedis()
-    monkeypatch.setattr("app.utils.redis_client.get_redis_client", lambda: redis)
+    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: redis)
     cb = CircuitBreaker(redis=redis)
     benchmark(cb.record_failure, "bench")
 
 def test_record_success_performance(benchmark, monkeypatch):
     redis = FakeRedis()
-    monkeypatch.setattr("app.utils.redis_client.get_redis_client", lambda: redis)
+    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: redis)
     cb = CircuitBreaker(redis=redis)
     cb.record_failure("bench")
     benchmark(cb.record_success, "bench")

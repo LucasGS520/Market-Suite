@@ -12,14 +12,14 @@ from app.utils.playwright_client import PlaywrightClient
 @pytest.fixture(autouse=True)
 def patch_robots(monkeypatch):
     fake_redis = Mock(get=lambda *a, **k: None, setex=lambda *a, **k: None)
-    monkeypatch.setattr("app.utils.robots_txt.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("alert_app.utils.robots_txt.get_redis_client", lambda: fake_redis)
 
     def fake_get(*a, **k):
         class FakeResp:
             status_code = 200
             text = ""
         return FakeResp()
-    monkeypatch.setattr("app.utils.robots_txt.requests.get", fake_get)
+    monkeypatch.setattr("alert_app.utils.robots_txt.requests.get", fake_get)
 
 
 @pytest.mark.integration
@@ -42,18 +42,18 @@ def test_scraper_persiste_dados_usando_playwright(db_session):
         yield PlaywrightClient()
 
     with patch(
-        "app.utils.playwright_client.PlaywrightClient.fetch_html",
+        "alert_app.utils.playwright_client.PlaywrightClient.fetch_html",
         new=AsyncMock(return_value=html)
     ) as fetch_mock, \
         patch(
-            "app.services.services_scraper_common.get_playwright_client",
+            "alert_app.services.services_scraper_common.get_playwright_client",
             fake_client
         ), \
         patch(
-            "app.services.services_scraper_common.parser.looks_like_product_page",
+            "alert_app.services.services_scraper_common.parser.looks_like_product_page",
             return_value=True
         ), \
-        patch("app.services.services_scraper_common.parser.parse_product_details", return_value={
+        patch("alert_app.services.services_scraper_common.parser.parse_product_details", return_value={
             "name": "Produto Teste",
             "current_price": "R$ 10,00",
             "old_price": None,
@@ -61,8 +61,8 @@ def test_scraper_persiste_dados_usando_playwright(db_session):
             "seller": "Loja X",
             "thumbnail": "img.jpg",
         }) as parse_mock, \
-        patch("app.services.services_scraper_common.create_or_update_monitored_product_scraped") as crud_mock, \
-        patch("app.tasks.compare_prices_tasks.compare_prices_task.delay") as delay_mock:
+        patch("alert_app.services.services_scraper_common.create_or_update_monitored_product_scraped") as crud_mock, \
+        patch("alert_app.tasks.compare_prices_tasks.compare_prices_task.delay") as delay_mock:
 
         crud_mock.return_value = type("Obj", (), {"id": "pid"})()
 

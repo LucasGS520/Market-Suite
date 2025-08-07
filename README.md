@@ -63,7 +63,7 @@ Nos containers Docker essa etapa já está contemplada no **Dockerfile**.
 
 
 ## Variáveis de Ambiente
-Crie um arquivo `.env` na raiz seguindo o modelo abaixo. Ele será lido pelo `app/core/config.py` durante a inicialização e define todos os parâmetros da aplicação:
+Crie um arquivo `.env` na raiz seguindo o modelo abaixo. Ele será lido pelo `alert_app/core/config.py` durante a inicialização e define todos os parâmetros da aplicação:
 ````env
 POSTGRES_USER=usuario
 POSTGRES_PASSWORD=senha
@@ -180,11 +180,11 @@ Para utilizar de fato os canais de notificação é necessário possuir contas e
 ## Executando Localmente
 Com o ambiente virtual ativo, inicie a API:
 ```bash
-uvicorn main:app --reload
+uvicorn main:alert_app --reload
 ```
 Em terminais separados, execute o worker Celery e o beat:
 ```bash
-celery -A app.core.celery_app:celery_app worker --loglevel=debug --pool=threads --concurrency=4
+celery -A alert_app.core.celery_app:celery_app worker --loglevel=debug --pool=threads --concurrency=4
 python beat_with_metrics.py
 ```
 
@@ -209,7 +209,7 @@ python beat_with_metrics.py
    ```
 6. Os serviços `celery-worker` e `celery_beat` são executados automaticamente. Para iniciá-los manualmente fora do Docker utilize:
    ```bash
-   celery -A app.core.celery_app:celery_app worker --loglevel=debug --pool=threads --concurrency=4
+   celery -A alert_app.core.celery_app:celery_app worker --loglevel=debug --pool=threads --concurrency=4
    python beat_with_metrics.py
    ```
 
@@ -266,7 +266,7 @@ alembic revision --autogenerate -m "<descricao>"
 - Consulte ``/notifications/logs`` em caso de falha no envio de alertas.
 
 ## Estrutura
-- `app/` – código da aplicação FastAPI, serviços e tarefas Celery
+- `alert_app/` – código da aplicação FastAPI, serviços e tarefas Celery
 - `infra/` – arquivos de infraestrutura, `docker-compose.yml` e configurações do Prometheus/Grafana
 - `alembic/` – migrações do banco de dados
 - `tests/` – suíte de testes unitários, de integração e desempenho 
@@ -503,7 +503,7 @@ Todas rodam periodicamente pelo Beat e não possuem retentativas, servindo para 
 
 ## Lógica de Comparação de Preços
 O processo de comparação é iniciado pela task `compare_prices_task`, que chama `run_price_comparison` em `services_comparison.py`.
-Essa função carrega o produto monitorado e os seus concorrentes e utiliza `compare_prices` (módulo `app/utils/comparator.py`) para gerar o resumo de preços.
+Essa função carrega o produto monitorado e os seus concorrentes e utiliza `compare_prices` (módulo `alert_app/utils/comparator.py`) para gerar o resumo de preços.
 1. Define o preço atual e o preço alvo do produto monitorado.
 2. Avalia todos os concorrentes com preços válidos e calcula o mínimo, máximo e média.
 3. Para cada concorrente são calculados discrepâncias e verificada a situação do anúncio.
@@ -534,34 +534,34 @@ para decidir quais alertas serão enviados. Os templates de mensagem são render
 Cada envio gera um registro em `NotificationLog` e incrementa métricas no Prometheus. O sistema evita notificações duplicadas e respeita um período de *cooldown* configurável.
 
 ### Canais de Notificação
-O pacote [`app/notifications`](app/notifications) centraliza todos os canais de envio e a classe `NotificationManager`, responsável por orquestrar
-as mensagens. O gerente utiliza [`get_notification_manager`](app/notifications/manager.py) para instanciar os canais configurados e verificar
+O pacote [`alert_app/notifications`](alert_app/notifications) centraliza todos os canais de envio e a classe `NotificationManager`, responsável por orquestrar
+as mensagens. O gerente utiliza [`get_notification_manager`](alert_app/notifications/manager.py) para instanciar os canais configurados e verificar
 variáveis de ambiente ausentes. Os modelos de mensagem residem em [`templates/notifications`](templates/notifications) e possuem versões em texto e HTML.
 
 Cada canal possui requisitos específicos e finalidades distintas:
 
 #### Email
-- **Implementação:** [`EmailChannel`](app/notifications/channels/email.py)
+- **Implementação:** [`EmailChannel`](alert_app/notifications/channels/email.py)
 - **Requisitos:** ``SMTP_HOST``, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` e `SMTP_TLS`.
 - **Uso:** principal meio de comunicação com os usuários, enviando todas as categorias de alerta. Utiliza ``aiosmtlib`` para disparar e suporta mensagens HTML ou texto simples a partir dos templates.
 
 #### SMS
-- **Implementação:** [`SMSChannel`](app/notifications/channels/sms.py)
+- **Implementação:** [`SMSChannel`](alert_app/notifications/channels/sms.py)
 - **Requisitos:** ``TWILIO_ACCOUNT_SID``, `TWILIO_AUTH_TOKEN` e `TWILIO_SMS_FROM`.
 - **Uso:** envia mensagens curtas via Twilio. O telefone do usuário é obtido do campo ``phone_number`` e o conteúdo é gerado no formato texto.
 
 #### WhatsApp
-- **Implementação:** [`WhatsAppChannel`](app/notifications/channels/whatsapp.py)
+- **Implementação:** [`WhatsAppChannel`](alert_app/notifications/channels/whatsapp.py)
 - **Requisitos:** ``TWILIO_ACCOUNT_SID``, `TWILIO_AUTH_TOKEN` e `TWILIO_WHATSAPP_FROM`.
 - **Uso:** similar ao canal SMS, mas enviando mensagens para o aplicativo WhatsApp. É necessário que o usuário possua um número validado associado ao campo ``whatsapp_number``.
 
 #### Push / In-App
-- **Implementação:** [`PushChannel`](app/notifications/channels/push.py)
+- **Implementação:** [`PushChannel`](alert_app/notifications/channels/push.py)
 - **Requisitos:** ``FCM_SERVER_KEY`` e token FCM armazenado em `fcm_token` de cada usuário.
 - **Uso:** fornece notificações "in-app" para dispositivos móveis ou clientes que suportem Firebase Cloud Messaging. É util para alertas imediatos sem depender de email ou SMS.
 
 #### Slack
-- **Implementação:** [`SlackChannel`](app/notifications/channels/slack.py)
+- **Implementação:** [`SlackChannel`](alert_app/notifications/channels/slack.py)
 - **Requisitos:** ``SLACK_WEBHOOK_URL``.
 - **Uso:** opcional e voltado a mensagens internas (erros de scraping ou eventos administrativos). O canal só é ativado quando a variável de ambiente está presente, evitando dependências em ambientes sem Slack.
 
@@ -853,7 +853,7 @@ curl http://localhost:8000/audit/metrica
 
 
 ## Audit Logs e Exportação
-O projeto registra cada fase do *scraping* através do helper ``audit_scrape`` (`app/utils/audit_logger.py`). Essa função grava arquivos
+O projeto registra cada fase do *scraping* através do helper ``audit_scrape`` (`alert_app/utils/audit_logger.py`). Essa função grava arquivos
 JSON em ``AUDIT_LOG_DIR`` (por padrão `logs/audit`) organizados por data. Os arquivos são nomeados seguindo `HH-MM_SS_<UUID>_<stage>.json`,
 indicando o momento e o estágio (`head`, `get`, `parser`, `persist`, `error`, etc.). Cada registro inclui URL, payload,
 tamanho do HTML e detalhes adicionais.
@@ -872,9 +872,9 @@ Exemplo de estrutura:
 ```
 
 O logger também incrementa as métricas ``audit_records_total``, `audit_html_length_bytes`, `audit_record_duration_seconds` e `audit_errors_total` 
-definidas em ``app/metrics.py``.
+definidas em ``alert_app/metrics.py``.
 
-Para expor essas informações existe uma aplicação FastAPI secundária (`app/utils/audit_exporter.py`) montada automaticamente em `/audit`.
+Para expor essas informações existe uma aplicação FastAPI secundária (`alert_app/utils/audit_exporter.py`) montada automaticamente em `/audit`.
 A rota ``/audit/metrica`` percorre os arquivos de auditoria, gera contadores por `stage` e devolve os dados no formato Prometheus:
 
 ```bash
@@ -888,7 +888,7 @@ Caso necessário, defina ``AUDIT_LOG_DIR`` para alterar o local de armazenamento
 O serviço expõe métricas em `/metrics` (API) e nos processos do Celery. Essas informações são coletadas pelo Prometheus e visualizadas no Grafana.
 
 ### Coleta periódica com Celery Beat
-Em ``app/tasks/metrics_tasks.py`` ficam as tarefas agendadas no `celery_app.conf.beat_schedule`:
+Em ``alert_app/tasks/metrics_tasks.py`` ficam as tarefas agendadas no `celery_app.conf.beat_schedule`:
 
 - **`collect_celery_metrics`** - executada a cada minuto. Inspeciona filas e workers do Celery, atualizando `CELERY_QUEUE_LENGTH`, `REDIS_QUEUE_MESSAGES`, `CELERY_WORKERS_TOTAL` e `CELERY_WORKER_CONCURRENCY`, além do uso de memória do Redis.
 - **`collect_db_metrics`** - também a cada minuto captura o tamanho e o número de conexões ativas do pool de banco (`DB_POOL_SIZE`, `DB_POOL_CHECKOUTS`).

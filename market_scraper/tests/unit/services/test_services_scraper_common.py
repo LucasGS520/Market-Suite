@@ -35,23 +35,23 @@ def _patch_common(monkeypatch):
         async def handle_block(self, *a, **k):
             pass
 
-    monkeypatch.setattr("app.services.services_scraper_common.RobotsTxtParser", lambda *a, **k: DummyRobots())
-    monkeypatch.setattr("app.services.services_scraper_common.CircuitBreaker", lambda: DummyCB())
-    monkeypatch.setattr("app.services.services_scraper_common.ThrottleManager.wait", lambda self, identifier=None, circuit_key="": None)
-    monkeypatch.setattr("app.services.services_scraper_common.ThrottleManager.backoff", lambda self, attempt, circuit_key="": None)
-    monkeypatch.setattr("app.services.services_scraper_common.HumanizedDelayManager.wait", lambda self, *a, **k: None)
-    monkeypatch.setattr("app.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: DummyRecovery())
+    monkeypatch.setattr("alert_app.services.services_scraper_common.RobotsTxtParser", lambda *a, **k: DummyRobots())
+    monkeypatch.setattr("alert_app.services.services_scraper_common.CircuitBreaker", lambda: DummyCB())
+    monkeypatch.setattr("alert_app.services.services_scraper_common.ThrottleManager.wait", lambda self, identifier=None, circuit_key="": None)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.ThrottleManager.backoff", lambda self, attempt, circuit_key="": None)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.HumanizedDelayManager.wait", lambda self, *a, **k: None)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: DummyRecovery())
 
     redis = DummyRedis()
-    monkeypatch.setattr("app.services.services_scraper_common.redis_client", redis, raising=False)
-    monkeypatch.setattr("app.services.services_scraper_monitored.redis_client", redis, raising=False)
-    monkeypatch.setattr("app.services.services_scraper_competitor.redis_client", redis, raising=False)
-    monkeypatch.setattr("app.utils.redis_client.get_redis_client", lambda: redis)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.redis_client", redis, raising=False)
+    monkeypatch.setattr("alert_app.services.services_scraper_monitored.redis_client", redis, raising=False)
+    monkeypatch.setattr("alert_app.services.services_scraper_competitor.redis_client", redis, raising=False)
+    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: redis)
     import app.services.services_cache_scraper as cache_scraper
     monkeypatch.setattr(cache_scraper.cache_manager, "redis", redis)
-    monkeypatch.setattr("app.services.services_scraper_common.ua_manager.get_user_agent", lambda *a, **k: "UA")
-    monkeypatch.setattr("app.services.services_scraper_common.parser.looks_like_product_page", lambda html: True)
-    monkeypatch.setattr("app.services.services_scraper_common.parser.parse_product_details", lambda *a, **k: {
+    monkeypatch.setattr("alert_app.services.services_scraper_common.ua_manager.get_user_agent", lambda *a, **k: "UA")
+    monkeypatch.setattr("alert_app.services.services_scraper_common.parser.looks_like_product_page", lambda html: True)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.parser.parse_product_details", lambda *a, **k: {
         "name": "prod",
         "current_price": "R$ 1,00",
         "old_price": None,
@@ -59,10 +59,10 @@ def _patch_common(monkeypatch):
         "shipping": "Frete Grátis",
         "seller": None
     })
-    monkeypatch.setattr("app.services.services_scraper_common.create_or_update_monitored_product_scraped", lambda *a, **k: type("Obj", (), {"id": uuid4()})())
-    monkeypatch.setattr("app.services.services_scraper_common.create_or_update_competitor_product_scraped", lambda *a, **k: type("Obj", (), {"id": uuid4()})())
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.compare_prices_task.delay", lambda *a, **k: None)
-    monkeypatch.setattr("app.services.services_scraper_common.update_cache", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.create_or_update_monitored_product_scraped", lambda *a, **k: type("Obj", (), {"id": uuid4()})())
+    monkeypatch.setattr("alert_app.services.services_scraper_common.create_or_update_competitor_product_scraped", lambda *a, **k: type("Obj", (), {"id": uuid4()})())
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.compare_prices_task.delay", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.update_cache", lambda *a, **k: None)
 
 def test_playwright_client_used(monkeypatch):
     _patch_common(monkeypatch)
@@ -73,7 +73,7 @@ def test_playwright_client_used(monkeypatch):
         called["url"] = url
         return "<html></html>"
 
-    monkeypatch.setattr("app.services.services_scraper_common.fetch_html_playwright", fake_playwright)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.fetch_html_playwright", fake_playwright)
 
     payload = MonitoredProductCreateScraping(
         monitored_product_id=str(uuid4()),
@@ -98,7 +98,7 @@ def test_playwright_client_used_competitor(monkeypatch):
         called["url"] = url
         return "<html></html>"
 
-    monkeypatch.setattr("app.services.services_scraper_common.fetch_html_playwright", fake_playwright)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.fetch_html_playwright", fake_playwright)
 
     payload = CompetitorProductCreateScraping(
         competitor_id=str(uuid4()),
@@ -119,7 +119,7 @@ def test_fetch_failure_unrecoverable_raises(monkeypatch):
     async def fail_playwright(url: str):
         raise Exception("fail")
 
-    monkeypatch.setattr("app.services.services_scraper_common.fetch_html_playwright", fail_playwright)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.fetch_html_playwright", fail_playwright)
 
     payload = MonitoredProductCreateScraping(
         monitored_product_id=str(uuid4()),
@@ -141,7 +141,7 @@ def test_fetch_failure_unrecoverable_competitor(monkeypatch):
     async def fail_playwright(url: str):
         raise Exception("fail")
 
-    monkeypatch.setattr("app.services.services_scraper_common.fetch_html_playwright", fail_playwright)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.fetch_html_playwright", fail_playwright)
 
     payload = CompetitorProductCreateScraping(
         competitor_id=str(uuid4()),
@@ -168,14 +168,14 @@ def test_timeout_triggers_recovery(monkeypatch):
             return "<html></html>"
 
     recovery = SpyRecovery()
-    monkeypatch.setattr("app.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: recovery)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: recovery)
 
     from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
     async def timeout_fetch(url: str):
         raise PlaywrightTimeoutError()
 
-    monkeypatch.setattr("app.services.services_scraper_common.fetch_html_playwright", timeout_fetch)
+    monkeypatch.setattr("alert_app.services.services_scraper_common.fetch_html_playwright", timeout_fetch)
 
     payload = MonitoredProductCreateScraping(
         monitored_product_id=str(uuid4()),

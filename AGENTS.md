@@ -15,7 +15,7 @@ Este arquivo documenta os principais **agentes de software e serviços automatiz
 
 - **Tipo:** Worker de background com Celery
 - **Responsabilidade:** Executar tarefas assíncronas como scraping, comparação de preços, envio de alertas, coleta de métricas.
-- **Inicialização:** `celery -A app.core.celery_app:celery_app worker --loglevel=info`
+- **Inicialização:** `celery -A alert_app.core.celery_app:celery_app worker --loglevel=info`
 - **Tarefas Executadas:** 
 - `collect_product_task`
 - `collect_competitor_task`

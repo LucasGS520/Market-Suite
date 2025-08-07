@@ -25,7 +25,7 @@ def test_alert_manager_dispatches_to_all_channels(monkeypatch):
 
     logs = []
     monkeypatch.setattr(
-        "app.notifications.manager.create_notification_log",
+        "alert_app.notifications.manager.create_notification_log",
         lambda db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None: logs.append((channel, success, alert_rule_id))
     )
 
@@ -48,8 +48,8 @@ def test_alert_manager_uses_asyncio_gather(monkeypatch):
         return [await t for t in tasks]
 
     called = {}
-    monkeypatch.setattr("app.notifications.manager.asyncio.gather", fake_gather)
-    monkeypatch.setattr("app.notifications.manager.create_notification_log", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.notifications.manager.asyncio.gather", fake_gather)
+    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", lambda *a, **k: None)
 
     manager.send(None, user, "s", "m")
 
@@ -67,7 +67,7 @@ def test_alert_manager_logs_errors(monkeypatch):
         recorded["rule"] = alert_rule_id
 
     monkeypatch.setattr(
-        "app.notifications.manager.create_notification_log",
+        "alert_app.notifications.manager.create_notification_log",
         fake_create
     )
 
@@ -139,10 +139,10 @@ def test_get_notification_manager_no_logs_when_configured(monkeypatch):
         def __init__(self, *a, **k):
             pass
 
-    monkeypatch.setattr("app.notifications.channels.sms.AsyncTwilioHttpClient", lambda *a, **k: None)
-    monkeypatch.setattr("app.notifications.channels.sms.Client", DummyClient)
-    monkeypatch.setattr("app.notifications.channels.whatsapp.AsyncTwilioHttpClient", lambda *a, **k: None)
-    monkeypatch.setattr("app.notifications.channels.whatsapp.Client", DummyClient)
+    monkeypatch.setattr("alert_app.notifications.channels.sms.AsyncTwilioHttpClient", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.notifications.channels.sms.Client", DummyClient)
+    monkeypatch.setattr("alert_app.notifications.channels.whatsapp.AsyncTwilioHttpClient", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.notifications.channels.whatsapp.Client", DummyClient)
 
     manager_mod.get_notification_manager()
 
@@ -194,7 +194,7 @@ def test_send_rendered_renders_per_channel(monkeypatch):
     def fake_log(db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None):
         logs.append(channel)
 
-    monkeypatch.setattr("app.notifications.manager.create_notification_log", fake_log)
+    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", fake_log)
 
     manager = NotificationManager([email, dummy])
     user = SimpleNamespace(id="u1", email="ex@example.com")

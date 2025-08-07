@@ -57,8 +57,8 @@ services:
     env_file:
       - .env
     volumes:
-      - ./market_alert:/app
-    working_dir: /app
+      - ./market_alert:/alert_app
+    working_dir: /alert_app
     command:
       - alembic
       - "-c"
@@ -80,7 +80,7 @@ services:
       - .env
     command:
       - uvicorn
-      - "main:app"
+      - "main:alert_app"
       - "--host"
       - "0.0.0.0"
       - "--port"
@@ -92,8 +92,8 @@ services:
       - redis
       - redis-init
     volumes:
-      - ./market_alert:/app
-      - audit-logs:/app/logs/audit
+      - ./market_alert:/alert_app
+      - audit-logs:/alert_app/logs/audit
     networks:
       - monitoring-net
 
@@ -126,7 +126,7 @@ services:
     command:
       - celery
       - "-A"
-      - "app.core.celery_app:celery_app"
+      - "alert_app.core.celery_app:celery_app"
       - "worker"
       - "--loglevel=debug"
       - "--pool=threads"
@@ -140,8 +140,8 @@ services:
       - redis-init
       - db
     volumes:
-      - ./market_alert:/app
-      - audit-logs:/app/logs/audit
+      - ./market_alert:/alert_app
+      - audit-logs:/alert_app/logs/audit
     networks:
       - monitoring-net
 

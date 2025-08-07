@@ -11,15 +11,18 @@ from utils.redis_client import get_redis_client
 
 #Tenta carregar o módulo de métricas exposto pelo serviço
 try:
-    metrics = importlib.import_module("app.metrics")
+    metrics = importlib.import_module("alert_app.metrics")
 except ModuleNotFoundError:
-    class _MetricsStub:
-        """ Fallback quando não há módulo de métricas """
-        def __getattr__(self, name):
-            def _noop(*args, **kwargs):
-                return None
-            return _noop
-    metrics = _MetricsStub()
+    try:
+        metrics = importlib.import_module("scraper_app.metrics")
+    except ModuleNotFoundError:
+        class _MetricsStub:
+            """ Fallback quando não há módulo de métricas """
+            def __getattr__(self, name):
+                def _noop(*args, **kwargs):
+                    return None
+                return _noop
+        metrics = _MetricsStub()
 
 _settings = ConfigBase()
 

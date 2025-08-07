@@ -27,7 +27,7 @@ def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
     mgr = BlockRecoveryManager(ua_manager=ua, cookie_manager=cookie, delay_manager=delay)
 
     called = []
-    monkeypatch.setattr("app.utils.block_recovery.suspend_scraping", lambda s: called.append(s))
+    monkeypatch.setattr("alert_app.utils.block_recovery.suspend_scraping", lambda s: called.append(s))
 
     asyncio.run(mgr.handle_block(block_type, session_id="sess"))
 

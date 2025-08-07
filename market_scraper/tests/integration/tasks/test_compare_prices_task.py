@@ -28,8 +28,8 @@ def test_compare_prices_task_success(monkeypatch):
     comps = [SimpleNamespace(id="c1")]
     result = {"lowest_competitor": {}, "highest_competitor": {}, "alerts": []}
 
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.redis_client", DummyRedis())
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.SessionLocal", DummySession)
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.redis_client", DummyRedis())
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.SessionLocal", DummySession)
 
     called = {}
 
@@ -42,9 +42,9 @@ def test_compare_prices_task_success(monkeypatch):
     def fake_delay(mid, alerts):
         sent["args"] = (mid, alerts)
 
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.send_notification_task.delay", fake_delay)
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.send_notification_task.delay", fake_delay)
 
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.run_price_comparison", fake_run_comparison)
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.run_price_comparison", fake_run_comparison)
 
     compare_prices_task.run(mp_id)
 
@@ -54,13 +54,13 @@ def test_compare_prices_task_success(monkeypatch):
 def test_compare_prices_task_retry_called(monkeypatch):
     """ Se ocorrer erro durante a execução, a task chama retry """
     mp_id = str(uuid4())
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.redis_client", DummyRedis())
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.SessionLocal", DummySession)
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.redis_client", DummyRedis())
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.SessionLocal", DummySession)
 
     def fake_run(*a, **k):
         raise ValueError("err")
 
-    monkeypatch.setattr("app.tasks.compare_prices_tasks.run_price_comparison", fake_run)
+    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.run_price_comparison", fake_run)
 
     called = {}
 

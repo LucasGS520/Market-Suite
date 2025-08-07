@@ -6,7 +6,7 @@ from app.utils.block_recovery import BlockRecoveryManager
 def test_escalates_suspend_duration(monkeypatch):
     """ Bloqueios consecutivos aumentam o tempo de suspensão """
     calls = []
-    monkeypatch.setattr("app.utils.block_recovery.suspend_scraping", lambda d: calls.append(d))
+    monkeypatch.setattr("alert_app.utils.block_recovery.suspend_scraping", lambda d: calls.append(d))
     mgr = BlockRecoveryManager()
 
     asyncio.run(mgr.handle_block("429", "s1"))

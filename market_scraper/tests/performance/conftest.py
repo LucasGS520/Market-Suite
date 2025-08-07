@@ -71,8 +71,8 @@ def patch_rate_limiter(monkeypatch):
         self.lua_sha = "fake-sha"
 
     monkeypatch.setattr(RateLimiter, "__init__", fake_init)
-    monkeypatch.setattr("app.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("app.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("alert_app.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
     return fake_redis
 
 @pytest.fixture(autouse=True)

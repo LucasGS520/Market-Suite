@@ -10,14 +10,14 @@ class DummyChannel(NotificationChannel):
         return {}
 
 def test_notification_manager_send_performance(benchmark, patch_rate_limiter, monkeypatch):
-    monkeypatch.setattr("app.notifications.manager.create_notification_log", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", lambda *a, **k: None)
     channels = [DummyChannel() for _ in range(5)]
     manager = NotificationManager(channels)
     user = SimpleNamespace(id="u1", email="user@example.com")
     benchmark(lambda: asyncio.run(manager.send_async(None, user, "subject", "message")))
 
 def test_notification_manager_send_rendered_performance(benchmark, patch_rate_limiter, monkeypatch):
-    monkeypatch.setattr("app.notifications.manager.create_notification_log", lambda *a, **k: None)
+    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", lambda *a, **k: None)
     channels = [DummyChannel() for _ in range(5)]
     manager = NotificationManager(channels)
     user = SimpleNamespace(id="u1", email="user@example.com")

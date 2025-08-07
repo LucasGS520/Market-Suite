@@ -41,9 +41,9 @@ def test_email_channel_warns_when_missing_email(monkeypatch):
         async def quit(self):
             pass
 
-    monkeypatch.setattr("app.notifications.channels.email.aiosmtplib.SMTP", DummySMTP)
+    monkeypatch.setattr("alert_app.notifications.channels.email.aiosmtplib.SMTP", DummySMTP)
     counter = DummyCounter()
-    monkeypatch.setattr("app.notifications.channels.email.metrics.NOTIFICATIONS_SKIPPED_TOTAL", counter)
+    monkeypatch.setattr("alert_app.notifications.channels.email.metrics.NOTIFICATIONS_SKIPPED_TOTAL", counter)
     channel = EmailChannel()
     user = SimpleNamespace(id="u1")
 
@@ -73,9 +73,9 @@ def test_dispatch_price_alerts_uses_manager(monkeypatch):
             sent.append((db, user, subject, msg, alert_rule_id))
 
     dummy_user = SimpleNamespace(id="u1")
-    monkeypatch.setattr("app.notifications.manager.get_user_by_id", lambda db, uid: dummy_user)
-    monkeypatch.setattr("app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [])
+    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: dummy_user)
+    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [])
 
     monitored = SimpleNamespace(id="m1", user_id="u1", name_identification="Prod")
     alerts = [{"name": "Shop", "price": 10}, {"name": "Shop2", "price": 5 }]
@@ -92,9 +92,9 @@ def test_dispatch_price_alerts_skips_when_no_rules(monkeypatch):
             captured['message'] = renderer(monitored, alert)
 
     dummy_user = SimpleNamespace(id="u1")
-    monkeypatch.setattr("app.notifications.manager.get_user_by_id", lambda db, uid: dummy_user)
-    monkeypatch.setattr("app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [])
+    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: dummy_user)
+    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [])
 
     monitored = SimpleNamespace(id="m1", user_id="u1", name_identification="Prod")
     alert = {"name": "Shop", "price": 12.0, "old_price": 10.0, "change": 2.0, "type": "price_increase"}
@@ -119,10 +119,10 @@ def test_dispatch_price_alerts_filters_by_rules(monkeypatch):
         enabled=True
     )
 
-    monkeypatch.setattr("app.notifications.manager.get_user_by_id", lambda db, uid: user)
-    monkeypatch.setattr("app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [rule])
-    monkeypatch.setattr("app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: user)
+    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [rule])
+    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alerts = [
@@ -151,10 +151,10 @@ def test_dispatch_price_alerts_skips_duplicates(monkeypatch):
         enabled=True
     )
 
-    monkeypatch.setattr("app.notifications.manager.get_user_by_id", lambda db, uid: user)
-    monkeypatch.setattr("app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [rule])
-    monkeypatch.setattr("app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: True)
+    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: user)
+    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [rule])
+    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: True)
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alert = {"name": "A", "price": 5}
@@ -179,12 +179,12 @@ def test_dispatch_price_alerts_respects_user_setting(monkeypatch):
         enabled=True
     )
 
-    monkeypatch.setattr("app.notifications.manager.get_user_by_id", lambda *a, **k: user)
-    monkeypatch.setattr("app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
-    monkeypatch.setattr("app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
+    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
     counter = DummyCounter()
-    monkeypatch.setattr("app.notifications.manager.metrics.NOTIFICATIONS_SKIPPED_TOTAL", counter)
+    monkeypatch.setattr("alert_app.notifications.manager.metrics.NOTIFICATIONS_SKIPPED_TOTAL", counter)
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alert = {"name": "A", "price": 5}
@@ -212,11 +212,11 @@ def test_dispatch_price_alerts_respects_cooldown(monkeypatch):
         last_notified_at=now
     )
 
-    monkeypatch.setattr("app.notifications.manager.get_user_by_id", lambda *a, **k: user)
-    monkeypatch.setattr("app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
-    monkeypatch.setattr("app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
-    monkeypatch.setattr("app.notifications.manager.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
+    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
+    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("alert_app.notifications.manager.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alert = {"name": "A", "price": 5}
@@ -244,14 +244,14 @@ def test_dispatch_price_alerts_updates_timestamp(monkeypatch):
     )
     updated = {}
 
-    monkeypatch.setattr("app.notifications.manager.get_user_by_id", lambda *a, **k: user)
-    monkeypatch.setattr("app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
-    monkeypatch.setattr("app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
-    monkeypatch.setattr("app.notifications.manager.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
+    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
+    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("alert_app.notifications.manager.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
     def fake_update(db, rid, when):
         updated["time"] = when
-    monkeypatch.setattr("app.notifications.manager.update_last_notified", fake_update)
+    monkeypatch.setattr("alert_app.notifications.manager.update_last_notified", fake_update)
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alert = {"name": "A", "price": 5}
@@ -283,7 +283,7 @@ def test_slack_channel_posts_message(monkeypatch):
 
             return Resp(status_code=200)
 
-    monkeypatch.setattr("app.notifications.channels.slack.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("alert_app.notifications.channels.slack.httpx.AsyncClient", DummyClient)
 
     channel = SlackChannel("http://hook")
     channel.send(SimpleNamespace(id="u1"), "Subject", "Message")
