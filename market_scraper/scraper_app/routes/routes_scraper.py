@@ -14,10 +14,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
 
 from scraper_app.services.services_scraper_common import _scrape_product_common
-from scraper_app.schemas.schemas_products import (
-    MonitoredProductCreateScraping,
-    CompetitorProductCreateScraping,
-)
+from scraper_app.schemas import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from scraper_app.utils.price import parse_price_str, parse_optional_price_str
 
 

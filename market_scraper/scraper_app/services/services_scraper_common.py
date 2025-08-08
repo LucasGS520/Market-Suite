@@ -42,12 +42,12 @@ import scraper_app.services.services_parser as parser
 from scraper_app.services.services_parser import CaptchaDetectedError
 from scraper_app.services.services_cache_scraper import use_cache_if_not_modified, update_cache
 from scraper_app.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
-from alert_app.metrics import (
+from scraper_app.metrics import (
     SCRAPER_HTTP_BLOCKED_TOTAL,
     SCRAPER_CAPTCHA_TOTAL,
     SCRAPER_REQUESTS_TOTAL,
     SCRAPER_RESPONSE_SIZE_BYTES,
-    SCRAPER_URL_STATUS_TOTAL
+    SCRAPER_URL_STATUS_TOTAL,
 )
 
 
