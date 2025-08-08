@@ -24,6 +24,36 @@ graph TD
 O diagrama acima resume os principais componentes e como eles se comunicam. O usuário acessa a API, que registra tarefas assíncronas no Celery Worker.
 O Celery Beat agenda execuções recorrentes. Dados e estados são armazenados no PostgreSQL e no Redis, enquanto métricas e logs são enviados ao stack de observabilidade.
 
+## Serviços `market_alert` e `market_scraper`
+
+`market_alert` é a API principal do sistema. Ele recebe as requisições dos usuários, agenda as tarefas de scraping no Celery e persiste os dados dos produtos monitorados. Sempre que um scraping é solicitado, o serviço utiliza o cliente HTTP em `utils/scraper_client.py` para conversar com o `market_scraper`.
+
+`market_scraper` é um microserviço especializado apenas em coletar e analisar páginas. Ele expõe o endpoint `POST /scraper/parse` e devolve as informações extraídas do anúncio sem armazená-las.
+
+A comunicação entre os dois serviços ocorre via HTTP: o `market_alert` envia a URL do produto para o `market_scraper`, que responde com os dados já estruturados. Com isso, o `market_alert` consegue salvar as informações e acionar as comparações de preço.
+
+### Exemplo de chamadas aos endpoints `/scrape`
+
+Solicitar o monitoramento de um produto:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"name_identification":"Console X","product_url":"https://exemplo.com/produto","target_price":1999.90}' \
+  http://localhost:8000/monitored/scrape
+```
+
+Adicionar um concorrente para comparação:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"monitored_product_id":"<ID_MONITORADO>","product_url":"https://exemplo.com/concorrente"}' \
+  http://localhost:8000/competitors/scrape
+```
+
 
 ## Como o sistema funciona
 1. O usuário realiza requisições para a API via HTTP, normalmente usando um token JWT obtido no login.
