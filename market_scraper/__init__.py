@@ -1,20 +1,17 @@
 """ Pacote raiz do serviço MarketScraper """
 
-#Expõe ``scraper_app`` como pacote de nível superior
 import sys as _sys
-from . import scraper_app as _scraper_app
-import utils as _utils
+import shared.utils as _utils
 
-_sys.modules.setdefault("scraper_app", _scraper_app)
+#Disponibiliza o pacote como ``scraper_app`` para compatibilidade
+_sys.modules.setdefault("scraper_app", _sys.modules[__name__])
+_sys.modules.setdefault("scraper_app.utils", _utils)
 
-#Torna ``alert_app`` acessível se o pacote principal estiver disponível
+#Torna ``alert_app`` acessível caso o serviço de alertas esteja presente
 try:
-    from market_alert import alert_app as _alert_app
+    import market_alert as _alert_app
     _sys.modules.setdefault("alert_app", _alert_app)
     _sys.modules.setdefault("alert_app.utils", _utils)
-
-    #Permite que os testes importem ``market_scraper.app`` apontando para ``alert_app``
-    _sys.modules.setdefault("scraper_app", _scraper_app)
 
 except Exception:
     pass
