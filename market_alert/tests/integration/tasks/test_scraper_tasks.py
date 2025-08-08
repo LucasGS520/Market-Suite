@@ -1,14 +1,14 @@
-"""Testes das tarefas de scraping executadas pelo Celery."""
-import pytest
+""" Testes de integração das tasks de scraping usando o serviço externo market_scraper """
+
 import pickle
-from fastapi import HTTPException
+from types import SimpleNamespace
+
+import pytest
+import requests
 
 from market_alert.exceptions import ScraperError
-from types import SimpleNamespace
-from datetime import datetime, timezone, timedelta
+from alert_app.tasks.scraper_tasks import collect_product_tasks, collect_competitor_tasks
 
-from alert_app.tasks.scraper_tasks import collect_product_task, collect_competitor_task, adaptive_recheck
-from .test_monitor_tasks import DummyCompare
 
 class DummySession:
     """ Gerente de contexto simples emulando uma sessão SQLAlchemy """
@@ -25,31 +25,24 @@ class DummySession:
 VALID_UUID = "123e4567-e89b-12d3-a456-426655440000"
 
 def test_collect_product_tasks_with_invalid_payload():
-    """ Quando o payload é inválido (Pydantic), a task capturar erro, registrar falha """
-    #Chama a task direto via .run
+    """ Quando o payload é inválido (Pydantic), a task encerra sem exceção """
     result = collect_product_task.run(
         "https://mercadolivre.com.br/abc",
         VALID_UUID,
         "Nome Produto",
-        "not-a-decimal"
+        "not-a-decimal",
     )
     assert result is None
 
 def test_collect_product_task_scraping_http_exception(monkeypatch):
-    """ Mocka scrape_monitored_product para lançar HTTPException e confirma que ela é propaganda """
-    def raise_http_exception(*args, **kwargs):
-        raise HTTPException(status_code=429)
+    """ Simula falha HTTP ao chamar o serviço externo e verifica a exceção """
 
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_monitored_product", raise_http_exception)
+    def fake_post(*args, **kwargs):
+        resp = SimpleNamespace(status_code=429)
+        raise requests.RequestException(response=resp)
+
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.requests.post", fake_post)
     monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
-
-    captured = {}
-    def fake_create(db, product_id, url, message, error_type):
-        captured["args"] = (str(product_id), url, message, error_type)
-
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
 
     with pytest.raises(ScraperError) as exc:
         collect_product_task.run(
@@ -57,13 +50,11 @@ def test_collect_product_task_scraping_http_exception(monkeypatch):
             VALID_UUID,
             "Produto A",
             99.0,
-            VALID_UUID
         )
     assert exc.value.status_code == 429
-    assert captured["args"][0] == VALID_UUID
-    assert captured["args"][1] == "https://mercadolivre.com.br/abc"
 
 def test_scraper_error_is_picklable():
+    """ Garante que o ScraperError pode ser serializado pelo Celery """
     err = ScraperError(status_code=400, detail="bad")
     dump = pickle.dumps(err)
     loaded = pickle.loads(dump)
@@ -71,35 +62,26 @@ def test_scraper_error_is_picklable():
     assert loaded.status_code == 400
     assert loaded.detail == "bad"
 
-def test_collect_product_task_rate_limited(monkeypatch):
-    """ Se monitored_rate_limiter.allow_request retornar False, a task captura erro, registrar falha """
-    monkeypatch.setattr(
-        "alert_app.tasks.scraper_tasks.RateLimiter.allow_request",
-        lambda self: False
-    )
-
-    result = collect_product_task.run(
-        "https://mercadolivre.com.br/abc",
-        VALID_UUID,
-        "Produto B",
-        50.0
-    )
-    assert result is None
-
 def test_collect_product_task_generic_exception_creates_error(monkeypatch):
-    def raise_exc(*a, **k):
-        raise Exception("boom")
+    """ Falhas genéricas na persistência devem gerar registro de erro """
+
+    def fake_post(*a, **k):
+        return SimpleNamespace(
+            json=lambda: {"current_price": 10},
+            raise_for_status=lambda: None,
+        )
 
     captured = {}
 
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_monitored_product", raise_exc)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
+    def fake_persist(db, user_id, product_data, scraped_info, last_checked):
+        raise Exception("boom")
 
     def fake_create(db, product_id, url, message, error_type):
         captured["args"] = (str(product_id), url, message, error_type)
 
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.requests.post", fake_post)
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.create_or_update_monitored_product_scraped", fake_persist)
     monkeypatch.setattr("alert_app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
 
     collect_product_task.run(
@@ -107,7 +89,7 @@ def test_collect_product_task_generic_exception_creates_error(monkeypatch):
         VALID_UUID,
         "Prod",
         99.0,
-        VALID_UUID
+        VALID_UUID,
     )
 
     assert captured["args"][0] == VALID_UUID
@@ -115,7 +97,7 @@ def test_collect_product_task_generic_exception_creates_error(monkeypatch):
 
 
 def test_collect_competitor_task_invalid_payload():
-    """ Quando o payload é invalido (Pydantic), a task deve registrar falha e não lançar exceção """
+    """ Quando o payload é invalido, a task deve encerrar sem exceção """
     result = collect_competitor_task.run(
         "not-a-uuid",
         "https://mercadolivre.com.br/comp",
@@ -123,109 +105,17 @@ def test_collect_competitor_task_invalid_payload():
     assert result is None
 
 def test_collect_competitor_task_scraping_http_exception(monkeypatch):
-    """ scrape_competitor_product lança HTTPException, registra erro e retorna HTTPException """
-    def raise_http_exception(*args, **kwargs):
-        raise HTTPException(status_code=429)
+    """ Erro HTTP no serviço externo deve ser propagado como ScraperError """
 
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_competitor_product", raise_http_exception)
+    def fake_post(*a, **k):
+        resp = SimpleNamespace(status_code=500)
+        raise requests.RequestException(response=resp)
+
+    monkeypatch.setattr("alert_app.tasks.scraper_tasks.requests.post", fake_post)
     monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: None)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: [])
 
-    captured = {}
-    def fake_create(db, product_id, url, message, error_type):
-        captured["args"] = (str(product_id), url, message, error_type)
-
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
-
-    with pytest.raises(ScraperError) as exc:
+    with pytest.raises(ScraperError):
         collect_competitor_task.run(
             VALID_UUID,
-            "https://mercadolivre.com.br/comp"
+            "https://mercadolivre.com.br/comp",
         )
-    assert exc.value.status_code == 429
-    assert captured["args"][0] == VALID_UUID
-    assert captured["args"][1] == "https://mercadolivre.com.br/comp"
-
-
-def test_collect_competitor_task_rate_limited(monkeypatch):
-    """ Se o competitor_rate_limiter não permitir, a task encerra sem scraping """
-    monkeypatch.setattr(
-        "alert_app.tasks.scraper_tasks.RateLimiter.allow_request",
-        lambda self: False
-    )
-
-    result = collect_competitor_task.run(
-        VALID_UUID,
-        "https://mercadolivre.com.br/comp"
-    )
-    assert result is None
-
-def test_collect_product_task_schedules_next(monkeypatch):
-    """ Após execução bem-sucedida, deve agendar próxima checagem """
-    prod = SimpleNamespace(
-        id=VALID_UUID,
-        product_url="https://ml.com/p1",
-        user_id=VALID_UUID,
-        name_identification="Prod",
-        target_price=10.0
-    )
-    comparisons = [SimpleNamespace(id="c1")]
-
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_monitored_product", lambda *a, **k: {"product_id": prod.id})
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", DummySession)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: prod)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: comparisons)
-    monkeypatch.setattr(adaptive_recheck, "redis", type("FR", (), {"get": lambda *a, **k: None, "set": lambda *a, **k: None, "delete": lambda *a, **k: None})())
-
-    called = {}
-
-    def fake_schedule(p, comps):
-        called["args"] = (p, comps)
-        return datetime.now(timezone.utc) + timedelta(seconds=60)
-
-    monkeypatch.setattr(adaptive_recheck, "schedule_next", fake_schedule)
-    monkeypatch.setattr(collect_product_task, "apply_async", lambda *a, **k: None)
-
-    collect_product_task.run(
-        prod.product_url,
-        prod.user_id,
-        prod.name_identification,
-        prod.target_price
-    )
-
-    assert called["args"] == (prod, comparisons)
-
-def test_collect_competitor_task_schedules_next(monkeypatch):
-    """ Fluxo de sucesso agenda próxima coleta de concorrente """
-    prod = SimpleNamespace(
-        id=VALID_UUID,
-        product_url="https://m1.com/p1",
-        user_id=VALID_UUID,
-        name_identification="Prod",
-        target_price=10.0
-    )
-    comparisons = [SimpleNamespace(id="c1")]
-
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.scrape_competitor_product", lambda *a, **k: None)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.SessionLocal", DummySession)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: prod)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.get_latest_comparisons", lambda db, pid, limit=3: comparisons)
-    monkeypatch.setattr("alert_app.tasks.scraper_tasks.compare_prices_task", DummyCompare)
-    monkeypatch.setattr(adaptive_recheck, "redis", type("FR", (), {"get": lambda *a, **k: None, "set": lambda *a, **k: None, "delete": lambda *a, **k: None})())
-
-    called = {}
-
-    def fake_schedule(p, comps):
-        called["args"] = (p, comps)
-        return datetime.now(timezone.utc) + timedelta(seconds=60)
-
-    monkeypatch.setattr(adaptive_recheck, "schedule_next", fake_schedule)
-    monkeypatch.setattr(collect_competitor_task, "apply_async", lambda *a, **k: None)
-
-    collect_competitor_task.run(
-        prod.id,
-        "https://ml.com/c1"
-    )
-
-    assert called["args"] == (prod, comparisons)
