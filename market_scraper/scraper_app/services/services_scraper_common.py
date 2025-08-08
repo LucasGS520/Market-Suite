@@ -76,16 +76,14 @@ async def _scrape_product_common(
         user_id: UUID,
         payload: MonitoredProductCreateScraping | CompetitorProductCreateScraping,
         product_type: Literal["monitored", "competitor"],
-        persist_fn: Callable[[dict], Any] | None = None,
         rate_limiter: RateLimiter | None = None,
         circuit_breaker: CircuitBreaker | None = None,
         recovery_manager: BlockRecoveryManager | None = None
 ) -> dict:
     """ Executa o fluxo assíncrono de scraping usando Playwright
 
-    Não realiza persistência nem autenticação. Caso seja necessário
-    salvar os dados obtidos, forneça ``persist_fn`` para que o
-    chamador trate dessa responsabilidade.
+    A função não realiza qualquer persistência em banco de dados,
+    retornando apenas os dados extraídos do anúncio.
     """
     if product_type == "monitored":
         rate_limiter = rate_limiter or RateLimiter(
@@ -210,10 +208,8 @@ async def _scrape_product_common(
             target_url=target_url,
             html=html,
             payload=payload,
-            persist_fn=persist_fn,
             circuit_breaker=circuit_breaker,
             circuit_key=circuit_key,
-            id_key="product_id",
             endpoint="monitored_scrape",
         )
     else:
@@ -221,10 +217,8 @@ async def _scrape_product_common(
             target_url=target_url,
             html=html,
             payload=payload,
-            persist_fn=persist_fn,
             circuit_breaker=circuit_breaker,
             circuit_key=circuit_key,
-            id_key="competitor_id",
             endpoint="competitor_scrape",
         )
 
@@ -297,11 +291,6 @@ async def _scrape_product_common(
 
     current_price = parse_price_str(raw_current, target_url)
 
-    if persist_fn:
-        new_id = persist_fn(details)
-    else:
-        new_id = None
-
     update_cache(target_url, details, html, None)
     audit_scrape(
         stage="persist",
@@ -313,9 +302,6 @@ async def _scrape_product_common(
     )
     circuit_breaker.record_success(circuit_key)
     SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="success").inc()
-    if new_id is not None:
-        key = "product_id" if product_type == "monitored" else "competitor_id"
-        return {"status": "success", key: str(new_id)}
     return {"status": "success", "details": details}
 
 
@@ -324,7 +310,6 @@ def scrape_product_common(
         user_id: UUID,
         payload,
         product_type: Literal["monitored", "competitor"],
-        persist_fn: Callable[[dict], Any] | None = None,
         rate_limiter: RateLimiter | None = None,
         circuit_breaker: CircuitBreaker | None = None,
         recovery_manager: BlockRecoveryManager | None = None
@@ -336,7 +321,6 @@ def scrape_product_common(
             user_id=user_id,
             payload=payload,
             product_type=product_type,
-            persist_fn=persist_fn,
             rate_limiter=rate_limiter,
             circuit_breaker=circuit_breaker,
             recovery_manager=recovery_manager

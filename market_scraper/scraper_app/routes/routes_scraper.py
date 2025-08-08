@@ -59,7 +59,6 @@ async def parse_endpoint(payload: ScrapeRequest) -> ScrapeResponse:
         user_id=payload.user_id or UUID(int=0),
         payload=base_payload,
         product_type=payload.product_type,
-        persist_fn=None,
     )
 
     details = result.get("details")

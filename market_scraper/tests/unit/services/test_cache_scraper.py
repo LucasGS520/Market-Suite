@@ -1,7 +1,4 @@
-import uuid
 from types import SimpleNamespace
-from unittest.mock import Mock
-import requests
 
 import scraper_app.services.services_cache_scraper as cache_scraper
 from scraper_app.services.services_cache_scraper import use_cache_if_not_modified, update_cache
@@ -26,49 +23,32 @@ def test_use_cache_returns_cached_data(monkeypatch):
     monkeypatch.setattr(cache_scraper.cache_manager, "get", lambda url: cached)
     monkeypatch.setattr(cache_scraper, "audit_scrape", lambda *a, **k: None)
     cb = DummyCB()
-    called = {}
-
-    def persist(data):
-        called["data"] = data
-        return uuid.uuid4()
 
     result = use_cache_if_not_modified(
         target_url="http://example.com",
         html=html,
         payload=_payload(),
-        persist_fn=persist,
         circuit_breaker=cb,
         circuit_key="c",
-        id_key="product_id"
     )
 
-    #A função de persistência recebe somente o campo "data"
-    assert called["data"] == cached["data"]
     assert cb.called == "c"
-    assert result["status"] == "cached"
-    assert "product_id" in result
+    assert result == {"status": "cached", "details": cached["data"]}
 
 def test_use_cache_returns_none_when_cache_empty(monkeypatch):
     html = _html()
     monkeypatch.setattr(cache_scraper.cache_manager, "get", lambda url: None)
     monkeypatch.setattr(cache_scraper, "audit_scrape", lambda *a, **k: None)
     cb = DummyCB()
-    was_called = False
 
-    def persist(data):
-        nonlocal was_called
-        was_called = True
     result = use_cache_if_not_modified(
         target_url="http://example.com",
         html=html,
         payload=_payload(),
-        persist_fn=persist,
         circuit_breaker=cb,
         circuit_key="c",
-        id_key="product_id"
     )
     assert result is None
-    assert was_called is False
     assert cb.called is None
 
 def test_use_cache_returns_none_with_other_hash(monkeypatch):
@@ -80,10 +60,8 @@ def test_use_cache_returns_none_with_other_hash(monkeypatch):
         target_url="http://example.com",
         html=html,
         payload=_payload(),
-        persist_fn=lambda d: uuid.uuid4(),
         circuit_breaker=cb,
         circuit_key="c",
-        id_key="product_id"
     )
     assert result is None
     assert cb.called is None
@@ -100,5 +78,5 @@ def test_update_cache_stores(monkeypatch):
         "url": "http://example.com",
         "data": {"x": 1},
         "html": "<html></html>",
-        "etag": "tag"
+        "etag": "tag",
     }

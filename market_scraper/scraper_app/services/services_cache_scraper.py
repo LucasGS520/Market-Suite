@@ -8,7 +8,7 @@ requisições desnecessárias.
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Any
+from typing import Optional
 
 from utils.circuit_breaker import CircuitBreaker
 
@@ -30,16 +30,14 @@ def use_cache_if_not_modified(
     target_url: str,
     html: str | None,
     payload,
-    persist_fn: Callable[[dict], Any] | None,
     circuit_breaker: CircuitBreaker,
     circuit_key: str,
-    id_key: str,
     endpoint: str | None = None
 ) -> Optional[dict]:
-    """ Retorna dados do cache quando o HTML não sofreu alterações
+    """ Retorna dados armazenados em cache quando o HTML não mudou
 
-    Quando ``persist_fn`` é informada, cabe ao chamador realizar
-    persistência dos dados do cache
+    A função não executa nenhuma persistência externa, limitando-se
+    a responder com dados já existentes em memória
     """
     cached = cache_manager.get(target_url)
     if not cached or html is None:
@@ -63,9 +61,6 @@ def use_cache_if_not_modified(
         )
         circuit_breaker.record_success(circuit_key)
         logger.info("cache_hit", url=target_url)
-        if persist_fn:
-            new_id = persist_fn(cached.get("data", {}))
-            return {"status": "cached", id_key: str(new_id)}
         return {"status": "cached", "details": cached.get("data", {})}
 
     CACHE_MISSES_TOTAL.inc()
