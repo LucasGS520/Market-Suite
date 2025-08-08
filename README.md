@@ -103,6 +103,20 @@ LOCUST_LOGIN_PASSWORD=senha_do_usuario_exemplo
 
 ````
 
+### Execução do Market Scraper
+Para iniciar apenas o serviço de scraping via Docker Compose:
+```bash
+docker-compose up market_scraper
+```
+
+O container expõe a porta `8010` no host (mapeada para `8000` interno) e depende do Redis para cache e controle de taxa. As variáveis
+`REDIS_HOST`, `REDIS_PORT` e `REDIS_PASSWORD` devem estar presentes no arquivo `.env`.
+
+### Comunicação entre ``market_alert`` e ``market_scraper``
+O serviço `market_alert` utiliza o cliente HTTP definido em `utils/scraper_client.py` para enviar requisições ao `market_scraper`.
+A URL base é configurada pela variável de ambiente ``SCRAPER_SERVICE_URL`` (padrão `http://market_scraper:8000`). As chamadas são
+feitas pelo endpoint ``/scraper/parse``, permitindo que o `market_alert` delegue o parsing das páginas ao `market_scraper`.
+
 ### Lista completa de variáveis
 Além das credenciais mostradas acima, o projeto suporta diversas outras configurações. Todas podem ser definidas no ``.env``:
 
