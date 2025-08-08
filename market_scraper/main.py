@@ -145,6 +145,9 @@ def create_app() -> FastAPI:
     from scraper_app.routes.routes_scraper import router as scraper_router
     from scraper_app.routes.routes_health import router as health_router
 
+    app.include_router(scraper_router)
+    app.include_router(health_router)
+
     #Log de rotas registradas para facilitar depuração
     for route in app.routes:
         if isinstance(route, APIRoute):

@@ -2,6 +2,16 @@
 
 import os
 import pytest
+import sys
+import types
+from fastapi import FastAPI, APIRouter
+
+sys.modules.setdefault("alert_app.utils.logging_utils", types.SimpleNamespace(mask_identifier=lambda x: x))
+sys.modules.setdefault("alert_app.utils.comparator", types.SimpleNamespace(compare_prices=lambda *a, **k: None))
+sys.modules.setdefault("alert_app.routes.auth", types.ModuleType("alert_app.routes.auth"))
+for _name in ["routes_login", "routes_verify", "routes_reset_password", "routes_profile", "routes_refresh", "routes_logout"]:
+    sys.modules.setdefault(f"alert_app.routes.auth.{_name}", types.SimpleNamespace(router=APIRouter()))
+sys.modules.setdefault("alert_app.utils.audit_exporter", types.SimpleNamespace(app=FastAPI()))
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -12,7 +22,7 @@ from uuid import uuid4
 from infra.db import Base
 from infra.db import get_db
 
-from main import alert_app
+from main import app as alert_app
 from alert_app.core.security import get_current_user
 from alert_app.core.password import hash_password
 from alert_app.models.models_users import User

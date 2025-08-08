@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import httpx
-import requests
 import structlog
 from sqlalchemy.orm import Session
 
@@ -19,6 +18,7 @@ from alert_app.core.config import settings
 from utils.circuit_breaker import CircuitBreaker
 from utils.rate_limiter import RateLimiter
 from alert_app.utils.block_recovery import BlockRecoveryManager
+from utils.scraper_client import ScraperClient
 
 from alert_app.schemas.schemas_products import (
     CompetitorProductCreateScraping,
@@ -79,13 +79,10 @@ def scrape_competitor_product(
 ) -> dict:
     """ Versão síncrona utilizada pelas tasks Celery """
 
-    resp = requests.post(
-        f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
-        json={"url": url, "product_type": "competitor"},
-        timeout=30,
+    details = ScraperClient().parse(
+        url=url,
+        product_type="competitor",
     )
-    resp.raise_for_status()
-    details = resp.json()
 
     competitor = create_or_update_competitor_product_scraped(
         db=db,

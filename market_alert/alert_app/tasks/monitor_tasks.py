@@ -21,11 +21,12 @@ from alert_app.crud.crud_monitored import get_products_by_type
 from alert_app.crud.crud_competitor import get_all_competitor_products
 from alert_app.tasks.compare_prices_tasks import compare_prices_task
 from alert_app.metrics import SCRAPING_LATENCY_SECONDS
-import requests
+from utils.scraper_client import ScraperClient, ScraperClientError
 
 
 logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()
+scraper_client = ScraperClient()
 
 #Batch sizes configurado via .env
 BATCH_SIZE_SCRAPING = int(os.getenv("BATCH_SIZE_SCRAPING", "10"))
@@ -58,17 +59,12 @@ def recheck_monitored_products() -> None:
                     monitored_id=str(p.id),
                 )
                 try:
-                    resp = requests.post(
-                        f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
-                        json={
-                            "url": p.product_url,
-                            "product_type": "monitored",
-                            "monitored_id": str(p.id),
-                        },
-                        timeout=30,
+                    scraper_client.parse(
+                        url=p.product_url,
+                        product_type="monitored",
+                        monitored_id=str(p.id),
                     )
-                    resp.raise_for_status()
-                except requests.RequestException as exc:
+                except ScraperClientError as exc:
                     status = "failure"
                     log.error(
                         "scraper_request_failed",
@@ -120,18 +116,13 @@ def recheck_competitor_products():
                     url=c.product_url,
                 )
                 try:
-                    resp = requests.post(
-                        f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
-                        json={
-                            "url": c.product_url,
-                            "product_type": "competitor",
-                            "competitor_id": str(c.id),
-                            "monitored_id": str(c.monitored_product_id),
-                        },
-                        timeout=30
+                    scraper_client.parse(
+                        url=c.product_url,
+                        product_type="competitor",
+                        competitor_id=str(c.id),
+                        monitored_id=str(c.monitored_product_id),
                     )
-                    resp.raise_for_status()
-                except requests.RequestException as exc:
+                except ScraperClientError as exc:
                     status = "failure"
                     log.error(
                         "scraper_competitor_failed",

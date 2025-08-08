@@ -2,8 +2,9 @@
 
 Este módulo concentra as tasks responsáveis por coletar dados de produtos
 monitorados e de concorrentes, utilizando apenas configurações locais e
-o cliente HTTP que aciona o serviço ``market_scraper``. A comunicação é
-feita via ``requests`` e o resultado é persistido no banco de dados.
+um cliente HTTP dedicado para acionar o serviço ``market_scraper``. A
+comunicação é feita via ``ScraperClient`` e o resultado é persistido no
+banco de dados.
 """
 
 from uuid import UUID
@@ -11,10 +12,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import structlog
-import requests
 
 from infra.db import SessionLocal
 from utils.redis_client import get_redis_client, is_scraping_suspended
+from utils.scraper_client import ScraperClient, ScraperClientError
 
 from alert_app.exceptions import ScraperError
 
@@ -23,7 +24,7 @@ from alert_app.core.celery_app import celery_app
 
 from alert_app.crud import crud_errors
 from alert_app.crud.crud_monitored import create_or_update_monitored_product_scraped
-from alert_app.crud.crud_competior import create_or_update_competitor_product_scraped
+from alert_app.crud.crud_competitor import create_or_update_competitor_product_scraped
 from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 from alert_app.tasks.compare_prices_tasks import compare_prices_task
 from alert_app.enums.enums_error_codes import ScrapingErrorType
@@ -32,6 +33,7 @@ from alert_app.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TO
 
 logger = structlog.get_logger("scraper_tasks")
 redis_client = get_redis_client()
+scraper_client = ScraperClient()
 
 def _observe_metrics(start: datetime, task_name: str, status: str) -> None:
     """ Registra latência e contagem de tasks no Prometheus """
@@ -77,13 +79,10 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
     with SessionLocal() as db:
         try:
             #Envia requisição ao serviço externo de scraping
-            resp = requests.post(
-                f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
-                json={"url": url, "product_type": "monitored"},
-                timeout=30,
+            details = scraper_client.parse(
+                url=url,
+                product_type="monitored",
             )
-            resp.raise_for_status()
-            details = resp.json()
 
             #Persiste ou atualiza o produto monitorado com as informações obtidas
             product = create_or_update_monitored_product_scraped(
@@ -103,7 +102,7 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
             task_logger.info("collect_product_completed", duration_ms=elapsed_ms)
             redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
-        except requests.RequestException as req_err:
+        except ScraperClientError as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
             task_logger.error("collect_product_http_error", error=str(req_err), monitored_product_id=product_id, url=url)
@@ -118,7 +117,7 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
                     )
                 except Exception as err:
                     task_logger.warning("error_persist_failed", error=str(err))
-            status_code = req_err.response.status_code if req_err.response else 500
+            status_code = req_err.status_code or 500
             raise ScraperError(status_code=status_code, detail=str(req_err))
         except Exception as exc:
             status = "failure"
@@ -173,13 +172,10 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
     with SessionLocal() as db:
         try:
             #Requisição ao serviço de scraping para coletar dados do concorrente
-            resp = requests.post(
-                f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
-                json={"url": url, "product_type": "competitor"},
-                timeout=30,
+            details = scraper_client.parse(
+                url=url,
+                product_type="competitor",
             )
-            resp.raise_for_status()
-            details = resp.json()
 
             #Persiste ou atualiza o concorrente com as informações obtidas
             create_or_update_competitor_product_scraped(
@@ -205,7 +201,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
             compare_prices_task.delay(str(monitored_product_id))
             task_logger.info("price_comparison_task_dispatched")
 
-        except requests.RequestException as req_err:
+        except ScraperClientError as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
             task_logger.error("collect_competitor_http_error", error=str(req_err), monitored_product_id=monitored_product_id, url=url)
@@ -219,7 +215,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 )
             except Exception as err:
                 task_logger.warning("error_persist_failed", error=str(err))
-            status_code = req_err.response.status_code if req_err.response else 500
+            status_code = req_err.status_code or 500
             raise ScraperError(status_code=status_code, detail=str(req_err))
 
         except Exception as exc:
