@@ -55,9 +55,9 @@ services:
       context: ./market_alert
       dockerfile: Dockerfile
     env_file:
-      - .env.market_alert
+      - ./market_alert/.env.market_alert
     environment:
-      - ENV_FILE=.env.market_alert
+      - ENV_FILE=./market_alert/.env.market_alert
     volumes:
       - ./market_alert:/market_alert
     working_dir: /market_alert
@@ -79,9 +79,9 @@ services:
       context: ./market_alert
       dockerfile: Dockerfile
     env_file:
-      - .env.market_alert
+      - ./market_alert/.env.market_alert
     environment:
-      - ENV_FILE=.env.market_alert
+      - ENV_FILE=./market_alert/.env.market_alert
     command:
       - uvicorn
       - "main:market_alert"
@@ -107,7 +107,7 @@ services:
       context: ./market_alert
       dockerfile: Dockerfile
     env_file:
-      - .env.market_alert
+      - ./market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
     command:
@@ -128,9 +128,9 @@ services:
       context: ./market_alert
       dockerfile: Dockerfile
     env_file:
-      - .env.market_alert
+      - ./market_alert/.env.market_alert
     environment:
-      - ENV_FILE=.env.market_alert
+      - ENV_FILE=./market_alert/.env.market_alert
     command:
       - celery
       - "-A"
@@ -159,7 +159,7 @@ services:
       context: ./market_scraper
       dockerfile: Dockerfile
     env_file:
-      - .env.market_scraper
+      - ./market_scraper/.env.market_scraper
     environment:
       - ENV_FILE=.env.market_scraper
       - REDIS_HOST=redis
