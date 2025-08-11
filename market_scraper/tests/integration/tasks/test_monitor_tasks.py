@@ -5,8 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-import alert_app.utils.redis_client as _rc_mod
-import alert_app.tasks.compare_prices_tasks as _cp_mod
+import market_alert.utils.redis_client as _rc_mod
+import market_alert.tasks.compare_prices_tasks as _cp_mod
 
 
 class DummyRedis:
@@ -29,7 +29,7 @@ def setup_env(monkeypatch):
     monkeypatch.setattr(_rc_mod, "get_redis_client", lambda: DummyRedis())
     monkeypatch.setattr(_cp_mod, "compare_prices_task", DummyCompare)
 
-    monitor_tasks = importlib.reload(importlib.import_module("alert_app.tasks.monitor_tasks"))
+    monitor_tasks = importlib.reload(importlib.import_module("market_alert.tasks.monitor_tasks"))
     monitor_tasks.redis_client = DummyRedis()
     return monitor_tasks
 

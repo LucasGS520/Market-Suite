@@ -4,8 +4,8 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from alert_app.services.services_scraper_competitor import scrape_competitor_product
-from alert_app.schemas.schemas_products import CompetitorProductCreateScraping
+from market_alert.services.services_scraper_competitor import scrape_competitor_product
+from market_alert.schemas.schemas_products import CompetitorProductCreateScraping
 
 
 class DummyRedis:
@@ -23,7 +23,7 @@ class FakeRobots:
         return None
 
 def _patch_common(monkeypatch):
-    module = "alert_app.services.services_scraper_competitor"
+    module = "market_alert.services.services_scraper_competitor"
     monkeypatch.setattr("scraper_app.services.services_scraper_common.RobotsTxtParser", lambda *a, **k: FakeRobots())
     monkeypatch.setattr(
         f"{module}.create_or_update_competitor_product_scraped",
@@ -38,7 +38,7 @@ def _patch_common(monkeypatch):
     monkeypatch.setattr("scraper_app.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: DummyRecovery())
     redis = DummyRedis()
     monkeypatch.setattr("scraper_app.services.services_scraper_common.redis_client", redis, raising=False)
-    monkeypatch.setattr("alert_app.utils.circuit_breaker.get_redis_client", lambda: redis)
+    monkeypatch.setattr("market_alert.utils.circuit_breaker.get_redis_client", lambda: redis)
 
 def _payload():
     return CompetitorProductCreateScraping(
@@ -51,11 +51,11 @@ def test_not_product_page_raises_bad_request(monkeypatch):
     _patch_common(monkeypatch)
     redis = DummyRedis()
     monkeypatch.setattr(
-        "alert_app.services.services_scraper_competitor.redis_client",
+        "market_alert.services.services_scraper_competitor.redis_client",
         redis,
         raising=False
     )
-    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: redis)
+    monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: redis)
     import scraper_app.services.services_cache_scraper as cache_scraper
 
     monkeypatch.setattr(cache_scraper.cache_manager, "redis", redis)

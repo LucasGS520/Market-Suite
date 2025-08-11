@@ -11,7 +11,7 @@ from scraper_app.utils.humanized_delay import HumanizedDelayManager
 from scraper_app.utils.user_agent_manager import IntelligentUserAgentManager
 from scraper_app.utils.cookie_manager import CookieManager
 from scraper_app.utils.playwright_client import get_playwright_client
-import alert_app.metrics as metrics
+import market_alert.metrics as metrics
 
 
 logger = structlog.get_logger("block_recovery")

@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Any
 
 import utils.redis_client as _rc
-from alert_app.metrics import RECHECK_SCHEDULED_TOTAL
+from market_alert.metrics import RECHECK_SCHEDULED_TOTAL
 
 
 class AdaptiveRecheckManager:

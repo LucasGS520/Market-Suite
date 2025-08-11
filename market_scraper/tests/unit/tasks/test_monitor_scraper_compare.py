@@ -31,7 +31,7 @@ class DummySession:
 
 
 def test_compare_prices_task_records_metrics(monkeypatch):
-    module = importlib.reload(importlib.import_module("alert_app.tasks.compare_prices_tasks"))
+    module = importlib.reload(importlib.import_module("market_alert.tasks.compare_prices_tasks"))
     gauge = DummyGauge()
     monkeypatch.setattr(module, "SCRAPING_LATENCY_SECONDS", gauge)
     monkeypatch.setattr(module, "SessionLocal", lambda: DummySession())
@@ -52,7 +52,7 @@ def test_compare_prices_task_records_metrics(monkeypatch):
     assert gauge.values
 
 def test_collect_product_rate_limited(monkeypatch):
-    module = importlib.reload(importlib.import_module("alert_app.tasks.scraper_tasks"))
+    module = importlib.reload(importlib.import_module("market_alert.tasks.scraper_tasks"))
     gauge = DummyGauge()
     inflight = DummyGauge()
     monkeypatch.setattr(module, "SCRAPING_LATENCY_SECONDS", gauge)
@@ -64,7 +64,7 @@ def test_collect_product_rate_limited(monkeypatch):
     assert gauge.values
 
 def test_collect_competitor_circuit_breaker(monkeypatch):
-    module = importlib.reload(importlib.import_module("alert_app.tasks.scraper_tasks"))
+    module = importlib.reload(importlib.import_module("market_alert.tasks.scraper_tasks"))
     gauge = DummyGauge()
     inflight = DummyGauge()
     monkeypatch.setattr(module, "SCRAPING_LATENCY_SECONDS", gauge)

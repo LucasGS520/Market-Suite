@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 import asyncio
 
-from alert_app.notifications.manager import NotificationManager
-from alert_app.notifications.channels.base import NotificationChannel
+from market_alert.notifications.manager import NotificationManager
+from market_alert.notifications.channels.base import NotificationChannel
 
 
 class DummyChannel(NotificationChannel):
@@ -10,14 +10,14 @@ class DummyChannel(NotificationChannel):
         return {}
 
 def test_notification_manager_send_performance(benchmark, patch_rate_limiter, monkeypatch):
-    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.notifications.manager.create_notification_log", lambda *a, **k: None)
     channels = [DummyChannel() for _ in range(5)]
     manager = NotificationManager(channels)
     user = SimpleNamespace(id="u1", email="user@example.com")
     benchmark(lambda: asyncio.run(manager.send_async(None, user, "subject", "message")))
 
 def test_notification_manager_send_rendered_performance(benchmark, patch_rate_limiter, monkeypatch):
-    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.notifications.manager.create_notification_log", lambda *a, **k: None)
     channels = [DummyChannel() for _ in range(5)]
     manager = NotificationManager(channels)
     user = SimpleNamespace(id="u1", email="user@example.com")

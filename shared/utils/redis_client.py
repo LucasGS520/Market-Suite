@@ -9,7 +9,7 @@ from core.config_base import ConfigBase
 
 #Tenta carregar o módulo de métricas do serviço atual
 try:
-    metrics = importlib.import_module("alert_app.metrics")
+    metrics = importlib.import_module("market_alert.metrics")
 except ModuleNotFoundError:
     try:
         metrics = importlib.import_module("scraper_app.metrics")

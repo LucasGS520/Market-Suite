@@ -12,7 +12,7 @@ from typing import Any, Dict, Tuple, Iterable
 from bs4 import BeautifulSoup
 
 from scraper_app.utils.data_quality_validator import DataQualityValidator
-from alert_app.metrics import PARSER_SUCCESS_TOTAL, PARSER_FAILURE_TOTAL
+from market_alert.metrics import PARSER_SUCCESS_TOTAL, PARSER_FAILURE_TOTAL
 
 
 def _deep_search(data: Any, keys: Iterable[str]) -> Any:

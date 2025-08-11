@@ -1,7 +1,7 @@
 import types
 from uuid import UUID
 
-from alert_app.routes import routes_monitoring_errors as r
+from market_alert.routes import routes_monitoring_errors as r
 
 
 def _request():

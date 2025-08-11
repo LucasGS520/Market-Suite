@@ -4,8 +4,8 @@ from uuid import uuid4
 from decimal import Decimal
 from sqlalchemy.orm import Session
 
-from alert_app.services.services_scraper_monitored import scrape_monitored_product
-from alert_app.schemas.schemas_products import MonitoredProductCreateScraping
+from market_alert.services.services_scraper_monitored import scrape_monitored_product
+from market_alert.schemas.schemas_products import MonitoredProductCreateScraping
 from scraper_app.utils.playwright_client import PlaywrightClient
 
 
@@ -46,8 +46,8 @@ def test_scraper_monitored_uses_playwright(monkeypatch):
             "seller": "Loja X",
             "thumbnail": "img.jpg"
         }) as parse_mock, \
-        patch("alert_app.services.services_scraper_common.create_or_update_monitored_product_scraped") as crud_mock, \
-        patch("alert_app.tasks.compare_prices_tasks.compare_prices_task.delay") as delay_mock:
+        patch("market_alert.services.services_scraper_common.create_or_update_monitored_product_scraped") as crud_mock, \
+        patch("market_alert.tasks.compare_prices_tasks.compare_prices_task.delay") as delay_mock:
 
         crud_mock.return_value = type("Obj", (), {"id": "pid"})()
 

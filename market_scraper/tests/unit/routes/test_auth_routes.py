@@ -2,11 +2,11 @@ import pytest
 from fastapi import HTTPException
 from types import SimpleNamespace
 
-from alert_app.routes.auth import routes_login as r_login
-from alert_app.routes.auth import routes_logout as r_logout
-from alert_app.routes.auth import routes_refresh as r_refresh
-from alert_app.routes.auth import routes_verify as r_verify
-from alert_app.routes.auth import routes_reset_password as r_reset
+from market_alert.auth.routes_auth import routes_login as r_login
+from market_alert.auth.routes_auth import routes_logout as r_logout
+from market_alert.auth.routes_auth import routes_refresh as r_refresh
+from market_alert.auth.routes_auth import routes_verify as r_verify
+from market_alert.auth.routes_auth import routes_reset_password as r_reset
 
 
 class DummyCounter:

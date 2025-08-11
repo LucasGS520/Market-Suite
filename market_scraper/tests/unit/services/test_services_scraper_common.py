@@ -4,9 +4,9 @@ from uuid import uuid4
 from decimal import Decimal
 from fastapi import HTTPException
 
-from alert_app.services.services_scraper_monitored import scrape_monitored_product
-from alert_app.services.services_scraper_competitor import scrape_competitor_product
-from alert_app.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from market_alert.services.services_scraper_monitored import scrape_monitored_product
+from market_alert.services.services_scraper_competitor import scrape_competitor_product
+from market_alert.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
 
 def _patch_common(monkeypatch):
@@ -44,9 +44,9 @@ def _patch_common(monkeypatch):
 
     redis = DummyRedis()
     monkeypatch.setattr("scraper_app.services.services_scraper_common.redis_client", redis, raising=False)
-    monkeypatch.setattr("alert_app.services.services_scraper_monitored.redis_client", redis, raising=False)
-    monkeypatch.setattr("alert_app.services.services_scraper_competitor.redis_client", redis, raising=False)
-    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: redis)
+    monkeypatch.setattr("market_alert.services.services_scraper_monitored.redis_client", redis, raising=False)
+    monkeypatch.setattr("market_alert.services.services_scraper_competitor.redis_client", redis, raising=False)
+    monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: redis)
     import scraper_app.services.services_cache_scraper as cache_scraper
     monkeypatch.setattr(cache_scraper.cache_manager, "redis", redis)
     monkeypatch.setattr("scraper_app.services.services_scraper_common.ua_manager.get_user_agent", lambda *a, **k: "UA")
@@ -61,7 +61,7 @@ def _patch_common(monkeypatch):
     })
     monkeypatch.setattr("scraper_app.services.services_scraper_common.create_or_update_monitored_product_scraped", lambda *a, **k: type("Obj", (), {"id": uuid4()})())
     monkeypatch.setattr("scraper_app.services.services_scraper_common.create_or_update_competitor_product_scraped", lambda *a, **k: type("Obj", (), {"id": uuid4()})())
-    monkeypatch.setattr("alert_app.tasks.compare_prices_tasks.compare_prices_task.delay", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.tasks.compare_prices_tasks.compare_prices_task.delay", lambda *a, **k: None)
     monkeypatch.setattr("scraper_app.services.services_scraper_common.update_cache", lambda *a, **k: None)
 
 def test_playwright_client_used(monkeypatch):

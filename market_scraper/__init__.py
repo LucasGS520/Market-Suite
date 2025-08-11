@@ -7,11 +7,11 @@ import shared.utils as _utils
 _sys.modules.setdefault("scraper_app", _sys.modules[__name__])
 _sys.modules.setdefault("scraper_app.utils", _utils)
 
-#Torna ``alert_app`` acessível caso o serviço de alertas esteja presente
+#Torna ``market_alert`` acessível caso o serviço de alertas esteja presente
 try:
-    import market_alert as _alert_app
-    _sys.modules.setdefault("alert_app", _alert_app)
-    _sys.modules.setdefault("alert_app.utils", _utils)
+    import market_alert as _market_alert
+    _sys.modules.setdefault("market_alert", _market_alert)
+    _sys.modules.setdefault("market_alert.utils", _utils)
 
 except Exception:
     pass

@@ -17,7 +17,7 @@ import structlog
 from scraper_app.utils.intelligent_cache import IntelligentCacheManager
 from scraper_app.core.config import settings
 from scraper_app.utils.audit_logger import audit_scrape
-from alert_app.metrics import (
+from market_alert.metrics import (
     CACHE_HITS_TOTAL, CACHE_MISSES_TOTAL,
     CACHE_HITS_ENDPOINT_TOTAL, CACHE_MISSES_ENDPOINT_TOTAL
 )

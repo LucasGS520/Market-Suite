@@ -11,7 +11,7 @@ from utils.redis_client import get_redis_client
 
 #Tenta carregar o módulo de métricas exposto pelo serviço
 try:
-    metrics = importlib.import_module("alert_app.metrics")
+    metrics = importlib.import_module("market_alert.metrics")
 except ModuleNotFoundError:
     try:
         metrics = importlib.import_module("scraper_app.metrics")

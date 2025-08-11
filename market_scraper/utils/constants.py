@@ -79,7 +79,7 @@ def to_mobile_url(url: Union[str, object]) -> str:
         #Se já for mobile ou domínio diferente, mantém a URL original
         return url_str
 
-    #Se a rota contém '/p/' (link direto para alert_app mobile), retorna intacto
+    #Se a rota contém '/p/' (link direto para market_alert mobile), retorna intacto
     if "/p/" in parsed.path:
         return url_str
 

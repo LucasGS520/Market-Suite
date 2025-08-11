@@ -9,7 +9,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
 os.environ.setdefault("SECRET_KEY", "dummy")
 
 from scraper_app.utils.block_recovery import BlockRecoveryManager
-import alert_app.metrics as metrics
+import market_alert.metrics as metrics
 
 
 class DummyCounter:

@@ -9,7 +9,7 @@ import structlog
 from datetime import datetime, timezone
 from fastapi.encoders import jsonable_encoder
 
-from alert_app.metrics import AUDIT_RECORDS_TOTAL, AUDIT_HTML_LENGTH_BYTES, AUDIT_RECORD_DURATION_SECONDS, AUDIT_ERRORS_TOTAL
+from market_alert.metrics import AUDIT_RECORDS_TOTAL, AUDIT_HTML_LENGTH_BYTES, AUDIT_RECORD_DURATION_SECONDS, AUDIT_ERRORS_TOTAL
 
 
 logger = structlog.get_logger("audit_logger")

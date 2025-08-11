@@ -1,11 +1,11 @@
 import uuid
 
-from alert_app.models.models_products import MonitoredProduct, CompetitorProduct
-from alert_app.models.models_users import User
-from alert_app.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
-from alert_app.core.password import hash_password
+from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
+from market_alert.models.models_users import User
+from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
+from market_alert.core.password import hash_password
 
-import alert_app.routes.routes_competitors as rc
+import market_alert.routes.routes_competitors as rc
 
 
 def _create_monitored(db_session, user_id):

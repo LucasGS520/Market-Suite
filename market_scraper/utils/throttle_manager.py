@@ -5,7 +5,7 @@ import random
 import threading
 from typing import Optional
 
-import alert_app.metrics as metrics
+import market_alert.metrics as metrics
 
 from fastapi import HTTPException, status
 

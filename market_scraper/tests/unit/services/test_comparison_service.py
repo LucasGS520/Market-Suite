@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from decimal import Decimal
-from alert_app.services.services_comparison import run_price_comparison
+from market_alert.services.services_comparison import run_price_comparison
 
 def test_run_price_comparison_success(monkeypatch):
     db = Mock()
@@ -15,11 +15,11 @@ def test_run_price_comparison_success(monkeypatch):
     result_data = {"ok": True}
 
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.get_monitored_product_by_id",
+        "market_alert.services.services_comparison.get_monitored_product_by_id",
         lambda db_, mid: monitored
     )
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.get_competitors_by_monitored_id",
+        "market_alert.services.services_comparison.get_competitors_by_monitored_id",
         lambda db_, mid: competitors
     )
     captured = {}
@@ -29,7 +29,7 @@ def test_run_price_comparison_success(monkeypatch):
         return result_data
 
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.compare_prices",
+        "market_alert.services.services_comparison.compare_prices",
         fake_compare
     )
     created = {}
@@ -39,7 +39,7 @@ def test_run_price_comparison_success(monkeypatch):
         return SimpleNamespace()
 
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.create_price_comparison",
+        "market_alert.services.services_comparison.create_price_comparison",
         fake_create
     )
 
@@ -57,7 +57,7 @@ def test_run_price_comparison_not_found(monkeypatch):
     mp_id = uuid.uuid4()
 
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.get_monitored_product_by_id",
+        "market_alert.services.services_comparison.get_monitored_product_by_id",
         lambda db_, mid: None
     )
 
@@ -77,19 +77,19 @@ def test_run_price_comparison_custom_params(monkeypatch):
         return {}
 
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.get_monitored_product_by_id",
+        "market_alert.services.services_comparison.get_monitored_product_by_id",
         lambda db_, mid: monitored
     )
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.get_competitors_by_monitored_id",
+        "market_alert.services.services_comparison.get_competitors_by_monitored_id",
         lambda db_, mid: competitors
     )
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.compare_prices",
+        "market_alert.services.services_comparison.compare_prices",
         fake_compare
     )
     monkeypatch.setattr(
-        "alert_app.services.services_comparison.create_price_comparison",
+        "market_alert.services.services_comparison.create_price_comparison",
         lambda *a, **k: None
     )
 
