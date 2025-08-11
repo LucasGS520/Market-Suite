@@ -5,7 +5,7 @@ import random
 import threading
 from typing import Optional
 
-import market_scraper.metrics as metrics
+import shared.metrics as metrics
 
 from fastapi import HTTPException, status
 

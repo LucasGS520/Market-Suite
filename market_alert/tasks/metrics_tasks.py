@@ -8,7 +8,7 @@ from celery.app.control import Inspect
 from utils.redis_client import get_redis_client
 from market_alert.core.celery_app import celery_app
 from infra.db import get_engine
-from market_alert.metrics import (
+from shared.metrics import (
     CELERY_QUEUE_LENGTH, CELERY_WORKERS_TOTAL,
     CELERY_WORKER_CONCURRENCY, CELERY_TASK_DURATION_SECONDS,
     REDIS_QUEUE_MESSAGES, REDIS_MEMORY_USAGE_BYTES,

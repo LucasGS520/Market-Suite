@@ -20,7 +20,7 @@ from market_alert.enums.enums_products import MonitoringType
 from market_alert.crud.crud_monitored import get_products_by_type
 from market_alert.crud.crud_competitor import get_all_competitor_products
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
-from market_alert.metrics import SCRAPING_LATENCY_SECONDS
+from shared.metrics import SCRAPING_LATENCY_SECONDS
 from utils.scraper_client import ScraperClient, ScraperClientError
 
 

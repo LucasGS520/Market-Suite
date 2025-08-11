@@ -1,7 +1,7 @@
-"""Definições de métricas do MarketAlert
+""" Métricas Prometheus compartilhadas pelos serviços
 
 Este módulo centraliza todas as métricas Prometheus utilizadas
-pela aplicação e as organiza por domínio.
+por `market_alert` e `market_scraper` e as organiza por domínio.
 Os principais Grupos cobertos são:
 - Tarefas e workers do Celery
 - Scraping de produtos e comportamento HTTP relacionado

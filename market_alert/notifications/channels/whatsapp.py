@@ -4,7 +4,7 @@ from twilio.http.async_http_client import AsyncTwilioHttpClient
 from twilio.rest import Client
 
 from market_alert.core.config import settings
-from market_alert import metrics
+from shared import metrics
 from .base import NotificationChannel, logger
 
 

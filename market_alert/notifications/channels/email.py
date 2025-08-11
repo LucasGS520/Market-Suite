@@ -4,7 +4,7 @@ from email.message import EmailMessage
 import aiosmtplib
 
 from market_alert.core.config import settings
-from market_alert import metrics
+from shared import metrics
 from .base import NotificationChannel, logger
 
 

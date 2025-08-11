@@ -1,7 +1,7 @@
 """ Aplicação principal FastAPI com configuração de métricas e rotas """
 from itertools import count
 
-import market_alert.metrics as metrics_module
+import shared.metrics as metrics_module
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 try:

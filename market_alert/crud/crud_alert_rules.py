@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from market_alert.models.models_alerts import AlertRule
 from market_alert.enums.enums_alerts import AlertType
 from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
-import market_alert.metrics as metrics
+import shared.metrics as metrics
 
 
 def create_alert_rule(db: Session, rule_data: AlertRuleCreate) -> AlertRule:

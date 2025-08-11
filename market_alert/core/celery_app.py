@@ -1,7 +1,7 @@
 """ Configuração da aplicação Celery e registro de métricas """
 
 #Registra métricas antes de iniciar o HTTP server
-import market_alert.metrics as metrics_module
+import shared.metrics as metrics_module
 import os
 
 from kombu import Exchange, Queue

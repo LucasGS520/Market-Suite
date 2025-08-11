@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from market_alert.exceptions import ScraperError
+from shared.exceptions import ScraperError
 from market_alert.tasks.scraper_tasks import collect_product_tasks, collect_competitor_tasks
 from utils.scraper_client import ScraperClientError
 

@@ -30,7 +30,7 @@ from .channels.slack import SlackChannel
 
 from market_alert.enums.enums_alerts import ChannelType, AlertType
 from market_alert.core.config import settings
-from market_alert import metrics
+from shared import metrics
 
 
 logger = structlog.get_logger("alerts")

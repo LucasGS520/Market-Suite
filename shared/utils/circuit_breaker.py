@@ -1,28 +1,17 @@
-""" Implementação simples de circuit breaker usando Redis """
+""" Implementação simples de circuit breaker usando Redis
+
+Compartilhado entre ``market_alert`` e ``market_scraper`` para
+evitar bloqueios consecutivos nas requisições
+"""
 
 import json
 import threading
-import importlib
 
 import requests
 
 from shared.core.config_base import ConfigBase
 from shared.utils.redis_client import get_redis_client
-
-#Tenta carregar o módulo de métricas exposto pelo serviço
-try:
-    metrics = importlib.import_module("market_alert.metrics")
-except ModuleNotFoundError:
-    try:
-        metrics = importlib.import_module("market_scraper.metrics")
-    except ModuleNotFoundError:
-        class _MetricsStub:
-            """ Fallback quando não há módulo de métricas """
-            def __getattr__(self, name):
-                def _noop(*args, **kwargs):
-                    return None
-                return _noop
-        metrics = _MetricsStub()
+from shared import metrics
 
 _settings = ConfigBase()
 

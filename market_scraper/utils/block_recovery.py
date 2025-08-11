@@ -11,7 +11,7 @@ from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.cookie_manager import CookieManager
 from market_scraper.utils.playwright_client import get_playwright_client
-import market_scraper.metrics as metrics
+import shared.metrics as metrics
 
 
 logger = structlog.get_logger("block_recovery")

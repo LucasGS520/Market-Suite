@@ -1,28 +1,17 @@
-""" Inicialização e acesso compartilhado ao cliente Redis """
+""" Inicialização e acesso compartilhado ao cliente Redis
+
+Reutilizado por `market_alert` e `market_scraper` para gerenciar
+a flag de suspensão de scraping
+"""
 
 import redis
 from typing import Optional
-import importlib
 
-import redis
 from shared.core.config_base import ConfigBase
+from shared import metrics
 
-#Tenta carregar o módulo de métricas do serviço atual
-try:
-    metrics = importlib.import_module("market_alert.metrics")
-except ModuleNotFoundError:
-    try:
-        metrics = importlib.import_module("market_scraper.metrics")
-    except ModuleNotFoundError:
-        class _MetricsStub:
-            """ Fallback simples quando métricas não estão disponíveis """
-            def __getattr__(self, name):
-                def _noop(*args, **kwargs):
-                    return None
-                return _noop
 
-        metrics = _MetricsStub()
-
+#Cliente Redis utilizado por ``market_alert`` e ``market_scraper``
 _redis_client: Optional[redis.Redis] = None
 SCRAPING_SUSPENDED_KEY = "scraping:suspended"
 _settings = ConfigBase()

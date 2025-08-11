@@ -918,7 +918,7 @@ Exemplo de estrutura:
 ```
 
 O logger também incrementa as métricas ``audit_records_total``, `audit_html_length_bytes`, `audit_record_duration_seconds` e `audit_errors_total` 
-definidas em ``market_alert/metrics.py``.
+definidas em ``shared/metrics.py``.
 
 Para expor essas informações existe uma aplicação FastAPI secundária (`market_alert/utils/audit_exporter.py`) montada automaticamente em `/audit`.
 A rota ``/audit/metrica`` percorre os arquivos de auditoria, gera contadores por `stage` e devolve os dados no formato Prometheus:

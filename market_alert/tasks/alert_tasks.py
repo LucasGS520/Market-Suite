@@ -23,7 +23,7 @@ from market_alert.services.services_notifications import dispatch_price_alerts
 from market_alert.notifications.channels import EmailChannel, SMSChannel, PushChannel, WhatsAppChannel, SlackChannel
 from market_alert.enums.enums_alerts import ChannelType
 from market_alert.core.config import settings
-from market_alert import metrics
+from shared import metrics
 
 
 logger = structlog.get_logger("alert_tasks")

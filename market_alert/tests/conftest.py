@@ -15,6 +15,6 @@ sys.modules.setdefault("utils", utils)
 sys.modules.setdefault("core", shared_core)
 sys.modules.setdefault("core.config_base", shared_config_base)
 
-import market_alert.exceptions as alert_exceptions
+import shared.exceptions as alert_exceptions
 sys.modules.setdefault("market_alert.utils", utils)
 sys.modules.setdefault("market_alert.exceptions", alert_exceptions)

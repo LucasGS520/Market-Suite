@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from market_alert.core.config import settings
-import market_alert.metrics as metrics
+import shared.metrics as metrics
 
 
 #Exibe as queries SQL no console quando a variável DEBUG está habilitada

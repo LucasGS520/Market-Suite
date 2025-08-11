@@ -21,7 +21,7 @@ from market_alert.notifications.matching import alert_matches_rule
 from market_alert.notifications.templates import render_price_alert, render_price_change_alert, render_listing_alert, render_error_alert
 from market_alert.enums.enums_alerts import AlertType
 from market_alert.core.config import settings
-from market_alert import metrics
+from shared import metrics
 
 
 def dispatch_price_alerts(db: Session | None, monitored_product, alerts: list, manager: NotificationManager | None = None) -> None:

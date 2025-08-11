@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 import sys
-from market_alert import exceptions as base_exceptions
+from shared import exceptions as base_exceptions
 
 sys.modules.setdefault("market_alert.exceptions", base_exceptions)
 import types

@@ -40,7 +40,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 import market_scraper.services.services_parser as parser
 from market_scraper.services.services_parser import CaptchaDetectedError
 from market_scraper.services.services_cache_scraper import use_cache_if_not_modified, update_cache
-from market_scraper.metrics import (
+from shared.metrics import (
     SCRAPER_HTTP_BLOCKED_TOTAL,
     SCRAPER_CAPTCHA_TOTAL,
     SCRAPER_REQUESTS_TOTAL,

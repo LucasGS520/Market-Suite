@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 
 from market_alert.core.config import settings
-from market_alert import metrics
+from shared import metrics
 from .base import NotificationChannel, logger
 
 

@@ -14,11 +14,11 @@ from decimal import Decimal
 
 from market_alert.core.celery_app import celery_app
 from infra.db import SessionLocal
-from utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_client
 from market_alert.utils.logging_utils import mask_identifier
 from market_alert.services.services_comparison import run_price_comparison
 from market_alert.tasks.alert_tasks import send_notification_task
-from market_alert.metrics import SCRAPING_LATENCY_SECONDS
+from shared.metrics import SCRAPING_LATENCY_SECONDS
 from market_alert.core.config import settings
 
 
