@@ -5,13 +5,13 @@ from typing import List, Optional
 
 import structlog
 
-from utils.redis_client import suspend_scraping, get_redis_client
+from shared.utils.redis_client import suspend_scraping, get_redis_client
 
-from scraper_app.utils.humanized_delay import HumanizedDelayManager
-from scraper_app.utils.user_agent_manager import IntelligentUserAgentManager
-from scraper_app.utils.cookie_manager import CookieManager
-from scraper_app.utils.playwright_client import get_playwright_client
-import market_alert.metrics as metrics
+from market_scraper.utils.humanized_delay import HumanizedDelayManager
+from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
+from market_scraper.utils.cookie_manager import CookieManager
+from market_scraper.utils.playwright_client import get_playwright_client
+import market_scraper.metrics as metrics
 
 
 logger = structlog.get_logger("block_recovery")

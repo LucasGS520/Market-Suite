@@ -1,4 +1,4 @@
-from scraper_app.utils.logging_utils import mask_identifier
+from market_scraper.utils.logging_utils import mask_identifier
 
 
 def test_mask_identifier_long():

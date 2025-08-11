@@ -3,7 +3,7 @@
 from typing import Optional
 import requests
 
-from scraper_app.enums.enums_block_results import BlockResult
+from market_scraper.enums.enums_block_results import BlockResult
 
 
 def detect_block(response: Optional[requests.Response]) -> BlockResult:

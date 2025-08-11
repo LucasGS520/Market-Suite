@@ -74,16 +74,13 @@ def patch_rate_limiter(monkeypatch):
     monkeypatch.setattr(RateLimiter, "__init__", fake_init)
     monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_alert.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("scraper_app.utils.robots_txt.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(
-        "scraper_app.utils.robots_txt.requests.get",
+        "market_scraper.utils.robots_txt.requests.get",
         lambda *a, **k: type("Resp", (), {"status_code": 200, "text": ""})()
     )
     monkeypatch.setattr("market_alert.services.services_scraper_common.redis_client", fake_redis, raising=False)
     monkeypatch.setattr("market_alert.utils.intelligent_cache.get_redis_client", lambda: FakeRedis)
-    #Garante que o cache inteligente use FakeRedis criado
-    import scraper_app.services.services_cache_scraper as cache_scraper
-    monkeypatch.setattr(cache_scraper.cache_manager, "redis", fake_redis)
 
     class DummyCircuitBreaker:
         def allow_request(self, *a, **k):
@@ -92,7 +89,7 @@ def patch_rate_limiter(monkeypatch):
         def record_success(self, *a, **k):
             pass
 
-    monkeypatch.setattr("scraper_app.services.services_scraper_common.CircuitBreaker", lambda: DummyCircuitBreaker())
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.CircuitBreaker", lambda: DummyCircuitBreaker())
 
     return fake_redis
 

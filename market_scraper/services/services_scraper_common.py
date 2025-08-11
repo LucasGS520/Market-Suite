@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Dict, Optional, Literal, Callable, Any
 from uuid import UUID
-from datetime import datetime, timezone
 
 import asyncio
 import structlog
@@ -17,43 +16,41 @@ import structlog
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
 
-from scraper_app.core.config import settings
+from shared.core.config_scraper import settings
 
-from utils.circuit_breaker import CircuitBreaker
-from utils.redis_client import get_redis_client, is_scraping_suspended, suspend_scraping
-from utils.rate_limiter import RateLimiter
-from utils.ml_url import canonicalize_ml_url, is_product_url
+from shared.utils.circuit_breaker import CircuitBreaker
+from shared.utils.redis_client import get_redis_client, is_scraping_suspended, suspend_scraping
+from shared.utils.rate_limiter import RateLimiter
+from shared.utils.ml_url import canonicalize_ml_url, is_product_url
 
-from scraper_app.utils.constants import to_mobile_url, THROTTLE_RATE, THROTTLE_CAPACITY, JITTER_RANGE, PRODUCT_HOSTS
-from scraper_app.utils.user_agent_manager import IntelligentUserAgentManager
-from scraper_app.utils.humanized_delay import HumanizedDelayManager
-from scraper_app.utils.throttle_manager import ThrottleManager
-from scraper_app.utils.http_utils import extract_hostname
-from scraper_app.utils.block_detector import detect_block, BlockResult
-from scraper_app.utils.block_recovery import BlockRecoveryManager
-from scraper_app.utils.audit_logger import audit_scrape
-from scraper_app.utils.price import parse_price_str
-from scraper_app.utils.robots_txt import RobotsTxtParser
-from scraper_app.utils.cookie_manager import cookie_manager
-from scraper_app.utils.playwright_client import get_playwright_client
+from market_scraper.utils.constants import to_mobile_url, THROTTLE_RATE, THROTTLE_CAPACITY, JITTER_RANGE, PRODUCT_HOSTS
+from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
+from market_scraper.utils.humanized_delay import HumanizedDelayManager
+from market_scraper.utils.throttle_manager import ThrottleManager
+from market_scraper.utils.http_utils import extract_hostname
+from market_scraper.utils.block_detector import detect_block, BlockResult
+from market_scraper.utils.block_recovery import BlockRecoveryManager
+from market_scraper.utils.audit_logger import audit_scrape
+from market_scraper.utils.price import parse_price_str
+from market_scraper.utils.robots_txt import RobotsTxtParser
+from market_scraper.utils.cookie_manager import cookie_manager
+from market_scraper.utils.playwright_client import get_playwright_client
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-import scraper_app.services.services_parser as parser
-from scraper_app.services.services_parser import CaptchaDetectedError
-from scraper_app.services.services_cache_scraper import use_cache_if_not_modified, update_cache
-from scraper_app.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
-from scraper_app.metrics import (
+import market_scraper.services.services_parser as parser
+from market_scraper.services.services_parser import CaptchaDetectedError
+from market_scraper.services.services_cache_scraper import use_cache_if_not_modified, update_cache
+from market_scraper.metrics import (
     SCRAPER_HTTP_BLOCKED_TOTAL,
     SCRAPER_CAPTCHA_TOTAL,
     SCRAPER_REQUESTS_TOTAL,
     SCRAPER_RESPONSE_SIZE_BYTES,
     SCRAPER_URL_STATUS_TOTAL,
 )
+from market_alert.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
 
 logger = structlog.get_logger("scraper_common")
-#Conexão Redis usada para cache e controle
-redis_client = get_redis_client()
 
 #ClienteHTTP é criado dinamicamente por requisição
 
@@ -155,7 +152,6 @@ async def _scrape_product_common(
         html = await fetch_html_playwright(target_url)
         SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
         SCRAPER_RESPONSE_SIZE_BYTES.labels(method="GET", status_code=200).observe(len(html))
-        audit_scrape(stage="get", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error=None)
         human_delay.wait(html)
     except PlaywrightTimeoutError as e:
         logger.warning("playwright_timeout", url=target_url, error=str(e))
@@ -163,7 +159,6 @@ async def _scrape_product_common(
         SCRAPER_HTTP_BLOCKED_TOTAL.inc()
         recovered = await recovery_manager.handle_block("timeout", url=target_url)
         if recovered is None:
-            audit_scrape(stage="error", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error=str(e))
             SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -173,7 +168,6 @@ async def _scrape_product_common(
         html = recovered
         SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
         human_delay.wait(html)
-        audit_scrape(stage="block_recovered", url=target_url, payload=jsonable_encoder(payload), html=None, details=None, error=None)
     except Exception as e:
         logger.error("get_request_failed", url=target_url, error=str(e))
         circuit_breaker.record_failure(circuit_key)
@@ -190,7 +184,6 @@ async def _scrape_product_common(
         recovered = await recovery_manager.handle_block(block_type, url=target_url)
         if recovered is None:
             #Falha definitiva registra e interrompe o fluxo
-            audit_scrape(stage="error", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error=str(e))
             SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -201,34 +194,9 @@ async def _scrape_product_common(
         html = recovered
         SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
         human_delay.wait(html)
-        audit_scrape(stage="block_recovered", url=target_url, payload=jsonable_encoder(payload), html=None, details=None, error=None)
-
-    if product_type == "monitored":
-        cached_result = use_cache_if_not_modified(
-            target_url=target_url,
-            html=html,
-            payload=payload,
-            circuit_breaker=circuit_breaker,
-            circuit_key=circuit_key,
-            endpoint="monitored_scrape",
-        )
-    else:
-        cached_result = use_cache_if_not_modified(
-            target_url=target_url,
-            html=html,
-            payload=payload,
-            circuit_breaker=circuit_breaker,
-            circuit_key=circuit_key,
-            endpoint="competitor_scrape",
-        )
-
-    if cached_result:
-        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="success").inc()
-        return cached_result
 
     if not parser.looks_like_product_page(html):
         logger.warning("not_product_page", url=original_url)
-        audit_scrape(stage="error", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error="not_product_page")
         SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Página não é de produto")
 
@@ -236,26 +204,21 @@ async def _scrape_product_common(
         details: Dict[str, Optional[str]] = parser.parse_product_details(html, target_url)
         logger.debug("parsed_details", details=details)
         logger.debug("raw_price_extracted", url=original_url, raw_price=details.get("current_price"))
-        audit_scrape(stage="parser", url=target_url, payload=payload.model_dump(), html=None, details=details, error=None)
     except CaptchaDetectedError as exc:
         logger.warning("captcha_detected", url=original_url)
         circuit_breaker.record_failure(circuit_key)
         SCRAPER_CAPTCHA_TOTAL.inc()
-        audit_scrape(stage="error", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error=str(exc))
         #Tenta recuperar o HTML caso o site apresente CAPTCHA
         recovered = await recovery_manager.handle_block("captcha", url=target_url)
         if recovered:
             html = recovered
-            audit_scrape(stage="captcha_recovered", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error=None)
             try:
                 details = parser.parse_product_details(html, target_url)
                 logger.debug("parsed_details", details=details)
                 logger.debug("raw_price_extracted", url=original_url, raw_price=details.get("current_price"))
-                audit_scrape(stage="parser", url=target_url, payload=payload.model_dump(), html=None, details=details, error=None)
             except Exception as exc2:
                 logger.error("parser_failed", url=original_url, error=str(exc2))
                 circuit_breaker.record_failure(circuit_key)
-                audit_scrape(stage="error", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error=str(exc2))
                 SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -267,13 +230,11 @@ async def _scrape_product_common(
     except ValueError as exc:
         logger.error("invalid_product_data", url=original_url, error=str(exc))
         circuit_breaker.record_failure(circuit_key)
-        audit_scrape(stage="error", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error=str(exc))
         SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
     except Exception as exc:
         logger.error("parser_failed", url=original_url, erro=str(exc))
         circuit_breaker.record_failure(circuit_key)
-        audit_scrape(stage="error", url=target_url, payload=jsonable_encoder(payload), html=html, details=None, error=str(exc))
         SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -291,15 +252,6 @@ async def _scrape_product_common(
 
     current_price = parse_price_str(raw_current, target_url)
 
-    update_cache(target_url, details, html, None)
-    audit_scrape(
-        stage="persist",
-        url=target_url,
-        payload=jsonable_encoder(payload),
-        html=None,
-        details=details,
-        error=None,
-    )
     circuit_breaker.record_success(circuit_key)
     SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="success").inc()
     return {"status": "success", "details": details}

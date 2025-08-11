@@ -5,14 +5,14 @@ from typing import Optional
 import importlib
 
 import redis
-from core.config_base import ConfigBase
+from shared.core.config_base import ConfigBase
 
 #Tenta carregar o módulo de métricas do serviço atual
 try:
     metrics = importlib.import_module("market_alert.metrics")
 except ModuleNotFoundError:
     try:
-        metrics = importlib.import_module("scraper_app.metrics")
+        metrics = importlib.import_module("market_scraper.metrics")
     except ModuleNotFoundError:
         class _MetricsStub:
             """ Fallback simples quando métricas não estão disponíveis """
@@ -20,6 +20,7 @@ except ModuleNotFoundError:
                 def _noop(*args, **kwargs):
                     return None
                 return _noop
+
         metrics = _MetricsStub()
 
 _redis_client: Optional[redis.Redis] = None

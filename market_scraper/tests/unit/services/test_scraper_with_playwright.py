@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.schemas.schemas_products import MonitoredProductCreateScraping
-from scraper_app.utils.playwright_client import PlaywrightClient
+from market_scraper.utils.playwright_client import PlaywrightClient
 
 
 def test_scraper_monitored_uses_playwright(monkeypatch):
@@ -27,18 +27,18 @@ def test_scraper_monitored_uses_playwright(monkeypatch):
         yield PlaywrightClient()
 
     with patch(
-        "scraper_app.utils.playwright_client.PlaywrightClient.fetch_html",
+        "market_scraper.utils.playwright_client.PlaywrightClient.fetch_html",
         new=AsyncMock(return_value=html)
     ) as fetch_mock, \
         patch(
-            "scraper_app.services.services_scraper_common.get_playwright_client",
+            "market_scraper.services.services_scraper_common.get_playwright_client",
             fake_client,
         ), \
         patch(
-            "scraper_app.services.services_scraper_common.parser.looks_like_product_page",
+            "market_scraper.services.services_scraper_common.parser.looks_like_product_page",
             return_value=True
         ), \
-        patch("scraper_app.services.services_scraper_common.parser.parse_product_details", return_value={
+        patch("market_scraper.services.services_scraper_common.parser.parse_product_details", return_value={
             "name": "Produto Teste",
             "current_price": "R$ 10,00",
             "old_price": None,

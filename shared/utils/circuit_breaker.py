@@ -6,15 +6,15 @@ import importlib
 
 import requests
 
-from core.config_base import ConfigBase
-from utils.redis_client import get_redis_client
+from shared.core.config_base import ConfigBase
+from shared.utils.redis_client import get_redis_client
 
 #Tenta carregar o módulo de métricas exposto pelo serviço
 try:
     metrics = importlib.import_module("market_alert.metrics")
 except ModuleNotFoundError:
     try:
-        metrics = importlib.import_module("scraper_app.metrics")
+        metrics = importlib.import_module("market_scraper.metrics")
     except ModuleNotFoundError:
         class _MetricsStub:
             """ Fallback quando não há módulo de métricas """

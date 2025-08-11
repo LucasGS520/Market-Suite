@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 import time
 
-from scraper_app.core.config import settings
+from shared.core.config_scraper import settings
 
 
 class HumanizedDelayManager:

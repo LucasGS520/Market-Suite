@@ -1,4 +1,4 @@
-from scraper_app.services.services_parser import parse_product_details
+from market_scraper.services.services_parser import parse_product_details
 
 html_sample = """
 <html>

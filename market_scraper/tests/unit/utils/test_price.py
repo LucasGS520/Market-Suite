@@ -1,7 +1,7 @@
 import pytest
 from decimal import Decimal
 from fastapi import HTTPException
-from scraper_app.utils.price import parse_price_str
+from market_scraper.utils.price import parse_price_str
 
 
 def test_parse_price_str_valid():

@@ -1,7 +1,7 @@
 import pytest
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from scraper_app.utils.playwright_client import PlaywrightClient
+from market_scraper.utils.playwright_client import PlaywrightClient
 
 class DummyPage:
     def __init__(self, raise_timeout: bool = False) -> None:

@@ -1,7 +1,7 @@
 import time
 import random
 
-from scraper_app.utils.throttle_manager import ThrottleManager
+from market_scraper.utils.throttle_manager import ThrottleManager
 
 
 class DummyCB:

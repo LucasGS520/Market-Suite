@@ -8,8 +8,8 @@ import pytest
 os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
 os.environ.setdefault("SECRET_KEY", "dummy")
 
-from scraper_app.utils.block_recovery import BlockRecoveryManager
-import market_alert.metrics as metrics
+from market_scraper.utils.block_recovery import BlockRecoveryManager
+import market_scraper.metrics as metrics
 
 
 class DummyCounter:
@@ -40,8 +40,8 @@ def test_recover_html_success(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             pass
 
-    monkeypatch.setattr("scraper_app.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
-    monkeypatch.setattr("scraper_app.utils.block_recovery.suspend_scraping", lambda s: None)
+    monkeypatch.setattr("market_scraper.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
+    monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
     counter = DummyCounter()
     monkeypatch.setattr(metrics, "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
 
@@ -67,8 +67,8 @@ def test_recover_html_failure(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             pass
 
-    monkeypatch.setattr("scraper_app.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
-    monkeypatch.setattr("scraper_app.utils.block_recovery.suspend_scraping", lambda s: None)
+    monkeypatch.setattr("market_scraper.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
+    monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
     counter = DummyCounter()
     monkeypatch.setattr(metrics, "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
 

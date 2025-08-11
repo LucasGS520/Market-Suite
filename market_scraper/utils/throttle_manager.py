@@ -5,12 +5,12 @@ import random
 import threading
 from typing import Optional
 
-import market_alert.metrics as metrics
+import market_scraper.metrics as metrics
 
 from fastapi import HTTPException, status
 
-from utils.circuit_breaker import CircuitBreaker
-from utils.rate_limiter import RateLimiter
+from shared.utils.circuit_breaker import CircuitBreaker
+from shared.utils.rate_limiter import RateLimiter
 
 
 class ThrottleManager:

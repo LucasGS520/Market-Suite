@@ -4,7 +4,7 @@ from typing import Dict
 from requests import Response, cookies
 import httpx
 
-from scraper_app.utils.constants import GENERIC_COOKIES
+from market_scraper.utils.constants import GENERIC_COOKIES
 
 
 class CookieManager:

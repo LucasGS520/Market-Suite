@@ -9,8 +9,8 @@ from urllib.parse import urljoin, urlparse
 import re
 from typing import Optional
 
-from scraper_app.core.config import settings
-from utils.redis_client import get_redis_client
+from shared.core.config_scraper import settings
+from shared.utils.redis_client import get_redis_client
 
 
 ROBOTS_CACHE_KEY = settings.ROBOTS_CACHE_KEY

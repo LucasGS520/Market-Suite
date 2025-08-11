@@ -72,7 +72,7 @@ def patch_rate_limiter(monkeypatch):
 
     monkeypatch.setattr(RateLimiter, "__init__", fake_init)
     monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("scraper_app.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("market_scraper.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
     return fake_redis
 
 @pytest.fixture(autouse=True)

@@ -4,7 +4,7 @@ import random
 import time
 import threading
 
-from scraper_app.utils.constants import USER_AGENTS
+from market_scraper.utils.constants import USER_AGENTS
 
 
 class IntelligentUserAgentManager:

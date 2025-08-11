@@ -1,7 +1,7 @@
 """ Constantes e configurações utilitárias """
 
 from typing import Tuple, Union, Dict
-from scraper_app.core.config import settings
+from shared.core.config_scraper import settings
 from urllib.parse import urlparse, urlunparse
 
 

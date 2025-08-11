@@ -1,4 +1,4 @@
-from scraper_app.utils.data_quality_validator import DataQualityValidator
+from market_scraper.utils.data_quality_validator import DataQualityValidator
 import pytest
 
 VALID_DATA = {

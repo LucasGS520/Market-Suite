@@ -1,7 +1,7 @@
 import pytest
 from validators import domain
 
-from scraper_app.utils.robots_txt import RobotsTxtParser
+from market_scraper.utils.robots_txt import RobotsTxtParser
 
 @pytest.fixture()
 def fake_redis(monkeypatch):

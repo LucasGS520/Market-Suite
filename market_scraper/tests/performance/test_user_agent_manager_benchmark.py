@@ -1,6 +1,6 @@
 import random
 
-from scraper_app.utils.user_agent_manager import IntelligentUserAgentManager
+from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 
 
 def test_user_agent_rotation_performance(benchmark, monkeypatch):

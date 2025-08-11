@@ -24,20 +24,20 @@ class FakeRobots:
 
 def _patch_common(monkeypatch):
     module = "market_alert.services.services_scraper_competitor"
-    monkeypatch.setattr("scraper_app.services.services_scraper_common.RobotsTxtParser", lambda *a, **k: FakeRobots())
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.RobotsTxtParser", lambda *a, **k: FakeRobots())
     monkeypatch.setattr(
         f"{module}.create_or_update_competitor_product_scraped",
         lambda *a, **k: None,
         raising=False
     )
-    monkeypatch.setattr("scraper_app.services.services_scraper_common.HumanizedDelayManager.wait", lambda self, *a, **k: None)
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.HumanizedDelayManager.wait", lambda self, *a, **k: None)
     class DummyRecovery:
         async def handle_block(self, *a, **k):
             pass
 
-    monkeypatch.setattr("scraper_app.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: DummyRecovery())
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.BlockRecoveryManager", lambda *a, **k: DummyRecovery())
     redis = DummyRedis()
-    monkeypatch.setattr("scraper_app.services.services_scraper_common.redis_client", redis, raising=False)
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.redis_client", redis, raising=False)
     monkeypatch.setattr("market_alert.utils.circuit_breaker.get_redis_client", lambda: redis)
 
 def _payload():
@@ -56,16 +56,13 @@ def test_not_product_page_raises_bad_request(monkeypatch):
         raising=False
     )
     monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: redis)
-    import scraper_app.services.services_cache_scraper as cache_scraper
-
-    monkeypatch.setattr(cache_scraper.cache_manager, "redis", redis)
 
     html = "<html><body><p>sem produto</p></body></html>"
     async def fake_playwright(url: str):
         return html
 
-    monkeypatch.setattr("scraper_app.services.services_scraper_common.fetch_html_playwright", fake_playwright)
-    monkeypatch.setattr("scraper_app.services.services_scraper_common.parser.looks_like_product_page", lambda _html: False)
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.fetch_html_playwright", fake_playwright)
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.parser.looks_like_product_page", lambda _html: False)
 
     called = {"parse": False}
 
@@ -74,7 +71,7 @@ def test_not_product_page_raises_bad_request(monkeypatch):
         return {}
 
     monkeypatch.setattr(
-        "scraper_app.services.services_scraper_common.parser.parse_product_details",
+        "market_scraper.services.services_scraper_common.parser.parse_product_details",
         fake_parse
     )
 
