@@ -14,34 +14,34 @@ class Settings(ConfigBase):
     """ Configurações específicas do serviço de scraping """
 
     #TTL base do cache de scraping
-    CACHE_BASE_TTL: int = int(os.getenv("CACHE_BASE_TTL", str(3600)))
+    CACHE_BASE_TTL: int = int(os.getenv("CACHE_BASE_TTL", str(3600))) #Validade do cache
 
     #Parâmetros para o HumanizedDelayManager
-    HUMAN_AVG_WPM: int = int(os.getenv("HUMAN_AVG_WPM", "200"))
-    HUMAN_BASE_DELAY: float = float(os.getenv("HUMAN_BASE_DELAY", "1.0"))
-    HUMAN_FATIGUE_MIN: float = float(os.getenv("HUMAN_FATIGUE_MIN", "0.5"))
-    HUMAN_FATIGUE_MAX: float = float(os.getenv("HUMAN_FATIGUE_MAX", "2.0"))
+    HUMAN_AVG_WPM: int = int(os.getenv("HUMAN_AVG_WPM", "200")) #Palavras/minuto simuladas
+    HUMAN_BASE_DELAY: float = float(os.getenv("HUMAN_BASE_DELAY", "1.0")) #Atraso incial
+    HUMAN_FATIGUE_MIN: float = float(os.getenv("HUMAN_FATIGUE_MIN", "0.5")) #Fadiga mínima
+    HUMAN_FATIGUE_MAX: float = float(os.getenv("HUMAN_FATIGUE_MAX", "2.0")) #Fadiga máxima
 
     #Parametros do Throttle e Rate Limiter
-    THROTTLE_RATE: float = float(os.getenv("THROTTLE_RATE", "0.2"))
-    THROTTLE_CAPACITY: float = float(os.getenv("THROTTLE_CAPACITY", "3"))
-    JITTER_MIN: float = float(os.getenv("JITTER_MIN", "2.0"))
-    JITTER_MAX: float = float(os.getenv("JITTER_MAX", "7.0"))
+    THROTTLE_RATE: float = float(os.getenv("THROTTLE_RATE", "0.2")) #Taxa de consumo de tokens
+    THROTTLE_CAPACITY: float = float(os.getenv("THROTTLE_CAPACITY", "3")) # Capacidade do bucket
+    JITTER_MIN: float = float(os.getenv("JITTER_MIN", "2.0")) #Delay mínimo adicional
+    JITTER_MAX: float = float(os.getenv("JITTER_MAX", "7.0")) #Delay máximo adicional
 
-    MONITORED_RATE_LIMIT: int = int(os.getenv("MONITORED_RATE_LIMIT", "100"))
+    MONITORED_RATE_LIMIT: int = int(os.getenv("MONITORED_RATE_LIMIT", "100")) #Limite de produtos monitorados
     COMPETITOR_SERVICE_RATE_LIMIT: int = int(
         os.getenv("COMPETITOR_SERVICE_RATE_LIMIT", "200")
-    )
-    RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "3600"))
+    ) #Limite para serviços de concorrentes
+    RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "3600")) #Janela de rate limit
 
     #Parametros do Playwright
-    PLAYWRIGHT_HEADLESS: bool = os.getenv("PLAYWRIGHT_HEADLESS", "1") == "1"
-    PLAYWRIGHT_TIMEOUT: int = int(os.getenv("PLAYWRIGHT_TIMEOUT", "30000"))
+    PLAYWRIGHT_HEADLESS: bool = os.getenv("PLAYWRIGHT_HEADLESS", "1") == "1" #Executa sem interface
+    PLAYWRIGHT_TIMEOUT: int = int(os.getenv("PLAYWRIGHT_TIMEOUT", "30000")) #Timeout padrão (ms)
 
     #Intervalo base para o AdaptiveRecheckManager
     ADAPTIVE_RECHECK_BASE_INTERVAL: int = int(
         os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200")
-    )
+    ) #Base para reagendamentos
 
 #Instância única de settings para a aplicação
 settings = Settings()

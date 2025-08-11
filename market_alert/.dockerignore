@@ -5,7 +5,7 @@
 tests/
 
 #Ignora arquivos de configuração de ambiente
-.env
+.env.market_alert
 .env.*
 !.env.*.example
 infra/.env

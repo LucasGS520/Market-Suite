@@ -28,7 +28,7 @@ logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()
 scraper_client = ScraperClient()
 
-#Batch sizes configurado via .env
+#Batch sizes configurado via .env.market_scraper.market_alert.common
 BATCH_SIZE_SCRAPING = int(os.getenv("BATCH_SIZE_SCRAPING", "10"))
 BATCH_SIZE_COMPETITOR = int(os.getenv("BATCH_SIZE_COMPETITOR", "20"))
 

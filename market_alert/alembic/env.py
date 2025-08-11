@@ -20,8 +20,9 @@ import market_alert.models.models_login_attempt
 import market_alert.models.models_comparisons
 import market_alert.models.models_alerts
 
-#Carrega o .env do projeto
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+#Carrega o arquivo definido em ``ENV_FILE`` (padrão .env)
+env_path = os.path.join(os.path.dirname(__file__), "..", os.getenv("ENV_FILE", ".env"))
+load_dotenv(dotenv_path=env_path)
 
 config = context.config
 

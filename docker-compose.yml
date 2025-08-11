@@ -3,7 +3,7 @@ services:
   db:
     image: postgres:15
     env_file:
-      - .env
+      - .env.common
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d marketalert"]
       interval: 10s
@@ -19,7 +19,7 @@ services:
   redis:
     image: redis:7
     env_file:
-      - .env
+      - .env.common
     command:
       - redis-server
       - "--requirepass"
@@ -35,7 +35,7 @@ services:
   redis-init:
     image: redis:7
     env_file:
-      - .env
+      - .env.common
     depends_on:
       - redis
     entrypoint:
@@ -55,7 +55,9 @@ services:
       context: ./market_alert
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
     volumes:
       - ./market_alert:/market_alert
     working_dir: /market_alert
@@ -77,7 +79,9 @@ services:
       context: ./market_alert
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
     command:
       - uvicorn
       - "main:market_alert"
@@ -103,7 +107,9 @@ services:
       context: ./market_alert
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
     command:
       - python
       - "beat_with_metrics.py"
@@ -122,7 +128,9 @@ services:
       context: ./market_alert
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
     command:
       - celery
       - "-A"
@@ -151,10 +159,11 @@ services:
       context: ./market_scraper
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - .env.market_scraper
     environment:
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      - ENV_FILE=.env.market_scraper
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     command:
       - uvicorn
       - "main:app"
@@ -191,7 +200,7 @@ services:
     volumes:
       - ./alertmanager:/etc/alertmanager:ro
     env_file:
-      - .env
+      - .env.common
     ports:
       - "9093:9093"
     networks:
@@ -251,7 +260,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     env_file:
-      - .env
+      - .env.common
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-storage:/var/lib/grafana
