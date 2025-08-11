@@ -11,8 +11,8 @@ sys.modules.setdefault("market_alert.exceptions", base_exceptions)
 import types
 
 #Cria pacotes fictícios necessários para a importação das tasks
-sys.modules.setdefault("market_scraper.scraper_app.utils.constants", types.SimpleNamespace(PRODUCT_HOSTS=[]))
-sys.modules.setdefault("market_scraper.scraper_app.utils.playwright_client", types.SimpleNamespace())
+sys.modules.setdefault("market_scraper.utils.constants", types.SimpleNamespace(PRODUCT_HOSTS=[]))
+sys.modules.setdefault("market_scraper.utils.playwright_client", types.SimpleNamespace())
 
 import importlib
 import market_alert  # type: ignore

@@ -6,7 +6,7 @@ import types
 from shared.utils.ml_url import PRODUCT_HOSTS
 
 #Stubs para módulos do pacote market_scraper esperados pelos testes
-sys.modules.setdefault("market_scraper.scraper_app.utils.constants", types.SimpleNamespace(PRODUCT_HOSTS=[]))
+sys.modules.setdefault("market_scraper.utils.constants", types.SimpleNamespace(PRODUCT_HOSTS=[]))
 
 from market_alert.utils.rate_limiter import RateLimiter
 

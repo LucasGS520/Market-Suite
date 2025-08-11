@@ -14,7 +14,6 @@ from market_alert.metrics import (
     REDIS_QUEUE_MESSAGES, REDIS_MEMORY_USAGE_BYTES,
     DB_POOL_SIZE, DB_POOL_CHECKOUTS
 )
-from market_alert.services.services_cache_scraper import cache_manager
 
 
 logger = structlog.get_logger("metrics_tasks")
@@ -95,14 +94,3 @@ def collect_db_metrics():
         DB_POOL_CHECKOUTS.set(engine.pool.checkedout())
     except Exception as exc:
         logger.error("failed_collecting_db_metrics", error=str(exc))
-
-@shared_task(name="market_alert.tasks.metrics_tasks.cleanup_cache")
-def cleanup_cache() -> int:
-    """ Remove entradas antigas do cache de scraping """
-    try:
-        removed = cache_manager.cleanup()
-        logger.info("cache_cleanup", removed=removed)
-        return removed
-    except Exception as exc:
-        logger.error("cache_cleanup_failed", error=str(exc))
-        return 0

@@ -15,10 +15,10 @@ import structlog
 from sqlalchemy.orm import Session
 
 from market_alert.core.config import settings
-from utils.circuit_breaker import CircuitBreaker
-from utils.rate_limiter import RateLimiter
-from market_alert.utils.block_recovery import BlockRecoveryManager
-from utils.scraper_client import ScraperClient
+from shared.utils.circuit_breaker import CircuitBreaker
+from shared.utils.rate_limiter import RateLimiter
+from market_scraper.utils.block_recovery import BlockRecoveryManager
+from market_alert.services.scraper_client import ScraperClient
 
 from market_alert.schemas.schemas_products import (
     CompetitorProductCreateScraping,

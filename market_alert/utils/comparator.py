@@ -4,8 +4,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any, Optional
 
 import structlog
-from scraper_app.models.models_products import MonitoredProduct, CompetitorProduct
-from scraper_app.enums.enums_products import ProductStatus
+from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
+from market_alert.enums.enums_products import ProductStatus
 
 
 logger = structlog.get_logger("price_comparator")
