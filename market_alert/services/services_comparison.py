@@ -12,13 +12,13 @@ from decimal import Decimal
 import structlog
 import time
 
-from alert_app.metrics import PRICE_COMPARISON_DURATION_SECONDS, PRICE_COMPARISONS_TOTAL, PRICE_ALERTS_TOTAL
+from market_alert.metrics import PRICE_COMPARISON_DURATION_SECONDS, PRICE_COMPARISONS_TOTAL, PRICE_ALERTS_TOTAL
 
-from alert_app.crud.crud_monitored import get_monitored_product_by_id
-from alert_app.crud.crud_competitor import get_competitors_by_monitored_id
-from alert_app.crud.crud_comparison import create_price_comparison
-from alert_app.utils.comparator import compare_prices
-from alert_app.core.config import settings
+from market_alert.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.crud.crud_comparison import create_price_comparison
+from market_alert.utils.comparator import compare_prices
+from market_alert.core.config import settings
 
 
 logger = structlog.get_logger("comparison_service")

@@ -8,17 +8,17 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from alert_app.crud.crud_refresh_token import create_refresh_token, get_refresh_token, revoke_refresh_token
-from alert_app.crud.crud_user import get_user_by_email
-from alert_app.core.bruteforce import block_ip, reset_failed_attempts, record_failed_attempt
-from alert_app.core.jwt import create_access_token
-from alert_app.core.tokens import generate_verification_token, generate_reset_token, token_expiry
-from alert_app.notifications.manager import get_notification_manager
-from alert_app.crud.crud_notification_logs import has_recent_duplicate_notification
-from alert_app.core.config import settings
-from alert_app.schemas.schemas_auth import TokenResponse, ResetPasswordRequest, ResetPasswordConfirmRequest, ChangePasswordRequest, ChangeEmailRequest, EmailTokenRequest
-from alert_app.schemas.schemas_auth import TokenPairResponse, RefreshRequest
-from alert_app.models.models_users import User
+from market_alert.crud.crud_refresh_token import create_refresh_token, get_refresh_token, revoke_refresh_token
+from market_alert.crud.crud_user import get_user_by_email
+from market_alert.core.bruteforce import block_ip, reset_failed_attempts, record_failed_attempt
+from market_alert.core.jwt import create_access_token
+from market_alert.core.tokens import generate_verification_token, generate_reset_token, token_expiry
+from market_alert.notifications.manager import get_notification_manager
+from market_alert.crud.crud_notification_logs import has_recent_duplicate_notification
+from market_alert.core.config import settings
+from market_alert.schemas.schemas_auth import TokenResponse, ResetPasswordRequest, ResetPasswordConfirmRequest, ChangePasswordRequest, ChangeEmailRequest, EmailTokenRequest
+from market_alert.schemas.schemas_auth import TokenPairResponse, RefreshRequest
+from market_alert.models.models_users import User
 
 
 logger = structlog.get_logger("service.auth")

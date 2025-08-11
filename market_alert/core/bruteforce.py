@@ -3,7 +3,7 @@
 import structlog
 from fastapi import HTTPException, Request, status
 
-from alert_app.core.config import settings
+from market_alert.core.config import settings
 from utils.redis_client import get_redis_client
 
 

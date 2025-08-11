@@ -7,8 +7,8 @@ from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from alert_app.enums.enums_alerts import AlertType, ChannelType
-from alert_app.enums.enums_products import ProductStatus
+from market_alert.enums.enums_alerts import AlertType, ChannelType
+from market_alert.enums.enums_products import ProductStatus
 
 
 class AlertRuleCreate(BaseModel):

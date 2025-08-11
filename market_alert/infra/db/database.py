@@ -11,8 +11,8 @@ from typing import Generator
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from alert_app.core.config import settings
-import alert_app.metrics as metrics
+from market_alert.core.config import settings
+import market_alert.metrics as metrics
 
 
 #Exibe as queries SQL no console quando a variável DEBUG está habilitada

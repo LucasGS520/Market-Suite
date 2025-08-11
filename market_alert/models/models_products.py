@@ -8,7 +8,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from infra.db import Base
-from alert_app.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
+from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
 
 
 # ---------- PRODUTO MONITORADO ----------

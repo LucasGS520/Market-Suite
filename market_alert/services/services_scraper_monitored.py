@@ -15,18 +15,18 @@ import httpx
 import structlog
 from sqlalchemy.orm import Session
 
-from alert_app.core.config import settings
+from market_alert.core.config import settings
 from utils.circuit_breaker import CircuitBreaker
 from utils.rate_limiter import RateLimiter
-from alert_app.utils.block_recovery import BlockRecoveryManager
+from market_alert.utils.block_recovery import BlockRecoveryManager
 from utils.scraper_client import ScraperClient
 
-from alert_app.schemas.schemas_products import (
+from market_alert.schemas.schemas_products import (
     MonitoredProductCreateScraping,
     MonitoredScrapedInfo,
 )
-from alert_app.crud.crud_monitored import create_or_update_monitored_product_scraped
-from alert_app.tasks.compare_prices_tasks import compare_prices_task
+from market_alert.crud.crud_monitored import create_or_update_monitored_product_scraped
+from market_alert.tasks.compare_prices_tasks import compare_prices_task
 
 
 #Logger especifico para o fluxo de monitorados

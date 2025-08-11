@@ -3,8 +3,8 @@ from __future__ import annotations
 from email.message import EmailMessage
 import aiosmtplib
 
-from alert_app.core.config import settings
-from alert_app import metrics
+from market_alert.core.config import settings
+from market_alert import metrics
 from .base import NotificationChannel, logger
 
 

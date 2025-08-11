@@ -8,10 +8,10 @@ from uuid import UUID
 from datetime import datetime
 
 from infra.db import get_db
-from alert_app.core.security import get_current_user
-from alert_app.schemas.schemas_alert_rules import NotificationLogResponse
-from alert_app.crud.crud_notification_logs import get_notification_logs
-from alert_app.enums.enums_alerts import ChannelType
+from market_alert.core.security import get_current_user
+from market_alert.schemas.schemas_alert_rules import NotificationLogResponse
+from market_alert.crud.crud_notification_logs import get_notification_logs
+from market_alert.enums.enums_alerts import ChannelType
 
 
 router = APIRouter(prefix="/notifications", tags=["Notificações"])

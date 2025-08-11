@@ -1,9 +1,9 @@
 import pytest
 from types import SimpleNamespace
 
-from alert_app.tasks.alert_tasks import send_alert_task
-from alert_app.models.models_alerts import NotificationLog
-from alert_app.enums.enums_alerts import ChannelType
+from market_alert.tasks.alert_tasks import send_alert_task
+from market_alert.models.models_alerts import NotificationLog
+from market_alert.enums.enums_alerts import ChannelType
 
 
 class DummyDB:
@@ -40,15 +40,15 @@ def test_send_alert_task_dispatches(monkeypatch):
     )
     called = {}
 
-    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: DummyDB(log, called))
-    monkeypatch.setattr("alert_app.tasks.alert_tasks.get_user_by_id", lambda db, uid: SimpleNamespace(id=uid))
+    monkeypatch.setattr("market_alert.tasks.alert_tasks.SessionLocal", lambda: DummyDB(log, called))
+    monkeypatch.setattr("market_alert.tasks.alert_tasks.get_user_by_id", lambda db, uid: SimpleNamespace(id=uid))
 
     def fake_send(self, db, user, subject, message, alert_rule_id=None, alert_type=None):
         called["user"] = user.id
         called["subject"] = subject
         called["db"] = db
 
-    monkeypatch.setattr("alert_app.tasks.alert_tasks.NotificationManager.send", fake_send)
+    monkeypatch.setattr("market_alert.tasks.alert_tasks.NotificationManager.send", fake_send)
 
     send_alert_task.run(log.id)
 
@@ -65,8 +65,8 @@ def test_send_alert_task_retry(monkeypatch):
         def __init__(self):
             super().__init__(log=None, called=called)
 
-    monkeypatch.setattr("alert_app.tasks.alert_tasks.SessionLocal", lambda: Dummy())
-    monkeypatch.setattr("alert_app.tasks.alert_tasks.NotificationManager.send", lambda self, *a, **k: called.setdefault("send_called", True))
+    monkeypatch.setattr("market_alert.tasks.alert_tasks.SessionLocal", lambda: Dummy())
+    monkeypatch.setattr("market_alert.tasks.alert_tasks.NotificationManager.send", lambda self, *a, **k: called.setdefault("send_called", True))
 
     def fake_retry(*a, **k):
         called["retry"] = True

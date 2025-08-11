@@ -4,8 +4,8 @@ import pytest
 from fastapi import HTTPException
 from datetime import datetime, timezone, timedelta
 
-from alert_app.core import security
-from alert_app.core import tokens
+from market_alert.core import security
+from market_alert.core import tokens
 
 
 class DummyDB:

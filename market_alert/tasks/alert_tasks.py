@@ -13,16 +13,17 @@ import structlog
 
 from sqlalchemy.orm import Session
 
-from alert_app.core.celery_app import celery_app
+from market_alert.core.celery_app import celery_app
 from infra.db import SessionLocal
-from alert_app.crud.crud_monitored import get_monitored_product_by_id
-from alert_app.crud.crud_user import get_user_by_id
-from alert_app.models.models_alerts import NotificationLog
-from alert_app.notifications.manager import NotificationManager, dispatch_price_alerts
-from alert_app.notifications.channels import EmailChannel, SMSChannel, PushChannel, WhatsAppChannel, SlackChannel
-from alert_app.enums.enums_alerts import ChannelType
-from alert_app.core.config import settings
-from alert_app import metrics
+from market_alert.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.crud.crud_user import get_user_by_id
+from market_alert.models.models_alerts import NotificationLog
+from market_alert.notifications.manager import NotificationManager
+from market_alert.services.services_notifications import dispatch_price_alerts
+from market_alert.notifications.channels import EmailChannel, SMSChannel, PushChannel, WhatsAppChannel, SlackChannel
+from market_alert.enums.enums_alerts import ChannelType
+from market_alert.core.config import settings
+from market_alert import metrics
 
 
 logger = structlog.get_logger("alert_tasks")

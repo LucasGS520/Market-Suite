@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 
-from alert_app.models.models_alerts import NotificationLog, AlertRule
-from alert_app.enums.enums_alerts import ChannelType, AlertType
+from market_alert.models.models_alerts import NotificationLog, AlertRule
+from market_alert.enums.enums_alerts import ChannelType, AlertType
 
 
 def _create_logs(db_session, user_id):

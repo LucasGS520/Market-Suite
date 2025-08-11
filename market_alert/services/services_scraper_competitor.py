@@ -14,17 +14,17 @@ import httpx
 import structlog
 from sqlalchemy.orm import Session
 
-from alert_app.core.config import settings
+from market_alert.core.config import settings
 from utils.circuit_breaker import CircuitBreaker
 from utils.rate_limiter import RateLimiter
-from alert_app.utils.block_recovery import BlockRecoveryManager
+from market_alert.utils.block_recovery import BlockRecoveryManager
 from utils.scraper_client import ScraperClient
 
-from alert_app.schemas.schemas_products import (
+from market_alert.schemas.schemas_products import (
     CompetitorProductCreateScraping,
     CompetitorScrapedInfo,
 )
-from alert_app.crud.crud_competitor import create_or_update_competitor_product_scraped
+from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
 
 
 #Logger específico para o scraping de concorrentes

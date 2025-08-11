@@ -10,20 +10,16 @@ from typing import Iterable, List, TYPE_CHECKING
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from alert_app.models.models_alerts import AlertRule
+    from market_alert.models.models_alerts import AlertRule
 
-from datetime import datetime, timezone
 import asyncio
 import time
 
 import structlog
 from sqlalchemy.orm import Session
 
-from alert_app.crud.crud_user import get_user_by_id
-from alert_app.crud.crud_alert_rules import update_last_notified, get_alert_rules_or_default, get_active_alert_rules_for_product as crud_get_active_rules
-from alert_app.crud.crud_notification_logs import create_notification_log, has_recent_duplicate_notification
-from .matching import alert_matches_rule
-from .templates import render_price_alert, render_price_change_alert, render_listing_alert, render_error_alert
+from market_alert.crud.crud_alert_rules import get_active_alert_rules_for_product as crud_get_active_rules
+from market_alert.crud.crud_notification_logs import create_notification_log
 
 from .channels import NotificationChannel
 from .channels.email import EmailChannel
@@ -32,12 +28,12 @@ from .channels.push import PushChannel
 from .channels.whatsapp import WhatsAppChannel
 from .channels.slack import SlackChannel
 
-from alert_app.enums.enums_alerts import ChannelType, AlertType
-from alert_app.core.config import settings
-from alert_app import metrics
+from market_alert.enums.enums_alerts import ChannelType, AlertType
+from market_alert.core.config import settings
+from market_alert import metrics
+
 
 logger = structlog.get_logger("alerts")
-
 
 def __verify_channel_settings() -> dict:
     """  Verifica as configurações necessárias para todos os canais de notificação
@@ -179,96 +175,3 @@ def get_notification_manager() -> NotificationManager:
     if settings.SLACK_WEBHOOK_URL:
         channels.append(SlackChannel())
     return NotificationManager(channels)
-
-def dispatch_price_alerts(db, monitored_product, alerts: list, manager: NotificationManager | None = None) -> None:
-    """ Envia alertas de preço para um produto monitorado """
-    user = get_user_by_id(db, monitored_product.user_id)
-    if manager is None:
-        manager = get_notification_manager()
-
-    if not getattr(user, "notifications_enabled", True):
-        metrics.NOTIFICATIONS_SKIPPED_TOTAL.labels(reason="disabled").inc()
-        return
-
-    try:
-        #Recupera regras ativas ou um padrão caso nenhuma exista
-        rules = get_alert_rules_or_default(db, user.id, monitored_product.id)
-    except AttributeError:
-        from types import SimpleNamespace
-
-        rules = [
-            SimpleNamespace(
-                id=None,
-                rule_type=AlertType.PRICE_TARGET,
-                threshold_value=None,
-                threshold_percent=None,
-                target_price=None,
-                product_status=None,
-                enabled=True,
-                last_notified_at=None
-            )
-        ]
-
-    now = datetime.now(timezone.utc)
-    cooldown = settings.ALERT_RULE_COOLDOWN
-
-    filtered: list[tuple[dict, AlertRule]] = []
-    #Para cada alerta gerado checamos as regras configuradas
-    for alert in alerts:
-        for rule in rules:
-
-            if alert_matches_rule(alert, rule):
-                metrics.ALERT_RULES_TRIGGERED_TOTAL.labels(rule_type=rule.rule_type.value).inc()
-                last_sent = getattr(rule, "last_notified_at", None)
-
-                if last_sent and (now - last_sent).total_seconds() < cooldown:
-                    metrics.ALERT_RULES_SUPPRESSED_TOTAL.labels(reason="cooldown").inc()
-                    break
-
-                rule_id = str(rule.id) if getattr(rule, "id", None) else None
-                alert = {**alert, "rule_id": rule_id}
-                filtered.append((alert, rule))
-                break
-
-    #Envia efetivamente as notificações com o template correto
-    for alert, rule in filtered:
-        template = render_price_alert
-        alert_type = AlertType.PRICE_TARGET
-
-        if alert.get("type") in ("price_increase", "price_decrease"):
-            template = render_price_change_alert
-            alert_type = AlertType.PRICE_CHANGE
-
-        elif alert.get("status") in ("unavailable", "removed"):
-            template = render_listing_alert
-            alert_type = AlertType.LISTING_PAUSED if alert.get("status") == "unavailable" else AlertType.LISTING_REMOVED
-
-        elif alert.get("error") or alert.get("detail"):
-            template = render_error_alert
-            alert_type = AlertType.SCRAPING_ERROR
-
-        subject = f"Alerta {alert_type.value.replace('_', ' ')} - {monitored_product.name_identification}"
-        preview = template(monitored_product, alert)
-
-        duplicate = False
-        if db is not None:
-            #Evita disparos repetidos em curta janela
-            duplicate = has_recent_duplicate_notification(
-                db, user.id, subject, preview, settings.ALERT_DUPLICATE_WINDOW
-            )
-        if not duplicate:
-            manager.send_rendered(
-                db,
-                user,
-                subject,
-                template,
-                monitored_product,
-                alert,
-                alert_rule_id=alert.get("rule_id"),
-                alert_type=alert_type
-            )
-            if db is not None:
-                #Registra horário do envio para controle de cooldown
-                update_last_notified(db, alert.get("rule_id"), now)
-        else:
-            metrics.ALERT_RULES_SUPPRESSED_TOTAL.labels(reason="duplicate").inc()

@@ -12,13 +12,13 @@ from alembic import context
 #Importa a Base diretamente do módulo infra
 from infra.db import Base
 #Importa explicitamente todos os modelos para que Base.metadata os conheça
-import alert_app.models.models_scraping_errors
-import alert_app.models.models_users
-import alert_app.models.models_refresh_token
-import alert_app.models.models_products
-import alert_app.models.models_login_attempt
-import alert_app.models.models_comparisons
-import alert_app.models.models_alerts
+import market_alert.models.models_scraping_errors
+import market_alert.models.models_users
+import market_alert.models.models_refresh_token
+import market_alert.models.models_products
+import market_alert.models.models_login_attempt
+import market_alert.models.models_comparisons
+import market_alert.models.models_alerts
 
 #Carrega o .env do projeto
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))

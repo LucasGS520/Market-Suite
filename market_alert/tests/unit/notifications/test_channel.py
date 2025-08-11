@@ -2,9 +2,10 @@ from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 import httpx
 
-from alert_app.notifications.channels.email import EmailChannel
-from alert_app.notifications.manager import get_notification_manager, dispatch_price_alerts
-from alert_app.enums.enums_alerts import AlertType
+from market_alert.notifications.channels.email import EmailChannel
+from market_alert.notifications.manager import get_notification_manager
+from market_alert.services.services_notifications import dispatch_price_alerts
+from market_alert.enums.enums_alerts import AlertType
 
 class DummyLogger:
     def __init__(self):
@@ -50,9 +51,9 @@ def test_email_channel_warns_when_missing_email(monkeypatch):
         async def quit(self):
             pass
 
-    monkeypatch.setattr("alert_app.notifications.channels.email.aiosmtplib.SMTP", DummySMTP)
+    monkeypatch.setattr("market_alert.notifications.channels.email.aiosmtplib.SMTP", DummySMTP)
     counter = DummyCounter()
-    monkeypatch.setattr("alert_app.notifications.channels.email.metrics.NOTIFICATIONS_SKIPPED_TOTAL", counter)
+    monkeypatch.setattr("market_alert.notifications.channels.email.metrics.NOTIFICATIONS_SKIPPED_TOTAL", counter)
     channel = EmailChannel()
     user = SimpleNamespace(id="u1")
 
@@ -62,7 +63,7 @@ def test_email_channel_warns_when_missing_email(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "email_missing"
 
 def test_get_notification_manager_returns_new_instance(monkeypatch):
-    from alert_app.core.config import settings
+    from market_alert.core.config import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", None)
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", None)
@@ -82,9 +83,9 @@ def test_dispatch_price_alerts_uses_manager(monkeypatch):
             sent.append((db, user, subject, msg, alert_rule_id))
 
     dummy_user = SimpleNamespace(id="u1")
-    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: dummy_user)
-    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [])
+    monkeypatch.setattr("market_alert.notifications.manager.get_user_by_id", lambda db, uid: dummy_user)
+    monkeypatch.setattr("market_alert.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("market_alert.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [])
 
     monitored = SimpleNamespace(id="m1", user_id="u1", name_identification="Prod")
     alerts = [{"name": "Shop", "price": 10}, {"name": "Shop2", "price": 5 }]
@@ -101,9 +102,9 @@ def test_dispatch_price_alerts_skips_when_no_rules(monkeypatch):
             captured['message'] = renderer(monitored, alert)
 
     dummy_user = SimpleNamespace(id="u1")
-    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: dummy_user)
-    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [])
+    monkeypatch.setattr("market_alert.notifications.manager.get_user_by_id", lambda db, uid: dummy_user)
+    monkeypatch.setattr("market_alert.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("market_alert.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [])
 
     monitored = SimpleNamespace(id="m1", user_id="u1", name_identification="Prod")
     alert = {"name": "Shop", "price": 12.0, "old_price": 10.0, "change": 2.0, "type": "price_increase"}
@@ -128,10 +129,10 @@ def test_dispatch_price_alerts_filters_by_rules(monkeypatch):
         enabled=True
     )
 
-    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: user)
-    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [rule])
-    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("market_alert.notifications.manager.get_user_by_id", lambda db, uid: user)
+    monkeypatch.setattr("market_alert.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("market_alert.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [rule])
+    monkeypatch.setattr("market_alert.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alerts = [
@@ -160,10 +161,10 @@ def test_dispatch_price_alerts_skips_duplicates(monkeypatch):
         enabled=True
     )
 
-    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda db, uid: user)
-    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [rule])
-    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: True)
+    monkeypatch.setattr("market_alert.notifications.manager.get_user_by_id", lambda db, uid: user)
+    monkeypatch.setattr("market_alert.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("market_alert.notifications.manager.get_alert_rules_or_default", lambda db, user_id, mid: [rule])
+    monkeypatch.setattr("market_alert.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: True)
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alert = {"name": "A", "price": 5}
@@ -188,12 +189,12 @@ def test_dispatch_price_alerts_respects_user_setting(monkeypatch):
         enabled=True
     )
 
-    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda *a, **k: user)
-    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
-    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("market_alert.notifications.manager.get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr("market_alert.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("market_alert.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
+    monkeypatch.setattr("market_alert.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
     counter = DummyCounter()
-    monkeypatch.setattr("alert_app.notifications.manager.metrics.NOTIFICATIONS_SKIPPED_TOTAL", counter)
+    monkeypatch.setattr("market_alert.notifications.manager.metrics.NOTIFICATIONS_SKIPPED_TOTAL", counter)
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alert = {"name": "A", "price": 5}
@@ -221,11 +222,11 @@ def test_dispatch_price_alerts_respects_cooldown(monkeypatch):
         last_notified_at=now
     )
 
-    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda *a, **k: user)
-    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
-    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
-    monkeypatch.setattr("alert_app.notifications.manager.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
+    monkeypatch.setattr("market_alert.notifications.manager.get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr("market_alert.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("market_alert.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
+    monkeypatch.setattr("market_alert.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("market_alert.notifications.manager.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alert = {"name": "A", "price": 5}
@@ -253,14 +254,14 @@ def test_dispatch_price_alerts_updates_timestamp(monkeypatch):
     )
     updated = {}
 
-    monkeypatch.setattr("alert_app.notifications.manager.get_user_by_id", lambda *a, **k: user)
-    monkeypatch.setattr("alert_app.notifications.manager.get_notification_manager", lambda: DummyManager())
-    monkeypatch.setattr("alert_app.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
-    monkeypatch.setattr("alert_app.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
-    monkeypatch.setattr("alert_app.notifications.manager.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
+    monkeypatch.setattr("market_alert.notifications.manager.get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr("market_alert.notifications.manager.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("market_alert.notifications.manager.get_alert_rules_or_default", lambda *a, **k: [rule])
+    monkeypatch.setattr("market_alert.notifications.manager.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("market_alert.notifications.manager.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
     def fake_update(db, rid, when):
         updated["time"] = when
-    monkeypatch.setattr("alert_app.notifications.manager.update_last_notified", fake_update)
+    monkeypatch.setattr("market_alert.notifications.manager.update_last_notified", fake_update)
 
     mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
     alert = {"name": "A", "price": 5}
@@ -271,7 +272,7 @@ def test_dispatch_price_alerts_updates_timestamp(monkeypatch):
     assert "time" in updated and isinstance(updated["time"], datetime)
 
 def test_slack_channel_posts_message(monkeypatch):
-    from alert_app.notifications.channels.slack import SlackChannel
+    from market_alert.notifications.channels.slack import SlackChannel
 
     posted = {}
 
@@ -292,7 +293,7 @@ def test_slack_channel_posts_message(monkeypatch):
 
             return Resp(status_code=200)
 
-    monkeypatch.setattr("alert_app.notifications.channels.slack.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("market_alert.notifications.channels.slack.httpx.AsyncClient", DummyClient)
 
     channel = SlackChannel("http://hook")
     channel.send(SimpleNamespace(id="u1"), "Subject", "Message")
@@ -302,8 +303,8 @@ def test_slack_channel_posts_message(monkeypatch):
     assert posted["timeout"] == 5
 
 def test_slack_channel_handles_http_error(monkeypatch):
-    from alert_app.notifications.channels import slack as slack_mod
-    from alert_app.notifications.channels.slack import SlackChannel
+    from market_alert.notifications.channels import slack as slack_mod
+    from market_alert.notifications.channels.slack import SlackChannel
 
     dummy = DummyLogger()
     monkeypatch.setattr(slack_mod, "logger", dummy)
@@ -334,9 +335,9 @@ def test_slack_channel_handles_http_error(monkeypatch):
     assert dummy.called
 
 def test_push_channel_handles_http_error(monkeypatch):
-    from alert_app.notifications.channels import push as push_mod
-    from alert_app.notifications.channels.push import PushChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import push as push_mod
+    from market_alert.notifications.channels.push import PushChannel
+    from market_alert.core.config import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(push_mod, "logger", dummy)
@@ -368,8 +369,8 @@ def test_push_channel_handles_http_error(monkeypatch):
     assert dummy.called
 
 def test_get_notification_manager_includes_slack(monkeypatch):
-    from alert_app.notifications.manager import get_notification_manager
-    from alert_app.core.config import settings
+    from market_alert.notifications.manager import get_notification_manager
+    from market_alert.core.config import settings
 
     monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "http://hook")
 
@@ -384,9 +385,9 @@ def test_get_notification_manager_includes_slack(monkeypatch):
     assert "SlackChannel" in names
 
 def test_sms_channel_missing_phone_increments_counter(monkeypatch):
-    from alert_app.notifications.channels import sms as sms_mod
-    from alert_app.notifications.channels.sms import SMSChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import sms as sms_mod
+    from market_alert.notifications.channels.sms import SMSChannel
+    from market_alert.core.config import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "sid")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "token")
@@ -409,9 +410,9 @@ def test_sms_channel_missing_phone_increments_counter(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "phone_missing"
 
 def test_whatsapp_channel_missing_number_increments_counter(monkeypatch):
-    from alert_app.notifications.channels import whatsapp as wa_mod
-    from alert_app.notifications.channels.whatsapp import WhatsAppChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import whatsapp as wa_mod
+    from market_alert.notifications.channels.whatsapp import WhatsAppChannel
+    from market_alert.core.config import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "sid")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "token")
@@ -434,9 +435,9 @@ def test_whatsapp_channel_missing_number_increments_counter(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "phone_missing"
 
 def test_push_channel_missing_token_increments_counter(monkeypatch):
-    from alert_app.notifications.channels import push as push_mod
-    from alert_app.notifications.channels.push import PushChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import push as push_mod
+    from market_alert.notifications.channels.push import PushChannel
+    from market_alert.core.config import settings
 
     monkeypatch.setattr(settings, "FCM_SERVER_KEY", "key")
     counter = DummyCounter()
@@ -448,9 +449,9 @@ def test_push_channel_missing_token_increments_counter(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "push_token_missing"
 
 def test_slack_channel_missing_webhook_increments_counter(monkeypatch):
-    from alert_app.notifications.channels import slack as slack_mod
-    from alert_app.notifications.channels.slack import SlackChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import slack as slack_mod
+    from market_alert.notifications.channels.slack import SlackChannel
+    from market_alert.core.config import settings
 
     counter = DummyCounter()
     monkeypatch.setattr(slack_mod.metrics, "NOTIFICATIONS_SKIPPED_TOTAL", counter)
@@ -461,9 +462,9 @@ def test_slack_channel_missing_webhook_increments_counter(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "slack_webhook_missing"
 
 def test_email_channel_missing_provider_skips(monkeypatch):
-    from alert_app.notifications.channels import email as email_mod
-    from alert_app.notifications.channels.email import EmailChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import email as email_mod
+    from market_alert.notifications.channels.email import EmailChannel
+    from market_alert.core.config import settings
 
     called = {}
     def dummy_smtp(*a, **k):
@@ -493,9 +494,9 @@ def test_email_channel_missing_provider_skips(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "smtp_not_configured"
 
 def test_sms_channel_missing_provider_skips(monkeypatch):
-    from alert_app.notifications.channels import sms as sms_mod
-    from alert_app.notifications.channels.sms import SMSChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import sms as sms_mod
+    from market_alert.notifications.channels.sms import SMSChannel
+    from market_alert.core.config import settings
 
     called = {}
     def dummy_http_client(*a, **k):
@@ -521,9 +522,9 @@ def test_sms_channel_missing_provider_skips(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "twilio_not_configured"
 
 def test_whatsapp_channel_missing_provider_skips(monkeypatch):
-    from alert_app.notifications.channels import whatsapp as wa_mod
-    from alert_app.notifications.channels.whatsapp import WhatsAppChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import whatsapp as wa_mod
+    from market_alert.notifications.channels.whatsapp import WhatsAppChannel
+    from market_alert.core.config import settings
 
     called = {}
     def dummy_http_client(*a, **k):
@@ -549,9 +550,9 @@ def test_whatsapp_channel_missing_provider_skips(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "twilio_not_configured"
 
 def test_push_channel_missing_provider_skips(monkeypatch):
-    from alert_app.notifications.channels import push as push_mod
-    from alert_app.notifications.channels.push import PushChannel
-    from alert_app.core.config import settings
+    from market_alert.notifications.channels import push as push_mod
+    from market_alert.notifications.channels.push import PushChannel
+    from market_alert.core.config import settings
 
     called = {}
     def dummy_client(*a, **k):

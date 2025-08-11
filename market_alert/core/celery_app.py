@@ -1,7 +1,7 @@
 """ Configuração da aplicação Celery e registro de métricas """
 
 #Registra métricas antes de iniciar o HTTP server
-import alert_app.metrics as metrics_module
+import market_alert.metrics as metrics_module
 import os
 
 from kombu import Exchange, Queue
@@ -15,7 +15,7 @@ try:
 except Exception:
     CeleryInstrumentor = None
 
-from alert_app.core.config import settings
+from market_alert.core.config import settings
 
 
 #Cria a aplicação Celery
@@ -24,11 +24,11 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=[
-        "alert_app.tasks.scraper_tasks",
-        "alert_app.tasks.monitor_tasks",
-        "alert_app.tasks.metrics_tasks",
-        "alert_app.tasks.compare_prices_tasks",
-        "alert_app.tasks.alert_tasks"
+        "market_alert.tasks.scraper_tasks",
+        "market_alert.tasks.monitor_tasks",
+        "market_alert.tasks.metrics_tasks",
+        "market_alert.tasks.compare_prices_tasks",
+        "market_alert.tasks.alert_tasks"
     ]
 )
 
@@ -90,18 +90,18 @@ celery_app.conf.task_queues = (
 #Mantém cada tipo de tarefa em sua fila
 celery_app.conf.task_routes = {
     #Todas as scraping tasks vão para fila "scraping"
-    "alert_app.tasks.scraper_tasks.collect_product_task": {
+    "market_alert.tasks.scraper_tasks.collect_product_task": {
         "queue": "scraping", "routing_key": "scraping"
     },
-    "alert_app.tasks.scraper_tasks.collect_competitor_task": {
+    "market_alert.tasks.scraper_tasks.collect_competitor_task": {
         "queue": "scraping", "routing_key": "scraping"
     },
 
     #Monitor tasks vão para fila "monitor"
-    "alert_app.tasks.monitor_tasks.recheck_monitored_products": {
+    "market_alert.tasks.monitor_tasks.recheck_monitored_products": {
         "queue": "monitor", "routing_key": "monitor"
     },
-    "alert_app.tasks.monitor_tasks.recheck_competitor_products": {
+    "market_alert.tasks.monitor_tasks.recheck_competitor_products": {
         "queue": "monitor", "routing_key": "monitor"
     }
 }
@@ -111,37 +111,37 @@ celery_app.conf.task_routes = {
 celery_app.conf.beat_schedule = {
     #Coleta métricas de celery: a cada 1 minuto
     "collect-celery-metrics-every-1min": {
-        "task": "alert_app.tasks.metrics_tasks.collect_celery_metrics",
+        "task": "market_alert.tasks.metrics_tasks.collect_celery_metrics",
         "schedule": crontab(minute="*/1"),
         "options": {"queue": "monitor", "routing_key": "monitor"}
     },
     #Coleta métricas de auditoria: a cada 1 minuto
     "collect-audit-metrics-every-1min": {
-        "task": "alert_app.tasks.metrics_tasks.collect_audit_metrics",
+        "task": "market_alert.tasks.metrics_tasks.collect_audit_metrics",
         "schedule": crontab(minute="*/1"),
         "options": {"queue": "monitor", "routing_key": "monitor"}
     },
     #Coleta métricas de banco: a cada 1 minuto
     "collect-db-metrics-every-1min":{
-        "task": "alert_app.tasks.metrics_tasks.collect_db_metrics",
+        "task": "market_alert.tasks.metrics_tasks.collect_db_metrics",
         "schedule": crontab(minute="*/1"),
         "options": {"queue": "monitor", "routing_key": "monitor"}
     },
     #Rechecagem de todos os produtos scraping: a cada 5 minutos
     "recheck-scraping-every-5min": {
-        "task": "alert_app.tasks.monitor_tasks.recheck_monitored_products",
+        "task": "market_alert.tasks.monitor_tasks.recheck_monitored_products",
         "schedule": crontab(minute="*/5"),
         "options": {"queue": "monitor", "routing_key": "monitor"}
     },
     #Rechecagem de todos os produtos concorrentes scraping: a cada 8 minutos
     "recheck-all-competitors-every-8min": {
-        "task": "alert_app.tasks.monitor_tasks.recheck_competitor_products",
+        "task": "market_alert.tasks.monitor_tasks.recheck_competitor_products",
         "schedule": crontab(minute="*/8"),
         "options": {"queue": "monitor", "routing_key": "monitor"}
     },
     #Limpeza diária do cache de scraping
     "cleanup-cache-daily": {
-        "task": "alert_app.tasks.metrics_tasks.cleanup_cache",
+        "task": "market_alert.tasks.metrics_tasks.cleanup_cache",
         "schedule": crontab(hour=3, minute=0),
         "options": {"queue": "monitor", "routing_key": "monitor"}
     },

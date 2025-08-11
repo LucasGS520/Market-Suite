@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
-from alert_app.core import bruteforce
-from alert_app.core.config import settings
+from market_alert.core import bruteforce
+from market_alert.core.config import settings
 
 
 class FakeRedis:

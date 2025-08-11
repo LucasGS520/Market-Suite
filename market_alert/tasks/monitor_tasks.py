@@ -11,16 +11,16 @@ import os
 
 import structlog
 
-from alert_app.core.config import settings
-from alert_app.core.celery_app import celery_app
+from market_alert.core.config import settings
+from market_alert.core.celery_app import celery_app
 from infra.db import SessionLocal
 from utils.redis_client import get_redis_client, is_scraping_suspended
 
-from alert_app.enums.enums_products import MonitoringType
-from alert_app.crud.crud_monitored import get_products_by_type
-from alert_app.crud.crud_competitor import get_all_competitor_products
-from alert_app.tasks.compare_prices_tasks import compare_prices_task
-from alert_app.metrics import SCRAPING_LATENCY_SECONDS
+from market_alert.enums.enums_products import MonitoringType
+from market_alert.crud.crud_monitored import get_products_by_type
+from market_alert.crud.crud_competitor import get_all_competitor_products
+from market_alert.tasks.compare_prices_tasks import compare_prices_task
+from market_alert.metrics import SCRAPING_LATENCY_SECONDS
 from utils.scraper_client import ScraperClient, ScraperClientError
 
 
@@ -35,7 +35,7 @@ BATCH_SIZE_COMPETITOR = int(os.getenv("BATCH_SIZE_COMPETITOR", "20"))
 #Intervalo base usado para reagendamentos automáticos adaptativos
 ADAPTIVE_RECHECK_BASE_INTERVAL = settings.ADAPTIVE_RECHECK_BASE_INTERVAL
 
-@celery_app.task(name="alert_app.tasks.monitor_tasks.recheck_monitored_products")
+@celery_app.task(name="market_alert.tasks.monitor_tasks.recheck_monitored_products")
 def recheck_monitored_products() -> None:
     """ Rechecagem periódica de produtos monitorados via scraping """
     start = time.time()
@@ -89,7 +89,7 @@ def recheck_monitored_products() -> None:
             duration = time.time() - start
             SCRAPING_LATENCY_SECONDS.labels(source="monitor_scraper").observe(duration)
 
-@celery_app.task(name="alert_app.tasks.monitor_tasks.recheck_competitor_products")
+@celery_app.task(name="market_alert.tasks.monitor_tasks.recheck_competitor_products")
 def recheck_competitor_products():
     """ Rechecagem periódica de produtos concorrentes e comparação de preços """
     start = time.time()

@@ -6,21 +6,21 @@ from celery import shared_task, signals
 from celery.app.control import Inspect
 
 from utils.redis_client import get_redis_client
-from alert_app.core.celery_app import celery_app
+from market_alert.core.celery_app import celery_app
 from infra.db import get_engine
-from alert_app.metrics import (
+from market_alert.metrics import (
     CELERY_QUEUE_LENGTH, CELERY_WORKERS_TOTAL,
     CELERY_WORKER_CONCURRENCY, CELERY_TASK_DURATION_SECONDS,
     REDIS_QUEUE_MESSAGES, REDIS_MEMORY_USAGE_BYTES,
     DB_POOL_SIZE, DB_POOL_CHECKOUTS
 )
-from alert_app.services.services_cache_scraper import cache_manager
+from market_alert.services.services_cache_scraper import cache_manager
 
 
 logger = structlog.get_logger("metrics_tasks")
 redis_client = get_redis_client()
 
-@shared_task(name="alert_app.tasks.metrics_tasks.collect_celery_metrics")
+@shared_task(name="market_alert.tasks.metrics_tasks.collect_celery_metrics")
 def collect_celery_metrics():
     """ Task periódica que inspeciona filas e workers do celery (Redis) """
     try:
@@ -81,12 +81,12 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
         #Registra no histograma
         CELERY_TASK_DURATION_SECONDS.labels(task_name=task.name).observe(duration)
 
-@shared_task(name="alert_app.tasks.metrics_tasks.collect_audit_metrics")
+@shared_task(name="market_alert.tasks.metrics_tasks.collect_audit_metrics")
 def collect_audit_metrics():
     """ Task periódica de auditoria """
     logger.info("collect_audit_metrics_noop")
 
-@shared_task(name="alert_app.tasks.metrics_tasks.collect_db_metrics")
+@shared_task(name="market_alert.tasks.metrics_tasks.collect_db_metrics")
 def collect_db_metrics():
     """ Coleta periódica de métricas do pool de banco """
     try:
@@ -96,7 +96,7 @@ def collect_db_metrics():
     except Exception as exc:
         logger.error("failed_collecting_db_metrics", error=str(exc))
 
-@shared_task(name="alert_app.tasks.metrics_tasks.cleanup_cache")
+@shared_task(name="market_alert.tasks.metrics_tasks.cleanup_cache")
 def cleanup_cache() -> int:
     """ Remove entradas antigas do cache de scraping """
     try:

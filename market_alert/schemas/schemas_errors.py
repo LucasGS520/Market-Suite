@@ -3,7 +3,7 @@
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
-from alert_app.enums.enums_error_codes import ScrapingErrorType
+from market_alert.enums.enums_error_codes import ScrapingErrorType
 
 
 class ScrapingErrorResponse(BaseModel):

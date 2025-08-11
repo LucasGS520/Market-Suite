@@ -6,7 +6,7 @@ from datetime import datetime
 from pydantic import BaseModel, HttpUrl, Field, ConfigDict
 from decimal import Decimal
 
-from alert_app.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
+from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
 
 
 # ---------- MONITORED PRODUCT ----------

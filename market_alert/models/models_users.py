@@ -7,8 +7,8 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID #UUID e uuid.uuid4 ge
 from sqlalchemy.orm import relationship
 
 from infra.db import Base
-from alert_app.core.password import hash_password, verify_password
-from alert_app.models.models_refresh_token import RefreshToken
+from market_alert.core.password import hash_password, verify_password
+from market_alert.models.models_refresh_token import RefreshToken
 
 
 class User(Base):

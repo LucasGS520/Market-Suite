@@ -6,12 +6,12 @@ import sys
 import types
 from fastapi import FastAPI, APIRouter
 
-sys.modules.setdefault("alert_app.utils.logging_utils", types.SimpleNamespace(mask_identifier=lambda x: x))
-sys.modules.setdefault("alert_app.utils.comparator", types.SimpleNamespace(compare_prices=lambda *a, **k: None))
-sys.modules.setdefault("alert_app.routes.auth", types.ModuleType("alert_app.routes.auth"))
+sys.modules.setdefault("market_alert.utils.logging_utils", types.SimpleNamespace(mask_identifier=lambda x: x))
+sys.modules.setdefault("market_alert.utils.comparator", types.SimpleNamespace(compare_prices=lambda *a, **k: None))
+sys.modules.setdefault("market_alert.routes.auth", types.ModuleType("market_alert.routes.auth"))
 for _name in ["routes_login", "routes_verify", "routes_reset_password", "routes_profile", "routes_refresh", "routes_logout"]:
-    sys.modules.setdefault(f"alert_app.routes.auth.{_name}", types.SimpleNamespace(router=APIRouter()))
-sys.modules.setdefault("alert_app.utils.audit_exporter", types.SimpleNamespace(app=FastAPI()))
+    sys.modules.setdefault(f"market_alert.routes.auth.{_name}", types.SimpleNamespace(router=APIRouter()))
+sys.modules.setdefault("market_alert.utils.audit_exporter", types.SimpleNamespace(app=FastAPI()))
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -22,13 +22,13 @@ from uuid import uuid4
 from infra.db import Base
 from infra.db import get_db
 
-from main import app as alert_app
-from alert_app.core.security import get_current_user
-from alert_app.core.password import hash_password
-from alert_app.models.models_users import User
+from main import app as market_alert
+from market_alert.core.security import get_current_user
+from market_alert.core.password import hash_password
+from market_alert.models.models_users import User
 
-from alert_app.utils import rate_limiter as rate_limiter_module
-from alert_app.tasks import scraper_tasks
+from market_alert.utils import rate_limiter as rate_limiter_module
+from market_alert.tasks import scraper_tasks
 
 #Utiliza banco SQLite em memória para testes
 db_url = "sqlite:///:memory:"
@@ -80,26 +80,26 @@ def patch_rate_limiter_and_redis(monkeypatch):
     fake_redis = FakeRedis()
     cache = DummyCacheManager()
 
-    monkeypatch.setattr("alert_app.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("alert_app.utils.redis_client._redis_client", fake_redis)
+    monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("market_alert.utils.redis_client._redis_client", fake_redis)
     #Usa raising False pois esses atributos podem não existir nos módulos
-    monkeypatch.setattr("alert_app.services.services_scraper_monitored.redis_client", fake_redis, raising=False)
-    monkeypatch.setattr("alert_app.services.services_scraper_competitor.redis_client", fake_redis, raising=False)
-    monkeypatch.setattr("alert_app.services.services_scraper_common.redis_client", fake_redis)
+    monkeypatch.setattr("market_alert.services.services_scraper_monitored.redis_client", fake_redis, raising=False)
+    monkeypatch.setattr("market_alert.services.services_scraper_competitor.redis_client", fake_redis, raising=False)
+    monkeypatch.setattr("market_alert.services.services_scraper_common.redis_client", fake_redis)
     monkeypatch.setattr(scraper_tasks, "redis_client", fake_redis)
-    monkeypatch.setattr("alert_app.services.services_cache_scraper.cache_manager", cache)
+    monkeypatch.setattr("market_alert.services.services_cache_scraper.cache_manager", cache)
 
     #Substitui o RateLimiter em todos os módulos
     monkeypatch.setattr(rate_limiter_module, "RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("alert_app.services.services_scraper_monitored.RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("alert_app.services.services_scraper_competitor.RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("alert_app.services.services_scraper_common.RateLimiter", MockRateLimiter)
+    monkeypatch.setattr("market_alert.services.services_scraper_monitored.RateLimiter", MockRateLimiter)
+    monkeypatch.setattr("market_alert.services.services_scraper_competitor.RateLimiter", MockRateLimiter)
+    monkeypatch.setattr("market_alert.services.services_scraper_common.RateLimiter", MockRateLimiter)
     monkeypatch.setattr(scraper_tasks, "RateLimiter", MockRateLimiter)
 
     #Substitui CircuitBreaker nos serviços e tasks
-    monkeypatch.setattr("alert_app.services.services_scraper_monitored.CircuitBreaker", lambda: MockCircuitBreaker())
-    monkeypatch.setattr("alert_app.services.services_scraper_competitor.CircuitBreaker", lambda: MockCircuitBreaker())
-    monkeypatch.setattr("alert_app.services.services_scraper_common.CircuitBreaker", lambda: MockCircuitBreaker())
+    monkeypatch.setattr("market_alert.services.services_scraper_monitored.CircuitBreaker", lambda: MockCircuitBreaker())
+    monkeypatch.setattr("market_alert.services.services_scraper_competitor.CircuitBreaker", lambda: MockCircuitBreaker())
+    monkeypatch.setattr("market_alert.services.services_scraper_common.CircuitBreaker", lambda: MockCircuitBreaker())
     monkeypatch.setattr(scraper_tasks, "circuit_breaker", MockCircuitBreaker())
 
 @pytest.fixture(scope="session")

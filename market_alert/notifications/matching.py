@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from alert_app.enums.enums_alerts import AlertType
-from alert_app.enums.enums_products import ProductStatus
+from market_alert.enums.enums_alerts import AlertType
+from market_alert.enums.enums_products import ProductStatus
 
 
 def alert_matches_rule(alert: dict, rule) -> bool:

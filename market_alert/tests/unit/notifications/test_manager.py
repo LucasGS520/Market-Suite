@@ -1,10 +1,11 @@
 from types import SimpleNamespace
 
-from alert_app.notifications.manager import NotificationManager, dispatch_price_alerts
-from alert_app.notifications.channels.base import NotificationChannel
-from alert_app.notifications.channels.email import EmailChannel
-from alert_app.enums.enums_alerts import ChannelType
-from alert_app.enums.enums_alerts import AlertType
+from market_alert.notifications.manager import NotificationManager
+from market_alert.services.services_notifications import dispatch_price_alerts
+from market_alert.notifications.channels.base import NotificationChannel
+from market_alert.notifications.channels.email import EmailChannel
+from market_alert.enums.enums_alerts import ChannelType
+from market_alert.enums.enums_alerts import AlertType
 
 class DummyChannel(NotificationChannel):
     def __init__(self, fail: bool = False):
@@ -25,7 +26,7 @@ def test_alert_manager_dispatches_to_all_channels(monkeypatch):
 
     logs = []
     monkeypatch.setattr(
-        "alert_app.notifications.manager.create_notification_log",
+        "market_alert.notifications.manager.create_notification_log",
         lambda db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None: logs.append((channel, success, alert_rule_id))
     )
 
@@ -48,8 +49,8 @@ def test_alert_manager_uses_asyncio_gather(monkeypatch):
         return [await t for t in tasks]
 
     called = {}
-    monkeypatch.setattr("alert_app.notifications.manager.asyncio.gather", fake_gather)
-    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.notifications.manager.asyncio.gather", fake_gather)
+    monkeypatch.setattr("market_alert.notifications.manager.create_notification_log", lambda *a, **k: None)
 
     manager.send(None, user, "s", "m")
 
@@ -67,7 +68,7 @@ def test_alert_manager_logs_errors(monkeypatch):
         recorded["rule"] = alert_rule_id
 
     monkeypatch.setattr(
-        "alert_app.notifications.manager.create_notification_log",
+        "market_alert.notifications.manager.create_notification_log",
         fake_create
     )
 
@@ -96,8 +97,8 @@ class DummyCounter:
         self.calls.append(self.kw)
 
 def test_get_notification_manager_logs_missing_settings(monkeypatch):
-    from alert_app.notifications import manager as manager_mod
-    from alert_app.core.config import settings
+    from market_alert.notifications import manager as manager_mod
+    from market_alert.core.config import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(manager_mod, "logger", dummy)
@@ -119,8 +120,8 @@ def test_get_notification_manager_logs_missing_settings(monkeypatch):
     assert len(counter.calls) == 5
 
 def test_get_notification_manager_no_logs_when_configured(monkeypatch):
-    from alert_app.notifications import manager as manager_mod
-    from alert_app.core.config import settings
+    from market_alert.notifications import manager as manager_mod
+    from market_alert.core.config import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(manager_mod, "logger", dummy)
@@ -139,10 +140,10 @@ def test_get_notification_manager_no_logs_when_configured(monkeypatch):
         def __init__(self, *a, **k):
             pass
 
-    monkeypatch.setattr("alert_app.notifications.channels.sms.AsyncTwilioHttpClient", lambda *a, **k: None)
-    monkeypatch.setattr("alert_app.notifications.channels.sms.Client", DummyClient)
-    monkeypatch.setattr("alert_app.notifications.channels.whatsapp.AsyncTwilioHttpClient", lambda *a, **k: None)
-    monkeypatch.setattr("alert_app.notifications.channels.whatsapp.Client", DummyClient)
+    monkeypatch.setattr("market_alert.notifications.channels.sms.AsyncTwilioHttpClient", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.notifications.channels.sms.Client", DummyClient)
+    monkeypatch.setattr("market_alert.notifications.channels.whatsapp.AsyncTwilioHttpClient", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.notifications.channels.whatsapp.Client", DummyClient)
 
     manager_mod.get_notification_manager()
 
@@ -150,7 +151,7 @@ def test_get_notification_manager_no_logs_when_configured(monkeypatch):
     assert counter.calls == []
 
 def test_dispatch_price_alerts_handles_rule_without_id(monkeypatch):
-    from alert_app.notifications import manager as manager_mod
+    from market_alert.notifications import manager as manager_mod
 
     logs = []
 
@@ -168,11 +169,13 @@ def test_dispatch_price_alerts_handles_rule_without_id(monkeypatch):
         enabled=True
     )
 
-    monkeypatch.setattr(manager_mod, "get_user_by_id", lambda *a, **k: user)
-    monkeypatch.setattr(manager_mod, "get_notification_manager", lambda: NotificationManager([DummyChannel()]))
+    from market_alert.services import services_notifications as services_mod
+
+    monkeypatch.setattr(services_mod, "get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr(services_mod, "get_notification_manager", lambda: NotificationManager([DummyChannel()]))
     monkeypatch.setattr(manager_mod, "create_notification_log", lambda db, user_id, channel, subject, message,
                         alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None: logs.append(alert_rule_id))
-    monkeypatch.setattr(manager_mod, "update_last_notified", lambda *a, **k: None)
+    monkeypatch.setattr(services_mod, "update_last_notified", lambda *a, **k: None)
 
     dispatch_price_alerts(None, mp, [{"name": "A", "price": 5}])
 
@@ -194,7 +197,7 @@ def test_send_rendered_renders_per_channel(monkeypatch):
     def fake_log(db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None):
         logs.append(channel)
 
-    monkeypatch.setattr("alert_app.notifications.manager.create_notification_log", fake_log)
+    monkeypatch.setattr("market_alert.notifications.manager.create_notification_log", fake_log)
 
     manager = NotificationManager([email, dummy])
     user = SimpleNamespace(id="u1", email="ex@example.com")

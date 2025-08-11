@@ -12,7 +12,7 @@ from typing import Any, Dict
 
 import requests
 
-from alert_app.core.config import settings
+from market_alert.core.config import settings
 
 
 class ScraperClientError(Exception):

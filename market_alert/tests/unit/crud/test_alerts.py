@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from datetime import datetime
 
-from alert_app.crud import crud_alert_rules as crud_alerts
-from alert_app.enums.enums_products import ProductStatus
+from market_alert.crud import crud_alert_rules as crud_alerts
+from market_alert.enums.enums_products import ProductStatus
 
 
 def test_update_alert_rule_success(monkeypatch):

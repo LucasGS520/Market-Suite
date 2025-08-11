@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from infra.db import get_db
-from alert_app.core.security import get_current_user
-from alert_app.crud.crud_errors import get_recent_scraping_errors, get_scraping_errors_for_product
-from alert_app.schemas.schemas_errors import ScrapingErrorResponse
+from market_alert.core.security import get_current_user
+from market_alert.crud.crud_errors import get_recent_scraping_errors, get_scraping_errors_for_product
+from market_alert.schemas.schemas_errors import ScrapingErrorResponse
 
 
 router = APIRouter(prefix="/monitoring_errors", tags=["Monitorar erros de Scraping"])
