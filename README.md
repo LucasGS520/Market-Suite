@@ -93,8 +93,9 @@ Nos containers Docker essa etapa já está contemplada no **Dockerfile**.
 
 
 ## Variáveis de Ambiente
-Crie um arquivo `.env` na raiz seguindo o modelo abaixo. Ele será lido pelo `market_alert/core/config.py` durante a inicialização e define todos os parâmetros da aplicação:
-````env
+No sistema possui 3 tipos de arquivo ``.env``, para cada módulo crie um arquivo `.env.common`, `.env.market_alert`, `.env.market_scraper` seguindo os modelos abaixo:
+1. Esse é o arquivo ``.env.common`` localizado na raiz do projeto (`market_suite`) e é utilizado para configurações compartilhadas entre os serviços
+```env
 POSTGRES_USER=usuario
 POSTGRES_PASSWORD=senha
 POSTGRES_DB=banco_de_dados
@@ -131,7 +132,75 @@ LOCUST_HOST=http://host:0000
 LOCUST_LOGIN_EMAIL=email_do_usuario@exemplo.com
 LOCUST_LOGIN_PASSWORD=senha_do_usuario_exemplo
 
-````
+```
+
+2. Esse o arquivo ``.env.market_alert`` está localizado no diretório `market_alert`, com variáveis exclusivas do serviço **MarketAlert**
+```env
+POSTGRES_USER=usuario
+POSTGRES_PASSWORD=senha
+POSTGRES_DB=banco_de_dados
+DATABASE_URL=postgresql+psycopg2://usuario:senha@db:5432/banco_de_dados
+
+REDIS_PASSWORD=senha
+
+GF_SECURITY_ADMIN_USER=usuario_grafana
+GF_SECURITY_ADMIN_PASSWORD=senha_para_grafana
+GF_USERS_ALLOW_SIGN_UP=false
+GF_PATHS_PROVISIONING=caminho_do_grafana
+
+SLACK_WEBHOOK_URL=https://sua_url
+
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=usuario
+SMTP_PASSWORD=senha
+SMTP_TLS=1
+SMTP_FROM=alertas@example.com
+
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxx
+TWILIO_SMS_FROM=+5511999999999
+TWILIO_WHATSAPP_FROM=+5511999999999
+
+FCM_SERVER_KEY=AAAxxxxxxxxxxxxxxxxxxxx:APA91bG...
+
+ADAPTIVE_RECHECK_BASE_INTERVAL=7200
+
+SECRET_KEY=sua_chave_secreta
+
+LOCUST_HOST=http://host:0000
+LOCUST_LOGIN_EMAIL=email_do_usuario@exemplo.com
+LOCUST_LOGIN_PASSWORD=senha_do_usuario_exemplo
+
+SCRAPER_SERVICE_URL=http://url_serviço_de_scraping
+
+```
+
+3. Esse ``.env.market_scraper`` está no localizado no diretório `market_scraper` com variáveis exclusivas utilizado no serviço de scraping **MarketScraper**
+```env
+CACHE_BASE_TTL=3600
+
+HUMAN_AVG_WPM=200
+HUMAN_BASE_DELAY=1.0
+HUMAN_FATIGUE_MIN=0.5
+HUMAN_FATIGUE_MAX=2.0
+
+THROTTLE_RATE=0.2
+THROTTLE_CAPACITY=3
+
+JITTER_MIN=2.0
+JITTER_MAX=7.0
+
+MONITORED_RATE_LIMIT=100
+COMPETITOR_SERVICE_RATE_LIMIT=200
+
+RATE_LIMIT_WINDOW=3600
+
+PLAYWRIGHT_HEADLESS=1
+PLAYWRIGHT_TIMEOUT=30000
+
+ADAPTIVE_RECHECK_BASE_INTERVAL=7200
+```
 
 ### Execução do Market Scraper
 Para iniciar apenas o serviço de scraping via Docker Compose:

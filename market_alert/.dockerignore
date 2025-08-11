@@ -6,6 +6,8 @@ tests/
 
 #Ignora arquivos de configuração de ambiente
 .env
+.env.*
+!.env.*.example
 infra/.env
 
 #Ignora ambientes virtuais
