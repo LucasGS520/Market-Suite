@@ -4,7 +4,9 @@ Este pacote reexporta utilitários compartilhados e expõe
 funções adicionais empregadas pelo serviço de alertas
 """
 
+#Importa todos os utilitários compartilhados para manter compatibilidade
 from shared.utils import *
+from shared.utils import mask_identifier
 import sys as _sys
 import shared.utils.rate_limiter as rate_limiter
 import shared.utils.circuit_breaker as circuit_breaker
@@ -16,3 +18,6 @@ _sys.modules.setdefault("market_alert.utils.rate_limiter", rate_limiter)
 _sys.modules.setdefault("market_alert.utils.circuit_breaker", circuit_breaker)
 _sys.modules.setdefault("market_alert.utils.redis_client", redis_client)
 _sys.modules.setdefault("market_alert.utils.ml_url", ml_url)
+
+#Define quais símbolos são exportados quando ``market_alert.utils`` é importado
+__all__ = ["mask_identifier", "rate_limiter", "circuit_breaker", "redis_client", "ml_url"]

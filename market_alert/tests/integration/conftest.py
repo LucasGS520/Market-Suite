@@ -6,7 +6,6 @@ import sys
 import types
 from fastapi import FastAPI, APIRouter
 
-sys.modules.setdefault("market_alert.utils.logging_utils", types.SimpleNamespace(mask_identifier=lambda x: x))
 sys.modules.setdefault("market_alert.utils.comparator", types.SimpleNamespace(compare_prices=lambda *a, **k: None))
 sys.modules.setdefault("market_alert.routes.auth", types.ModuleType("market_alert.routes.auth"))
 for _name in ["routes_login", "routes_verify", "routes_reset_password", "routes_profile", "routes_refresh", "routes_logout"]:
@@ -26,7 +25,6 @@ from main import app as market_alert
 from market_alert.core.security import get_current_user
 from market_alert.core.password import hash_password
 from market_alert.models.models_users import User
-
 from market_alert.utils import rate_limiter as rate_limiter_module
 from market_alert.tasks import scraper_tasks
 

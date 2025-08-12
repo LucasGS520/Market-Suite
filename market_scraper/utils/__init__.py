@@ -1,6 +1,7 @@
 """ Utilitários e helpers usados em toda a aplicação de scraping """
 
-from .logging_utils import mask_identifier
+#Reexporta ``mask_identifier`` do pacote compartilhado para retrocompatibilidade
+from shared.utils.logging_utils import mask_identifier
 from .playwright_client import PlaywrightClient, get_playwright_client
 from .block_recovery import recover_html_if_blocked
 

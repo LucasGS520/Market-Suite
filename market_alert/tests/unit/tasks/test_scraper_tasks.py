@@ -23,7 +23,6 @@ ms_utils = sys.modules["market_scraper.utils"]
 # Mapeia utilitários reais sob o namespace esperado pelos testes
 sys.modules.setdefault("market_alert.utils", types.ModuleType("market_alert.utils"))
 market_alert.utils = sys.modules["market_alert.utils"]
-sys.modules.setdefault("market_scraper.utils.logging_utils", types.SimpleNamespace(mask_identifier=lambda x: x))
 sys.modules.setdefault("market_scraper.utils.comparator", types.SimpleNamespace(compare_prices=lambda *a, **k: None))
 sys.modules.setdefault("market_alert.utils.redis_client", importlib.import_module("utils.redis_client"))
 sys.modules.setdefault("market_alert.utils.circuit_breaker", types.SimpleNamespace(get_redis_client=lambda: None))
@@ -38,15 +37,12 @@ sys.modules.setdefault(
 )
 sys.modules.setdefault("market_alert.utils.intelligent_cache", types.SimpleNamespace(get_redis_client=lambda: None))
 
-market_alert.utils.logging_utils = sys.modules["market_scraper.utils.logging_utils"]
 market_alert.utils.comparator = sys.modules["market_scraper.utils.comparator"]
-ms_utils.mask_identifier = lambda x: x
 market_alert.utils.redis_client = sys.modules["market_alert.utils.redis_client"]
 market_alert.utils.circuit_breaker = sys.modules["market_alert.utils.circuit_breaker"]
 market_alert.utils.robots_txt = sys.modules["market_alert.utils.robots_txt"]
 market_alert.utils.intelligent_cache = sys.modules["market_alert.utils.intelligent_cache"]
 
-sys.modules.setdefault("market_alert.utils.logging_utils", sys.modules["market_scraper.utils.logging_utils"])
 sys.modules.setdefault("market_alert.utils.comparator", sys.modules["market_scraper.utils.comparator"])
 
 from market_alert.tasks.scraper_tasks import collect_product_task, collect_competitor_task
