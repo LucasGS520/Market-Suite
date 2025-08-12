@@ -1,7 +1,9 @@
 import pytest
 import time
 
-from market_alert.utils.rate_limiter import RateLimiter
+#Usa RateLimiter da camada compartilhada
+from shared.utils.rate_limiter import RateLimiter
+import sys, types
 
 #FakeRedis universal para testes unitarios
 class FakeRedis:
@@ -70,15 +72,29 @@ def patch_rate_limiter(monkeypatch):
         self.lua_sha = "fake-sha"
 
     monkeypatch.setattr(RateLimiter, "__init__", fake_init)
-    monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("market_alert.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("shared.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(
         "market_scraper.utils.robots_txt.requests.get",
         lambda *a, **k: type("Resp", (), {"status_code": 200, "text": ""})()
     )
-    monkeypatch.setattr("market_alert.services.services_scraper_common.redis_client", fake_redis, raising=False)
-    monkeypatch.setattr("market_alert.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
+
+    class DummyCacheManager:
+        """ Cache fictício para evitar dependência de Redis """
+        def __init__(self, *a, **k):
+            pass
+
+        def get(self, *a, **k):
+            return None
+
+        def set(self, *a, **k):
+            pass
+
+        def _hash_content(self, *a, **k):
+            return ""
+
+    sys.modules.setdefault("market_scraper.utils.intelligent_cache", types.SimpleNamespace(IntelligentCacheManager=DummyCacheManager))
 
     class DummyCircuitBreaker:
         def allow_request(self, *a, **k):
@@ -89,8 +105,6 @@ def patch_rate_limiter(monkeypatch):
 
         def record_failure(self, *a, **k):
             pass
-
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.CircuitBreaker", lambda: DummyCircuitBreaker())
 
     return fake_redis
 

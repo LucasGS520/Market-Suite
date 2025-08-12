@@ -14,7 +14,8 @@ import time
 os.environ.setdefault("DATABASE_URL", "sqlite:///benchmark.db")
 os.environ.setdefault("SECRET_KEY", "benchmark-secret")
 
-from market_alert.utils.rate_limiter import RateLimiter
+#Utiliza implementação compartilhada de RateLimiter
+from shared.utils.rate_limiter import RateLimiter
 
 class FakeRedis:
     def __init__(self):
@@ -71,8 +72,7 @@ def patch_rate_limiter(monkeypatch):
         self.lua_sha = "fake-sha"
 
     monkeypatch.setattr(RateLimiter, "__init__", fake_init)
-    monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("market_scraper.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
     return fake_redis
 
 @pytest.fixture(autouse=True)

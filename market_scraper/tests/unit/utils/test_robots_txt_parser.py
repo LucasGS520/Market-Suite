@@ -16,7 +16,7 @@ def fake_redis(monkeypatch):
             self.store[key] = value
 
     redis = FakeRedis()
-    monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: redis)
+    monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: redis)
     return redis
 
 @pytest.fixture()
