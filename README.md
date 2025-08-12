@@ -26,11 +26,38 @@ O Celery Beat agenda execuções recorrentes. Dados e estados são armazenados n
 
 ## Serviços `market_alert` e `market_scraper`
 
-`market_alert` é a API principal do sistema. Ele recebe as requisições dos usuários, agenda as tarefas de scraping no Celery e persiste os dados dos produtos monitorados. Sempre que um scraping é solicitado, o serviço utiliza o cliente HTTP em `utils/scraper_client.py` para conversar com o `market_scraper`.
+`market_alert` é a API principal do sistema. Ele recebe as requisições dos usuários, agenda as tarefas no Celery e persiste os dados dos produtos monitorados. Sempre que um scraping é solicitado, e o serviço utiliza o cliente HTTP definido em `services/scraper_client.py` e configurado pela variável `SCRAPER_SERVICE_URL` para conversar com o `market_scraper`.
 
-`market_scraper` é um microserviço especializado apenas em coletar e analisar páginas. Ele expõe o endpoint `POST /scraper/parse` e devolve as informações extraídas do anúncio sem armazená-las.
+`market_scraper` é um microserviço dedicado exclusivamente a coletar e analisar páginas. Ele expõe o endpoint `POST/scraper/parse` e devolve as informações extraídas do anúncio sem realizar qualquer persistência.
 
 A comunicação entre os dois serviços ocorre via HTTP: o `market_alert` envia a URL do produto para o `market_scraper`, que responde com os dados já estruturados. Com isso, o `market_alert` consegue salvar as informações e acionar as comparações de preço.
+
+### Exemplo de comunicação ``market_alert`` -> `market_scraper`
+```http
+POST http://market_scraper:8001/scraper/parse
+Content-Type: application/json
+
+{
+  "url": "https://exemplo.com/produto",
+  "product_type": "monitored",
+  "user_id": "<UUID>
+}
+```
+
+Resposta típica:
+```json
+{
+  "name": "Produto Exemplo",
+  "current_price": 99.90,
+  "old_price": 120.0,
+  "thumbnail": "https://img.exemplo.com/123.jpg",
+  "free_shipping": true,
+  "seller": "Loja X",
+  "shipping": "Frete Grátis"
+}
+```
+
+O ``market_alert`` usa esses dados para persistir o produto e agendar comparação de preço.
 
 ### Exemplo de chamadas aos endpoints `/scrape`
 
