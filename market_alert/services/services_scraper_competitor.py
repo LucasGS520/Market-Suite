@@ -17,12 +17,9 @@ from sqlalchemy.orm import Session
 
 from shared.utils.circuit_breaker import CircuitBreaker
 from shared.utils.rate_limiter import RateLimiter
-from market_alert.services.scraper_client import ScraperClient
+from shared.schemas.products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 
-from market_alert.schemas.schemas_products import (
-    CompetitorProductCreateScraping,
-    CompetitorScrapedInfo,
-)
+from market_alert.services.scraper_client import ScraperClient
 from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
 
 

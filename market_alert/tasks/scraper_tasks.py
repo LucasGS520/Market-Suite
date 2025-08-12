@@ -14,21 +14,21 @@ from decimal import Decimal
 import structlog
 
 from infra.db import SessionLocal
-from utils.redis_client import get_redis_client, is_scraping_suspended
-from utils.scraper_client import ScraperClient, ScraperClientError
 
+from shared.utils.redis_client import get_redis_client, is_scraping_suspended
+from shared.utils.scraper_client import ScraperClient, ScraperClientError
 from shared.exceptions import ScraperError
+from shared.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
+from shared.schemas.products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 from market_alert.core.config import settings
 from market_alert.core.celery_app import celery_app
-
 from market_alert.crud import crud_errors
 from market_alert.crud.crud_monitored import create_or_update_monitored_product_scraped
 from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
-from market_alert.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from market_alert.enums.enums_error_codes import ScrapingErrorType
-from shared.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
+
 
 
 logger = structlog.get_logger("scraper_tasks")

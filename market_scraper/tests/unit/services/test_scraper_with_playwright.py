@@ -4,8 +4,9 @@ from uuid import uuid4
 from decimal import Decimal
 from sqlalchemy.orm import Session
 
+from shared.schemas.products import MonitoredProductCreateScraping
+
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
-from market_alert.schemas.schemas_products import MonitoredProductCreateScraping
 from market_scraper.utils.playwright_client import PlaywrightClient
 
 

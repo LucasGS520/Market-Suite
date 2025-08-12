@@ -7,11 +7,14 @@ from typing import List
 from uuid import UUID
 
 from infra.db import get_db
+
+from shared.utils.ml_url import canonicalize_ml_url, is_product_url
+from shared.schemas.products import MonitoredProductCreateScraping
+
 from market_alert.models import User
-from market_alert.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredProductResponse
+from market_alert.schemas.schemas_products import MonitoredProductResponse
 from market_alert.crud.crud_monitored import get_all_monitored_products, get_monitored_product_by_id, delete_monitored_product
 from market_alert.tasks.scraper_tasks import collect_product_task
-from utils.ml_url import canonicalize_ml_url, is_product_url
 from market_alert.core.security import get_current_user
 
 

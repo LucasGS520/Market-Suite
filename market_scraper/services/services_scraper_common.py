@@ -22,6 +22,14 @@ from shared.utils.circuit_breaker import CircuitBreaker
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended, suspend_scraping
 from shared.utils.rate_limiter import RateLimiter
 from shared.utils.ml_url import canonicalize_ml_url, is_product_url
+from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.metrics import (
+    SCRAPER_HTTP_BLOCKED_TOTAL,
+    SCRAPER_CAPTCHA_TOTAL,
+    SCRAPER_REQUESTS_TOTAL,
+    SCRAPER_RESPONSE_SIZE_BYTES,
+    SCRAPER_URL_STATUS_TOTAL,
+)
 
 from market_scraper.utils.constants import to_mobile_url, THROTTLE_RATE, THROTTLE_CAPACITY, JITTER_RANGE, PRODUCT_HOSTS
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
@@ -30,24 +38,15 @@ from market_scraper.utils.throttle_manager import ThrottleManager
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.block_detector import detect_block, BlockResult
 from market_scraper.utils.block_recovery import BlockRecoveryManager
-from market_scraper.utils.audit_logger import audit_scrape
 from market_scraper.utils.price import parse_price_str
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.cookie_manager import cookie_manager
 from market_scraper.utils.playwright_client import get_playwright_client
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 import market_scraper.services.services_parser as parser
 from market_scraper.services.services_parser import CaptchaDetectedError
 from market_scraper.services.services_cache_scraper import use_cache_if_not_modified, update_cache
-from shared.metrics import (
-    SCRAPER_HTTP_BLOCKED_TOTAL,
-    SCRAPER_CAPTCHA_TOTAL,
-    SCRAPER_REQUESTS_TOTAL,
-    SCRAPER_RESPONSE_SIZE_BYTES,
-    SCRAPER_URL_STATUS_TOTAL,
-)
-from market_alert.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 
 logger = structlog.get_logger("scraper_common")

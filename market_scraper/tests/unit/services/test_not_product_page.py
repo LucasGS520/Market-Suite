@@ -4,8 +4,9 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
+from shared.schemas.products import CompetitorProductCreateScraping
+
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
-from market_alert.schemas.schemas_products import CompetitorProductCreateScraping
 
 
 class DummyRedis:

@@ -13,7 +13,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, HttpUrl
 
-from market_alert.schemas import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+
 from market_scraper.services.services_scraper_common import _scrape_product_common
 from market_scraper.utils.price import parse_price_str, parse_optional_price_str
 
