@@ -1,10 +1,10 @@
-""" Rate limiter usando janela deslizante em Redis """
+""" Utilitários de limitação de taxa usando Redis e script Lua """
 
 import time
 import os
 from typing import Optional
 
-from utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_client
 
 
 def _load_lua_script(redis):

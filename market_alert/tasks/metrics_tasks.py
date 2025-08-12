@@ -5,7 +5,7 @@ import structlog
 from celery import shared_task, signals
 from celery.app.control import Inspect
 
-from utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_client
 from market_alert.core.celery_app import celery_app
 from infra.db import get_engine
 from shared.metrics import (

@@ -14,14 +14,14 @@ import structlog
 from market_alert.core.config import settings
 from market_alert.core.celery_app import celery_app
 from infra.db import SessionLocal
-from utils.redis_client import get_redis_client, is_scraping_suspended
+from shared.utils.redis_client import get_redis_client, is_scraping_suspended
 
 from market_alert.enums.enums_products import MonitoringType
 from market_alert.crud.crud_monitored import get_products_by_type
 from market_alert.crud.crud_competitor import get_all_competitor_products
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from shared.metrics import SCRAPING_LATENCY_SECONDS
-from utils.scraper_client import ScraperClient, ScraperClientError
+from market_alert.services.scraper_client import ScraperClient, ScraperClientError
 
 
 logger = structlog.get_logger("monitor_tasks")
