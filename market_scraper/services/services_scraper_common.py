@@ -145,54 +145,64 @@ async def _scrape_product_common(
     human_delay.wait(None)
     throttle.wait(identifier="get", circuit_key=circuit_key)
 
-    #HTML capturado da página. Se ocorrer bloqueio, pode ser substituído
-    html: str | None = None
-    try:
-        html = await fetch_html_playwright(target_url)
-        SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
-        SCRAPER_RESPONSE_SIZE_BYTES.labels(method="GET", status_code=200).observe(len(html))
-        human_delay.wait(html)
-    except PlaywrightTimeoutError as e:
-        logger.warning("playwright_timeout", url=target_url, error=str(e))
-        circuit_breaker.record_failure(circuit_key)
-        SCRAPER_HTTP_BLOCKED_TOTAL.inc()
-        recovered = await recovery_manager.handle_block("timeout", url=target_url)
-        if recovered is None:
-            SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Erro ao obter HTML" if product_type == "monitored" else "Erro ao obter HTML concorrente"
-            )
+    #HTML capturado da página. Se ocorrer bloqueio, pode ser substituído ou vir do cache
+    html: str | None = use_cache_if_not_modified(target_url)
+    if html is None:
+        try:
+            html = await fetch_html_playwright(target_url)
+            SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
+            SCRAPER_RESPONSE_SIZE_BYTES.labels(method="GET", status_code=200).observe(len(html))
+            update_cache(target_url, html)
+            human_delay.wait(html)
+        except PlaywrightTimeoutError as e:
+            logger.warning("playwright_timeout", url=target_url, error=str(e))
+            circuit_breaker.record_failure(circuit_key)
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            recovered = await recovery_manager.handle_block("timeout", url=target_url)
+            if recovered is None:
+                SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Erro ao obter HTML" if product_type == "monitored" else "Erro ao obter HTML concorrente"
+                )
 
-        html = recovered
-        SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
-        human_delay.wait(html)
-    except Exception as e:
-        logger.error("get_request_failed", url=target_url, error=str(e))
-        circuit_breaker.record_failure(circuit_key)
-        #Tenta classificar o tipo de bloqueio a partir da mensagem da exceção
-        block_type = "429"
-        msg = str(e).lower()
-        if "403" in msg:
-            block_type = "403"
-        elif "429" in msg:
+            html = recovered
+            SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
+            human_delay.wait(html)
+        except Exception as e:
+            logger.error("get_request_failed", url=target_url, error=str(e))
+            circuit_breaker.record_failure(circuit_key)
+            #Tenta classificar o tipo de bloqueio a partir da mensagem da exceção
             block_type = "429"
+            msg = str(e).lower()
+            if "403" in msg:
+                block_type = "403"
+            elif "429" in msg:
+                block_type = "429"
 
-        SCRAPER_HTTP_BLOCKED_TOTAL.inc()
-        #Aciona o gerenciador de recuperação informando o tipo de bloqueio
-        recovered = await recovery_manager.handle_block(block_type, url=target_url)
-        if recovered is None:
-            #Falha definitiva registra e interrompe o fluxo
-            SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Erro ao obter HTML" if product_type == "monitored" else "Erro ao obter HTML concorrente"
-            )
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            #Aciona o gerenciador de recuperação informando o tipo de bloqueio
+            recovered = await recovery_manager.handle_block(block_type, url=target_url)
+            if recovered is None:
+                #Falha definitiva registra e interrompe o fluxo
+                SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Erro ao obter HTML" if product_type == "monitored" else "Erro ao obter HTML concorrente"
+                )
 
-        #Se houver HTML recuperado, continua o fluxo normalmente
-        html = recovered
-        SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
+            #Se houver HTML recuperado, continua o fluxo normalmente
+            html = recovered
+            SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
+            human_delay.wait(html)
+    else:
+        #Quando há cache, registra métricas específicas
+        SCRAPER_REQUESTS_TOTAL.labels(method="CACHE", status_code=200).inc()
+        SCRAPER_RESPONSE_SIZE_BYTES.labels(method="CACHE", status_code=200).observe(len(html))
         human_delay.wait(html)
+
+    if html is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Falha ao obter HTML")
 
     if not parser.looks_like_product_page(html):
         logger.warning("not_product_page", url=original_url)
