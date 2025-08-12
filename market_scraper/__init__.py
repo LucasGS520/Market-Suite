@@ -1,14 +1,10 @@
-""" Pacote raiz do serviço MarketScraper """
+""" Pacote raiz do serviço MarketScraper
+
+Este pacote pode ser utilizado de forma independente e não expõe
+mais o módulo ``market_alert`` automaticamente.
+"""
 
 import sys as _sys
 
 #Disponibiliza o pacote para importações diretas
 _sys.modules.setdefault("market_scraper", _sys.modules[__name__])
-
-#Torna ``market_alert`` acessível caso o serviço de alertas esteja presente
-try:
-    import market_alert as _market_alert
-    _sys.modules.setdefault("market_alert", _market_alert)
-
-except Exception:
-    pass
