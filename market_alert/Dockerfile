@@ -1,18 +1,18 @@
-#Imagem oficial Pyhton leve
+#Dockerfile da API principal do MarketAlert
 FROM python:3.11-slim
 
-#Define diretório de trabalho no container
-WORKDIR /app
+#Define diretório de trabalho dentro do container
+WORKDIR /market_alert
 
-#Copia só as dependencias e instala
+#Copia apenas as dependencias e instala
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-#copia todo o codigo da aplicação
+#Copia o código fonte necessário conforme regras do .dockerignore
 COPY . .
 
-#Documenta a porta que o container vai usar
+#Exponha a porta utilizada pelo serviço
 EXPOSE 8000
 
-#Comando padrão ao iniciar o container
+#Comando padrão para inciar a API FastAPI
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

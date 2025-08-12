@@ -1,5 +1,6 @@
 services:
 
+  #Banco de dados PostgreSQL utilizado pela aplicação
   db:
     image: postgres:15
     env_file:
@@ -16,6 +17,7 @@ services:
       - monitoring-net
 
 
+  #Instância Redis utilizada para cache e filas
   redis:
     image: redis:7
     env_file:
@@ -32,6 +34,7 @@ services:
       - monitoring-net
 
 
+  #Carrega scripts lua no Redis na inicialização
   redis-init:
     image: redis:7
     env_file:
@@ -50,6 +53,7 @@ services:
       - monitoring-net
 
 
+  #Executa migrações de banco de dados com Alembic
   migrations:
     build:
       context: ./market_alert
@@ -74,6 +78,7 @@ services:
       - monitoring-net
 
 
+  #API principal do MarketAlert
   api:
     build:
       context: ./market_alert
@@ -84,7 +89,7 @@ services:
       - ENV_FILE=./market_alert/.env.market_alert
     command:
       - uvicorn
-      - "main:market_alert"
+      - "main:app"
       - "--host"
       - "0.0.0.0"
       - "--port"
@@ -102,6 +107,7 @@ services:
       - monitoring-net
 
 
+  #Agendador de tarefas do Celery
   celery_beat:
     build:
       context: ./market_alert
@@ -119,10 +125,14 @@ services:
       - db
       - redis
       - redis-init
+    volumes:
+      - ./market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
     networks:
       - monitoring-net
 
 
+  #Worker do Celery para tarefas assíncronas
   celery-worker:
     build:
       context: ./market_alert
@@ -154,6 +164,7 @@ services:
       - monitoring-net
 
 
+  #Serviço dedicado ao scraping de produtos
   market_scraper:
     build:
       context: ./market_scraper
@@ -176,10 +187,13 @@ services:
     depends_on:
       - redis
       - redis-init
+    volumes:
+      - ./market_scraper:/market_scraper
     networks:
       - monitoring-net
 
 
+  #Servidor Prometheus para coleta de métricas
   prometheus:
     image: prom/prometheus:latest
     volumes:
@@ -192,6 +206,7 @@ services:
       - monitoring-net
 
 
+  #Gerenciador de alertas do Prometheus
   alertmanager:
     build:
       context: ./alertmanager
@@ -207,6 +222,7 @@ services:
       - monitoring-net
 
 
+  #Armazenamento centralizado de logs com Loki
   loki:
     image: grafana/loki:2.9.8
     user: root
@@ -225,6 +241,7 @@ services:
       - monitoring-net
 
 
+  #Agente Promtail que envia logs para o Loki
   promtail:
     image: grafana/promtail:2.9.8
     command: -config.file=/etc/promtail/promtail-config.yml
@@ -235,6 +252,7 @@ services:
       - monitoring-net
 
 
+  #Exportador de métricas do host
   node-exporter:
     image: prom/node-exporter:latest
     pid: host
@@ -246,6 +264,7 @@ services:
       - monitoring-net
 
 
+  #Exportador de métricas de containers Docker
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:latest
     volumes:
@@ -257,6 +276,7 @@ services:
       - monitoring-net
 
 
+  #Interface do Grafana para visualização de métricas
   grafana:
     image: grafana/grafana:latest
     env_file:
@@ -270,13 +290,14 @@ services:
       - monitoring-net
 
 
+  #Ferramenta de teste de carga Locust
   locust:
     image: locustio/locust
     depends_on:
       - api
     volumes:
-      - ./market_alert:/mnt/locust
-    working_dir: /mnt/locust
+      - ./market_alert:/market_alert
+    working_dir: /market_alert
     command:
       - "-f"
       - "tests/load/locustfile.py"
