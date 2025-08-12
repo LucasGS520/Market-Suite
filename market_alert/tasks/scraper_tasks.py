@@ -1,41 +1,37 @@
 """ Tarefas Celery relacionadas ao scraping de produtos.
 
 Este módulo concentra as tasks responsáveis por coletar dados de produtos
-monitorados e de concorrentes, utilizando apenas configurações locais e
-um cliente HTTP dedicado para acionar o serviço ``market_scraper``. A
-comunicação é feita via ``ScraperClient`` e o resultado é persistido no
-banco de dados.
+monitorados e de concorrentes, delegando a coleta às funções de serviço
+``scrape_monitored_product`` e ``scrape_competitor_product``. Essas
+funções cuidam da comunicação com o serviço externo enquanto
+as tasks mantêm métricas e tratamento de erros.
 """
 
 from uuid import UUID
 from datetime import datetime, timezone
-from decimal import Decimal
 
 import structlog
 
 from infra.db import SessionLocal
 
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
-
 from shared.exceptions import ScraperError
 from shared.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
-from shared.schemas.products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.core.config import settings
 from market_alert.core.celery_app import celery_app
 from market_alert.crud import crud_errors
-from market_alert.crud.crud_monitored import create_or_update_monitored_product_scraped
-from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
-from market_alert.services.scraper_client import ScraperClient, ScraperClientError
+from market_alert.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.services.scraper_client import ScraperClientError
+from market_alert.services.services_scraper_monitored import scrape_monitored_product
+from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
-
-
 
 
 logger = structlog.get_logger("scraper_tasks")
 redis_client = get_redis_client()
-scraper_client = ScraperClient()
 
 def _observe_metrics(start: datetime, task_name: str, status: str) -> None:
     """ Registra latência e contagem de tasks no Prometheus """
@@ -76,30 +72,17 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
         SCRAPER_IN_FLIGHT.dec()
         return
 
-    # Execução do scraping propriamente dito e persistência dos dados
+    #Execução do scraping delegada ao serviço especializado
     product_id = monitored_id
     with SessionLocal() as db:
         try:
-            #Envia requisição ao serviço externo de scraping
-            details = scraper_client.parse(
-                url=url,
-                product_type="monitored",
-            )
-
-            #Persiste ou atualiza o produto monitorado com as informações obtidas
-            product = create_or_update_monitored_product_scraped(
+            resultado = scrape_monitored_product(
                 db=db,
+                url=url,
                 user_id=UUID(user_id),
-                product_data=payload,
-                scraped_info=MonitoredScrapedInfo(
-                    current_price=Decimal(str(details.get("current_price", 0))),
-                    thumbnail=details.get("thumbnail"),
-                    free_shipping=details.get("free_shipping", False),
-                ),
-                last_checked=datetime.now(timezone.utc),
+                payload=payload,
             )
-            product_id = str(product.id)
-            compare_prices_task.delay(product_id)
+            product_id = resultado.get("product_id")
 
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
             task_logger.info("collect_product_completed", duration_ms=elapsed_ms)
@@ -107,7 +90,12 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
         except ScraperClientError as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
-            task_logger.error("collect_product_http_error", error=str(req_err), monitored_product_id=product_id, url=url)
+            task_logger.error(
+                "collect_product_http_error",
+                error=str(req_err),
+                monitored_product_id=product_id,
+                url=url,
+            )
             if product_id:
                 try:
                     crud_errors.create_scraping_error(
@@ -173,28 +161,14 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
     #Scraping propriamente dito e agendamento de comparação de preços
     with SessionLocal() as db:
         try:
-            #Requisição ao serviço de scraping para coletar dados do concorrente
-            details = scraper_client.parse(
-                url=url,
-                product_type="competitor",
-            )
+            monitored = get_monitored_product_by_id(db, UUID(monitored_product_id))
+            user_id = monitored.user_id if monitored else UUID(int=0)
 
-            #Persiste ou atualiza o concorrente com as informações obtidas
-            create_or_update_competitor_product_scraped(
+            scrape_competitor_product(
                 db=db,
-                product_data=payload,
-                scraped_info=CompetitorScrapedInfo(
-                    name=details.get("name", ""),
-                    current_price=Decimal(str(details.get("current_price", 0))),
-                    old_price=Decimal(str(details.get("old_price")))
-                    if details.get("old_price") is not None
-                    else None,
-                    thumbnail=details.get("thumbnail"),
-                    free_shipping=details.get("free_shipping", False),
-                    seller=details.get("seller"),
-                    seller_rating=None,
-                ),
-                last_checked=datetime.now(timezone.utc)
+                user_id=user_id,
+                url=url,
+                payload=payload,
             )
 
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
@@ -206,7 +180,12 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
         except ScraperClientError as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
-            task_logger.error("collect_competitor_http_error", error=str(req_err), monitored_product_id=monitored_product_id, url=url)
+            task_logger.error(
+                "collect_competitor_http_error",
+                error=str(req_err),
+                monitored_product_id=monitored_product_id,
+                url=url,
+            )
             try:
                 crud_errors.create_scraping_error(
                     db,

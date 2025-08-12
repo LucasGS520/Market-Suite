@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from shared.exceptions import ScraperError
-from market_alert.tasks.scraper_tasks import collect_product_tasks, collect_competitor_tasks
+from market_alert.tasks.scraper_tasks import collect_product_task, collect_competitor_task
 from market_alert.services.scraper_client import ScraperClientError
 
 
@@ -37,10 +37,10 @@ def test_collect_product_tasks_with_invalid_payload():
 def test_collect_product_task_scraping_http_exception(monkeypatch):
     """ Simula falha HTTP ao chamar o serviço externo e verifica a exceção """
 
-    def fake_parse(*a, **k):
+    def fake_service(*a, **k):
         raise ScraperClientError("erro", status_code=429)
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scraper_client.parse", fake_parse)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
 
     with pytest.raises(ScraperError) as exc:
@@ -64,20 +64,16 @@ def test_scraper_error_is_picklable():
 def test_collect_product_task_generic_exception_creates_error(monkeypatch):
     """ Falhas genéricas na persistência devem gerar registro de erro """
 
-    def fake_parse(*a, **k):
-        return {"current_price": 10}
+    def fake_service(*a, **k):
+        return Exception("boom")
 
     captured = {}
-
-    def fake_persist(db, user_id, product_data, scraped_info, last_checked):
-        raise Exception("boom")
 
     def fake_create(db, product_id, url, message, error_type):
         captured["args"] = (str(product_id), url, message, error_type)
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scraper_client.parse", fake_parse)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.create_or_update_monitored_product_scraped", fake_persist)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
 
     collect_product_task.run(
@@ -103,11 +99,12 @@ def test_collect_competitor_task_invalid_payload():
 def test_collect_competitor_task_scraping_http_exception(monkeypatch):
     """ Erro HTTP no serviço externo deve ser propagado como ScraperError """
 
-    def fake_parse(*a, **k):
+    def fake_service(*a, **k):
         raise ScraperClientError("erro", status_code=500)
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scraper_client.parse", fake_parse)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_competitor_product", fake_service)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
 
     with pytest.raises(ScraperError):
         collect_competitor_task.run(
