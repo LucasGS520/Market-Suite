@@ -493,10 +493,11 @@ organizado nos seguintes pacotes:
     cookies.
   - `circuit_breaker.py`, `block_recovery.py` – tratamento de bloqueios.
   - `redis_client.py` – cliente Redis compartilhado.
-- `enums/` – enumerações de códigos e status utilizados no domínio.
+- `enums/` – enumerações específicas do domínio.
   - `enums_products.py` – tipos de produto e campos monitorados.
-  - `enums_error_codes.py` – códigos de erro padronizados.
-  - `enums_block_results.py` – resultado das tentativas de scraping.
+- `shared/enums/` - enumerações compartilhadas entre os serviços
+ - `error_codes.py` - códigos de erro padronizados.
+ - `block_results.py` - resultado das tentativas de scraping.
 - `metrics.py` – registro central de métricas Prometheus utilizadas pela
   aplicação.
 

@@ -36,7 +36,7 @@ from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.throttle_manager import ThrottleManager
 from market_scraper.utils.http_utils import extract_hostname
-from market_scraper.utils.block_detector import detect_block, BlockResult
+from market_scraper.utils.block_detector import detect_block
 from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_scraper.utils.price import parse_price_str
 from market_scraper.utils.robots_txt import RobotsTxtParser

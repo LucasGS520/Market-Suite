@@ -1,10 +1,11 @@
-""" Enumerações de resultados ao lidar com bloqueios de scraping """
+""" Enumera os resultados ao lidar com bloqueios de scraping """
 
 from enum import Enum
 
 
 class BlockResult(str, Enum):
     """ Resultados possíveis ao detectar bloqueios """
+
     OK = "ok" #Acesso liberado
     CAPTCHA = "captcha" #Foi solicitado CAPTCHA
     HTTP_429 = "http_429" #Muitas requisições (429)
