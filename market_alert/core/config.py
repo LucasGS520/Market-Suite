@@ -36,7 +36,7 @@ class Settings(ConfigBase):
     #Configuração do banco de dados
     DATABASE_URL: str = os.getenv("DATABASE_URL") #URL de conexão do Postgres
     if not DATABASE_URL:
-        raise ValueError("DATABASE_URL não foi encontrada no .env.market_scraper.market_alert.common")
+        raise ValueError("DATABASE_URL não foi encontrada no arquivo .env.market_alert")
 
     #Segurança e tokens
     SECRET_KEY: str = os.getenv("SECRET_KEY") #Chave para asisnar JWTs
