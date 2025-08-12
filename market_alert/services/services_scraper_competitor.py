@@ -1,7 +1,8 @@
 """ Fluxo de scraping para produtos concorrentes
 
-Este módulo consulta o serviço ``market_scraper`` para obter
-os dados do anúncio e apenas realiza a persistência local.
+Este módulo utiliza o ``ScraperClient`` para consultar o serviço
+``market_scraper`` e persistir localmente as informações do anúncio,
+sem empregar gerenciador de bloqueios
 """
 
 from __future__ import annotations
@@ -9,15 +10,13 @@ from __future__ import annotations
 from decimal import Decimal
 from datetime import datetime, timezone
 from uuid import UUID
+import asyncio
 
-import httpx
 import structlog
 from sqlalchemy.orm import Session
 
-from market_alert.core.config import settings
 from shared.utils.circuit_breaker import CircuitBreaker
 from shared.utils.rate_limiter import RateLimiter
-from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_alert.services.scraper_client import ScraperClient
 
 from market_alert.schemas.schemas_products import (
@@ -37,18 +36,19 @@ async def _scrape_competitor_product(
     payload: CompetitorProductCreateScraping,
     rate_limiter: RateLimiter | None = None,
     circuit_breaker: CircuitBreaker | None = None,
-    recovery_manager: BlockRecoveryManager | None = None,
 ) -> dict:
-    """ Executa o scraping de concorrentes de forma assíncrona """
+    """ Executa o scraping de concorrentes de forma assíncrona
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
-            json={"url": url, "product_type": "competitor"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        details = resp.json()
+    A comunicação ocorre via ``ScraperClient`` executado em ``thread``
+    separada, sem empregar gerenciador de bloqueios.
+    """
+
+    #Requisição ao serviço de scraping em ``thread`` para evitar bloqueios
+    details = await asyncio.to_thread(
+        ScraperClient().parse,
+        url=url,
+        product_type="competitor",
+    )
 
     competitor = create_or_update_competitor_product_scraped(
         db=db,
@@ -75,9 +75,12 @@ def scrape_competitor_product(
     payload: CompetitorProductCreateScraping,
     rate_limiter: RateLimiter | None = None,
     circuit_breaker: CircuitBreaker | None = None,
-    recovery_manager: BlockRecoveryManager | None = None
 ) -> dict:
-    """ Versão síncrona utilizada pelas tasks Celery """
+    """ Versão síncrona utilizada pelas tasks Celery
+
+    Utiliza o ``ScraperClient`` para coletar dados sem qualquer
+    gerenciador de bloqueios.
+    """
 
     details = ScraperClient().parse(
         url=url,

@@ -1,8 +1,9 @@
 """ Fluxo de scraping dedicado a produtos monitorados
 
-O módulo comunica-se com o serviço externo ``market_scraper``
-por HTTP, recebendo os dados já extraídos para apenas persistir
-e acionar as comparações necessárias.
+A comunicação com o serviço externo ``market_scraper`` é realizada
+exclusivamente via ``ScraperClient`` para persistir os dados
+e acionar as comparações necessárias, sem uso de gerenciador
+de bloqueios.
 """
 
 from __future__ import annotations
@@ -10,15 +11,13 @@ from __future__ import annotations
 from decimal import Decimal
 from datetime import datetime, timezone
 from uuid import UUID
+import asyncio
 
-import httpx
 import structlog
 from sqlalchemy.orm import Session
 
-from market_alert.core.config import settings
 from shared.utils.circuit_breaker import CircuitBreaker
 from shared.utils.rate_limiter import RateLimiter
-from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_alert.services.scraper_client import ScraperClient
 
 from market_alert.schemas.schemas_products import (
@@ -39,18 +38,20 @@ async def _scrape_monitored_product(
     payload: MonitoredProductCreateScraping,
     rate_limiter: RateLimiter | None = None,
     circuit_breaker: CircuitBreaker | None = None,
-    recovery_manager: BlockRecoveryManager | None = None
 ) -> dict:
-    """ Executa o scraping de forma assíncrona via serviço externo """
+    """ Executa o scraping de forma assíncrona usando ``ScraperClient``
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{settings.SCRAPER_SERVICE_URL}/scraper/parse",
-            json={"url": url, "product_type": "monitored"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        details = resp.json()
+    A chamada síncrona é executada em ``thread`` separada para não
+    bloquear o loop de eventos, e não há mais uso de gerenciador
+    de bloqueios.
+    """
+
+    #Dispara o cliente de scraping em ``thread`` separada
+    details = await asyncio.to_thread(
+        ScraperClient().parse,
+        url=url,
+        product_type="monitored",
+    )
 
     product = create_or_update_monitored_product_scraped(
         db=db,
@@ -73,9 +74,12 @@ def scrape_monitored_product(
     payload: MonitoredProductCreateScraping,
     rate_limiter: RateLimiter | None = None,
     circuit_breaker: CircuitBreaker | None = None,
-    recovery_manager: BlockRecoveryManager | None = None,
 ) -> dict:
-    """ Versão síncrona utilizada pelas tasks Celery """
+    """ Versão síncrona utilizada pelas tasks Celery
+
+    Realiza a requisição via ``ScraperClient`` sem
+    utilizar ``BlockRecoveryManager``
+    """
 
     details = ScraperClient().parse(
         url=url,
