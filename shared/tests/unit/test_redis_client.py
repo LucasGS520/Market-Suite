@@ -1,5 +1,4 @@
-from types import SimpleNamespace
-from utils import redis_client as rc
+from shared.utils import redis_client as rc
 
 
 class FakeRedis:

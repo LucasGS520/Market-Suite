@@ -1,6 +1,6 @@
 import time
 import pytest
-from utils.rate_limiter import RateLimiter
+from shared.utils.rate_limiter import RateLimiter
 
 def test_allow_request_under_limit():
     """ Verifica que allow request() retorna True quando o numero de chamadas estiver

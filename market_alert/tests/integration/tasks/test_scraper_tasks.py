@@ -7,7 +7,7 @@ import pytest
 
 from shared.exceptions import ScraperError
 from market_alert.tasks.scraper_tasks import collect_product_tasks, collect_competitor_tasks
-from utils.scraper_client import ScraperClientError
+from market_alert.services.scraper_client import ScraperClientError
 
 
 class DummySession:
