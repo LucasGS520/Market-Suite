@@ -2,7 +2,8 @@
 
 Este módulo utiliza o ``ScraperClient`` para consultar o serviço
 ``market_scraper`` e persistir localmente as informações do anúncio,
-sem empregar gerenciador de bloqueios
+sem empregar gerenciador de bloqueios como ``RateLimiter`` ou
+``CircuitBreaker``
 """
 
 from __future__ import annotations
@@ -15,8 +16,6 @@ import asyncio
 import structlog
 from sqlalchemy.orm import Session
 
-from shared.utils.circuit_breaker import CircuitBreaker
-from shared.utils.rate_limiter import RateLimiter
 from shared.schemas.products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 from market_alert.services.scraper_client import ScraperClient
@@ -31,13 +30,11 @@ async def _scrape_competitor_product(
     user_id: UUID,
     url: str,
     payload: CompetitorProductCreateScraping,
-    rate_limiter: RateLimiter | None = None,
-    circuit_breaker: CircuitBreaker | None = None,
 ) -> dict:
     """ Executa o scraping de concorrentes de forma assíncrona
 
     A comunicação ocorre via ``ScraperClient`` executado em ``thread``
-    separada, sem empregar gerenciador de bloqueios.
+    separada, sem empregar mecanismos de rate limiting ou circuit breaker
     """
 
     #Requisição ao serviço de scraping em ``thread`` para evitar bloqueios
@@ -70,13 +67,11 @@ def scrape_competitor_product(
     user_id: UUID,
     url: str,
     payload: CompetitorProductCreateScraping,
-    rate_limiter: RateLimiter | None = None,
-    circuit_breaker: CircuitBreaker | None = None,
 ) -> dict:
     """ Versão síncrona utilizada pelas tasks Celery
 
     Utiliza o ``ScraperClient`` para coletar dados sem qualquer
-    gerenciador de bloqueios.
+    gerenciador de bloqueios ``RateLimiter`` ou ``CircuitBreaker``
     """
 
     details = ScraperClient().parse(

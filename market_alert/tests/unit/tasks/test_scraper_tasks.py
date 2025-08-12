@@ -70,7 +70,7 @@ def test_collect_product_task_send_request_and_persists(monkeypatch):
     """ Garante que a task encaminha os dados ao serviço de scraping """
     chamado = {}
 
-    def fake_service(db, url, user_id, payload, rate_limiter=None, circuit_breaker=None):
+    def fake_service(db, url, user_id, payload):
         chamado["url"] = url
         chamado["user_id"] = str(user_id)
         chamado["payload"] = payload
@@ -90,7 +90,7 @@ def test_collect_competitor_task_send_request_and_persist(monkeypatch):
     """ Confere a delegação ao serviço de scraping de concorrentes """
     chamado = {}
 
-    def fake_service(db, user_id, url, payload, rate_limiter=None, circuit_breaker=None):
+    def fake_service(db, user_id, url, payload):
         chamado["url"] = url
         chamado["user_id"] = str(user_id)
         chamado["monitored_id"] = str(payload.monitored_product_id)

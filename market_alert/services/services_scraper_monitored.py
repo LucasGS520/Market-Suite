@@ -1,9 +1,9 @@
 """ Fluxo de scraping dedicado a produtos monitorados
 
-A comunicação com o serviço externo ``market_scraper`` é realizada
-exclusivamente via ``ScraperClient`` para persistir os dados
-e acionar as comparações necessárias, sem uso de gerenciador
-de bloqueios.
+Este módulo se comunica com o serviço externo ``market_scraper``
+exclusivamente via ``ScraperClient`` para persistir os dados e
+acionar as comparações necessárias, sem empregar mecanismos
+de rate limiting ou circuit breaker.
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ import asyncio
 import structlog
 from sqlalchemy.orm import Session
 
-from shared.utils.circuit_breaker import CircuitBreaker
-from shared.utils.rate_limiter import RateLimiter
 from shared.schemas.products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 
 from market_alert.services.scraper_client import ScraperClient
@@ -33,8 +31,6 @@ async def _scrape_monitored_product(
     url: str,
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
-    rate_limiter: RateLimiter | None = None,
-    circuit_breaker: CircuitBreaker | None = None,
 ) -> dict:
     """ Executa o scraping de forma assíncrona usando ``ScraperClient``
 
@@ -69,13 +65,11 @@ def scrape_monitored_product(
     url: str,
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
-    rate_limiter: RateLimiter | None = None,
-    circuit_breaker: CircuitBreaker | None = None,
 ) -> dict:
     """ Versão síncrona utilizada pelas tasks Celery
 
     Realiza a requisição via ``ScraperClient`` sem
-    utilizar ``BlockRecoveryManager``
+    utilizar ``RateLimiter`` e ``CircuitBreaker``
     """
 
     details = ScraperClient().parse(
