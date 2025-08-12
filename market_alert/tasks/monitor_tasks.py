@@ -6,6 +6,7 @@ comparação de preços.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 import time
 import os
 
@@ -17,8 +18,9 @@ from infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
 
 from market_alert.enums.enums_products import MonitoringType
-from market_alert.crud.crud_monitored import get_products_by_type
-from market_alert.crud.crud_competitor import get_all_competitor_products
+from market_alert.crud.crud_monitored import get_products_by_type, create_or_update_monitored_product_scraped
+from market_alert.crud.crud_competitor import get_all_competitor_products, create_or_update_competitor_product_scraped
+from shared.schemas.products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from shared.metrics import SCRAPING_LATENCY_SECONDS
 from market_alert.services.scraper_client import ScraperClient, ScraperClientError
@@ -59,11 +61,35 @@ def recheck_monitored_products() -> None:
                     monitored_id=str(p.id),
                 )
                 try:
-                    scraper_client.parse(
+                    #Captura os detalhes do scraping para persistência
+                    details = scraper_client.parse(
                         url=p.product_url,
                         product_type="monitored",
                         monitored_id=str(p.id),
                     )
+
+                    #Salva os dados atualizados no banco
+                    old_price = p.current_price
+                    product = create_or_update_monitored_product_scraped(
+                        db=db,
+                        user_id=p.user_id,
+                        product_data=MonitoredProductCreateScraping(
+                            name_identification=p.name_identification,
+                            product_url=p.product_url,
+                            target_price=p.target_price,
+                        ),
+                        scraped_info=MonitoredScrapedInfo(
+                            current_price=Decimal(str(details.get("current_price", 0))),
+                            thumbnail=details.get("thumbnail"),
+                            free_shipping=details.get("free_shipping", False),
+                        ),
+                        last_checked=datetime.now(timezone.utc),
+                    )
+
+                    #Agendamento da comparação apenas se houver mudança no preço
+                    if old_price != product.current_price:
+                        compare_prices_task.delay(str(product.id))
+
                 except ScraperClientError as exc:
                     status = "failure"
                     log.error(
@@ -105,10 +131,9 @@ def recheck_competitor_products():
         try:
             competitors = get_all_competitor_products(db)
             batch = competitors[:BATCH_SIZE_COMPETITOR]
-            monitored_ids = set()
+            updated_ids = set()
 
             for c in batch:
-                monitored_ids.add(c.monitored_product_id)
                 log.info(
                     "chamada_market_scraper_competitor",
                     monitored_id=str(c.monitored_product_id),
@@ -116,12 +141,38 @@ def recheck_competitor_products():
                     url=c.product_url,
                 )
                 try:
-                    scraper_client.parse(
+                    #Realiza o scraping e salva as informações obtidas
+                    details = scraper_client.parse(
                         url=c.product_url,
                         product_type="competitor",
                         competitor_id=str(c.id),
                         monitored_id=str(c.monitored_product_id),
                     )
+
+                    old_price = c.current_price
+                    competitor = create_or_update_competitor_product_scraped(
+                        db=db,
+                        product_data=CompetitorProductCreateScraping(
+                            monitored_product_id=c.monitored_product_id,
+                            product_url=c.product_url,
+                        ),
+                        scraped_info=CompetitorScrapedInfo(
+                            name=details.get("name", ""),
+                            current_price=Decimal(str(details.get("current_price", 0))),
+                            old_price=Decimal(str(details.get("old_price")))
+                            if details.get("old_price") is not None
+                            else None,
+                            thumbnail=details.get("thumbnail"),
+                            free_shipping=details.get("free_shipping", False),
+                            seller=details.get("seller"),
+                            seller_rating=None,
+                        ),
+                        last_checked=datetime.now(timezone.utc),
+                    )
+
+                    if old_price != competitor.current_price:
+                        updated_ids.add(competitor.monitored_product_id)
+
                 except ScraperClientError as exc:
                     status = "failure"
                     log.error(
@@ -136,8 +187,8 @@ def recheck_competitor_products():
             #Atualizar heartbeat
             redis_client.set("beat:last_competitor", datetime.now(timezone.utc).isoformat())
 
-            #Dispara uma nova task de comparação para cada produto monitorado afetado
-            for mp_id in monitored_ids:
+            #Dispara uma nova task de comparação para cada produto monitorado com mudança de preço
+            for mp_id in updated_ids:
                 compare_prices_task.delay(str(mp_id))
 
         except Exception as exc:
