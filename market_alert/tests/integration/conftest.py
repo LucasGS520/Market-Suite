@@ -5,9 +5,6 @@ import pytest
 import sys
 from fastapi import FastAPI
 
-import market_alert.utils.comparator as comparator_module
-comparator_module.compare_prices = lambda *a, **k: None
-
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -19,7 +16,7 @@ from infra.db import get_db
 
 import shared.utils.rate_limiter as rate_limiter_module
 
-from main import app as market_alert
+from main import app
 from market_alert.core.security import get_current_user
 from market_alert.core.password import hash_password
 from market_alert.models.models_users import User
@@ -77,25 +74,12 @@ def patch_rate_limiter_and_redis(monkeypatch):
 
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("shared.utils.redis_client._redis_client", fake_redis)
-    #Usa raising False pois esses atributos podem não existir nos módulos
     monkeypatch.setattr("market_alert.services.services_scraper_monitored.redis_client", fake_redis, raising=False)
     monkeypatch.setattr("market_alert.services.services_scraper_competitor.redis_client", fake_redis, raising=False)
-    monkeypatch.setattr("market_alert.services.services_scraper_common.redis_client", fake_redis)
     monkeypatch.setattr(scraper_tasks, "redis_client", fake_redis)
-    monkeypatch.setattr("market_alert.services.services_cache_scraper.cache_manager", cache)
 
-    #Substitui o RateLimiter em todos os módulos
+    #Substitui o RateLimiter global
     monkeypatch.setattr(rate_limiter_module, "RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("market_alert.services.services_scraper_monitored.RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("market_alert.services.services_scraper_competitor.RateLimiter", MockRateLimiter)
-    monkeypatch.setattr("market_alert.services.services_scraper_common.RateLimiter", MockRateLimiter)
-    monkeypatch.setattr(scraper_tasks, "RateLimiter", MockRateLimiter)
-
-    #Substitui CircuitBreaker nos serviços e tasks
-    monkeypatch.setattr("market_alert.services.services_scraper_monitored.CircuitBreaker", lambda: MockCircuitBreaker())
-    monkeypatch.setattr("market_alert.services.services_scraper_competitor.CircuitBreaker", lambda: MockCircuitBreaker())
-    monkeypatch.setattr("market_alert.services.services_scraper_common.CircuitBreaker", lambda: MockCircuitBreaker())
-    monkeypatch.setattr(scraper_tasks, "circuit_breaker", MockCircuitBreaker())
 
 @pytest.fixture(scope="session")
 def prepare_test_database():

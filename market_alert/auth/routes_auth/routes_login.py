@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 import shared.metrics as metrics
 from infra.db import get_db
 from market_alert.schemas.schemas_auth import TokenResponse
-from market_alert.services.services_auth import login_user
+from market_alert.auth.services_auth import login_user
 
 
 logger = structlog.get_logger("route.auth.login")

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from infra.db import get_db
 from market_alert.schemas.schemas_auth import RefreshRequest
-from market_alert.services.services_auth import logout_service
+from market_alert.auth.services_auth import logout_service
 
 
 logger = structlog.get_logger("route.auth.logout")

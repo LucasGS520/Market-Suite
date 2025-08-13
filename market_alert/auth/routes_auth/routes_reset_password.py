@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from infra.db import get_db
 from market_alert.schemas.schemas_auth import ResetPasswordRequest, ResetPasswordConfirmRequest
-from market_alert.services.services_auth import request_password_reset_service, confirm_password_service
+from market_alert.auth.services_auth import request_password_reset_service, confirm_password_service
 
 
 logger = structlog.get_logger("route.auth.reset")
