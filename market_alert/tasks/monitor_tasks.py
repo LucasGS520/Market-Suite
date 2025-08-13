@@ -10,6 +10,7 @@ from decimal import Decimal
 import time
 import os
 import asyncio
+from idlelib.debugobj import dispatch
 
 import structlog
 
@@ -31,12 +32,37 @@ logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()
 scraper_client = ScraperClient()
 
+#Limite de concorrência para chamadas ao serviço de scraping
+MAX_SCRAPER_CONCURRENCY = int(os.getenv("MAX_SCRAPER_CONCURRENCY", "5"))
+
 #Tamanho dos lotes para rechecagens de produtos e concorrentes
 BATCH_SIZE_SCRAPING = int(os.getenv("BATCH_SIZE_SCRAPING", "10"))
 BATCH_SIZE_COMPETITOR = int(os.getenv("BATCH_SIZE_COMPETITOR", "20"))
 
 #Intervalo base usado para reagendamentos automáticos adaptativos
 ADAPTIVE_RECHECK_BASE_INTERVAL = settings.ADAPTIVE_RECHECK_BASE_INTERVAL
+
+async def _parse_monitored_batch(products):
+    """ Executa o parsing de produtos monitorados de forma concorrente """
+
+    semaphore = asyncio.Semaphore(MAX_SCRAPER_CONCURRENCY)
+
+    async def _fetch(p):
+        log = logger.bind(monitored_id=str(p.id))
+        log.info("chamada_market_scraper", product_url=p.product_url)
+        async with semaphore:
+            try:
+                details = await scraper_client.parse(
+                    url=p.product_url,
+                    product_type="monitored",
+                    monitored_id=str(p.id),
+                )
+                return {"product": p, "details": details, "error": None}
+            except ScraperClientError as exc:
+                return {"product": p, "details": None, "error": exc}
+
+    tasks = [_fetch(p) for p in products]
+    return await asyncio.gather(*tasks)
 
 @celery_app.task(name="market_alert.tasks.monitor_tasks.recheck_monitored_products")
 def recheck_monitored_products() -> None:
@@ -55,51 +81,43 @@ def recheck_monitored_products() -> None:
             products = get_products_by_type(db, MonitoringType.scraping)
             batch = products[:BATCH_SIZE_SCRAPING]
 
-            for p in batch:
-                log.info(
-                    "chamada_market_scraper",
-                    product_url=p.product_url,
-                    monitored_id=str(p.id),
-                )
-                try:
-                    #Captura os detalhes do scraping para persistência
-                    details = asyncio.run(
-                        scraper_client.parse(
-                            url=p.product_url,
-                            product_type="monitored",
-                            monitored_id=str(p.id),
-                        )
-                    )
+            #Executa o scraping de forma concorrente
+            results = asyncio.run(_parse_monitored_batch(batch))
 
-                    #Salva os dados atualizados no banco
-                    old_price = p.current_price
-                    product = create_or_update_monitored_product_scraped(
-                        db=db,
-                        user_id=p.user_id,
-                        product_data=MonitoredProductCreateScraping(
-                            name_identification=p.name_identification,
-                            product_url=p.product_url,
-                            target_price=p.target_price,
-                        ),
-                        scraped_info=MonitoredScrapedInfo(
-                            current_price=Decimal(str(details.get("current_price", 0))),
-                            thumbnail=details.get("thumbnail"),
-                            free_shipping=details.get("free_shipping", False),
-                        ),
-                        last_checked=datetime.now(timezone.utc),
-                    )
-
-                    #Agendamento da comparação apenas se houver mudança no preço
-                    if old_price != product.current_price:
-                        compare_prices_task.delay(str(product.id))
-
-                except ScraperClientError as exc:
+            for result in results:
+                p = result["product"]
+                if result["error"] is not None:
                     status = "failure"
                     log.error(
                         "scraper_request_failed",
-                        error=str(exc),
+                        error=str(result["error"]),
                         url=p.product_url,
                     )
+                    continue
+
+                details = result["details"]
+
+                #Salva os dados atualizados no banco
+                old_price = p.curent_price
+                product = create_or_update_monitored_product_scraped(
+                    db=db,
+                    user_id=p.user_id,
+                    product_data=MonitoredProductCreateScraping(
+                        name_identification=p.name_identification,
+                        product_url=p.product_url,
+                        target_price=p.target_price,
+                    ),
+                    scraped_info=MonitoredScrapedInfo(
+                        current_price=Decimal(str(details.get("current_price", 0))),
+                        thumbnail=details.get("thumbnail"),
+                        free_shipping=details.get("free_shipping", False),
+                    ),
+                    last_checked=datetime.now(timezone.utc),
+                )
+
+                #Agendamento da comparação apenas se houver mudança no preço
+                if old_price != product.current_price:
+                    compare_prices_task.delay(str(product.id))
 
             elapsed_ms = int((time.time() - start) * 1000)
             log.info("recheck_monitored_completed", status=status, duration_ms=elapsed_ms, dispatched=len(batch))
@@ -136,55 +154,45 @@ def recheck_competitor_products():
             batch = competitors[:BATCH_SIZE_COMPETITOR]
             updated_ids = set()
 
-            for c in batch:
-                log.info(
-                    "chamada_market_scraper_competitor",
-                    monitored_id=str(c.monitored_product_id),
-                    competitor_id=str(c.id),
-                    url=c.product_url,
-                )
-                try:
-                    #Realiza o scraping e salva as informações obtidas
-                    details = asyncio.run(
-                        scraper_client.parse(
-                            url=c.product_url,
-                            product_type="competitor",
-                            competitor_id=str(c.id),
-                            monitored_id=str(c.monitored_product_id),
-                        )
-                    )
+            # Executa o scraping de forma concorrente
+            results = asyncio.run(_parse_competitor_batch(batch))
 
-                    old_price = c.current_price
-                    competitor = create_or_update_competitor_product_scraped(
-                        db=db,
-                        product_data=CompetitorProductCreateScraping(
-                            monitored_product_id=c.monitored_product_id,
-                            product_url=c.product_url,
-                        ),
-                        scraped_info=CompetitorScrapedInfo(
-                            name=details.get("name", ""),
-                            current_price=Decimal(str(details.get("current_price", 0))),
-                            old_price=Decimal(str(details.get("old_price")))
-                            if details.get("old_price") is not None
-                            else None,
-                            thumbnail=details.get("thumbnail"),
-                            free_shipping=details.get("free_shipping", False),
-                            seller=details.get("seller"),
-                            seller_rating=None,
-                        ),
-                        last_checked=datetime.now(timezone.utc),
-                    )
-
-                    if old_price != competitor.current_price:
-                        updated_ids.add(competitor.monitored_product_id)
-
-                except ScraperClientError as exc:
+            for result in results:
+                c = result["competitor"]
+                if result["error"] is not None:
                     status = "failure"
                     log.error(
                         "scraper_competitor_failed",
-                        error=str(exc),
+                        error=str(result["error"]),
                         url=c.product_url,
                     )
+                    continue
+
+                details = result["details"]
+
+                old_price = c.current_price
+                competitor = create_or_update_competitor_product_scraped(
+                    db=db,
+                    product_data=CompetitorProductCreateScraping(
+                        monitored_product_id=c.monitored_product_id,
+                        product_url=c.product_url,
+                    ),
+                    scraped_info=CompetitorScrapedInfo(
+                        name=details.get("name", ""),
+                        current_price=Decimal(str(details.get("current_price", 0))),
+                        old_price=Decimal(str(details.get("old_price")))
+                        if details.get("old_price") is not None
+                        else None,
+                        thumbnail=details.get("thumbnail"),
+                        free_shipping=details.get("free_shipping", False),
+                        seller=details.get("seller"),
+                        seller_rating=None,
+                    ),
+                    last_checked=datetime.now(timezone.utc),
+                )
+
+                if old_price != competitor.current_price:
+                    updated_ids.add(competitor.monitored_product_id)
 
             elapsed_ms = int((time.time() - start) * 1000)
             log.info("recheck_competitors_completed", status=status, duration_ms=elapsed_ms, count=len(batch))
