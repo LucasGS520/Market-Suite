@@ -25,53 +25,13 @@ from market_alert.crud.crud_competitor import create_or_update_competitor_produc
 #Logger específico para o scraping de concorrentes
 logger = structlog.get_logger("scraper_competitor_service")
 
-async def _scrape_competitor_product(
-    db: Session,
-    user_id: UUID,
-    url: str,
-    payload: CompetitorProductCreateScraping,
-) -> dict:
-    """ Executa o scraping de concorrentes de forma assíncrona
-
-    A chamada é feita diretamente através do cliente assíncrono
-    eliminando a necessidade de ``thread`` auxiliar
-    """
-
-    client = ScraperClient()
-    details = await client.parse(
-        url=url,
-        product_type="competitor",
-    )
-
-    competitor = create_or_update_competitor_product_scraped(
-        db=db,
-        product_data=payload,
-        scraped_info=CompetitorScrapedInfo(
-            name=details.get("name", ""),
-            current_price=Decimal(str(details.get("current_price", 0))),
-            old_price=Decimal(str(details.get("old_price")))
-            if details.get("old_price") is not None
-            else None,
-            thumbnail=details.get("thumbnail"),
-            free_shipping=details.get("free_shipping", False),
-            seller=details.get("seller"),
-            seller_rating=None,
-        ),
-        last_checked=datetime.now(timezone.utc),
-    )
-    return {"status": "success", "competitor_id": str(competitor.id)}
-
 def scrape_competitor_product(
     db: Session,
     user_id: UUID,
     url: str,
     payload: CompetitorProductCreateScraping,
 ) -> dict:
-    """ Versão síncrona utilizada pelas tasks Celery
-
-    Utiliza o ``ScraperClient`` para coletar dados sem qualquer
-    gerenciador de bloqueios ``RateLimiter`` ou ``CircuitBreaker``
-    """
+    """ Realiza o scraping de concorrentes de forma síncrona """
 
     client = ScraperClient()
     details = asyncio.run(
@@ -79,7 +39,7 @@ def scrape_competitor_product(
             url=url,
             product_type="competitor",
         )
-    )
+    ) #Executa a coroutine do cliente assíncrono
 
     competitor = create_or_update_competitor_product_scraped(
         db=db,

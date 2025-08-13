@@ -26,50 +26,13 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 #Logger especifico para o fluxo de monitorados
 logger = structlog.get_logger("scraper_monitored_service")
 
-async def _scrape_monitored_product(
-    db: Session,
-    url: str,
-    user_id: UUID,
-    payload: MonitoredProductCreateScraping,
-) -> dict:
-    """ Executa o scraping de forma assíncrona usando ``ScraperClient``
-
-    A função realiza a chamada HTTP diretamente, sem recorrer a
-    ``thread`` auxiliar, aproveitando o cliente assíncrono baseado
-    em ``httpx``
-    """
-
-    client = ScraperClient()
-    details = await client.parse(
-        url=url,
-        product_type="monitored",
-    )
-
-    product = create_or_update_monitored_product_scraped(
-        db=db,
-        user_id=user_id,
-        product_data=payload,
-        scraped_info=MonitoredScrapedInfo(
-            current_price=Decimal(str(details.get("current_price", 0))),
-            thumbnail=details.get("thumbnail"),
-            free_shipping=details.get("free_shipping", False),
-        ),
-        last_checked=datetime.now(timezone.utc),
-    )
-    compare_prices_task.delay(str(product.id))
-    return {"status": "success", "product_id": str(product.id)}
-
 def scrape_monitored_product(
     db: Session,
     url: str,
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
 ) -> dict:
-    """ Versão síncrona utilizada pelas tasks Celery
-
-    Realiza a requisição via ``ScraperClient`` sem
-    utilizar ``RateLimiter`` e ``CircuitBreaker``
-    """
+    """ Realiza o scraping de produtos monitorados de forma síncrona """
 
     client = ScraperClient()
     details = asyncio.run(
@@ -77,7 +40,7 @@ def scrape_monitored_product(
             url=url,
             product_type="monitored",
         )
-    )
+    ) #Executa a coroutine do cliente assíncrono
 
     product = create_or_update_monitored_product_scraped(
         db=db,
