@@ -109,7 +109,7 @@ playwright install chromium
 Nos containers Docker essa etapa já está contemplada no **Dockerfile**.
 
 
-3. Configure as suas variáveis de ambiente criando um arquivo `.env` na raiz do projeto (veja a seção a seguir). Para o ambiente Docker, copie `.env` para `infra/.env` e preencha com os seus segredos locais.
+3. Configure as variáveis de ambiente criando os arquivo `.env.common` e os arquivos específicos de cada serviço (`.env.market_alert` e `.env.market_scraper`).
 
 
 ## Requisitos
@@ -120,7 +120,7 @@ Nos containers Docker essa etapa já está contemplada no **Dockerfile**.
 
 
 ## Variáveis de Ambiente
-No sistema possui 3 tipos de arquivo ``.env``, para cada módulo crie um arquivo `.env.common`, `.env.market_alert`, `.env.market_scraper` seguindo os modelos abaixo:
+O sistema utiliza três tipos de arquivo ``.env`` distintos, para cada módulo crie um arquivo `.env.common`, `.env.market_alert`, `.env.market_scraper` seguindo os modelos abaixo:
 1. Esse é o arquivo ``.env.common`` localizado na raiz do projeto (`market_suite`) e é utilizado para configurações compartilhadas entre os serviços
 ```env
 POSTGRES_USER=usuario
@@ -242,7 +242,7 @@ docker-compose up market_scraper
 ```
 
 O container expõe a porta `8010` no host (mapeada para `8000` interno) e depende do Redis para cache e controle de taxa. As variáveis
-`REDIS_HOST`, `REDIS_PORT` e `REDIS_PASSWORD` devem estar presentes no arquivo `.env`.
+`REDIS_HOST`, `REDIS_PORT` e `REDIS_PASSWORD` devem estar presentes nos arquivos de configuração (`.env.common` e `.env.market_scraper`).
 
 ### Comunicação entre ``market_alert`` e ``market_scraper``
 O serviço `market_alert` utiliza o cliente HTTP definido em `utils/scraper_client.py` para enviar requisições ao `market_scraper`.
@@ -326,7 +326,7 @@ Para utilizar de fato os canais de notificação é necessário possuir contas e
 
 
 ## Executando Localmente
-Com o ambiente virtual ativo, inicie a API:
+Com o ambiente virtual ativo inicie a API:
 ```bash
 uvicorn main:market_alert --reload
 ```
@@ -362,7 +362,7 @@ python beat_with_metrics.py
    ```
 
 ## Implantação e Operação
-1. Copie o arquivo ``.env`` para o servidor de destino e ajuste as variáveis de ambiente conforme a sua infraestrutura.
+1. Copie os arquivos ``.env.common`` e ``.env.<serviço>`` correspondentes para o servidor de destino e ajuste as variáveis de ambiente conforme a sua infraestrutura.
 2. Execute ``docker compose -f infra/docker-compose.yml up -d --build`` para iniciar todos os containers.
 3. Verifique o status dos serviços com ``docker compose ps`` e acompanhe os logs em `docker compose logs -f api` ou `celery-worker`.
 4. Para aplicar migrações futuras execute ``docker compose exec migrations alembic upgrade head``.

@@ -6,14 +6,32 @@ configurações específicas de cada serviço.
 """
 
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import AnyHttpUrl, ConfigDict
 from pydantic_settings import BaseSettings
 
 
-#Carrega o arquivo de variáveis definido em ``ENV_FILE``
-ENV_FILE = os.getenv("ENV_FILE", ".env")
-load_dotenv(ENV_FILE)
+#Diretório base do projeto (raiz do repositório)
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+#Nome do serviço que está sendo executado
+SERVICE_NAME = os.getenv("SERVICE_NAME")
+
+#Carrega primeiro as variáveis comuns a todos os serviços
+common_env = BASE_DIR / ".env.common"
+load_dotenv(common_env, override=False)
+
+if SERVICE_NAME:
+    #Arquivo específico do serviço atual
+    ENV_FILE = BASE_DIR / f".env.{SERVICE_NAME}"
+    load_dotenv(ENV_FILE, override=True)
+else:
+    #Retrocompatibilidade: utiliza ``ENV_FILE`` ou ``.env``
+    ENV_FILE = Path(os.getenv("ENV_FILE", ".env"))
+    if not ENV_FILE.is_absolute():
+        ENV_FILE = BASE_DIR / ENV_FILE
+    load_dotenv(ENV_FILE, override=True)
 
 __all__ = ["ConfigBase"]
 
