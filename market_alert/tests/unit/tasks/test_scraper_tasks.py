@@ -1,30 +1,24 @@
-""" Testes unitários das tasks de scraping com mocks do serviço market_scraper """
+""" Testes unitários das tasks de scraping sem dependências externas """
 
 from types import SimpleNamespace
 
-import pytest
 import sys
-from shared import exceptions as base_exceptions
-from shared.utils.redis_client import get_redis_client
-
-sys.modules.setdefault("market_alert.exceptions", base_exceptions)
 import types
+import pytest
 
-#Cria pacotes fictícios necessários para a importação das tasks
-sys.modules.setdefault("market_scraper.utils.constants", types.SimpleNamespace(PRODUCT_HOSTS=[]))
-sys.modules.setdefault("market_scraper.utils.playwright_client", types.SimpleNamespace())
+from market_alert.utils.comparator import compare_prices
 
-import importlib
+#Cria stub mínimo para o módulo de comparação utilizado em ``services_comparison``
+market_alert_utils = types.ModuleType("market_alert.utils")
+sys.modules.setdefault("market_alert.utils", market_alert_utils)
 import market_alert  # type: ignore
-import types
-sys.modules.setdefault("market_scraper.utils", types.ModuleType("market_scraper.utils"))
-ms_utils = sys.modules["market_scraper.utils"]
+market_alert.utils = market_alert_utils
 
-# Mapeia utilitários reais sob o namespace esperado pelos testes
-sys.modules.setdefault("market_alert.utils", types.ModuleType("market_alert.utils"))
-market_alert.utils = sys.modules["market_alert.utils"]
-sys.modules.setdefault("market_scraper.utils.comparator", types.SimpleNamespace(compare_prices=lambda *a, **k: None))
-sys.modules.setdefault("market_alert.utils.redis_client", importlib.import_module("utils.redis_client"))
+#Submódulos necessários para os demais componentes
+import shared.utils.redis_client as shared_redis
+
+market_alert_utils.redis_client = shared_redis
+sys.modules.setdefault("market_alert.utils.redis_client", shared_redis)
 sys.modules.setdefault("market_alert.utils.circuit_breaker", types.SimpleNamespace(get_redis_client=lambda: None))
 sys.modules.setdefault(
     "market_alert.utils.robots_txt",
@@ -36,16 +30,21 @@ sys.modules.setdefault(
     ),
 )
 sys.modules.setdefault("market_alert.utils.intelligent_cache", types.SimpleNamespace(get_redis_client=lambda: None))
+sys.modules.setdefault("market_alert.utils.comparator", types.SimpleNamespace(compare_prices=lambda *a, **k: {}))
+market_alert_utils.circuit_breaker = sys.modules["market_alert.utils.circuit_breaker"]
+market_alert_utils.robots_txt = sys.modules["market_alert.utils.robots_txt"]
+market_alert_utils.intelligent_cache = sys.modules["market_alert.utils.intelligent_cache"]
+market_alert_utils.comparator = sys.modules["market_alert.utils.comparator"]
 
-market_alert.utils.comparator = sys.modules["market_scraper.utils.comparator"]
-market_alert.utils.redis_client = sys.modules["market_alert.utils.redis_client"]
-market_alert.utils.circuit_breaker = sys.modules["market_alert.utils.circuit_breaker"]
-market_alert.utils.robots_txt = sys.modules["market_alert.utils.robots_txt"]
-market_alert.utils.intelligent_cache = sys.modules["market_alert.utils.intelligent_cache"]
+#Stub do módulo inexistente ``services_scraper_common`` para evitar erros de importação
+sys.modules.setdefault("market_alert.services.services_scraper_common", types.SimpleNamespace(CircuitBreaker=None, redis_client=None))
+import market_alert.services as services_pkg
+services_pkg.services_scraper_common = sys.modules["market_alert.services.services_scraper_common"]
+sys.modules.setdefault(
+    "market_alert.services.services_cache_scraper", types.SimpleNamespace(cache_manager=types.SimpleNamespace(redis=None))
+)
 
-sys.modules.setdefault("market_alert.utils.comparator", sys.modules["market_scraper.utils.comparator"])
-
-from market_alert.tasks.scraper_tasks import collect_product_task, collect_competitor_task
+from market_alert.tasks.scraper_tasks import collect_product_task, collect_competitor_task, redis_client
 
 
 class DummySession:
