@@ -120,6 +120,8 @@ def dispatch_price_alerts(db: Session | None, monitored_product, alerts: list, m
                 alert_type=alert_type,
             )
             if db is not None:
-                update_last_notified(db, alert.get("rule_id"), now)
+                #Apenas atualiza a data da regra quando houver identificador válido
+                if alert.get("rule_id"):
+                    update_last_notified(db, alert.get("rule_id"), now)
         else:
             metrics.ALERT_RULES_SUPPRESSED_TOTAL.labels(reason="duplicate").inc()

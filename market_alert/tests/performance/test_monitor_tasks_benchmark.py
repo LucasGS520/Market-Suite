@@ -8,7 +8,7 @@ from market_alert.tasks import monitor_tasks
 def test_parse_monitored_batch_benchmark(benchmark, monkeypatch):
     #Cria objetos simples simulando produtos a serem processados
     batch = [SimpleNamespace(id=i, product_url=f"http://exemplo.com/{i}") for i in range(3)]
-    
+
     async def fake_parse(url: str, product_type: str, **k):
         #Simula atraso de rede para testar concorrência
         await asyncio.sleep(0.1)

@@ -1,3 +1,4 @@
+from gc import enable
 from types import SimpleNamespace
 from datetime import datetime, timezone, timedelta
 import httpx
@@ -270,6 +271,43 @@ def test_dispatch_price_alerts_updates_timestamp(monkeypatch):
 
     assert sent
     assert "time" in updated and isinstance(updated["time"], datetime)
+
+def test_dispatch_price_alerts_skips_update_without_rule(monkeypatch):
+    sent = []
+
+    class DummyManager:
+        def send_rendered(self, *a, **k):
+            sent.append(1)
+
+    user = SimpleNamespace(id="u1")
+    rule = SimpleNamespace(
+        id="r1",
+        rule_type=AlertType.PRICE_TARGET,
+        threshold_value=None,
+        threshold_percent=None,
+        enabled=True,
+        last_notified_at=None
+    )
+    updated = {}
+
+    monkeypatch.setattr("market_alert.services.services_notifications.get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr("market_alert.services.services_notifications.get_notification_manager", lambda: DummyManager())
+    monkeypatch.setattr("market_alert.services.services_notifications.get_alert_rules_or_default", lambda *a, **k: [rule])
+    monkeypatch.setattr("market_alert.services.services_notifications.has_recent_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr("market_alert.services.services_notifications.settings", SimpleNamespace(ALERT_DUPLICATE_WINDOW=60, ALERT_RULE_COOLDOWN=3600))
+
+    def fake_update(db, rid, when):
+        updated["called"] = True
+
+    monkeypatch.setattr("market_alert.services.services_notifications.update_last_notified", fake_update)
+
+    mp = SimpleNamespace(user_id="u1", name_identification="Prod", id="m1")
+    alert = {"name": "A", "price": 5}
+
+    dispatch_price_alerts(SimpleNamespace(), mp, [alert])
+
+    assert sent
+    assert "called" not in updated
 
 def test_slack_channel_posts_message(monkeypatch):
     from market_alert.notifications.channels.slack import SlackChannel
