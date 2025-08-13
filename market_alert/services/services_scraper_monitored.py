@@ -34,14 +34,13 @@ async def _scrape_monitored_product(
 ) -> dict:
     """ Executa o scraping de forma assíncrona usando ``ScraperClient``
 
-    A chamada síncrona é executada em ``thread`` separada para não
-    bloquear o loop de eventos, e não há mais uso de gerenciador
-    de bloqueios.
+    A função realiza a chamada HTTP diretamente, sem recorrer a
+    ``thread`` auxiliar, aproveitando o cliente assíncrono baseado
+    em ``httpx``
     """
 
-    #Dispara o cliente de scraping em ``thread`` separada
-    details = await asyncio.to_thread(
-        ScraperClient().parse,
+    client = ScraperClient()
+    details = await client.parse(
         url=url,
         product_type="monitored",
     )
@@ -72,9 +71,12 @@ def scrape_monitored_product(
     utilizar ``RateLimiter`` e ``CircuitBreaker``
     """
 
-    details = ScraperClient().parse(
-        url=url,
-        product_type="monitored",
+    client = ScraperClient()
+    details = asyncio.run(
+        client.parse(
+            url=url,
+            product_type="monitored",
+        )
     )
 
     product = create_or_update_monitored_product_scraped(

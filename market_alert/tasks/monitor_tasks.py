@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import time
 import os
+import asyncio
 
 import structlog
 
@@ -62,10 +63,12 @@ def recheck_monitored_products() -> None:
                 )
                 try:
                     #Captura os detalhes do scraping para persistência
-                    details = scraper_client.parse(
-                        url=p.product_url,
-                        product_type="monitored",
-                        monitored_id=str(p.id),
+                    details = asyncio.run(
+                        scraper_client.parse(
+                            url=p.product_url,
+                            product_type="monitored",
+                            monitored_id=str(p.id),
+                        )
                     )
 
                     #Salva os dados atualizados no banco
@@ -127,7 +130,7 @@ def recheck_competitor_products():
         log.warning("suspended_via_flag", detail="scraping suspended flag is set")
         return
 
-    with SessionLocal() as db:
+    with (SessionLocal() as db):
         try:
             competitors = get_all_competitor_products(db)
             batch = competitors[:BATCH_SIZE_COMPETITOR]
@@ -142,11 +145,13 @@ def recheck_competitor_products():
                 )
                 try:
                     #Realiza o scraping e salva as informações obtidas
-                    details = scraper_client.parse(
-                        url=c.product_url,
-                        product_type="competitor",
-                        competitor_id=str(c.id),
-                        monitored_id=str(c.monitored_product_id),
+                    details = asyncio.run(
+                        scraper_client.parse(
+                            url=c.product_url,
+                            product_type="competitor",
+                            competitor_id=str(c.id),
+                            monitored_id=str(c.monitored_product_id),
+                        )
                     )
 
                     old_price = c.current_price

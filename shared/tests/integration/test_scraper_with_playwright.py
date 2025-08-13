@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, AsyncMock
 from uuid import uuid4
 from decimal import Decimal
 from sqlalchemy.orm import Session
@@ -21,12 +21,12 @@ def test_scrape_monitored_triggers_client_and_tasks():
         target_price=Decimal("10.00")
     )
 
-    with patch.object(mod.ScraperClient, "parse", return_value={
+    with patch.object(mod.ScraperClient, "parse", AsyncMock(return_value={
         "current_price": "10.00",
         "thumbnail": "img.jpg",
         "free_shipping": True
-    }) as parse_mock, \
-        patch("market_alert.crud.crud_monitored.create_or_update_monitored_product_scraped") as crud_mock, \
+    })) as parse_mock, \
+        patch("market_alert.services.services_scraper_monitored.create_or_update_monitored_product_scraped") as crud_mock, \
         patch("market_alert.tasks.compare_prices_tasks.compare_prices_task.delay") as delay_mock:
 
         crud_mock.return_value = type("Obj", (), {"id": uuid4()})()

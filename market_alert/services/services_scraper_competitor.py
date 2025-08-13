@@ -33,13 +33,12 @@ async def _scrape_competitor_product(
 ) -> dict:
     """ Executa o scraping de concorrentes de forma assíncrona
 
-    A comunicação ocorre via ``ScraperClient`` executado em ``thread``
-    separada, sem empregar mecanismos de rate limiting ou circuit breaker
+    A chamada é feita diretamente através do cliente assíncrono
+    eliminando a necessidade de ``thread`` auxiliar
     """
 
-    #Requisição ao serviço de scraping em ``thread`` para evitar bloqueios
-    details = await asyncio.to_thread(
-        ScraperClient().parse,
+    client = ScraperClient()
+    details = await client.parse(
         url=url,
         product_type="competitor",
     )
@@ -74,9 +73,12 @@ def scrape_competitor_product(
     gerenciador de bloqueios ``RateLimiter`` ou ``CircuitBreaker``
     """
 
-    details = ScraperClient().parse(
-        url=url,
-        product_type="competitor",
+    client = ScraperClient()
+    details = asyncio.run(
+        client.parse(
+            url=url,
+            product_type="competitor",
+        )
     )
 
     competitor = create_or_update_competitor_product_scraped(
