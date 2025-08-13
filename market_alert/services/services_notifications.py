@@ -8,7 +8,6 @@ no projeto
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from gc import enable
 from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
