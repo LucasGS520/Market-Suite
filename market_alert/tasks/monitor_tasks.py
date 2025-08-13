@@ -11,6 +11,7 @@ import time
 import os
 import asyncio
 from idlelib.debugobj import dispatch
+from idlelib.window import add_windows_to_menu
 
 import structlog
 
@@ -62,6 +63,27 @@ async def _parse_monitored_batch(products):
                 return {"product": p, "details": None, "error": exc}
 
     tasks = [_fetch(p) for p in products]
+    return await asyncio.gather(*tasks)
+
+async def _parse_competitor_batch(competitors):
+    """ Executa o parsing de concorrentes de forma concorrente """
+
+    semaphore = asyncio.Semaphore(MAX_SCRAPER_CONCURRENCY)
+
+    async def _fetch(c):
+        log = logger.bind(competitor_id=str(c.id))
+        log.info("chamada_market_scraper", product_url=c.product_url)
+        async with semaphore:
+            try:
+                details = await scraper_client.parse(
+                    url=c.product_url,
+                    product_type="competitor",
+                )
+                return {"competitor": c, "details": details, "error": None}
+            except ScraperClientError as exc:
+                return {"competitor": c, "details": None, "error": exc}
+
+    tasks = [_fetch(c) for c in competitors]
     return await asyncio.gather(*tasks)
 
 @celery_app.task(name="market_alert.tasks.monitor_tasks.recheck_monitored_products")
