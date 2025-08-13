@@ -8,8 +8,8 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-#Diretório de templates localizado em 'templates/notifications' na raiz do projeto
-TEMPLATE_DIR = Path(__file__).resolve().parents[2] / "templates" / "notifications"
+#Diretório de templates localizado em 'templates/notifications' dentro do pacote `market_alert`
+TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates" / "notifications"
 
 env = Environment(
     loader=FileSystemLoader(str(TEMPLATE_DIR)),
