@@ -516,15 +516,15 @@ ferramentas de observabilidade.
   Postgres, Redis, Prometheus, Grafana, Alertmanager, Loki/Promtail e outros).
 - `db/` – utilidades de banco de dados compartilhadas (`engine`, `SessionLocal`,
   `get_db`).
-- `prometheus/` – arquivos `prometheus.yml` e `alert_rules.yml` com as métricas e
+- `infra/prometheus/` – arquivos `prometheus.yml` e `alert_rules.yml` com as métricas e
   regras de alerta coletadas pelo Prometheus.
-- `alertmanager/` – imagem personalizada e `alertmanager.yml` para envio de
+- `infra/alertmanager/` – imagem personalizada e `alertmanager.yml` para envio de
   notificações (ex.: Slack).
-- `loki/` – configuração do Loki para centralização de logs.
-- `promtail/` – define como o Promtail coleta logs dos containers.
-- `monitoring/grafana/` – dashboards e datasource provisionados
+- `infra/loki/` – configuração do Loki para centralização de logs.
+- `infra/promtail/` – define como o Promtail coleta logs dos containers.
+- `infra/monitoring/grafana/` – dashboards e datasource provisionados
   automaticamente no Grafana.
-- `core/infra/redis-scripts/` – scripts auxiliares carregados pelo Redis na inicialização.
+- `infra/redis-scripts/` – scripts auxiliares carregados pelo Redis na inicialização.
 
 ### Serviço ``redis-init``
 Container que carrega os scripts Lua em tempo de inicialização. Ele guarda o Redis responder e executa:

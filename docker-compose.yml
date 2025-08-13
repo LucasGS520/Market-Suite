@@ -29,7 +29,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./shared/core/infra/redis-scripts:/etc/redis/scripts:ro
+      - ./infra/redis-scripts:/etc/redis/scripts:ro
     networks:
       - monitoring-net
 
@@ -48,7 +48,7 @@ services:
         until redis-cli -h redis -a "$REDIS_PASSWORD" ping; do sleep 1; done
         redis-cli -h redis -a "$REDIS_PASSWORD" SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
     volumes:
-      - ./shared/core/infra/redis-scripts:/etc/redis/scripts:ro
+      - ./infra/redis-scripts:/etc/redis/scripts:ro
     networks:
       - monitoring-net
 
@@ -64,6 +64,7 @@ services:
       - ENV_FILE=./market_alert/.env.market_alert
     volumes:
       - ./market_alert:/market_alert
+      - ./infra:/market_alert/infra
     working_dir: /market_alert
     command:
       - alembic
@@ -103,6 +104,7 @@ services:
     volumes:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
+      - ./infra:/market_alert/infra
     networks:
       - monitoring-net
 
@@ -128,6 +130,7 @@ services:
     volumes:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
+      - ./infra:/market_alert/infra
     networks:
       - monitoring-net
 
@@ -160,6 +163,7 @@ services:
     volumes:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
+      - ./infra:/market_alert/infra
     networks:
       - monitoring-net
 
@@ -189,6 +193,7 @@ services:
       - redis-init
     volumes:
       - ./market_scraper:/market_scraper
+      - ./infra:/market_scraper/infra
     networks:
       - monitoring-net
 
@@ -197,7 +202,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     volumes:
-      - ./prometheus:/etc/prometheus:ro
+      - ./infra/prometheus:/etc/prometheus:ro
     ports:
       - "9090:9090"
     extra_hosts:
@@ -209,11 +214,11 @@ services:
   #Gerenciador de alertas do Prometheus
   alertmanager:
     build:
-      context: ./alertmanager
+      context: ./infra/alertmanager
       dockerfile: Dockerfile
     image: alertmanager-envsubst
     volumes:
-      - ./alertmanager:/etc/alertmanager:ro
+      - ./infra/alertmanager:/etc/alertmanager:ro
     env_file:
       - .env.common
     ports:
@@ -233,7 +238,7 @@ services:
         chown -R root:root /tmp/loki && \
         exec /usr/bin/loki -config.file=/etc/loki/loki-config.yml
     volumes:
-      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./infra/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/tmp/loki
     ports:
       - "3100:3100"
@@ -246,7 +251,7 @@ services:
     image: grafana/promtail:2.9.8
     command: -config.file=/etc/promtail/promtail-config.yml
     volumes:
-      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ./infra/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
       - /var/log:/var/log:ro
     networks:
       - monitoring-net
@@ -282,7 +287,7 @@ services:
     env_file:
       - .env.common
     volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-storage:/var/lib/grafana
     ports:
       - "3000:3000"
@@ -297,6 +302,7 @@ services:
       - api
     volumes:
       - ./market_alert:/market_alert
+      - ./infra:/market_alert/infra
     working_dir: /market_alert
     command:
       - "-f"

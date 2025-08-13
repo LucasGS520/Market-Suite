@@ -8,7 +8,7 @@ tests/
 .env.market_alert
 .env.*
 !.env.*.example
-infra/.env
+../infra/.env
 
 #Ignora ambientes virtuais
 venv*/

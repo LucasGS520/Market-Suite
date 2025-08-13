@@ -1,5 +1,4 @@
 """ Aplicação principal FastAPI com configuração de métricas e rotas """
-from itertools import count
 
 import shared.metrics as metrics_module
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
@@ -14,7 +13,6 @@ except Exception:
 import structlog
 import logging
 import time
-import redis
 
 from fastapi import FastAPI, Request, Response
 from fastapi.routing import APIRoute
