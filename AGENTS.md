@@ -137,6 +137,6 @@ Este arquivo documenta os principais **agentes de software e serviços automatiz
 - **Responsabilidade:** Carregar scripts Lua no Redis para RateLimiter
 - **Comando Executado:** 
 ```sh
-redis-cli SCRIPT LOAD "$(cat sliding_window.lua)"
+redis-cli SCRIPT LOAD "$(cat infra/redis-scripts/sliding_window.lua)"
 ```
 Este helper garante que o script esteja disponível no Redis.

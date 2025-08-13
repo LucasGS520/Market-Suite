@@ -3,14 +3,10 @@
 import os
 import pytest
 import sys
-import types
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI
 
-sys.modules.setdefault("market_alert.utils.comparator", types.SimpleNamespace(compare_prices=lambda *a, **k: None))
-sys.modules.setdefault("market_alert.routes.auth", types.ModuleType("market_alert.routes.auth"))
-for _name in ["routes_login", "routes_verify", "routes_reset_password", "routes_profile", "routes_refresh", "routes_logout"]:
-    sys.modules.setdefault(f"market_alert.routes.auth.{_name}", types.SimpleNamespace(router=APIRouter()))
-sys.modules.setdefault("market_alert.utils.audit_exporter", types.SimpleNamespace(app=FastAPI()))
+import market_alert.utils.comparator as comparator_module
+comparator_module.compare_prices = lambda *a, **k: None
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -21,11 +17,12 @@ from uuid import uuid4
 from infra.db import Base
 from infra.db import get_db
 
+import shared.utils.rate_limiter as rate_limiter_module
+
 from main import app as market_alert
 from market_alert.core.security import get_current_user
 from market_alert.core.password import hash_password
 from market_alert.models.models_users import User
-from market_alert.utils import rate_limiter as rate_limiter_module
 from market_alert.tasks import scraper_tasks
 
 #Utiliza banco SQLite em memória para testes
@@ -78,8 +75,8 @@ def patch_rate_limiter_and_redis(monkeypatch):
     fake_redis = FakeRedis()
     cache = DummyCacheManager()
 
-    monkeypatch.setattr("market_alert.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("market_alert.utils.redis_client._redis_client", fake_redis)
+    monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("shared.utils.redis_client._redis_client", fake_redis)
     #Usa raising False pois esses atributos podem não existir nos módulos
     monkeypatch.setattr("market_alert.services.services_scraper_monitored.redis_client", fake_redis, raising=False)
     monkeypatch.setattr("market_alert.services.services_scraper_competitor.redis_client", fake_redis, raising=False)
