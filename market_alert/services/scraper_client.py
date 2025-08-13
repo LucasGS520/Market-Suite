@@ -1,6 +1,8 @@
-""" Cliente HTTP assíncrono para o serviço externo de scraping
+""" Módulo que provê um cliente HTTP assíncrono para interagir com
+o serviço externo de scraping ``market_scraper``
 
-
+Envia requisições de parsing para páginas de produtos e retorna
+os dados estruturados, tratando erros de comunicação com o serviço
 """
 
 from __future__ import annotations
