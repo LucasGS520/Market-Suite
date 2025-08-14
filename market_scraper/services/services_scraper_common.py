@@ -142,7 +142,8 @@ async def _scrape_product_common(
         throttle.jitter_min = delay * 0.5
         throttle.jitter_max = delay * 1.5
 
-    human_delay.wait(None)
+    #Aguarda de forma assíncrona para simular leitura humana inicial
+    await human_delay.wait_async(None)
     throttle.wait(identifier="get", circuit_key=circuit_key)
 
     #HTML capturado da página. Se ocorrer bloqueio, pode ser substituído ou vir do cache
@@ -154,7 +155,8 @@ async def _scrape_product_common(
             SCRAPER_RESPONSE_SIZE_BYTES.labels(method="GET", status_code=200).observe(len(html))
             #Atualiza o cache distribuído com o HTML recém-obtido
             set_cached_html(target_url, html)
-            human_delay.wait(html)
+            #Espera de maneira não bloqueante após obter o HTML
+            await human_delay.wait_async(html)
         except PlaywrightTimeoutError as e:
             logger.warning("playwright_timeout", url=target_url, error=str(e))
             circuit_breaker.record_failure(circuit_key)
@@ -169,7 +171,8 @@ async def _scrape_product_common(
 
             html = recovered
             SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
-            human_delay.wait(html)
+            #Aguarda antes de prosseguir após recuperação de bloqueio
+            await human_delay.wait_async(html)
         except Exception as e:
             logger.error("get_request_failed", url=target_url, error=str(e))
             circuit_breaker.record_failure(circuit_key)
@@ -195,12 +198,14 @@ async def _scrape_product_common(
             #Se houver HTML recuperado, continua o fluxo normalmente
             html = recovered
             SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
-            human_delay.wait(html)
+            #Delay assíncrono após recuperar o HTML bloqueado
+            await human_delay.wait_async(html)
     else:
         #Quando há cache, registra métricas específicas
         SCRAPER_REQUESTS_TOTAL.labels(method="CACHE", status_code=200).inc()
         SCRAPER_RESPONSE_SIZE_BYTES.labels(method="CACHE", status_code=200).observe(len(html))
-        human_delay.wait(html)
+        #Delay assíncrono mesmo quando o HTML vem do cache
+        await human_delay.wait_async(html)
 
     if html is None:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Falha ao obter HTML")

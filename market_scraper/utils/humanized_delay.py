@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """ Utilitário para calcular atrasos de comportamento humano """
 
+import asyncio
 import random
 import time
 
@@ -35,6 +36,11 @@ class HumanizedDelayManager:
         """ Aguarda o tempo calculado de forma síncrona """
         delay = self.calculate_delay(text, reflection_time)
         time.sleep(delay)
+
+    async def wait_async(self, text: str | None, reflection_time: float = 1.0) -> None:
+        """ Aguarda o tempo calculado de forma assíncrona """
+        delay = self.calculate_delay(text, reflection_time)
+        await asyncio.sleep(delay)
 
     def prolong(self, factor: float = 1.5) -> None:
         """ Aumenta o delay base pelo *factor* para reduzir o ritmo de scraping """
