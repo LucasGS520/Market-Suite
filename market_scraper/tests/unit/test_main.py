@@ -27,7 +27,7 @@ def test_scraper_parse(monkeypatch) -> None:
             }
         }
 
-    monkeypatch.setattr("market_scraper.routes.routes_scraper._scrape_product_common_async", fake_scrape_product_common_async)
+    monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
 
     payload = {"url": "http://example.com/produto"}
     response = client.post("/scrape/parse", json=payload)
