@@ -45,7 +45,7 @@ from market_scraper.utils.playwright_client import get_playwright_client
 
 import market_scraper.services.services_parser as parser
 from market_scraper.services.services_parser import CaptchaDetectedError
-from market_scraper.services.services_cache_scraper import use_cache_if_not_modified, update_cache
+from market_scraper.services.services_cache_scraper import get_cached_html, set_cached_html
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 
@@ -146,13 +146,14 @@ async def _scrape_product_common(
     throttle.wait(identifier="get", circuit_key=circuit_key)
 
     #HTML capturado da página. Se ocorrer bloqueio, pode ser substituído ou vir do cache
-    html: str | None = use_cache_if_not_modified(target_url)
+    html: str | None = get_cached_html(target_url)
     if html is None:
         try:
             html = await fetch_html_playwright(target_url)
             SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
             SCRAPER_RESPONSE_SIZE_BYTES.labels(method="GET", status_code=200).observe(len(html))
-            update_cache(target_url, html)
+            #Atualiza o cache distribuído com o HTML recém-obtido
+            set_cached_html(target_url, html)
             human_delay.wait(html)
         except PlaywrightTimeoutError as e:
             logger.warning("playwright_timeout", url=target_url, error=str(e))

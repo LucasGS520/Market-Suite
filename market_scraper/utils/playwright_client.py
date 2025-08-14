@@ -10,7 +10,6 @@ lidar diretamente com a inicialização do navegador.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from pkgutil import resolve_name
 from typing import AsyncGenerator, Optional
 from datetime import datetime
 import random
@@ -38,9 +37,12 @@ class PlaywrightClient:
 
     async def _simulate_interacao(self, page, width: int, height: int) -> None:
         """ Realiza movimentos e rolagens sutis para parecer navegação humana """
-        await page.mouse.move(random.randint(0, width), random.randint(0, height), steps=5)
+        mouse = getattr(page, "mouse", None)
+        if not mouse:
+            return
+        await mouse.move(random.randint(0, width), random.randint(0, height), steps=5)
         await page.wait_for_timeout(random.randint(100, 300))
-        await page.mouse.wheel(0, random.randint(300, 800))
+        await mouse.wheel(0, random.randint(300, 800))
         await page.wait_for_timeout(random.randint(100, 300))
 
     async def __aenter__(self) -> "PlaywrightClient":

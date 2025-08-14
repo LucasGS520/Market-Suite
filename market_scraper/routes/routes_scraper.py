@@ -18,8 +18,8 @@ from shared.schemas.products import MonitoredProductCreateScraping, CompetitorPr
 from market_scraper.services.services_scraper_common import _scrape_product_common
 from market_scraper.utils.price import parse_price_str, parse_optional_price_str
 
-
-router = APIRouter(prefix="/scraper", tags=["scraper"])
+#Roteador sem prefixo; os caminhos base são definidos na aplicação principal
+router = APIRouter(tags=["scraper"])
 
 class ScrapeRequest(BaseModel):
     """ Corpo da requisição de scraping """

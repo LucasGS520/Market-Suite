@@ -14,7 +14,9 @@ app = FastAPI(title="MarketScraper")
 
 #Registro das rotas de saúde e de scraping
 app.include_router(routes_health.router)
-app.include_router(routes_scraper.router)
+#Disponibiliza o endpoint com dois prefixos por compatibilidade ("/scraper" e "/scrape")
+app.include_router(routes_scraper.router, prefix="/scraper")
+app.include_router(routes_scraper.router, prefix="/scrape")
 
 #A variável `app` é exposta para uso pelo Uvicorn
 __all__ = ["app"]
