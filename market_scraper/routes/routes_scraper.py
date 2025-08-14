@@ -15,7 +15,7 @@ from pydantic import BaseModel, HttpUrl
 
 from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
-from market_scraper.services.services_scraper_common import _scrape_product_common
+from market_scraper.services.services_scraper_common import scrape_product_common_async
 from market_scraper.utils.price import parse_price_str, parse_optional_price_str
 
 #Roteador sem prefixo; os caminhos base são definidos na aplicação principal
@@ -55,7 +55,7 @@ async def parse_endpoint(payload: ScrapeRequest) -> ScrapeResponse:
             product_url=payload.url,
         )
 
-    result = await _scrape_product_common(
+    result = await scrape_product_common_async(
         url=str(payload.url),
         user_id=payload.user_id or UUID(int=0),
         payload=base_payload,

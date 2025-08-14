@@ -15,7 +15,7 @@ def test_health_ping() -> None:
 
 def test_scraper_parse(monkeypatch) -> None:
     """ Garante que o endpoint de parsing retorna os campos esperados """
-    async def fake_scrape_product_common(*args, **kwargs):
+    async def fake_scrape_product_common_async(*a, **k):
         return {
             "details": {
                 "name": "Produto Teste",
@@ -27,7 +27,7 @@ def test_scraper_parse(monkeypatch) -> None:
             }
         }
 
-    monkeypatch.setattr("market_scraper.routes.routes_scraper._scrape_product_common", fake_scrape_product_common)
+    monkeypatch.setattr("market_scraper.routes.routes_scraper._scrape_product_common_async", fake_scrape_product_common_async)
 
     payload = {"url": "http://example.com/produto"}
     response = client.post("/scrape/parse", json=payload)

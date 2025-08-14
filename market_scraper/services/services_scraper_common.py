@@ -63,7 +63,7 @@ async def fetch_html_playwright(url: str) -> str:
         html = await client.fetch_html(url)
         return html
 
-async def _scrape_product_common(
+async def scrape_product_common_async(
         *,
         url: str,
         user_id: UUID,
@@ -279,9 +279,9 @@ def scrape_product_common(
         circuit_breaker: CircuitBreaker | None = None,
         recovery_manager: BlockRecoveryManager | None = None
 ) -> dict:
-    """ Executa ``_scrape_product_common`` em contexto síncrono """
+    """ Executa ``scrape_product_common_async`` em contexto síncrono """
     return asyncio.run(
-        _scrape_product_common(
+        scrape_product_common_async(
             url=url,
             user_id=user_id,
             payload=payload,
