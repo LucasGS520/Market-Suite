@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import structlog
 
-from shared.utils.redis_client import suspend_scraping, get_redis_client
+from shared.utils.redis_client import suspend_scraping
 
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
@@ -18,12 +18,17 @@ logger = structlog.get_logger("block_recovery")
 
 @dataclass
 class BlockRecoveryManager:
-    """ Coordena etapas de recuperação quando o scraping é bloqueado """
+    """ Coordena etapas de recuperação quando o scraping é bloqueado
+
+    Este gerenciador rotaciona o ``User-Agent``, reseta cookies e prolonga
+    o delay de requisições. Ao final, ativa uma suspensão temporária no Redis
+    utilizando ``suspend_scraping`` para evitar novas tentativas agresisvas
+    """
     ua_manager: Optional[IntelligentUserAgentManager] = None
     cookie_manager: Optional[CookieManager] = None
     delay_manager: HumanizedDelayManager = HumanizedDelayManager()
-    redis = get_redis_client()
 
+    #Períodos de suspensão progressivos em segundos
     suspension_steps: List[int] = (300, 900, 1800)
     _severity: int = 0
 
@@ -60,6 +65,7 @@ class BlockRecoveryManager:
 
         idx = min(self._severity - 1, len(self.suspension_steps) - 1)
         suspend_seconds = self.suspension_steps[idx]
+        #Registra no Redis uma suspensão temporária do scraping
         suspend_scraping(suspend_seconds)
 
         return recovered_html
