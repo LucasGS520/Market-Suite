@@ -12,7 +12,12 @@ from __future__ import annotations
 from typing import Optional, Dict
 import time
 
+import structlog
+
 from shared.utils.redis_client import get_redis_client
+
+#Logger local para registrar eventos e erros relacionados ao cache
+logger = structlog.get_logger(__name__)
 
 #Estrutura interna de cache em memória
 _cache: Dict[str, Dict[str, object]] = {}
@@ -46,9 +51,9 @@ def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
         html = client.get(key)
         if html:
             return html
-    except Exception:
+    except Exception as err:
         #Se ocorrer qualquer problema com o Redis, usa o cache local
-        pass
+        logger.warning("Falha ao recuperar HTML do Redis", erro=str(err))
 
     #Fallback para o cache em memória
     entry = _cache.get(url)
@@ -82,8 +87,9 @@ def set_cached_html(url: str, html: str, ttl: int = 300) -> None:
     #Atualiza o cache no Redis com tempo de expiração definido
     try:
         client.setex(key, ttl, html)
-    except Exception:
-        pass #Caso o Redis falhe, ignora e segue com o cache local
+    except Exception as err:
+        #Caso o Redis falhe, ignora e segue com o cache local
+        logger.warning("Falha ao armazenar HTML no Redis", erro=str(err))
 
     #Sempre armazena no cache local para garantir a reutilização mínima
     _cache[url] = {"html": html, "timestamp": time.time()}

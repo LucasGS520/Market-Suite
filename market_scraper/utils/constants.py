@@ -1,4 +1,4 @@
-""" Constantes e configurações utilitárias """
+""" Centralizado constantes do projeto e configurações utilitárias ligados a URLs e User-Agent """
 
 from typing import Tuple, Union, Dict
 from shared.core.config_scraper import settings
