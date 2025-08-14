@@ -7,21 +7,19 @@ por camadas externas, como o módulo ``market_alert``.
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Literal, Callable, Any
+from typing import Dict, Optional, Literal
 from uuid import UUID
 
 import asyncio
 import structlog
 
 from fastapi import HTTPException, status
-from fastapi.encoders import jsonable_encoder
 
 from shared.core.config_scraper import settings
 
 from shared.utils.circuit_breaker import CircuitBreaker
-from shared.utils.redis_client import get_redis_client, is_scraping_suspended, suspend_scraping
+from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.rate_limiter import RateLimiter
-from shared.utils.ml_url import canonicalize_ml_url, is_product_url
 from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.metrics import (
     SCRAPER_HTTP_BLOCKED_TOTAL,
@@ -31,12 +29,11 @@ from shared.metrics import (
     SCRAPER_URL_STATUS_TOTAL,
 )
 
-from market_scraper.utils.constants import to_mobile_url, THROTTLE_RATE, THROTTLE_CAPACITY, JITTER_RANGE, PRODUCT_HOSTS
+from market_scraper.utils.constants import to_mobile_url, THROTTLE_RATE, THROTTLE_CAPACITY, JITTER_RANGE
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.throttle_manager import ThrottleManager
 from market_scraper.utils.http_utils import extract_hostname
-from market_scraper.utils.block_detector import detect_block
 from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_scraper.utils.price import parse_price_str
 from market_scraper.utils.robots_txt import RobotsTxtParser
@@ -265,7 +262,8 @@ async def _scrape_product_common(
             detail=("Preço não encontrado no HTML" if product_type == "monitored" else "Preço não encontrado no HTML concorrente")
         )
 
-    current_price = parse_price_str(raw_current, target_url)
+    #Valida se o preço extraído pode ser convertido corretamente
+    parse_price_str(raw_current, target_url)
 
     circuit_breaker.record_success(circuit_key)
     SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="success").inc()
