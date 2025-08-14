@@ -25,7 +25,7 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from market_alert.core.config import settings
-from infra.db import get_engine, SessionLocal
+from shared.infra.db import get_engine, SessionLocal
 from market_alert.models.models_alerts import AlertRule
 
 #Rotas

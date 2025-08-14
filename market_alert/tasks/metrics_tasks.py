@@ -6,8 +6,7 @@ from celery import shared_task, signals
 from celery.app.control import Inspect
 
 from shared.utils.redis_client import get_redis_client
-from market_alert.core.celery_app import celery_app
-from infra.db import get_engine
+from shared.infra.db import get_engine
 from shared.metrics import (
     CELERY_QUEUE_LENGTH, CELERY_WORKERS_TOTAL,
     CELERY_WORKER_CONCURRENCY, CELERY_TASK_DURATION_SECONDS,
@@ -15,6 +14,7 @@ from shared.metrics import (
     DB_POOL_SIZE, DB_POOL_CHECKOUTS,
     CACHE_CLEANUP_TOTAL
 )
+from market_alert.core.celery_app import celery_app
 
 
 logger = structlog.get_logger("metrics_tasks")

@@ -7,7 +7,7 @@ from sqlalchemy import Column, String, Numeric, ForeignKey, DateTime, Text, Bool
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
-from infra.db import Base
+from shared.infra.db import Base
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
 
 

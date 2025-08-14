@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from infra.db import get_db
+from shared.infra.db import get_db
 from market_alert.core.security import get_current_admin_user
 from market_alert.models.models_users import User
 

@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone
 
-from infra.db import get_engine
+from shared.infra.db import get_engine
 from market_alert.core.config import settings
 
 

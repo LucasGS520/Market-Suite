@@ -12,8 +12,7 @@ from uuid import UUID
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from infra.db import SessionLocal
-
+from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client
 from shared.utils.logging_utils import mask_identifier
 from shared.metrics import SCRAPING_LATENCY_SECONDS

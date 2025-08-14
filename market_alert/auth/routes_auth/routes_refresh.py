@@ -4,7 +4,7 @@ import structlog
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from infra.db import get_db
+from shared.infra.db import get_db
 from market_alert.schemas.schemas_auth import RefreshRequest, TokenPairResponse
 from market_alert.auth.services_auth import refresh_token_service
 

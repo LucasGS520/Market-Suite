@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from infra.db import get_db
+from shared.infra.db import get_db
 from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpdate
 from market_alert.crud import crud_user as crud
 from market_alert.models.models_users import User

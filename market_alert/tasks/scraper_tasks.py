@@ -12,8 +12,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from infra.db import SessionLocal
-
+from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
 from shared.exceptions import ScraperError
 from shared.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT

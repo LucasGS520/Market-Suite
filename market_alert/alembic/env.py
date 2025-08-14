@@ -9,8 +9,8 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
-#Importa a Base diretamente do módulo infra
-from infra.db import Base
+#Importa a Base diretamente do módulo compartilhado
+from shared.infra.db import Base
 #Importa explicitamente todos os modelos para que Base.metadata os conheça
 import market_alert.models.models_scraping_errors
 import market_alert.models.models_users

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
 
-from infra.db import get_db
+from shared.infra.db import get_db
 
 from shared.utils.ml_url import canonicalize_ml_url, is_product_url
 from shared.schemas.products import CompetitorProductCreateScraping

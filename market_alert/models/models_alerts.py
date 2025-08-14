@@ -7,7 +7,7 @@ from sqlalchemy import Column, ForeignKey, DateTime, Numeric, Float, Boolean, Te
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 
-from infra.db import Base
+from shared.infra.db import Base
 from market_alert.enums.enums_alerts import AlertType, ChannelType
 from market_alert.enums.enums_products import ProductStatus
 

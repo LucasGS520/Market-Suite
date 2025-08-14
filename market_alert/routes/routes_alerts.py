@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
 
-from infra.db import get_db
+from shared.infra.db import get_db
 from market_alert.models import User
 from market_alert.schemas.schemas_alert_rules import AlertRuleCreate, QuickAlertRuleCreate, AlertRuleUpdate, AlertRuleResponse
 from market_alert.crud.crud_alert_rules import create_alert_rule, get_alert_rule, get_user_alert_rules, toggle_alert_rule, update_alert_rule, delete_alert_rule

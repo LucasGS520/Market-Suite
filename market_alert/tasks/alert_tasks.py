@@ -13,8 +13,10 @@ import structlog
 
 from sqlalchemy.orm import Session
 
+from shared import metrics
+from shared.infra.db import SessionLocal
+
 from market_alert.core.celery_app import celery_app
-from infra.db import SessionLocal
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_user import get_user_by_id
 from market_alert.models.models_alerts import NotificationLog
@@ -23,7 +25,6 @@ from market_alert.services.services_notifications import dispatch_price_alerts
 from market_alert.notifications.channels import EmailChannel, SMSChannel, PushChannel, WhatsAppChannel, SlackChannel
 from market_alert.enums.enums_alerts import ChannelType
 from market_alert.core.config import settings
-from shared import metrics
 
 
 logger = structlog.get_logger("alert_tasks")

@@ -8,7 +8,7 @@ from sqlalchemy import Column, Text, DateTime, ForeignKey, Integer, String, Enum
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Session, relationship
 
-from infra.db import Base
+from shared.infra.db import Base
 from shared.enums.error_codes import ScrapingErrorType
 
 

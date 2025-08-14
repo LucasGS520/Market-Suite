@@ -5,7 +5,7 @@ from sqlalchemy import Column, String, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from uuid import uuid4
 
-from infra.db import Base
+from shared.infra.db import Base
 
 
 #Logger para rastrear atividades do modelo de tentativas de login

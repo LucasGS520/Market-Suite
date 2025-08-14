@@ -6,7 +6,7 @@ from sqlalchemy import Column, String, func, LargeBinary, Boolean, DateTime, Int
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID #UUID e uuid.uuid4 gera identificadores unicos (id)
 from sqlalchemy.orm import relationship
 
-from infra.db import Base
+from shared.infra.db import Base
 from market_alert.core.password import hash_password, verify_password
 from market_alert.models.models_refresh_token import RefreshToken
 

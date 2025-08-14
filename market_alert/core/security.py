@@ -8,7 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from market_alert.core.jwt import verify_access_token
-from infra.db import get_db
+from shared.infra.db import get_db
 from market_alert.models.models_users import User
 
 

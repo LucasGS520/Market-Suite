@@ -4,7 +4,7 @@ import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from infra.db import get_db
+from shared.infra.db import get_db
 from market_alert.schemas.schemas_auth import ChangePasswordRequest, ChangeEmailRequest
 from market_alert.auth.services_auth import change_password_service, change_email_service
 from market_alert.core.security import get_current_user

@@ -4,7 +4,7 @@ import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from infra.db import get_db
+from shared.infra.db import get_db
 from market_alert.schemas.schemas_auth import EmailTokenRequest
 from market_alert.auth.services_auth import send_verification_email_service, confirm_email_verification_service
 from market_alert.core.security import get_current_user

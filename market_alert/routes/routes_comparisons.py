@@ -7,7 +7,7 @@ from typing import List
 from uuid import UUID
 from decimal import Decimal
 
-from infra.db import get_db
+from shared.infra.db import get_db
 from market_alert.models import User
 from market_alert.schemas.schemas_comparisons import PriceComparisonResponse
 from market_alert.core.security import get_current_user

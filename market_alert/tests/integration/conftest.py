@@ -11,8 +11,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from uuid import uuid4
 
-from infra.db import Base
-from infra.db import get_db
+from shared.infra.db import Base
+from shared.infra.db import get_db
 
 import shared.utils.rate_limiter as rate_limiter_module
 
