@@ -18,7 +18,7 @@ from shared.utils.redis_client import get_redis_client
 _cache: Dict[str, Dict[str, object]] = {}
 
 #Prefixo de chave utilizando no Redis para evitar colisões com outros dados
-_CACHE_PREFIX = "scraper:html"
+_CACHE_PREFIX = "scraper:html:"
 
 
 def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
@@ -38,6 +38,7 @@ def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
         não houver cache utilizável
     """
     client = get_redis_client()
+    #Monta a chave com o prefixo padronizado e a URL solicitada
     key = f"{_CACHE_PREFIX}{url}"
 
     #Primeiro tenta recuperar do Redis
@@ -75,6 +76,7 @@ def set_cached_html(url: str, html: str, ttl: int = 300) -> None:
     """
 
     client = get_redis_client()
+    #Combina o prefixo de cache com a URL alvo
     key = f"{_CACHE_PREFIX}{url}"
 
     #Atualiza o cache no Redis com tempo de expiração definido
