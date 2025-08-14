@@ -10,8 +10,6 @@ from decimal import Decimal
 import time
 import os
 import asyncio
-from idlelib.debugobj import dispatch
-from idlelib.window import add_windows_to_menu
 
 import structlog
 

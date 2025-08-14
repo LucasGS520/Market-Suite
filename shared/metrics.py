@@ -187,6 +187,13 @@ CACHE_MISSES_ENDPOINT_TOTAL = Counter(
 )
 
 
+# ---------- CACHE CLEANUP METRICS ----------
+CACHE_CLEANUP_TOTAL = Counter(
+    "cache_cleanup_total",
+    "Total de entradas removidas do cache de scraping",
+)
+
+
 # ---------- AUDIT LOG METRICS ----------
 #Métricas para auditoria de logs
 AUDIT_RECORDS_TOTAL = Counter(
