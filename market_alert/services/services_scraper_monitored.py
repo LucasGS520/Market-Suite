@@ -26,21 +26,16 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 #Logger especifico para o fluxo de monitorados
 logger = structlog.get_logger("scraper_monitored_service")
 
-def scrape_monitored_product(
+async def scrape_monitored_product_async(
     db: Session,
     url: str,
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
 ) -> dict:
-    """ Realiza o scraping de produtos monitorados de forma síncrona """
+    """ Executa o scraping de produtos monitorados de forma assíncrona """
 
     client = ScraperClient()
-    details = asyncio.run(
-        client.parse(
-            url=url,
-            product_type="monitored",
-        )
-    ) #Executa a coroutine do cliente assíncrono
+    details = await client.parse(url=url, product_type="monitored")
 
     product = create_or_update_monitored_product_scraped(
         db=db,
@@ -55,3 +50,30 @@ def scrape_monitored_product(
     )
     compare_prices_task.delay(str(product.id))
     return {"status": "success", "product_id": str(product.id)}
+
+def scrape_monitored_product(
+    db: Session,
+    url: str,
+    user_id: UUID,
+    payload: MonitoredProductCreateScraping,
+) -> dict:
+    """ Executa o scraping em contexto síncrono """
+
+    coro = scrape_monitored_product_async(db, url, user_id, payload)
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+
+    if loop.is_running():
+        new_loop = asyncio.new_event_loop()
+        try:
+            return new_loop.run_until_complete(coro)
+        finally:
+            new_loop.close()
+
+    else:
+        return loop.run_until_complete(coro)

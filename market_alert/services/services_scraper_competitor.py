@@ -25,21 +25,16 @@ from market_alert.crud.crud_competitor import create_or_update_competitor_produc
 #Logger específico para o scraping de concorrentes
 logger = structlog.get_logger("scraper_competitor_service")
 
-def scrape_competitor_product(
+async def scrape_competitor_product_async(
     db: Session,
     user_id: UUID,
     url: str,
     payload: CompetitorProductCreateScraping,
 ) -> dict:
-    """ Realiza o scraping de concorrentes de forma síncrona """
+    """ Executa o scraping de concorrentes de forma assíncrona """
 
     client = ScraperClient()
-    details = asyncio.run(
-        client.parse(
-            url=url,
-            product_type="competitor",
-        )
-    ) #Executa a coroutine do cliente assíncrono
+    details = await client.parse(url=url, product_type="competitor")
 
     competitor = create_or_update_competitor_product_scraped(
         db=db,
@@ -58,3 +53,29 @@ def scrape_competitor_product(
         last_checked=datetime.now(timezone.utc),
     )
     return {"status": "success", "competitor_id": str(competitor.id)}
+
+def scrape_competitor_product(
+    db: Session,
+    user_id: UUID,
+    url: str,
+    payload: CompetitorProductCreateScraping,
+) -> dict:
+    """ Interface síncrona que reutiliza o loop de eventos quando disponível """
+
+    coro = scrape_competitor_product_async(db, user_id, url, payload)
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+
+    if loop.is_running():
+        new_loop = asyncio.new_event_loop()
+        try:
+            return new_loop.run_until_complete(coro)
+        finally:
+            new_loop.close()
+    else:
+        return loop.run_until_complete(coro)
