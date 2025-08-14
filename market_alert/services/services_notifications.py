@@ -23,6 +23,46 @@ from market_alert.core.config import settings
 from shared import metrics
 
 
+def filter_alerts_by_rules(
+    alerts: list, rules: list, cooldown: int, now: datetime | None = None
+) -> list[tuple[dict, object]]:
+    """ Filtra alertas com base nas regras configuradas """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    filtrados: list[tuple[dict, object]] = []
+    for alert in alerts:
+        for rule in rules:
+            if alert_matches_rule(alert, rule):
+                metrics.ALERT_RULES_TRIGGERED_TOTAL.labels(
+                    rule_type=rule.rule_type.value
+                ).inc()
+                last_sent = getattr(rule, "last_notified_at", None)
+                if last_sent and (now - last_sent).total_seconds() < cooldown:
+                    metrics.ALERT_RULES_SUPPRESSED_TOTAL.labels(
+                        reason="cooldown"
+                    ).inc()
+                    break
+                rule_id = str(rule.id) if getattr(rule, "last_notified_at", None) else None
+                alert = {**alert, "rule_id": rule_id}
+                filtrados.append((alert, rule))
+                break
+    return filtrados
+
+def is_duplicate_notification(
+    db:Session | None, user_id: int, subject: str, preview: str
+) -> bool:
+    """ Verifica se já existe uma notificação idêntica recente """
+    if db is None:
+        return False
+    return has_recent_duplicate_notification(
+        db,
+        user_id,
+        subject,
+        preview,
+        settings.ALERT_DUPLICATE_WINDOW,
+    )
+
 def dispatch_price_alerts(db: Session | None, monitored_product, alerts: list, manager: NotificationManager | None = None) -> None:
     """ Envia alertas de preço para um produto monitorado
 
@@ -55,25 +95,9 @@ def dispatch_price_alerts(db: Session | None, monitored_product, alerts: list, m
         ]
 
     now = datetime.now(timezone.utc)
-    cooldown = settings.ALERT_RULE_COOLDOWN
-
-    filtered: list[tuple[dict, object]] = []
-    for alert in alerts:
-        for rule in rules:
-            if alert_matches_rule(alert, rule):
-                metrics.ALERT_RULES_TRIGGERED_TOTAL.labels(
-                    rule_type=rule.rule_type.value
-                ).inc()
-                last_sent = getattr(rule, "last_notified_at", None)
-                if last_sent and (now - last_sent).total_seconds() < cooldown:
-                    metrics.ALERT_RULES_SUPPRESSED_TOTAL.labels(
-                        reason="cooldown"
-                    ).inc()
-                    break
-                rule_id = str(rule.id) if getattr(rule, "last_notified_at", None) else None
-                alert = {**alert, "rule_id": rule_id}
-                filtered.append((alert, rule))
-                break
+    filtered = filter_alerts_by_rules(
+        alerts, rules, settings.ALERT_RULE_COOLDOWN, now
+    )
 
     for alert, rule in filtered:
         template = render_price_alert
@@ -99,15 +123,7 @@ def dispatch_price_alerts(db: Session | None, monitored_product, alerts: list, m
         )
         preview = template(monitored_product, alert)
 
-        duplicate = False
-        if db is not None:
-            duplicate = has_recent_duplicate_notification(
-                db,
-                user.id,
-                subject,
-                preview,
-                settings.ALERT_DUPLICATE_WINDOW,
-            )
+        duplicate = is_duplicate_notification(db, user.id, subject, preview)
         if not duplicate:
             manager.send_rendered(
                 db,
