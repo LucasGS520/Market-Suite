@@ -1,13 +1,15 @@
 from locust import HttpUser, task, between
 import os
-import random
 import uuid
 
+
 class WebsiteUser(HttpUser):
+    """ Usuário que realiza requisições de teste ao serviço de scraping """
     wait_time = between(1, 3)
     host = os.getenv("LOCUST_HOST", "http://localhost:8000")
 
     def on_start(self):
+        """ Efetua o login para obter o token de autenticação """
         self.token = None
         email = os.getenv("LOCUST_LOGIN_EMAIL")
         password = os.getenv("LOCUST_LOGIN_PASSWORD")
@@ -19,23 +21,27 @@ class WebsiteUser(HttpUser):
                     resp.failure(f"Failed login: {resp.status_code}")
 
     def _headers(self):
+        """ Retorna cabeçalhos com o token JWT quando disponível """
         if self.token:
             return {"Authorization": f"Bearer {self.token}"}
         return {}
 
     @task(2)
     def scrape_monitored(self):
+        """ Simula o scraping de um produto monitorado """
         payload = {
-            "product_url": "https://example.com/product",
-            "name_identification": f"load-{random.randint(1,10000)}",
-            "target_price": 100.0
+            "url": "https://example.com/product",
+            "product_type": "monitored",
+            "user_id": str(uuid.uuid4()),
         }
-        self.client.post("/monitored/scrape", json=payload, headers=self._headers())
+        self.client.post("/scrape/parse", json=payload, headers=self._headers())
 
     @task(1)
     def scrape_competitor(self):
+        """ Simula o scraping de um produto concorrente """
         payload = {
-            "monitored_product_id": str(uuid.uuid4()),
-            "product_url": "https://example.com/competitor"
+            "url": "https://example.com/competitor",
+            "product_type": "competitor",
+            "user_id": str(uuid.uuid4()),
         }
-        self.client.post("/competitors/scrape", json=payload, headers=self._headers())
+        self.client.post("/scrape/parse", json=payload, headers=self._headers())
