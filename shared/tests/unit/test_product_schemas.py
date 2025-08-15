@@ -1,0 +1,70 @@
+from decimal import Decimal
+
+import pytest
+from pydantic import ValidationError
+
+from shared.schemas.products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
+
+
+def test_monitored_scraped_info_defaults():
+    data = MonitoredScrapedInfo(current_price=Decimal("10.5"))
+    assert data.thumbnail is None
+    assert data.free_shipping is False
+
+def test_competitor_scraped_info_defaults():
+    data = CompetitorScrapedInfo(name="Produto", current_price=Decimal("9.99"))
+    assert data.old_price is None
+    assert data.thumbnail is None
+    assert data.free_shipping is False
+    assert data.seller is None
+    assert data.seller_rating is None
+
+def test_monitored_scraped_info_defaults():
+    data = MonitoredScrapedInfo(current_price=Decimal("10.5"))
+    assert data.thumbnail is None
+    assert data.free_shipping is False
+
+def test_competitor_scraped_info_defaults():
+    data = CompetitorScrapedInfo(name="Produto", current_price=Decimal("9.99"))
+    assert data.old_price is None
+    assert data.thumbnail is None
+    assert data.free_shipping is False
+    assert data.seller is None
+    assert data.seller_rating is None
+
+def test_monitored_product_required_fields():
+    with pytest.raises(ValidationError) as exc:
+        MonitoredProductCreateScraping()
+
+    mensagens = str(exc.value)
+    assert "name_identification" in mensagens
+    assert "product_url" in mensagens
+    assert "target_price" in mensagens
+
+def test_monitored_product_invalid_url():
+    with pytest.raises(ValidationError) as exc:
+        MonitoredProductCreateScraping(
+            name_identification="Teste",
+            product_url="nao-e-url",
+            target_price=Decimal("10"),
+        )
+    assert "url" in str(exc.value).lower()
+
+def test_monitored_product_invalid_type():
+    with pytest.raises(ValidationError) as exc:
+        MonitoredProductCreateScraping(
+            name_identification="Teste",
+            product_url="https://example.com/produto",
+            target_price="dez",
+        )
+    assert "target_price" in str(exc.value)
+
+def test_competitor_product_invalid_url():
+    from uuid import uuid4
+
+    with pytest.raises(ValidationError) as exc:
+        CompetitorProductCreateScraping(
+            monitored_product_id=uuid4(),
+            product_url="url-invalida",
+        )
+    assert "url" in str(exc.value).lower()

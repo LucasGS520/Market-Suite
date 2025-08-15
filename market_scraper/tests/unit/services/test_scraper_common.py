@@ -2,7 +2,6 @@ import pytest
 from types import SimpleNamespace
 from uuid import uuid4
 
-from aiohttp import payload_type
 from fastapi import HTTPException, status
 
 from market_scraper.services import services_scraper_common as common
