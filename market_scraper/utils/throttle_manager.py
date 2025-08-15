@@ -1,5 +1,6 @@
 """ Implementa controle de velocidade e backoff para o scraping """
 
+import asyncio
 import time
 import random
 import threading
@@ -78,6 +79,35 @@ class ThrottleManager:
                 time.sleep(jitter)
                 self.tokens -= 1.0
 
+    async def wait_async(self, circuit_key: str, identifier: Optional[str] = None):
+        """ Versão assíncrona de ``wait`` utilizando ``asyncio.sleep`` """
+        if self.rate_limiter and not self.rate_limiter.allow_request(identifier):
+            self.circuit_breaker.record_failure(circuit_key)
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
+
+        with self.lock:
+            now = time.monotonic()
+            elapsed = now - self.timestamp
+
+            #Recarga de tokens proporcional ao tempo decorrido
+            refill = elapsed * self.rate
+            self.tokens = min(self.capacity, self.tokens + refill)
+            self.timestamp = now
+
+            if self.tokens < 1.0:
+                sleep_time = (1.0 - self.tokens) / self.rate
+                jitter = random.uniform(self.jitter_min, self.jitter_max)
+                metrics.SCRAPER_JITTER_SECONDS.observe(jitter)
+                total_sleep_time = sleep_time + jitter
+                self.tokens = 0.0
+            else:
+                jitter = random.uniform(self.jitter_min, self.jitter_max)
+                metrics.SCRAPER_JITTER_SECONDS.observe(jitter)
+                self.tokens -= 1.0
+                total_sleep_time = jitter
+
+        await asyncio.sleep(total_sleep_time)
+
     def backoff(self, attempt: int, circuit_key: str):
         """ Exponential backoff + adaptative rate adjust, chamado quando recebe HTTP 429 """
         #Base random para variar o backoff
@@ -92,4 +122,18 @@ class ThrottleManager:
         metrics.SCRAPER_BACKOFF_FACTOR.set(self.rate)
 
         #Registra falha no circuit breaker
+        self.circuit_breaker.record_failure(circuit_key)
+
+    async def backoff_async(self, attempt: int, circuit_key: str):
+        """ Versão assíncrono  de ``backoff`` utilizando ``asyncio.sleep`` """
+        base = random.uniform(self.jitter_min, self.jitter_max)
+        delay = (2 ** attempt) * base
+        metrics.SCRAPER_JITTER_SECONDS.observe(base)
+        await asyncio.sleep(delay)
+
+        new_rate = max(self.min_rate, self.rate * self.decrease_factor)
+        if new_rate < self.rate:
+            self.rate = new_rate
+        metrics.SCRAPER_BACKOFF_FACTOR.set(self.rate)
+
         self.circuit_breaker.record_failure(circuit_key)

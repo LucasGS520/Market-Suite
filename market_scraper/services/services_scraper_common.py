@@ -100,7 +100,7 @@ async def _get_html(
     """ Obtém o HTML da página utilizando cache e recuperação de bloqueios """
     #Aguarda para simular leitura humana e respeitar a taxa de requisições
     await human_delay.wait_async(None)
-    throttle.wait(identifier="get", circuit_key=circuit_key)
+    await throttle.wait_async(identifier="get", circuit_key=circuit_key)
 
     html: str | None = get_cached_html(target_url)
     if html is None:

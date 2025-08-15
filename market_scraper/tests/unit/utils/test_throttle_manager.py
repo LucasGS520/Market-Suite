@@ -1,3 +1,4 @@
+import asyncio
 import time
 import pytest
 from unittest.mock import Mock
@@ -13,6 +14,17 @@ def fake_sleep(monkeypatch):
         sleeps.append(duration)
 
     monkeypatch.setattr(time, "sleep", fake)
+    return sleeps
+
+@pytest.fixture()
+def fake_async_sleep(monkeypatch):
+    """ Captura chamadas de ``asyncio.sleep`` sem realmente guardar """
+    sleeps: list[float] = []
+
+    async def fake(duration, *a, **k):
+        sleeps.append(duration)
+
+    monkeypatch.setattr(asyncio, "sleep", fake)
     return sleeps
 
 @pytest.fixture()
@@ -45,6 +57,17 @@ def test_wait_does_not_sleep_if_tokens_available(fixed_time, fake_sleep):
     tm.wait(circuit_key="t")
     assert any(s > 0 for s in fake_sleep)
 
+@pytest.mark.asyncio
+async def test_wait_async_does_not_sleep_if_tokens_available(fake_async_sleep):
+    """ Garante que ``wait_async`` não dorme quando há tokens disponíveis """
+    tm = ThrottleManager(rate=2.0, capacity=2)
+
+    await tm.wait_async(circuit_key="t")
+    await tm.wait_async(circuit_key="t")
+
+    sleeps_nonzero = [s for s in fake_async_sleep if s > 0.01]
+    assert sleeps_nonzero == []
+
 def test_wait_consumes_token_and_triggers_jitter(fixed_time, fake_sleep):
     """ Testa que wait() consome tokens, quando esgota, entra em jitter (sleep com tempo aleatório) """
     tm = ThrottleManager(rate=1.0, capacity=2)
@@ -60,6 +83,19 @@ def test_wait_consumes_token_and_triggers_jitter(fixed_time, fake_sleep):
     tm.wait(circuit_key="t")
 
     sleeps_nonzero = [s for s in fake_sleep if s > 0.01]
+    assert len(sleeps_nonzero) == 1
+    assert sleeps_nonzero[0] > 0.01
+
+@pytest.mark.asyncio
+async def test_wait_async_consumes_token_and_triggers_jitter(fake_async_sleep):
+    """ Testa que ``wait_async`` consome tokens e aplica espera quando necessário """
+    tm = ThrottleManager(rate=1.0, capacity=2)
+
+    await tm.wait_async(circuit_key="t")
+    await tm.wait_async(circuit_key="t")
+    await tm.wait_async(circuit_key="t")
+
+    sleeps_nonzero = [s for s in fake_async_sleep if s > 0.01]
     assert len(sleeps_nonzero) == 1
     assert sleeps_nonzero[0] > 0.01
 
@@ -92,6 +128,23 @@ def test_backoff_reduces_rate_and_calls_circuit_breaker(monkeypatch):
     assert len(sleeps) == 1
     assert sleeps[0] > 0.0
 
+@pytest.mark.asyncio
+async def test_backoff_async_reduces_rate_and_calls_circuit_breaker(monkeypatch, fake_async_sleep):
+    """ Verifica que o ``backoff_async`` reduz a taxa e registra falha """
+    monkeypatch.setattr("random.uniform", lambda a, b: 0.5)
+    fake_cb = Mock()
+    monkeypatch.setattr("market_scraper.utils.throttle_manager.CircuitBreaker", lambda: fake_cb)
+
+    tm = ThrottleManager(rate=2.0, capacity=2)
+    rate_before = tm.rate
+
+    await tm.backoff_async(attempt=2, circuit_key="t")
+
+    assert tm.rate < rate_before
+    fake_cb.record_failure.assert_called_once()
+    assert len(fake_async_sleep) == 1
+    assert fake_async_sleep[0] > 0.0
+
 def test_wait_raises_when_rate_limiter_blocks(monkeypatch):
     """ Espera que wait() lance HTTPException 429 se o rate limiter negar a requisição """
     fake_rate = Mock()
@@ -102,6 +155,21 @@ def test_wait_raises_when_rate_limiter_blocks(monkeypatch):
 
     with pytest.raises(HTTPException) as exc:
         tm.wait(identifier="test", circuit_key="cb")
+
+    assert exc.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    fake_cb.record_failure.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_wait_async_raises_when_rate_limiter_blocks(monkeypatch):
+    """ Garante que ``wait_async`` lança exceção se o rate limiter negar a requisição """
+    fake_rate = Mock()
+    fake_rate.allow_request.return_value = False
+    fake_cb = Mock()
+
+    tm = ThrottleManager(rate=1.0, capacity=1, rate_limiter=fake_rate, circuit_breaker=fake_cb)
+
+    with pytest.raises(HTTPException) as exc:
+        await tm.wait_async(identifier="test", circuit_key="cb")
 
     assert exc.value.status_code == status.HTTP_429_TOO_MANY_REQUESTS
     fake_cb.record_failure.assert_called_once()
