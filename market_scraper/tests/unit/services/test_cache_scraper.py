@@ -1,13 +1,9 @@
 import pytest
 
 from market_scraper.services import services_cache_scraper as cache
-from market_scraper.tests.unit.utils.test_robots_txt_parser import fake_redis
 
 
-@pytest.mark.usefixtures("patch_rate_limiter")
-def test_set_cached_html_stores_in_memory_and_redis(monkeypatch, patch_rate_limiter):
-    fake_redis = patch_rate_limiter
-
+def test_set_cached_html_stores_in_memory_and_redis(monkeypatch, fake_redis):
     def setex(key, ttl, value):
         fake_redis.set(key, value, ex=ttl)
 
@@ -25,9 +21,7 @@ def test_set_cached_html_stores_in_memory_and_redis(monkeypatch, patch_rate_limi
     assert fake_redis.data[f"ttl:{redis_key}"] == 100
     assert cache._cache[url]["html"] == html
 
-def test_get_cached_html_from_redis(monkeypatch, patch_rate_limiter):
-    fake_redis = patch_rate_limiter
-
+def test_get_cached_html_from_redis(monkeypatch, fake_redis):
     def setex(key, ttl, value):
         fake_redis.set(key, value, ex=ttl)
 

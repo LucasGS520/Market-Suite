@@ -108,6 +108,11 @@ def patch_rate_limiter(monkeypatch):
 
     return fake_redis
 
+@pytest.fixture()
+def fake_redis(patch_rate_limiter):
+    """ Fornece a instância de Redis falso utilizada nos testes """
+    return patch_rate_limiter
+
 @pytest.fixture(autouse=True)
 def fixed_time(monkeypatch):
     """ Congela o tempo para simulação precisa """
