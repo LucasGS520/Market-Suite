@@ -7,40 +7,22 @@ os dados estruturados do anúncio, sem qualquer persistência de dados.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, HttpUrl
 
 from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
+from market_scraper.schemas.schemas_scraper import ScraperRequest, ScraperResponse
 from market_scraper.services.services_scraper_common import scrape_product_common_async
 from market_scraper.utils.price import parse_price_str, parse_optional_price_str
+
 
 #Roteador sem prefixo; os caminhos base são definidos na aplicação principal
 router = APIRouter(tags=["scraper"])
 
-class ScrapeRequest(BaseModel):
-    """ Corpo da requisição de scraping """
-
-    url: HttpUrl
-    product_type: Literal["monitored", "competitor"] = "monitored"
-    user_id: UUID | None = None
-
-class ScrapeResponse(BaseModel):
-    """ Resposta com os dados extraídos do anúncio """
-
-    name: str | None = None
-    current_price: float
-    old_price: float | None = None
-    thumbnail: str | None = None
-    free_shipping: bool = False
-    seller: str | None = None
-    shipping: str | None = None
-
-@router.post("/parse", response_model=ScrapeResponse)
-async def parse_endpoint(payload: ScrapeRequest) -> ScrapeResponse:
+@router.post("/parse", response_model=ScraperResponse)
+async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
     """ Executa o scraping e retorna apenas os dados parseados """
 
     if payload.product_type == "monitored":
@@ -66,7 +48,7 @@ async def parse_endpoint(payload: ScrapeRequest) -> ScrapeResponse:
     if not details:
         raise HTTPException(status_code=500, detail="Falha ao extrair dados")
 
-    return ScrapeResponse(
+    return ScraperResponse(
         name=details.get("name"),
         current_price=float(parse_price_str(details.get("current_price"), str(payload.url))),
         old_price=float(parse_optional_price_str(details.get("old_price"), str(payload.url)))
