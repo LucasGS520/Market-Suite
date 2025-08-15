@@ -63,21 +63,179 @@ async def fetch_html_playwright(url: str) -> str:
         html = await client.fetch_html(url)
         return html
 
-async def scrape_product_common_async(
-        *,
-        url: str,
-        user_id: UUID,
-        payload: MonitoredProductCreateScraping | CompetitorProductCreateScraping,
-        product_type: Literal["monitored", "competitor"],
-        rate_limiter: RateLimiter | None = None,
-        circuit_breaker: CircuitBreaker | None = None,
-        recovery_manager: BlockRecoveryManager | None = None
-) -> dict:
-    """ Executa o fluxo assíncrono de scraping usando Playwright
+async def _recover_html(
+    block_type: str,
+    *,
+    url: str,
+    url_host: str,
+    recovery_manager: BlockRecoveryManager,
+    human_delay: HumanizedDelayManager,
+    product_type: Literal["monitored", "competitor"],
+) -> str:
+    """ Tenta recuperar o HTML após um bloqueio do site """
+    recovered = await recovery_manager.handle_block(block_type, url=url)
+    if recovered is None:
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Erro ao obter HTML" if product_type == "monitored" else "Erro ao obter HTML concorrente",
+        )
 
-    A função não realiza qualquer persistência em banco de dados,
-    retornando apenas os dados extraídos do anúncio.
-    """
+    SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
+    #Aguarda de maneira assíncrona antes de continuar o fluxo
+    await human_delay.wait_async(recovered)
+    return recovered
+
+async def _get_html(
+    *,
+    target_url: str,
+    circuit_key: str,
+    product_type: Literal["monitored", "competitor"],
+    url_host: str,
+    throttle: ThrottleManager,
+    human_delay: HumanizedDelayManager,
+    circuit_breaker: CircuitBreaker,
+    recovery_manager: BlockRecoveryManager,
+) -> str:
+    """ Obtém o HTML da página utilizando cache e recuperação de bloqueios """
+    #Aguarda para simular leitura humana e respeitar a taxa de requisições
+    await human_delay.wait_async(None)
+    throttle.wait(identifier="get", circuit_key=circuit_key)
+
+    html: str | None = get_cached_html(target_url)
+    if html is None:
+        try:
+            html = await fetch_html_playwright(target_url)
+            SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
+            SCRAPER_RESPONSE_SIZE_BYTES.labels(method="GET", status_code=200).observe(len(html))
+            set_cached_html(target_url, html)
+            await human_delay.wait_async(html)
+        except PlaywrightTimeoutError as e:
+            logger.warning("playwright_timeout", url=target_url, error=str(e))
+            circuit_breaker.record_failure(circuit_key)
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            html = await _recover_html(
+                "timeout",
+                url=target_url,
+                url_host=url_host,
+                recovery_manager=recovery_manager,
+                human_delay=human_delay,
+                product_type=product_type,
+            )
+        except Exception as e:
+            logger.error("get_request_failed", url=target_url, error=str(e))
+            circuit_breaker.record_failure(circuit_key)
+            block_type = "429"
+            msg = str(e).lower()
+            if "403" in msg:
+                block_type = "403"
+            elif "429" in msg:
+                block_type = "429"
+
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            html = await _recover_html(
+                block_type,
+                url=target_url,
+                url_host=url_host,
+                recovery_manager=recovery_manager,
+                human_delay=human_delay,
+                product_type=product_type,
+            )
+    else:
+        SCRAPER_REQUESTS_TOTAL.labels(method="CACHE", status_code=200).inc()
+        SCRAPER_RESPONSE_SIZE_BYTES.labels(method="CACHE", status_code=200).observe(len(html))
+        await human_delay.wait_async(html)
+
+    if html is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Falha ao obter HTML")
+
+    return html
+
+async def _parse_html(
+    html: str,
+    *,
+    original_url: str,
+    target_url: str,
+    product_type: Literal["monitored", "competitor"],
+    url_host: str,
+    circuit_breaker: CircuitBreaker,
+    circuit_key: str,
+    recovery_manager: BlockRecoveryManager,
+) -> dict:
+    """ Interpreta o HTML e extrai os dados principais do produto """
+    if not parser.looks_like_product_page(html):
+        logger.warning("not_product_page", url=original_url)
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Página não é de produto")
+
+    try:
+        details: Dict[str, Optional[str]] = parser.parse_product_details(html, target_url)
+        logger.debug("parsed_details", details=details)
+        logger.debug("raw_price_extracted", url=original_url, raw_price=details.get("current_price"))
+    except CaptchaDetectedError:
+        logger.warning("captcha_detected", url=original_url)
+        circuit_breaker.record_failure(circuit_key)
+        SCRAPER_CAPTCHA_TOTAL.inc()
+        #Tenta recuperar o HTML caso o site apresente CAPTCHA
+        recovered = await recovery_manager.handle_block("captcha", url=target_url)
+        if recovered:
+            html = recovered
+            try:
+                details = parser.parse_product_details(html, target_url)
+                logger.debug("parsed_details", details=details)
+                logger.debug("raw_price_extracted", url=original_url, raw_price=details.get("current_price"))
+            except Exception as exc2:
+                logger.error("parser_failed", url=original_url, error=str(exc2))
+                circuit_breaker.record_failure(circuit_key)
+                SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=("Erro ao extrair dados do produto" if product_type == "monitored" else f"Erro ao extrair dados do produto concorrente: {exc2}"),
+                )
+        else:
+            SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+            return {"status": "captcha"}
+    except ValueError as exc:
+        logger.error("invalid_product_data", url=original_url, error=str(exc))
+        circuit_breaker.record_failure(circuit_key)
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    except Exception as exc:
+        logger.error("parser_failed", url=original_url, erro=str(exc))
+        circuit_breaker.record_failure(circuit_key)
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=("Erro ao extrair dados do produto" if product_type == "monitored" else f"Erro ao extrair dados do produto concorrente: {exc}"),
+        )
+
+    raw_current = details.get("current_price")
+    if raw_current is None:
+        circuit_breaker.record_failure(circuit_key)
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("Preço não encontrado no HTML" if product_type == "monitored" else "Preço não encontrado no HTML concorrente"),
+        )
+
+    #Garante que o preço extraído é valido
+    parse_price_str(raw_current, target_url)
+
+    circuit_breaker.record_success(circuit_key)
+    SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="success").inc()
+    return {"status": "success", "details": details}
+
+async def scrape_product_common_async(
+    *,
+    url: str,
+    user_id: UUID,
+    payload: MonitoredProductCreateScraping | CompetitorProductCreateScraping,
+    product_type: Literal["monitored", "competitor"],
+    rate_limiter: RateLimiter | None = None,
+    circuit_breaker: CircuitBreaker | None = None,
+    recovery_manager: BlockRecoveryManager | None = None
+) -> dict:
+    """ Executa o fluxo assíncrono de scraping usando Playwright """
     if product_type == "monitored":
         rate_limiter = rate_limiter or RateLimiter(
             redis_key="monitored",
@@ -94,7 +252,7 @@ async def scrape_product_common_async(
     circuit_breaker = circuit_breaker or CircuitBreaker()
     recovery_manager = recovery_manager or BlockRecoveryManager(
         ua_manager=ua_manager,
-        cookie_manager=cookie_manager
+        cookie_manager=cookie_manager,
     )
 
     #Controla a taxa de requisições e aplica jitter entre elas
@@ -103,7 +261,7 @@ async def scrape_product_common_async(
         capacity=THROTTLE_CAPACITY,
         jitter_range=JITTER_RANGE,
         circuit_breaker=circuit_breaker,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
     )
     #Simula atraso humano antes de cada requisição
     human_delay = HumanizedDelayManager()
@@ -116,7 +274,7 @@ async def scrape_product_common_async(
         SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Scraping temporariamente suspenso via flag Redis para {url}"
+            detail=f"Scraping suspenso temporariamente por falhas repetitivas {url}" if product_type == "competitor" else f"Scraping suspenso temporariamente por falhas repetitivas em {url}"
         )
 
     circuit_key = f"user:{user_id}:{payload.product_url}"
@@ -139,136 +297,27 @@ async def scrape_product_common_async(
         throttle.jitter_min = delay * 0.5
         throttle.jitter_max = delay * 1.5
 
-    #Aguarda de forma assíncrona para simular leitura humana inicial
-    await human_delay.wait_async(None)
-    throttle.wait(identifier="get", circuit_key=circuit_key)
+    html = await _get_html(
+        target_url=target_url,
+        circuit_key=circuit_key,
+        product_type=product_type,
+        url_host=url_host,
+        throttle=throttle,
+        human_delay=human_delay,
+        circuit_breaker=circuit_breaker,
+        recovery_manager=recovery_manager,
+    )
 
-    #HTML capturado da página. Se ocorrer bloqueio, pode ser substituído ou vir do cache
-    html: str | None = get_cached_html(target_url)
-    if html is None:
-        try:
-            html = await fetch_html_playwright(target_url)
-            SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
-            SCRAPER_RESPONSE_SIZE_BYTES.labels(method="GET", status_code=200).observe(len(html))
-            #Atualiza o cache distribuído com o HTML recém-obtido
-            set_cached_html(target_url, html)
-            #Espera de maneira não bloqueante após obter o HTML
-            await human_delay.wait_async(html)
-        except PlaywrightTimeoutError as e:
-            logger.warning("playwright_timeout", url=target_url, error=str(e))
-            circuit_breaker.record_failure(circuit_key)
-            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
-            recovered = await recovery_manager.handle_block("timeout", url=target_url)
-            if recovered is None:
-                SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="Erro ao obter HTML" if product_type == "monitored" else "Erro ao obter HTML concorrente"
-                )
-
-            html = recovered
-            SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
-            #Aguarda antes de prosseguir após recuperação de bloqueio
-            await human_delay.wait_async(html)
-        except Exception as e:
-            logger.error("get_request_failed", url=target_url, error=str(e))
-            circuit_breaker.record_failure(circuit_key)
-            #Tenta classificar o tipo de bloqueio a partir da mensagem da exceção
-            block_type = "429"
-            msg = str(e).lower()
-            if "403" in msg:
-                block_type = "403"
-            elif "429" in msg:
-                block_type = "429"
-
-            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
-            #Aciona o gerenciador de recuperação informando o tipo de bloqueio
-            recovered = await recovery_manager.handle_block(block_type, url=target_url)
-            if recovered is None:
-                #Falha definitiva registra e interrompe o fluxo
-                SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="Erro ao obter HTML" if product_type == "monitored" else "Erro ao obter HTML concorrente"
-                )
-
-            #Se houver HTML recuperado, continua o fluxo normalmente
-            html = recovered
-            SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
-            #Delay assíncrono após recuperar o HTML bloqueado
-            await human_delay.wait_async(html)
-    else:
-        #Quando há cache, registra métricas específicas
-        SCRAPER_REQUESTS_TOTAL.labels(method="CACHE", status_code=200).inc()
-        SCRAPER_RESPONSE_SIZE_BYTES.labels(method="CACHE", status_code=200).observe(len(html))
-        #Delay assíncrono mesmo quando o HTML vem do cache
-        await human_delay.wait_async(html)
-
-    if html is None:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Falha ao obter HTML")
-
-    if not parser.looks_like_product_page(html):
-        logger.warning("not_product_page", url=original_url)
-        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Página não é de produto")
-
-    try:
-        details: Dict[str, Optional[str]] = parser.parse_product_details(html, target_url)
-        logger.debug("parsed_details", details=details)
-        logger.debug("raw_price_extracted", url=original_url, raw_price=details.get("current_price"))
-    except CaptchaDetectedError as exc:
-        logger.warning("captcha_detected", url=original_url)
-        circuit_breaker.record_failure(circuit_key)
-        SCRAPER_CAPTCHA_TOTAL.inc()
-        #Tenta recuperar o HTML caso o site apresente CAPTCHA
-        recovered = await recovery_manager.handle_block("captcha", url=target_url)
-        if recovered:
-            html = recovered
-            try:
-                details = parser.parse_product_details(html, target_url)
-                logger.debug("parsed_details", details=details)
-                logger.debug("raw_price_extracted", url=original_url, raw_price=details.get("current_price"))
-            except Exception as exc2:
-                logger.error("parser_failed", url=original_url, error=str(exc2))
-                circuit_breaker.record_failure(circuit_key)
-                SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=("Erro ao extrair dados do produto" if product_type == "monitored" else f"Erro ao extrair dados do produto concorrente: {exc2}")
-                )
-        else:
-            SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-            return {"status": "captcha"}
-    except ValueError as exc:
-        logger.error("invalid_product_data", url=original_url, error=str(exc))
-        circuit_breaker.record_failure(circuit_key)
-        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
-    except Exception as exc:
-        logger.error("parser_failed", url=original_url, erro=str(exc))
-        circuit_breaker.record_failure(circuit_key)
-        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=("Erro ao extrair dados do produto" if product_type == "monitored" else f"Erro ao extrair dados do produto concorrente: {exc}")
-        )
-
-    raw_current = details.get("current_price")
-    if raw_current is None:
-        circuit_breaker.record_failure(circuit_key)
-        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=("Preço não encontrado no HTML" if product_type == "monitored" else "Preço não encontrado no HTML concorrente")
-        )
-
-    #Valida se o preço extraído pode ser convertido corretamente
-    parse_price_str(raw_current, target_url)
-
-    circuit_breaker.record_success(circuit_key)
-    SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="success").inc()
-    return {"status": "success", "details": details}
-
+    return await _parse_html(
+        html,
+        original_url=original_url,
+        target_url=target_url,
+        product_type=product_type,
+        url_host=url_host,
+        circuit_breaker=circuit_breaker,
+        circuit_key=circuit_key,
+        recovery_manager=recovery_manager,
+    )
 
 def scrape_product_common(
         url: str,
