@@ -17,6 +17,13 @@ os.environ.setdefault("SECRET_KEY", "benchmark-secret")
 #Utiliza implementação compartilhada de RateLimiter
 from shared.utils.rate_limiter import RateLimiter
 
+#Marca todos os testes deste diretório como lentos, serão executados apenas quando explicitamente solicitados
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items):
+    """ Aplica a marca ``slow`` em todos os testes de benchmark """
+    for item in items:
+        item.add_marker(pytest.mark.slow)
+
 class FakeRedis:
     def __init__(self):
         self.data = {}
