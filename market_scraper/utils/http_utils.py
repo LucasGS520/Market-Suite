@@ -1,4 +1,4 @@
-""" Funções auxiliares para lidar com headers HTTP """
+""" Funções auxiliares para lidar com cabeçalhos HTTP """
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from typing import Optional
 
 
 def parse_retry_after(value: str) -> Optional[int]:
-    """ Retorna o valor header Retry-After como segundos
+    """ Retorna o valor do cabeçalho Retry-after em segundos
 
-    Suporta segundos inteiros ou data HTTP. Devolve 'None' if parsing fails
+    Suporta segundos inteiros ou data HTTP. Devolve ``None`` se a conversão falhar
     """
     if not value:
         return None
@@ -29,7 +29,7 @@ def parse_retry_after(value: str) -> Optional[int]:
         return None
 
 def extract_hostname(url: str) -> str:
-    """ Retorna o hostname de uma URL ou string vazia se inválida """
+    """ Retorna o nome do host de uma URL ou string vazia se inválida """
     from urllib.parse import urlparse
 
     try:
