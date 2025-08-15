@@ -15,7 +15,7 @@ def parse_price_str(raw: str, url: str) -> Decimal:
     if not raw or not raw.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Preço não encontrado em na página {url}"
+            detail=f"Preço não encontrado na página {url}"
         )
 
     #Fromata o preço em versão brasileira
@@ -29,7 +29,7 @@ def parse_price_str(raw: str, url: str) -> Decimal:
         )
 
 def parse_optional_price_str(raw: str | None, url: str) -> Decimal | None:
-    """ Mesma logica do parse_price_str, mas retorna None se raw estiver vazio """
+    """ Mesma logica do parse_price_str, mas retorna None se ``raw`` estiver vazio """
     if not raw or not raw.strip():
         return None
     return parse_price_str(raw, url)
