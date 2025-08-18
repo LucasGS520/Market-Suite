@@ -46,18 +46,18 @@ class CircuitBreaker:
 
         self.webhook = webhook or _settings.SLACK_WEBHOOK_URL
 
-    def _gets_keys(self, key: str):
+    def _get_keys(self, key: str):
         return f"{key}:failures", f"{key}:suspend"
 
     def allow_request(self, key: str) -> bool:
         """ Retorna ``True`` se o circuito estiver fechado ou ``False`` se aberto """
-        _, suspend_key = self._gets_keys(key)
+        _, suspend_key = self._get_keys(key)
         return not self.redis.exists(suspend_key)
 
     def record_failure(self, key: str) -> None:
         """ Incrementa contador de falhas e abre o circuito se necessário """
         with self._lock:
-            failures_key, suspend_key = self._gets_keys(key)
+            failures_key, suspend_key = self._get_keys(key)
 
             #Incrementa falhas e garante expiração após o período de suspensão
             count = self.redis.incr(failures_key)
@@ -88,7 +88,7 @@ class CircuitBreaker:
     def record_success(self, key: str) -> None:
         """ Fecha o circuito, limpando flags e contadores """
         with self._lock:
-            failures_key, suspend_key = self._gets_keys(key)
+            failures_key, suspend_key = self._get_keys(key)
             self.redis.delete(failures_key)
             self.redis.delete(suspend_key)
 

@@ -67,7 +67,7 @@ def test_suspension_ttl_at_level(cb, fake_redis):
     """ Testa ao atingir diferentes niveis de falhas
     TTL da suspensão é apropriado """
     key = "circuit:ttl"
-    _, suspend_key = cb._gets_keys(key)
+    _, suspend_key = cb._get_keys(key)
 
     #Level 1 -> 3 falhas
     for _ in range(3):
@@ -93,7 +93,7 @@ def test_suspension_ttl_at_level(cb, fake_redis):
 def test_record_success_resets_state(cb, fake_redis):
     """ Confirma que record_success() limpa contador e chave de suspensão """
     key = "circuit:reset"
-    failures_key, suspend_key = cb._gets_keys(key)
+    failures_key, suspend_key = cb._get_keys(key)
 
     #Causa falhas para ativar suspensão
     for _ in range(3):
