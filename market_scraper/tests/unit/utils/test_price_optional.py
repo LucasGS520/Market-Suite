@@ -12,4 +12,3 @@ def test_parse_optional_price_valid():
     #Deve converter o preço para Decimal corretamente
     valor = parse_optional_price_str("R$ 1.234,56", "http://exemplo.com")
     assert valor == Decimal("1234.56")
-    
