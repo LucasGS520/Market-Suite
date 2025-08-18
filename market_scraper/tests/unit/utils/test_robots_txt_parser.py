@@ -35,7 +35,9 @@ def mock_http(monkeypatch):
     monkeypatch.setattr("requests.get", fake_get)
     return response
 
-def test_crawl_delay_user_agent_exact_and_wildcard(fake_redis, mock_http):
+@pytest.mark.asyncio
+
+async def test_crawl_delay_user_agent_exact_and_wildcard(fake_redis, mock_http):
     robots_url = "https://example.com/robots.txt"
     mock_http[robots_url] = type("Resp", (), {
         "text": """
@@ -55,17 +57,18 @@ def test_crawl_delay_user_agent_exact_and_wildcard(fake_redis, mock_http):
     expected_key = parser.cache_key
 
     #Caso exato -> deve retornar 10
-    delay = parser.get_crawl_delay("Googlebot")
+    delay = await parser.get_crawl_delay("Googlebot")
     assert delay == 10
 
     #Outro agente qualquer -> wildcard 5
-    delay2 = parser.get_crawl_delay("MyCustomBot")
+    delay2 = await parser.get_crawl_delay("MyCustomBot")
     assert delay2 == 5
 
     #Conteúdo foi salvo usando a chave de domínio
     assert expected_key in fake_redis.store
 
-def test_robots_txt_parser_uses_redis_cache(fake_redis, mock_http):
+@pytest.mark.asyncio
+async def test_robots_txt_parser_uses_redis_cache(fake_redis, mock_http):
     robots_url = "https://cached.com/robots.txt"
     parser = RobotsTxtParser(base_url="https://cached.com")
     parser.redis = fake_redis
@@ -80,7 +83,7 @@ def test_robots_txt_parser_uses_redis_cache(fake_redis, mock_http):
         "status_code": 200
     })()
 
-    delay = parser.get_crawl_delay("AnyBot")
+    delay = await parser.get_crawl_delay("AnyBot")
     assert delay == 8
     assert fake_redis.store.get(cache_key)
 
@@ -88,10 +91,11 @@ def test_robots_txt_parser_uses_redis_cache(fake_redis, mock_http):
     del mock_http[robots_url]
 
     #Segunda chamada deve retornar valor armazenado, não lançar erro
-    delay2 = parser.get_crawl_delay("AnyBot")
+    delay2 = await parser.get_crawl_delay("AnyBot")
     assert delay2 == 8
 
-def test_cache_isolated_per_domain(fake_redis, mock_http):
+@pytest.mark.asyncio
+async def test_cache_isolated_per_domain(fake_redis, mock_http):
     robots_url1 = "https://site1.com/robots.txt"
     robots_url2 = "https://site2.com/robots.txt"
 
@@ -109,8 +113,8 @@ def test_cache_isolated_per_domain(fake_redis, mock_http):
     parser2 = RobotsTxtParser(base_url="https://site2.com")
     parser2.redis = fake_redis
 
-    d1 = parser1.get_crawl_delay("*")
-    d2 = parser2.get_crawl_delay("*")
+    d1 = await parser1.get_crawl_delay("*")
+    d2 = await parser2.get_crawl_delay("*")
 
     assert d1 == 3
     assert d2 == 7

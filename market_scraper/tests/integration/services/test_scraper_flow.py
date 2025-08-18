@@ -77,11 +77,21 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
         return HTML_EXEMPLO
 
     monkeypatch.setattr("market_scraper.services.services_scraper_common.fetch_html_playwright", fake_fetch_html_playwright)
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.get_cached_html", lambda *a, **k: None)
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.set_cached_html", lambda *a, **k: None)
+
+    async def fake_get_cached_html(*a, **k):
+        return None
+
+    async def fake_set_cached_html(*a, **k):
+        return None
+
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.get_cached_html", fake_get_cached_html)
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.set_cached_html", fake_set_cached_html)
 
     #Impedindo delays e leituras de robots.txt
-    monkeypatch.setattr("market_scraper.utils.robots_txt.RobotsTxtParser._fetch_robots", lambda self: "")
+    async def fake_fetch_robots(self):
+        return ""
+
+    monkeypatch.setattr("market_scraper.utils.robots_txt.RobotsTxtParser._fetch_robots", fake_fetch_robots)
 
     async def fake_wait_async(self, text: str | None, reflection_time: float = 1.0) -> None:
         return None

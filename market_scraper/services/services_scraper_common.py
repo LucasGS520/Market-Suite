@@ -102,13 +102,13 @@ async def _get_html(
     await human_delay.wait_async(None)
     await throttle.wait_async(identifier="get", circuit_key=circuit_key)
 
-    html: str | None = get_cached_html(target_url)
+    html: str | None = await get_cached_html(target_url)
     if html is None:
         try:
             html = await fetch_html_playwright(target_url)
             SCRAPER_REQUESTS_TOTAL.labels(method="GET", status_code=200).inc()
             SCRAPER_RESPONSE_SIZE_BYTES.labels(method="GET", status_code=200).observe(len(html))
-            set_cached_html(target_url, html)
+            await set_cached_html(target_url, html)
             await human_delay.wait_async(html)
         except PlaywrightTimeoutError as e:
             logger.warning("playwright_timeout", url=target_url, error=str(e))
@@ -292,7 +292,7 @@ async def scrape_product_common_async(
 
     #Respeita eventuais diretivas de robots.txt
     robots = RobotsTxtParser(original_url)
-    delay = robots.get_crawl_delay(user_agent="*")
+    delay = await robots.get_crawl_delay(user_agent="*")
     if delay:
         throttle.jitter_min = delay * 0.5
         throttle.jitter_max = delay * 1.5

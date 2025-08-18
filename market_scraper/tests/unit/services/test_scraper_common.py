@@ -11,7 +11,7 @@ class DummyThrottleManager:
     def __init__(self, *a, **k):
         pass
 
-    def wait(self, *a, **k):
+    async def wait_async(self, *a, **k):
         pass
 
 class DummyHumanizedDelayManager:
@@ -40,7 +40,7 @@ class DummyRobotsTxtParser:
     def __init__(self, *a, **k):
         pass
 
-    def get_crawl_delay(self, *a, **k):
+    async def get_crawl_delay(self, *a, **k):
         return None
 
 @pytest.mark.asyncio
@@ -49,8 +49,14 @@ async def test_scrape_product_common_async_success(monkeypatch):
         return "<html>ok</html>"
 
     monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
-    monkeypatch.setattr(common, "get_cached_html", lambda url: None)
-    monkeypatch.setattr(common, "set_cached_html", lambda *a, **k: None)
+    async def fake_get_cached_html(url):
+        return None
+
+    async def fake_set_cached_html(*a, **k):
+        return None
+
+    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
+    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
     monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
     monkeypatch.setattr(common.parser, "parse_product_details", lambda html, url: {"current_price": "10"})
     monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
@@ -76,8 +82,14 @@ async def test_scrape_product_common_async_timeout(monkeypatch):
         raise common.PlaywrightTimeoutError("timeout")
 
     monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
-    monkeypatch.setattr(common, "get_cached_html", lambda url: None)
-    monkeypatch.setattr(common, "set_cached_html", lambda *a, **k: None)
+    async def fake_get_cached_html(url):
+        return None
+
+    async def fake_set_cached_html(*a, **k):
+        return None
+
+    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
+    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
     monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
     monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
     monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)

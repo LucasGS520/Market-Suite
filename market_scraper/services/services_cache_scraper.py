@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Optional, Dict
 import time
+import asyncio
 
 import structlog
 
@@ -26,8 +27,12 @@ _cache: Dict[str, Dict[str, object]] = {}
 _CACHE_PREFIX = "scraper:html:"
 
 
-def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
-    """ Retorna o HTML em cache caso ainda esteja válido e disponível
+async def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
+    """ Retorna o HTML em cache de forma assíncrona
+
+    A consulta ao Redis é executada em *thread pool* para não bloquear
+    o loop de eventos. Caso o conteúdo não esteja disponível ou seja
+    considerado expirado, faz *fallback* para o cache em memória.
 
     Parâmetros
     ----------
@@ -46,9 +51,9 @@ def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
     #Monta a chave com o prefixo padronizado e a URL solicitada
     key = f"{_CACHE_PREFIX}{url}"
 
-    #Primeiro tenta recuperar do Redis
+    #Primeiro tenta recuperar do Redis em executor
     try:
-        html = client.get(key)
+        html = await asyncio.to_thread(client.get, key)
         if html:
             return html
     except Exception as err:
@@ -63,12 +68,12 @@ def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
         return None
     return entry["html"]
 
-def set_cached_html(url: str, html: str, ttl: int = 300) -> None:
-    """ Armazena o HTML no cache distribuído e local
+async def set_cached_html(url: str, html: str, ttl: int = 300) -> None:
+    """ Armazena o HTML no cache distribuído e local de forma assíncrona
 
-    O conteúdo é salvo no Redis com tempo de expiração ``ttl``.
-    Se o Redis não estiver acessível, a função mantém somente
-    a entrada em memória.
+    O conteúdo é salvo no Redis com tempo de expiração ``ttl`` executando a
+    operação em *thread pool*. Caso o Redis não esteja acessível, a função
+    mantém somente a entrada em memória.
 
     Parâmetros
     ----------
@@ -84,9 +89,9 @@ def set_cached_html(url: str, html: str, ttl: int = 300) -> None:
     #Combina o prefixo de cache com a URL alvo
     key = f"{_CACHE_PREFIX}{url}"
 
-    #Atualiza o cache no Redis com tempo de expiração definido
+    #Atualiza o cache no Redis com tempo de expiração definido em executor
     try:
-        client.setex(key, ttl, html)
+        await asyncio.to_thread(client.setex, key, ttl, html)
     except Exception as err:
         #Caso o Redis falhe, ignora e segue com o cache local
         logger.warning("Falha ao armazenar HTML no Redis", erro=str(err))
