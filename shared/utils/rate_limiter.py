@@ -13,11 +13,10 @@ def _load_lua_script(redis):
         lua_path = os.path.join(
             os.path.dirname(__file__),
             os.pardir,
-            os.pardir,
             "infra",
             "redis-scripts",
             "sliding_window.lua",
-        )
+        ) #Caminho final: shared/infra/redis-scripts/sliding_window.lua
 
         with open(lua_path, "r", encoding="utf-8") as f:
             lua_source = f.read()

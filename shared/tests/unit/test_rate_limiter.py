@@ -1,4 +1,5 @@
 import time
+import os
 import pytest
 from shared.utils.rate_limiter import RateLimiter
 
@@ -54,3 +55,16 @@ def test_reset_clears_rate_limiter_state():
     #Com chave limpa, contagem volta ao zero -> novas chamadas aceitas
     assert limiter.allow_request() is True
     assert limiter.get_count() == 1
+
+def test_lua_script_path_exists():
+    from shared.utils import rate_limiter
+
+    caminho = os.path.join(
+        os.path.dirname(rate_limiter.__file__),
+        os.pardir,
+        "infra",
+        "redis-scripts",
+        "sliding_window.lua",
+    )
+
+    assert os.path.exists(caminho)
