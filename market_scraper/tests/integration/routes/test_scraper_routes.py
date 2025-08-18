@@ -56,3 +56,30 @@ def test_parse_endpoint_com_cache(monkeypatch) -> None:
     resp2 = client.post("/scrape/parse", json=payload)
     assert resp2.status_code == 200
     assert contador == {"get": 2, "set": 1}
+
+def test_parse_endpoint_competitor_not_monitored(monkeypatch) -> None:
+    client = TestClient(app)
+
+    async def fake_scrape_product_common_async(*a, **k):
+        return {"details": {"name": "Produto X", "current_price": "R$ 5,00"}}
+
+    def fake_monitored(*a, **k):
+        raise AssertionError("MonitoredProductCreateScraping não deve ser usado")
+
+    monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
+    monkeypatch.setattr("market_scraper.routes.routes_scraper.MonitoredProductCreateScraping", fake_monitored)
+
+    payload = {"url": "http://exemplo.com/item", "product_type": "competitor"}
+
+    resp = client.post("/scrape/parse", json=payload)
+    assert resp.status_code == 200
+    dados = resp.json()
+    assert dados == {
+        "name": "Produto X",
+        "current_price": 5.0,
+        "old_price": None,
+        "thumbnail": None,
+        "free_shipping": False,
+        "seller": None,
+        "shipping": None,
+    }
