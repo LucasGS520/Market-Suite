@@ -4,24 +4,32 @@ Reutilizado por `market_alert` e `market_scraper` para gerenciar
 a flag de suspensão de scraping
 """
 
+import threading
 import redis
-from typing import Optional
 
 from shared.core.config_base import ConfigBase
 from shared import metrics
 
 
-#Cliente Redis utilizado por ``market_alert`` e ``market_scraper``
-_redis_client: Optional[redis.Redis] = None
+#Armazena instâncias isoladas de Redis por thread
+_thread_local = threading.local()
 SCRAPING_SUSPENDED_KEY = "scraping:suspended"
 _settings = ConfigBase()
 
 def get_redis_client() -> redis.Redis:
-    """ Retorna uma instância singleton de Redis, usando a URL configurada """
-    global _redis_client
-    if _redis_client is None:
-        _redis_client = redis.Redis.from_url(_settings.redis_url, decode_responses=True)
-    return _redis_client
+    """ Retorna um cliente Redis isolado por thread
+
+    Cria o cliente na primeira chamada da thread e o reutiliza nas
+    chamadas subsequentes, evitando o compartilhamento entre threads
+    ou processos diferentes.
+    """
+    client = getattr(_thread_local, "client", None)
+    if client is None:
+        _thread_local.client = redis.Redis.from_url(
+            _settings.redis_url, decode_responses=True
+        )
+        client = _thread_local.client
+    return client
 
 def is_scraping_suspended() -> bool:
     """ Verifica se a flag de scraping está ativa """

@@ -3,6 +3,7 @@
 import os
 import pytest
 import sys
+from types import SimpleNamespace
 from fastapi import FastAPI
 
 from fastapi.testclient import TestClient
@@ -73,7 +74,7 @@ def patch_rate_limiter_and_redis(monkeypatch):
     cache = DummyCacheManager()
 
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("shared.utils.redis_client._redis_client", fake_redis)
+    monkeypatch.setattr("shared.utils.redis_client._thread_local", SimpleNamespace(client=fake_redis))
     monkeypatch.setattr("market_alert.services.services_scraper_monitored.redis_client", fake_redis, raising=False)
     monkeypatch.setattr("market_alert.services.services_scraper_competitor.redis_client", fake_redis, raising=False)
     monkeypatch.setattr(scraper_tasks, "redis_client", fake_redis)

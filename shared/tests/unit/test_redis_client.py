@@ -1,3 +1,6 @@
+import threading
+import importlib
+
 from shared.utils import redis_client as rc
 
 
@@ -16,14 +19,56 @@ class FakeRedis:
 
 
 def test_suspend_resume(monkeypatch):
+    global rc
+    rc = importlib.reload(rc)
     fake = FakeRedis()
-    monkeypatch.setattr(rc, "_redis_client", fake)
-    monkeypatch.setattr(rc, "get_redis_client", lambda: fake)
+
+    def fake_from_url(url, decode_responses=True):
+        return fake
+
+    monkeypatch.setattr(rc.redis.Redis, "from_url", staticmethod(fake_from_url))
+    monkeypatch.setattr(rc, "_thread_local", threading.local())
 
     assert rc.is_scraping_suspended() is False
     rc.suspend_scraping(10)
-
     assert rc.is_scraping_suspended() is True
     rc.resume_scraping()
-
     assert rc.is_scraping_suspended() is False
+
+def test_get_redis_client_thread_isolation(monkeypatch):
+    global rc
+    rc = importlib.reload(rc)
+
+    def fake_from_url(url, decode_responses=True):
+        return FakeRedis()
+
+    monkeypatch.setattr(rc.redis.Redis, "from_url", staticmethod(fake_from_url))
+    monkeypatch.setattr(rc, "_thread_local", threading.local())
+
+    clients = []
+
+    def target():
+        clients.append(rc.get_redis_client())
+
+    threads = [threading.Thread(target=target) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert clients[0] is not clients[1]
+
+def test_get_redis_client_same_thread(monkeypatch):
+    global rc
+    rc = importlib.reload(rc)
+
+    def fake_from_url(url, decode_responses=True):
+        return FakeRedis()
+
+    monkeypatch.setattr(rc.redis.Redis, "from_url", staticmethod(fake_from_url))
+    monkeypatch.setattr(rc, "_thread_local", threading.local())
+
+    client1 = rc.get_redis_client()
+    client2 = rc.get_redis_client()
+
+    assert client1 is client2
