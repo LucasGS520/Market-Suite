@@ -9,6 +9,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
 os.environ.setdefault("SECRET_KEY", "dummy")
 
 from market_scraper.utils.block_recovery import BlockRecoveryManager
+from shared.enums import BlockResult
 from shared.metrics import metrics_scraper
 
 
@@ -43,9 +44,9 @@ def test_recover_html_success(monkeypatch):
     monkeypatch.setattr("market_scraper.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
     monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
     counter = DummyCounter()
-    monkeypatch.setattr(metrics_scraper, "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
+    monkeypatch.setattr("market_scraper.utils.block_recovery.SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
 
-    html = asyncio.run(mgr.handle_block("403", session_id="s1", url="http://example.com"))
+    html = asyncio.run(mgr.handle_block(BlockResult.HTTP_403, session_id="s1", url="http://example.com"))
 
     assert html == "<html></html>"
     assert counter.count == 1
@@ -70,9 +71,9 @@ def test_recover_html_failure(monkeypatch):
     monkeypatch.setattr("market_scraper.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
     monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
     counter = DummyCounter()
-    monkeypatch.setattr(metrics_scraper, "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
+    monkeypatch.setattr( "market_scraper.utils.block_recovery.SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
 
-    html = asyncio.run(mgr.handle_block("captcha", session_id="s2", url="http://example.com"))
+    html = asyncio.run(mgr.handle_block(BlockResult.CAPTCHA, session_id="s2", url="http://example.com"))
 
     assert html is None
     assert counter.count == 0

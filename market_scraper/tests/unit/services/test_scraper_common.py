@@ -4,6 +4,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 
 from market_scraper.services import services_scraper_common as common
+from shared.enums import BlockResult
 
 
 class DummyThrottleManager:
@@ -163,7 +164,7 @@ async def test_scrape_product_common_async_captcha_detected(monkeypatch):
     monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
 
     def fake_parse_product_details(html, url):
-        raise common.CaptchaDetectedError("captcha")
+        raise common.CaptchaDetectedError(BlockResult.CAPTCHA.value)
 
     monkeypatch.setattr(common.parser, "parse_product_details", fake_parse_product_details)
     monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
@@ -180,7 +181,7 @@ async def test_scrape_product_common_async_captcha_detected(monkeypatch):
         product_type="monitored",
     )
 
-    assert resultado == {"status": "captcha"}
+    assert resultado == {"status": BlockResult.CAPTCHA.value}
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_not_price(monkeypatch):

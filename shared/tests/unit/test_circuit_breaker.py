@@ -1,6 +1,7 @@
 import importlib
 import pytest
 import shared.utils.circuit_breaker as cb_mod
+from shared.enums import BlockResult
 
 #Recarregar o módulo para evitar alterações feitas por outros testes
 CircuitBreaker = importlib.reload(cb_mod).CircuitBreaker
@@ -103,3 +104,7 @@ def test_record_success_resets_state(cb, fake_redis):
 
     assert not fake_redis.exists(failures_key)
     assert not fake_redis.exists(suspend_key)
+
+def test_blockresult_enum_values():
+    assert BlockResult.HTTP_403.value == "http_403"
+    assert BlockResult.CAPTCHA.value == "captcha"

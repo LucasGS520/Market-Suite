@@ -20,6 +20,7 @@ from market_scraper.core.config_scraper import settings
 from shared.utils.circuit_breaker import CircuitBreaker
 from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.rate_limiter import RateLimiter
+from shared.enums import BlockResult
 from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.metrics.metrics_scraper import (
     SCRAPER_HTTP_BLOCKED_TOTAL,
@@ -64,7 +65,7 @@ async def fetch_html_playwright(url: str) -> str:
         return html
 
 async def _recover_html(
-    block_type: str,
+    block_type: BlockResult,
     *,
     url: str,
     url_host: str,
@@ -115,7 +116,7 @@ async def _get_html(
             circuit_breaker.record_failure(circuit_key)
             SCRAPER_HTTP_BLOCKED_TOTAL.inc()
             html = await _recover_html(
-                "timeout",
+                BlockResult.UNKNOWN,
                 url=target_url,
                 url_host=url_host,
                 recovery_manager=recovery_manager,
@@ -125,12 +126,14 @@ async def _get_html(
         except Exception as e:
             logger.error("get_request_failed", url=target_url, error=str(e))
             circuit_breaker.record_failure(circuit_key)
-            block_type = "429"
+            block_type = BlockResult.HTTP_429
             msg = str(e).lower()
             if "403" in msg:
-                block_type = "403"
+                block_type = BlockResult.HTTP_403
             elif "429" in msg:
-                block_type = "429"
+                block_type = BlockResult.HTTP_429
+            else:
+                block_type = BlockResult.UNKNOWN
 
             SCRAPER_HTTP_BLOCKED_TOTAL.inc()
             html = await _recover_html(
@@ -177,7 +180,7 @@ async def _parse_html(
         circuit_breaker.record_failure(circuit_key)
         SCRAPER_CAPTCHA_TOTAL.inc()
         #Tenta recuperar o HTML caso o site apresente CAPTCHA
-        recovered = await recovery_manager.handle_block("captcha", url=target_url)
+        recovered = await recovery_manager.handle_block(BlockResult.CAPTCHA, url=target_url)
         if recovered:
             html = recovered
             try:
@@ -194,7 +197,7 @@ async def _parse_html(
                 )
         else:
             SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
-            return {"status": "captcha"}
+            return {"status": BlockResult.CAPTCHA.value}
     except ValueError as exc:
         logger.error("invalid_product_data", url=original_url, error=str(exc))
         circuit_breaker.record_failure(circuit_key)

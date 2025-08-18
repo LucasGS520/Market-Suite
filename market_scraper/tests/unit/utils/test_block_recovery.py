@@ -9,14 +9,15 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
 os.environ.setdefault("SECRET_KEY", "dummy")
 
 from market_scraper.utils.block_recovery import BlockRecoveryManager
+from shared.enums import BlockResult
 
 
 @pytest.mark.parametrize(
     "block_type,expected",
     [
-        ("429", 300),
-        ("403", 900),
-        ("captcha", 1800)
+        (BlockResult.HTTP_429, 300),
+        (BlockResult.HTTP_403, 900),
+        (BlockResult.CAPTCHA, 1800)
     ]
 )
 def test_handle_block_invokes_managers(monkeypatch, block_type, expected):

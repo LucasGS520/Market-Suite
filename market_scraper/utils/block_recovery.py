@@ -5,6 +5,7 @@ from typing import List, Optional
 
 import structlog
 
+from shared.enums import BlockResult
 from shared.utils.redis_client import suspend_scraping
 from shared.metrics.metrics_scraper import SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL
 
@@ -36,13 +37,17 @@ class BlockRecoveryManager:
         self.ua_manager = self.ua_manager or IntelligentUserAgentManager()
         self.cookie_manager = self.cookie_manager or CookieManager()
 
-    async def handle_block(self, block_type: str, session_id: str | None = None, url: str | None = None) -> Optional[str]:
+    async def handle_block(self, block_type: BlockResult, session_id: str | None = None, url: str | None = None) -> Optional[str]:
         """ Aplica ações de mitigação e tenta recuperar o HTML via navegador
 
-        Se ``url`` for informado e o bloqueio indicar ``403`` ou ``captcha``,
+        Se ``url`` for informado e o bloqueio indicar ``HTTP_403`` ou ``captcha``,
         a função tenta obter o HTML utilizando o Playwright de forma assíncrona.
         """
-        severity_map = {"429": 1, "403": 2, "captcha": 3}
+        severity_map = {
+            BlockResult.HTTP_429: 1,
+            BlockResult.HTTP_403: 2,
+            BlockResult.CAPTCHA: 3,
+        }
         level = severity_map.get(block_type, 1)
 
         self._severity = max(level, self._severity + 1)
@@ -53,7 +58,7 @@ class BlockRecoveryManager:
 
         recovered_html: Optional[str] = None
 
-        if block_type in {"captcha", "403"} and url:
+        if block_type in {BlockResult.CAPTCHA, BlockResult.HTTP_403} and url:
             try:
                 async with get_playwright_client() as client:
                     recovered_html = await client.fetch_html(
@@ -72,10 +77,10 @@ class BlockRecoveryManager:
 
 async def recover_html_if_blocked(
     url: str,
-    reason: str,
+    reason: BlockResult,
     *,
     manager: BlockRecoveryManager | None = None,
-    session_id: str | None = None
+    session_id: str | None = None,
 ) -> Optional[str]:
     """ Realiza tentativa assíncrona de recuperação do HTML
 
