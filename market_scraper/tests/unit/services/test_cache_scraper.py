@@ -50,3 +50,19 @@ async def test_get_cached_html_fallback_local(monkeypatch):
     cache._cache[url] = {"html": "<html>velho</html>", "timestamp": -400}
 
     assert await cache.get_cached_html(url, max_age=300) is None
+
+@pytest.mark.asyncio
+async def test_set_cached_html_redis_falha_ainda_persiste_local(monkeypatch):
+    class BrokenRedis:
+        def setex(self, *a, **k):
+            raise Exception("indisponível")
+
+    monkeypatch.setattr(cache, "get_redis_client", lambda: BrokenRedis())
+    cache._cache.clear()
+
+    url = "https://exemplo.com/produto"
+    html = "<html>produto</html>"
+
+    await cache.set_cached_html(url, html, ttl=100)
+
+    assert cache._cache[url]["html"] == html
