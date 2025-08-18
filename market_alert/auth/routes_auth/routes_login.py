@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-import shared.metrics as metrics
+from shared.metrics.metrics_auth import LOGIN_ERRORS_TOTAL
 from shared.infra.db import get_db
 from market_alert.schemas.schemas_auth import TokenResponse
 from market_alert.auth.services_auth import login_user
@@ -23,5 +23,5 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
     except HTTPException as exc:
         #Conta apenas falhas de credenciais inválidas
         if exc.status_code == 401:
-            metrics.LOGIN_ERRORS_TOTAL.labels(reason="invalid_credentials").inc()
+            LOGIN_ERRORS_TOTAL.labels(reason="invalid_credentials").inc()
         raise

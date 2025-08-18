@@ -7,13 +7,10 @@ from celery.app.control import Inspect
 
 from shared.utils.redis_client import get_redis_client
 from shared.infra.db import get_engine
-from shared.metrics import (
-    CELERY_QUEUE_LENGTH, CELERY_WORKERS_TOTAL,
-    CELERY_WORKER_CONCURRENCY, CELERY_TASK_DURATION_SECONDS,
-    REDIS_QUEUE_MESSAGES, REDIS_MEMORY_USAGE_BYTES,
-    DB_POOL_SIZE, DB_POOL_CHECKOUTS,
-    CACHE_CLEANUP_TOTAL
-)
+from shared.metrics.metrics_celery import CELERY_QUEUE_LENGTH, CELERY_WORKERS_TOTAL, CELERY_WORKER_CONCURRENCY, CELERY_TASK_DURATION_SECONDS
+from shared.metrics.metrics_redis import REDIS_MEMORY_USAGE_BYTES, REDIS_QUEUE_MESSAGES
+from shared.metrics.metrics_db import DB_POOL_CHECKOUTS, DB_POOL_SIZE
+from shared.metrics.metrics_cache import CACHE_CLEANUP_TOTAL
 from market_alert.core.celery_app import celery_app
 
 

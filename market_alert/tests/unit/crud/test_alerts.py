@@ -95,7 +95,7 @@ def test_update_alert_rule_enabled_inc(monkeypatch):
     gauge = DummyGauge()
 
     monkeypatch.setattr(crud_alerts, "get_alert_rule", lambda d, rid: rule)
-    monkeypatch.setattr(crud_alerts.metrics, "ALERT_RULES_ACTIVE", gauge)
+    monkeypatch.setattr(crud_alerts, "ALERT_RULES_ACTIVE", gauge)
 
     crud_alerts.update_alert_rule(db, "r1", {"enabled": True})
 
@@ -109,7 +109,7 @@ def test_update_alert_rule_enabled_dec(monkeypatch):
     gauge = DummyGauge()
 
     monkeypatch.setattr(crud_alerts, "get_alert_rule", lambda d, rid: rule)
-    monkeypatch.setattr(crud_alerts.metrics, "ALERT_RULES_ACTIVE", gauge)
+    monkeypatch.setattr(crud_alerts, "ALERT_RULES_ACTIVE", gauge)
 
     crud_alerts.update_alert_rule(db, "r1", {"enabled": False})
 

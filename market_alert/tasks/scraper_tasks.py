@@ -15,7 +15,7 @@ import structlog
 from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
 from shared.exceptions import ScraperError
-from shared.metrics import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
+from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
 from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.enums.error_codes import ScrapingErrorType
 

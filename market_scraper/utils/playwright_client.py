@@ -18,7 +18,7 @@ import structlog
 from playwright.async_api import async_playwright, Browser, TimeoutError as PlaywrightTimeoutError
 from playwright_stealth import Stealth
 
-from shared.metrics import SCRAPER_BROWSER_FALLBACK_TOTAL
+from shared.metrics.metrics_scraper import SCRAPER_BROWSER_FALLBACK_TOTAL
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.core.config_scraper import settings
 

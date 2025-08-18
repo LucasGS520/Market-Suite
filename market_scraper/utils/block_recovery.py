@@ -6,12 +6,12 @@ from typing import List, Optional
 import structlog
 
 from shared.utils.redis_client import suspend_scraping
+from shared.metrics.metrics_scraper import SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL
 
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.cookie_manager import CookieManager
 from market_scraper.utils.playwright_client import get_playwright_client
-import shared.metrics as metrics
 
 
 logger = structlog.get_logger("block_recovery")
@@ -59,7 +59,7 @@ class BlockRecoveryManager:
                     recovered_html = await client.fetch_html(
                         url, session_id=session_id
                     )
-                metrics.SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL.inc()
+                SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL.inc()
             except Exception as exc:
                 logger.warning("browser_fallback_failed", url=url, error=str(exc))
 

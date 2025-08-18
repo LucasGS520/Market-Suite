@@ -1,6 +1,5 @@
 """ Aplicação principal FastAPI com configuração de métricas e rotas """
 
-import shared.metrics as metrics_module
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 try:
@@ -24,8 +23,15 @@ from slowapi.util import get_remote_address
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from market_alert.core.config_alert import settings
+
 from shared.infra.db import get_engine, SessionLocal
+from shared.metrics.metrics_logging import LOG_ENTRIES_TOTAL
+from shared.metrics.metrics_http import HTTP_REQUESTS_TOTAL, HTTP_REQUESTS_LATENCY_SECONDS
+from shared.metrics.metrics_api import API_ERRORS_TOTAL
+from shared.metrics.metrics_db import DB_POOL_CHECKOUTS, DB_POOL_SIZE
+from shared.metrics.metrics_alerts import ALERT_RULES_ACTIVE
+
+from market_alert.core.config_alert import settings
 from market_alert.models.models_alerts import AlertRule
 
 #Rotas
@@ -74,7 +80,7 @@ def configure_logging():
         def emit(self, record: logging.LogRecord) -> None:
             level = record.levelname.lower()
             try:
-                metrics_module.LOG_ENTRIES_TOTAL.labels(level=level).inc()
+                LOG_ENTRIES_TOTAL.labels(level=level).inc()
             except Exception:
                 pass
 
@@ -110,7 +116,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         latency = time.time() - start
 
         #Incrementa contador de requisições
-        metrics_module.HTTP_REQUESTS_TOTAL.labels(
+        HTTP_REQUESTS_TOTAL.labels(
             method = request.method,
             endpoint = request.url.path,
             status_code = response.status_code
@@ -118,7 +124,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
         if response.status_code >= 400:
             try:
-                metrics_module.API_ERRORS_TOTAL.labels(
+                API_ERRORS_TOTAL.labels(
                     endpoint=request.url.path,
                     status_code=response.status_code
                 ).inc()
@@ -126,7 +132,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
                 pass
 
         #Observa latência
-        metrics_module.HTTP_REQUESTS_LATENCY_SECONDS.labels(
+        HTTP_REQUESTS_LATENCY_SECONDS.labels(
             method=request.method,
             endpoint=request.url.path
         ).observe(latency)
@@ -159,8 +165,8 @@ def create_app() -> FastAPI:
         #Atualiza DB pool metrics
         engine = get_engine()
         #Atualiza gauges de pool
-        metrics_module.DB_POOL_SIZE.set(engine.pool.size())
-        metrics_module.DB_POOL_CHECKOUTS.set(engine.pool.checkedout())
+        DB_POOL_SIZE.set(engine.pool.size())
+        DB_POOL_CHECKOUTS.set(engine.pool.checkedout())
 
         data = generate_latest(REGISTRY)
         return Response(content=data, media_type=CONTENT_TYPE_LATEST)
@@ -204,7 +210,7 @@ def create_app() -> FastAPI:
     try:
         with SessionLocal() as db:
             count_enabled = db.query(AlertRule).filter(AlertRule.enabled.is_(True)).count()
-            metrics_module.ALERT_RULES_ACTIVE.set(count_enabled)
+            ALERT_RULES_ACTIVE.set(count_enabled)
     except Exception as exc:
         logger.error("init_alert_rule_metric_failed", error=str(exc))
 

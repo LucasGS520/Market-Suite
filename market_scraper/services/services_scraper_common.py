@@ -21,7 +21,7 @@ from shared.utils.circuit_breaker import CircuitBreaker
 from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.rate_limiter import RateLimiter
 from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
-from shared.metrics import (
+from shared.metrics.metrics_scraper import (
     SCRAPER_HTTP_BLOCKED_TOTAL,
     SCRAPER_CAPTCHA_TOTAL,
     SCRAPER_REQUESTS_TOTAL,

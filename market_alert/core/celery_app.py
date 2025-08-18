@@ -1,7 +1,6 @@
 """ Configuração da aplicação Celery e registro de métricas """
 
 #Registra métricas antes de iniciar o HTTP server
-import shared.metrics as metrics_module
 import os
 
 from kombu import Exchange, Queue
@@ -9,6 +8,7 @@ from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
 from celery.schedules import crontab
 from prometheus_client import start_http_server
+from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL
 
 try:
     from opentelemetry.instrumentation.celery import CeleryInstrumentor
@@ -47,14 +47,14 @@ def _start_prometheus_server(**kwargs):
 def handle_task_success(sender=None, **kwargs):
     """ Métricas de contagem de sucesso """
     #Incrementa contagem de tasks concluídas
-    metrics_module.CELERY_TASKS_TOTAL.labels(task_name=sender.name, status="success").inc()
+    CELERY_TASKS_TOTAL.labels(task_name=sender.name, status="success").inc()
 
 #Incrementa em toda a falha de task
 @task_failure.connect
 def handle_task_failure(sender=None, **kwargs):
     """ Métricas de contagem de falha """
     #Incrementa em caso de falha de task
-    metrics_module.CELERY_TASKS_TOTAL.labels(task_name=sender.name, status="failure").inc()
+    CELERY_TASKS_TOTAL.labels(task_name=sender.name, status="failure").inc()
 
 
 #Configurações adicionais do Celery

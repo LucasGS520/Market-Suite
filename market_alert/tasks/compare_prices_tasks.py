@@ -15,7 +15,7 @@ from decimal import Decimal
 from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client
 from shared.utils.logging_utils import mask_identifier
-from shared.metrics import SCRAPING_LATENCY_SECONDS
+from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
 
 from market_alert.core.celery_app import celery_app
 from market_alert.services.services_comparison import run_price_comparison

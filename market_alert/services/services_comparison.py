@@ -12,7 +12,7 @@ from decimal import Decimal
 import structlog
 import time
 
-from shared.metrics import PRICE_COMPARISON_DURATION_SECONDS, PRICE_COMPARISONS_TOTAL, PRICE_ALERTS_TOTAL
+from shared.metrics.metrics_price_comparison import PRICE_COMPARISON_DURATION_SECONDS, PRICE_COMPARISONS_TOTAL, PRICE_ALERTS_TOTAL
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id

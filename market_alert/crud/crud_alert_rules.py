@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from market_alert.models.models_alerts import AlertRule
 from market_alert.enums.enums_alerts import AlertType
 from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
-import shared.metrics as metrics
+from shared.metrics.metrics_alerts import ALERT_RULES_ACTIVE
 
 
 def create_alert_rule(db: Session, rule_data: AlertRuleCreate) -> AlertRule:
@@ -31,7 +31,7 @@ def create_alert_rule(db: Session, rule_data: AlertRuleCreate) -> AlertRule:
     #Incrementa métrica se a regra criada estiver habilitada
     try:
         if rule.enabled:
-            metrics.ALERT_RULES_ACTIVE.inc()
+            ALERT_RULES_ACTIVE.inc()
     except Exception:
         pass
     return rule
@@ -90,9 +90,9 @@ def toggle_alert_rule(db: Session, rule_id: UUID, enabled: bool) -> Optional[Ale
     #Ajusta o gauge apenas se o valor mudou
     try:
         if enabled and not previous:
-            metrics.ALERT_RULES_ACTIVE.inc()
+            ALERT_RULES_ACTIVE.inc()
         elif not enabled and previous:
-            metrics.ALERT_RULES_ACTIVE.dec()
+            ALERT_RULES_ACTIVE.dec()
     except Exception:
         pass
     return rule
@@ -125,9 +125,9 @@ def update_alert_rule(db: Session, rule_id: UUID, rule_update) -> Optional[Alert
     if enabled_changed:
         try:
             if rule.enabled and not prev_enabled:
-                metrics.ALERT_RULES_ACTIVE.inc()
+                ALERT_RULES_ACTIVE.inc()
             elif not rule.enabled and prev_enabled:
-                metrics.ALERT_RULES_ACTIVE.dec()
+                ALERT_RULES_ACTIVE.dec()
         except Exception:
             pass
 
@@ -143,7 +143,7 @@ def delete_alert_rule(db: Session, rule_id: UUID) -> Optional[AlertRule]:
 
     try:
         if was_enabled:
-            metrics.ALERT_RULES_ACTIVE.dec()
+            ALERT_RULES_ACTIVE.dec()
     except Exception:
         pass
     return rule

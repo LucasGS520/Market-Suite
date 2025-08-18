@@ -1,5 +1,5 @@
 import market_alert.tasks.metrics_tasks as metrics_tasks
-from shared.metrics import CACHE_CLEANUP_TOTAL
+from shared.metrics.metrics_cache import CACHE_CLEANUP_TOTAL
 
 
 class FakeRedis:
