@@ -20,7 +20,7 @@ from shared.metrics import SCRAPING_LATENCY_SECONDS
 from market_alert.core.celery_app import celery_app
 from market_alert.services.services_comparison import run_price_comparison
 from market_alert.tasks.alert_tasks import send_notification_task
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 
 
 logger = structlog.get_logger("compare_prices")

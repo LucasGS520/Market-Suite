@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 from shared import metrics
 from .base import NotificationChannel, logger
 

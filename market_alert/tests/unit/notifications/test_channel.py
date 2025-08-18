@@ -64,7 +64,7 @@ def test_email_channel_warns_when_missing_email(monkeypatch):
     assert counter.calls and counter.calls[0]["reason"] == "email_missing"
 
 def test_get_notification_manager_returns_new_instance(monkeypatch):
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", None)
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", None)
@@ -375,7 +375,7 @@ def test_slack_channel_handles_http_error(monkeypatch):
 def test_push_channel_handles_http_error(monkeypatch):
     from market_alert.notifications.channels import push as push_mod
     from market_alert.notifications.channels.push import PushChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(push_mod, "logger", dummy)
@@ -408,7 +408,7 @@ def test_push_channel_handles_http_error(monkeypatch):
 
 def test_get_notification_manager_includes_slack(monkeypatch):
     from market_alert.notifications.manager import get_notification_manager
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "http://hook")
 
@@ -425,7 +425,7 @@ def test_get_notification_manager_includes_slack(monkeypatch):
 def test_sms_channel_missing_phone_increments_counter(monkeypatch):
     from market_alert.notifications.channels import sms as sms_mod
     from market_alert.notifications.channels.sms import SMSChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "sid")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "token")
@@ -450,7 +450,7 @@ def test_sms_channel_missing_phone_increments_counter(monkeypatch):
 def test_whatsapp_channel_missing_number_increments_counter(monkeypatch):
     from market_alert.notifications.channels import whatsapp as wa_mod
     from market_alert.notifications.channels.whatsapp import WhatsAppChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", "sid")
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", "token")
@@ -475,7 +475,7 @@ def test_whatsapp_channel_missing_number_increments_counter(monkeypatch):
 def test_push_channel_missing_token_increments_counter(monkeypatch):
     from market_alert.notifications.channels import push as push_mod
     from market_alert.notifications.channels.push import PushChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     monkeypatch.setattr(settings, "FCM_SERVER_KEY", "key")
     counter = DummyCounter()
@@ -489,7 +489,7 @@ def test_push_channel_missing_token_increments_counter(monkeypatch):
 def test_slack_channel_missing_webhook_increments_counter(monkeypatch):
     from market_alert.notifications.channels import slack as slack_mod
     from market_alert.notifications.channels.slack import SlackChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     counter = DummyCounter()
     monkeypatch.setattr(slack_mod.metrics, "NOTIFICATIONS_SKIPPED_TOTAL", counter)
@@ -502,7 +502,7 @@ def test_slack_channel_missing_webhook_increments_counter(monkeypatch):
 def test_email_channel_missing_provider_skips(monkeypatch):
     from market_alert.notifications.channels import email as email_mod
     from market_alert.notifications.channels.email import EmailChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     called = {}
     def dummy_smtp(*a, **k):
@@ -534,7 +534,7 @@ def test_email_channel_missing_provider_skips(monkeypatch):
 def test_sms_channel_missing_provider_skips(monkeypatch):
     from market_alert.notifications.channels import sms as sms_mod
     from market_alert.notifications.channels.sms import SMSChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     called = {}
     def dummy_http_client(*a, **k):
@@ -562,7 +562,7 @@ def test_sms_channel_missing_provider_skips(monkeypatch):
 def test_whatsapp_channel_missing_provider_skips(monkeypatch):
     from market_alert.notifications.channels import whatsapp as wa_mod
     from market_alert.notifications.channels.whatsapp import WhatsAppChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     called = {}
     def dummy_http_client(*a, **k):
@@ -590,7 +590,7 @@ def test_whatsapp_channel_missing_provider_skips(monkeypatch):
 def test_push_channel_missing_provider_skips(monkeypatch):
     from market_alert.notifications.channels import push as push_mod
     from market_alert.notifications.channels.push import PushChannel
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     called = {}
     def dummy_client(*a, **k):

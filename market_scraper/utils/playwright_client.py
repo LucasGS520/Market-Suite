@@ -20,7 +20,7 @@ from playwright_stealth import Stealth
 
 from shared.metrics import SCRAPER_BROWSER_FALLBACK_TOTAL
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
-from shared.core.config_scraper import settings
+from market_scraper.core.config_scraper import settings
 
 
 logger = structlog.get_logger("playwright_client")

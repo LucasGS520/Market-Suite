@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone
 
 from shared.infra.db import get_engine
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 
 
 router = APIRouter(prefix="/health", tags=["Health"])

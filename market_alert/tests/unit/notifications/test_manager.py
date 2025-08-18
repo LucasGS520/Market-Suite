@@ -98,7 +98,7 @@ class DummyCounter:
 
 def test_get_notification_manager_logs_missing_settings(monkeypatch):
     from market_alert.notifications import manager as manager_mod
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(manager_mod, "logger", dummy)
@@ -121,7 +121,7 @@ def test_get_notification_manager_logs_missing_settings(monkeypatch):
 
 def test_get_notification_manager_no_logs_when_configured(monkeypatch):
     from market_alert.notifications import manager as manager_mod
-    from market_alert.core.config import settings
+    from market_alert.core.config_alert import settings
 
     dummy = DummyLogger()
     monkeypatch.setattr(manager_mod, "logger", dummy)

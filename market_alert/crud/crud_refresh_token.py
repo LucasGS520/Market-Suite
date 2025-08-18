@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
 
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 from market_alert.models.models_refresh_token import RefreshToken
 
 

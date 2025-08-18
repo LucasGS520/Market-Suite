@@ -12,7 +12,7 @@ import re
 from typing import Optional
 import asyncio
 
-from shared.core.config_scraper import settings
+from market_scraper.core.config_scraper import settings
 from shared.utils.redis_client import get_redis_client
 
 

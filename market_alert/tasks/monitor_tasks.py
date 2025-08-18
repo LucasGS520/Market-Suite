@@ -18,7 +18,7 @@ from shared.metrics import SCRAPING_LATENCY_SECONDS
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
 from shared.schemas.products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
 from market_alert.enums.enums_products import MonitoringType
 from market_alert.crud.crud_monitored import get_products_by_type, create_or_update_monitored_product_scraped

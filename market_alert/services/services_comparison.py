@@ -18,7 +18,7 @@ from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_comparison import create_price_comparison
 from market_alert.utils.comparator import compare_prices
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 
 
 logger = structlog.get_logger("comparison_service")

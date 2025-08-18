@@ -15,7 +15,7 @@ from market_alert.core.jwt import create_access_token
 from market_alert.core.tokens import generate_verification_token, generate_reset_token, token_expiry
 from market_alert.notifications.manager import get_notification_manager
 from market_alert.crud.crud_notification_logs import has_recent_duplicate_notification
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 from market_alert.schemas.schemas_auth import TokenResponse, ResetPasswordRequest, ResetPasswordConfirmRequest, ChangePasswordRequest, ChangeEmailRequest, EmailTokenRequest
 from market_alert.schemas.schemas_auth import TokenPairResponse, RefreshRequest
 from market_alert.models.models_users import User

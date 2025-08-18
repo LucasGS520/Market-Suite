@@ -29,7 +29,7 @@ from .channels.whatsapp import WhatsAppChannel
 from .channels.slack import SlackChannel
 
 from market_alert.enums.enums_alerts import ChannelType, AlertType
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 from shared import metrics
 
 

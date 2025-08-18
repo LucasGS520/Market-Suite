@@ -3,7 +3,7 @@ from __future__ import annotations
 from twilio.http.async_http_client import AsyncTwilioHttpClient
 from twilio.rest import Client
 
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 from shared import metrics
 from .base import NotificationChannel, logger
 

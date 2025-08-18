@@ -7,7 +7,7 @@ para o domínio mobile.
 """
 
 from typing import Tuple, Union, Dict
-from shared.core.config_scraper import settings
+from market_scraper.core.config_scraper import settings
 from urllib.parse import urlparse, urlunparse
 
 

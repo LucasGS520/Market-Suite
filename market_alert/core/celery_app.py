@@ -15,7 +15,7 @@ try:
 except Exception:
     CeleryInstrumentor = None
 
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 
 
 #Cria a aplicação Celery

@@ -15,7 +15,7 @@ import structlog
 
 from fastapi import HTTPException, status
 
-from shared.core.config_scraper import settings
+from market_scraper.core.config_scraper import settings
 
 from shared.utils.circuit_breaker import CircuitBreaker
 from shared.utils.redis_client import is_scraping_suspended

@@ -6,7 +6,7 @@ import asyncio
 import random
 import time
 
-from shared.core.config_scraper import settings
+from market_scraper.core.config_scraper import settings
 
 
 class HumanizedDelayManager:

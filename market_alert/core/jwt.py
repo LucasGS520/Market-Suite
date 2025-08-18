@@ -8,7 +8,7 @@ from jose.exceptions import ExpiredSignatureError
 
 from fastapi import HTTPException, status
 
-from market_alert.core.config import settings
+from market_alert.core.config_alert import settings
 
 
 logger = structlog.get_logger("core.jwt")
