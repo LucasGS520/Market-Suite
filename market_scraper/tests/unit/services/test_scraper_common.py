@@ -121,7 +121,7 @@ async def test_scrape_product_common_async_html_not_product(monkeypatch):
     monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
     monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
 
-    monkeypatch.setattr(common, "looks_like_product_page", lambda html: False)
+    monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: False)
 
     def fake_parse_product_details(html, url):
         raise AssertionError("parse_product_details não deve ser chamado")
