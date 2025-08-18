@@ -1,4 +1,10 @@
-""" Centralizado constantes do projeto e configurações utilitárias ligados a URLs e User-Agent """
+""" Centralizado constantes e utilidades utilizadas nas requisições HTTP do scraper
+
+Reúne listas de User-Agent, cabeçalhos stealth, cookies genéricos e parâmetros de
+throttle/jitter que controlam a taxa de acesso aos sites monitorados.
+Também disponibiliza função auxiliar para converter URLs do Mercado Livre
+para o domínio mobile.
+"""
 
 from typing import Tuple, Union, Dict
 from shared.core.config_scraper import settings
