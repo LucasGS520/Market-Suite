@@ -11,15 +11,21 @@ from typing import Generator
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from market_alert.core.config import settings
+from shared.core.config_base import ConfigBase
 import shared.metrics as metrics
 
+
+class DBSettings(ConfigBase):
+    """ Configurações mínimas para acesso ao banco de dados """
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
+
+_settings = DBSettings()
 
 #Exibe as queries SQL no console quando a variável DEBUG está habilitada
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 #Criação do engine que gerencia as conexões com o banco de dados
-engine = create_engine(settings.DATABASE_URL, echo=DEBUG, pool_pre_ping=True)
+engine = create_engine(_settings.DATABASE_URL, echo=DEBUG, pool_pre_ping=True)
 
 #Configurando sessões de banco de Dados
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
