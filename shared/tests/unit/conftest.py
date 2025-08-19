@@ -60,8 +60,6 @@ def patch_redis_client(monkeypatch):
 
     #Redireciona as chamadas de obtenção do cliente Redis para a versão fake
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("shared.utils.rate_limiter.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("shared.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
 
     return fake_redis
 

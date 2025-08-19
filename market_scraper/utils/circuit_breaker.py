@@ -1,7 +1,7 @@
 """ Implementação simples de circuit breaker usando Redis
 
-Compartilhado entre ``market_alert`` e ``market_scraper`` para
-evitar bloqueios consecutivos nas requisições
+Utilizado pelo ``market_scraper`` para evitar
+bloqueios consecutivos nas requisições
 """
 
 import json

@@ -1,6 +1,5 @@
 """ Fixtures e utilidades para testes de integração """
 
-import os
 import pytest
 import sys
 from types import SimpleNamespace
@@ -14,8 +13,6 @@ from uuid import uuid4
 
 from shared.infra.db import Base
 from shared.infra.db import get_db
-
-import shared.utils.rate_limiter as rate_limiter_module
 
 from main import app
 from market_alert.core.security import get_current_user
@@ -36,8 +33,8 @@ else:
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 @pytest.fixture(autouse=True)
-def patch_rate_limiter_and_redis(monkeypatch):
-    """ Mocka Redis, RateLimiter e CircuitBreaker antes de qualquer uso em integração """
+def patch_redis(monkeypatch):
+    """ Mocka Redis e cache para evitar conexões externas nos testes de integração """
 
     class FakeRedis:
         def get(self, *args, **kwargs): return None
@@ -45,17 +42,6 @@ def patch_rate_limiter_and_redis(monkeypatch):
         def exists(self, *args, **kwargs): return False
         def script_load(self, *args, **kwargs): return "mock_sha"
         def evalsha(self, *args, **kwargs): return 1
-
-    class MockRateLimiter:
-        def __init__(self, *args, **kwargs): pass
-        def allow_request(self, *args, **kwargs): return True
-        def reset(self, *args, **kwargs): pass
-        def get_count(self, *args, **kwargs): return 0
-
-    class MockCircuitBreaker:
-        def allow_request(self, *args, **kwargs): return True
-        def record_success(self, *args, **kwargs): pass
-        def record_failure(self, *args, **kwargs): pass
 
     class DummyCacheManager:
         def __init__(self):
@@ -78,9 +64,6 @@ def patch_rate_limiter_and_redis(monkeypatch):
     monkeypatch.setattr("market_alert.services.services_scraper_monitored.redis_client", fake_redis, raising=False)
     monkeypatch.setattr("market_alert.services.services_scraper_competitor.redis_client", fake_redis, raising=False)
     monkeypatch.setattr(scraper_tasks, "redis_client", fake_redis)
-
-    #Substitui o RateLimiter global
-    monkeypatch.setattr(rate_limiter_module, "RateLimiter", MockRateLimiter)
 
 @pytest.fixture(scope="session")
 def prepare_test_database():

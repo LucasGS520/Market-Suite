@@ -17,9 +17,7 @@ from fastapi import HTTPException, status
 
 from market_scraper.core.config_scraper import settings
 
-from shared.utils.circuit_breaker import CircuitBreaker
 from shared.utils.redis_client import is_scraping_suspended
-from shared.utils.rate_limiter import RateLimiter
 from shared.enums import BlockResult
 from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.metrics.metrics_scraper import (
@@ -30,6 +28,8 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_URL_STATUS_TOTAL,
 )
 
+from market_scraper.utils.circuit_breaker import CircuitBreaker
+from market_scraper.utils.rate_limiter import RateLimiter
 from market_scraper.utils.constants import to_mobile_url, THROTTLE_RATE, THROTTLE_CAPACITY, JITTER_RANGE
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.humanized_delay import HumanizedDelayManager

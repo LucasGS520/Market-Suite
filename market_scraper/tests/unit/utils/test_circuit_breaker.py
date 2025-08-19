@@ -1,6 +1,6 @@
 import importlib
 import pytest
-import shared.utils.circuit_breaker as cb_mod
+import market_scraper.utils.circuit_breaker as cb_mod
 from shared.enums import BlockResult
 
 #Recarregar o módulo para evitar alterações feitas por outros testes

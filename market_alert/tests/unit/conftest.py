@@ -1,11 +1,6 @@
 import pytest
 import time
 
-from shared.utils.ml_url import PRODUCT_HOSTS
-
-from shared.utils.rate_limiter import RateLimiter
-
-
 #FakeRedis universal para testes unitarios
 class FakeRedis:
     def __init__(self):
@@ -60,32 +55,12 @@ class FakeRedis:
             del self.data[redis_key]
 
 @pytest.fixture(autouse=True)
-def patch_rate_limiter(monkeypatch):
-    """ Substitui a classe Redis por uma fake e evitar conexão real com redis e leitura de arquivo Lua """
+def fake_redis_client(monkeypatch):
+    """ Substitui a cliente Redis por uma implementação em memória """
     fake_redis = FakeRedis()
 
-    def fake_init(self, redis_key: str, max_requests: int, window_seconds: int):
-        self.redis = fake_redis
-        self.key = redis_key
-        self.limit = max_requests
-        self.window = window_seconds
-        self.window_ms = window_seconds * 1000
-        self.lua_sha = "fake-sha"
-
-    monkeypatch.setattr(RateLimiter, "__init__", fake_init)
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("shared.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
-
-    class DummyCircuitBreaker:
-        def allow_request(self, *a, **k):
-            return True
-
-        def record_success(self, *a, **k):
-            pass
-
-        def record_failure(self, *a, **k):
-            pass
-
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.redis_client", fake_redis, raising=False)
     return fake_redis
 
 @pytest.fixture(autouse=True)

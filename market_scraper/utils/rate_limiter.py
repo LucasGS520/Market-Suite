@@ -1,4 +1,8 @@
-""" Utilitários de limitação de taxa usando Redis e script Lua """
+""" Utilitários de limitação de taxa usando Redis e script Lua
+
+Empregado pelo ``market_scraper`` para controlar requisições
+de forma global e evitar sobrecarga nos sites alvo.
+"""
 
 import time
 import os
@@ -13,6 +17,8 @@ def _load_lua_script(redis):
         lua_path = os.path.join(
             os.path.dirname(__file__),
             os.pardir,
+            os.pardir,
+            "shared",
             "infra",
             "redis-scripts",
             "sliding_window.lua",

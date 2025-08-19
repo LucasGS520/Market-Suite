@@ -1,4 +1,4 @@
-from shared.utils.circuit_breaker import CircuitBreaker
+from market_scraper.utils.circuit_breaker import CircuitBreaker
 
 
 class FakeRedis:

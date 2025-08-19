@@ -10,8 +10,8 @@ from shared.metrics.metrics_scraper import SCRAPER_JITTER_SECONDS, SCRAPER_BACKO
 
 from fastapi import HTTPException, status
 
-from shared.utils.circuit_breaker import CircuitBreaker
-from shared.utils.rate_limiter import RateLimiter
+from market_scraper.utils.circuit_breaker import CircuitBreaker
+from market_scraper.utils.rate_limiter import RateLimiter
 
 
 class ThrottleManager:

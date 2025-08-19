@@ -15,7 +15,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///benchmark.db")
 os.environ.setdefault("SECRET_KEY", "benchmark-secret")
 
 #Utiliza implementação compartilhada de RateLimiter
-from shared.utils.rate_limiter import RateLimiter
+from market_scraper.utils.rate_limiter import RateLimiter
 
 #Marca todos os testes deste diretório como lentos, serão executados apenas quando explicitamente solicitados
 @pytest.hookimpl(tryfirst=True)

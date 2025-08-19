@@ -1,8 +1,7 @@
 import pytest
 import time
 
-#Usa RateLimiter da camada compartilhada
-from shared.utils.rate_limiter import RateLimiter
+from market_scraper.utils.rate_limiter import RateLimiter
 import sys, types
 
 #FakeRedis universal para testes unitarios
@@ -73,7 +72,7 @@ def patch_rate_limiter(monkeypatch):
 
     monkeypatch.setattr(RateLimiter, "__init__", fake_init)
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("shared.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("market_scraper.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(
         "market_scraper.utils.robots_txt.requests.get",

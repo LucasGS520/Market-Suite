@@ -1,7 +1,7 @@
 import time
 import os
 import pytest
-from shared.utils.rate_limiter import RateLimiter
+from market_scraper.utils.rate_limiter import RateLimiter
 
 def test_allow_request_under_limit():
     """ Verifica que allow request() retorna True quando o numero de chamadas estiver
@@ -57,11 +57,13 @@ def test_reset_clears_rate_limiter_state():
     assert limiter.get_count() == 1
 
 def test_lua_script_path_exists():
-    from shared.utils import rate_limiter
+    from market_scraper.utils import rate_limiter
 
     caminho = os.path.join(
         os.path.dirname(rate_limiter.__file__),
         os.pardir,
+        os.pardir,
+        "shared",
         "infra",
         "redis-scripts",
         "sliding_window.lua",
