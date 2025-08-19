@@ -16,7 +16,7 @@ except Exception:
 def _payload() -> CompetitorProductCreateScraping:
     """ Monta payload padrão de produto concorrente """
     return CompetitorProductCreateScraping(
-        competitor_id=str(uuid4()),
+        #Campos obrigatórios definidos no esquema compartilhado
         monitored_product_id=str(uuid4()),
         product_url="https://example.com/item",
     )

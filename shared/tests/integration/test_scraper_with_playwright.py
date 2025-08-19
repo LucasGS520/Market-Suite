@@ -15,7 +15,7 @@ except Exception:
 def test_scrape_monitored_triggers_client_and_tasks():
     """ Garante integração entre cliente de scraping e tarefas de comparação """
     payload = MonitoredProductCreateScraping(
-        monitored_product_id=str(uuid4()),
+        #Campos obrigatórios requeridos pelo esquema compartilhado
         name_identification="Produto Teste",
         product_url="https://example.com/item",
         target_price=Decimal("10.00")
