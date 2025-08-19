@@ -7,7 +7,7 @@ from unittest.mock import patch, AsyncMock, Mock
 
 import pytest
 
-from market_scraper.tests.unit.utils.test_circuit_breaker import fake_redis
+from shared.tests.conftest import fake_redis
 from shared.metrics import SCRAPING_SUSPENDED_FLAG
 from shared.schemas.products import MonitoredProductCreateScraping
 
