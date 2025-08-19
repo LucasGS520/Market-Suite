@@ -7,8 +7,9 @@ para o domínio mobile.
 """
 
 from typing import Tuple, Union, Dict
-from market_scraper.core.config_scraper import settings
 from urllib.parse import urlparse, urlunparse
+from market_scraper.core.config_scraper import settings
+from shared.utils.ml_url import PRODUCT_HOSTS
 
 
 # ---------- LISTA DE USER AGENTS (DESKTOP E MOBILE) ----------
@@ -54,13 +55,6 @@ GENERIC_COOKIES: Dict[str, str] = {
 
 # ---------- DOMÍNIO MOBILE DO MERCADO LIVRE ----------
 MOBILE_DOMAIN = "m.mercadolivre.com.br"
-
-#Hosts válidos para páginas de produto do Mercado Livre
-PRODUCT_HOSTS = {
-    "produto.mercadolivre.com.br",
-    "www.mercadolivre.com.br",
-    MOBILE_DOMAIN,
-}
 
 # ---------- PARÂMETROS PADRÃO DE THROTTLE / JITTER PARA O THROTTLE MANAGER ----------
 #Quantos tokens são recarregados por segundo
