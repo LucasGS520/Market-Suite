@@ -1,8 +1,9 @@
+""" Avalia utilitário de cliente Redis, incluindo suspensão de scraping e isolamento por thread """
+
 import threading
 import importlib
 
 from shared.utils import redis_client as rc
-
 
 class FakeRedis:
     def __init__(self):

@@ -1,3 +1,5 @@
+""" Verifica a integração do scraper de produtos monitorados com as tarefas assíncronas de comparação """
+
 import pytest
 from unittest.mock import patch, Mock, AsyncMock
 from uuid import uuid4

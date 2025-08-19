@@ -2,7 +2,6 @@
 
 from shared.exceptions import ScraperError
 
-
 def test_scraper_error_pickable():
     """ Garante que ``ScraperError`` pode ser serializado """
     import pickle

@@ -1,6 +1,7 @@
+""" Fixtures e utilidades comuns para os testes unitários dos componentes compartilhados """
+
 import pytest
 import time
-
 
 #FakeRedis universal para testes unitários
 class FakeRedis:

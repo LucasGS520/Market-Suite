@@ -1,3 +1,5 @@
+""" Testes de integração do scraper de concorrentes ao lidar com páginas sem produto válido """
+
 from unittest.mock import Mock, AsyncMock, patch
 from uuid import uuid4
 from sqlalchemy.orm import Session

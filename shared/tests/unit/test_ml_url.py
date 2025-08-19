@@ -1,5 +1,6 @@
-from shared.utils.ml_url import canonicalize_ml_url, is_product_url
+""" Testa funções de URL do Mercado Livre para normalização e detecção de produtos """
 
+from shared.utils.ml_url import canonicalize_ml_url, is_product_url
 
 def test_canonicalize_extracts_id():
     url = "https://m.mercadolivre.com.br/MLB-1234-celular"

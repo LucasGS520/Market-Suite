@@ -1,3 +1,5 @@
+""" Testes da classe ConfigBase garantindo a montagem correta da URL do Redis """
+
 from shared.core.config_base import ConfigBase
 
 def test_redis_url_with_password():
