@@ -31,28 +31,32 @@ async def scrape_competitor_product_async(
     url: str,
     payload: CompetitorProductCreateScraping,
 ) -> dict:
-    """ Executa o scraping de concorrentes de forma assíncrona """
+    """ Executa o scraping de concorrentes de forma assíncrona
 
-    client = ScraperClient()
-    details = await client.parse(url=url, product_type="competitor")
+    Utiliza ``ScraperClient`` em um bloco de contexto assíncrono
+    para assegurar que a sessão HTTP seja fechada ao término
+    """
+    async with ScraperClient() as client:
+        #Fecha automaticamente a conexão HTTP ao sair do contexto
+        details = await client.parse(url=url, product_type="competitor")
 
-    competitor = create_or_update_competitor_product_scraped(
-        db=db,
-        product_data=payload,
-        scraped_info=CompetitorScrapedInfo(
-            name=details.get("name", ""),
-            current_price=Decimal(str(details.get("current_price", 0))),
-            old_price=Decimal(str(details.get("old_price")))
-            if details.get("old_price") is not None
-            else None,
-            thumbnail=details.get("thumbnail"),
-            free_shipping=details.get("free_shipping", False),
-            seller=details.get("seller"),
-            seller_rating=None,
-        ),
-        last_checked=datetime.now(timezone.utc),
-    )
-    return {"status": "success", "competitor_id": str(competitor.id)}
+        competitor = create_or_update_competitor_product_scraped(
+            db=db,
+            product_data=payload,
+            scraped_info=CompetitorScrapedInfo(
+                name=details.get("name", ""),
+                current_price=Decimal(str(details.get("current_price", 0))),
+                old_price=Decimal(str(details.get("old_price")))
+                if details.get("old_price") is not None
+                else None,
+                thumbnail=details.get("thumbnail"),
+                free_shipping=details.get("free_shipping", False),
+                seller=details.get("seller"),
+                seller_rating=None,
+            ),
+            last_checked=datetime.now(timezone.utc),
+        )
+        return {"status": "success", "competitor_id": str(competitor.id)}
 
 def scrape_competitor_product(
     db: Session,

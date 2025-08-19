@@ -32,24 +32,28 @@ async def scrape_monitored_product_async(
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
 ) -> dict:
-    """ Executa o scraping de produtos monitorados de forma assíncrona """
+    """ Executa o scraping de produtos monitorados de forma assíncrona
 
-    client = ScraperClient()
-    details = await client.parse(url=url, product_type="monitored")
+    Utiliza ``ScraperClient`` como gerenciador de contexto para garantir o
+    fechamento da sessão HTTP após o uso.
+    """
+    async with ScraperClient() as client:
+        #Garante que a conexão HTTP seja encerrada ao final do bloco
+        details = await client.parse(url=url, product_type="monitored")
 
-    product = create_or_update_monitored_product_scraped(
-        db=db,
-        user_id=user_id,
-        product_data=payload,
-        scraped_info=MonitoredScrapedInfo(
-            current_price=Decimal(str(details.get("current_price", 0))),
-            thumbnail=details.get("thumbnail"),
-            free_shipping=details.get("free_shipping", False),
-        ),
-        last_checked=datetime.now(timezone.utc),
-    )
-    compare_prices_task.delay(str(product.id))
-    return {"status": "success", "product_id": str(product.id)}
+        product = create_or_update_monitored_product_scraped(
+            db=db,
+            user_id=user_id,
+            product_data=payload,
+            scraped_info=MonitoredScrapedInfo(
+                current_price=Decimal(str(details.get("current_price", 0))),
+                thumbnail=details.get("thumbnail"),
+                free_shipping=details.get("free_shipping", False),
+            ),
+            last_checked=datetime.now(timezone.utc),
+        )
+        compare_prices_task.delay(str(product.id))
+        return {"status": "success", "product_id": str(product.id)}
 
 def scrape_monitored_product(
     db: Session,
