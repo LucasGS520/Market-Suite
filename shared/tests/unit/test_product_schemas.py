@@ -19,19 +19,6 @@ def test_competitor_scraped_info_defaults():
     assert data.seller is None
     assert data.seller_rating is None
 
-def test_monitored_scraped_info_defaults():
-    data = MonitoredScrapedInfo(current_price=Decimal("10.5"))
-    assert data.thumbnail is None
-    assert data.free_shipping is False
-
-def test_competitor_scraped_info_defaults():
-    data = CompetitorScrapedInfo(name="Produto", current_price=Decimal("9.99"))
-    assert data.old_price is None
-    assert data.thumbnail is None
-    assert data.free_shipping is False
-    assert data.seller is None
-    assert data.seller_rating is None
-
 def test_monitored_product_required_fields():
     with pytest.raises(ValidationError) as exc:
         MonitoredProductCreateScraping()
