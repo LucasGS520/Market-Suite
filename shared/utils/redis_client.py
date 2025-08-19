@@ -18,12 +18,18 @@ logger = logging.getLogger(__name__)
 SCRAPING_SUSPENDED_KEY = "scraping:suspended"
 _settings = ConfigBase()
 
-def get_redis_client() -> redis.Redis:
+def get_redis_client() -> redis.Redis | None:
     """ Retorna um cliente Redis isolado por thread
 
     Cria o cliente na primeira chamada da thread e o reutiliza nas
     chamadas subsequentes, evitando o compartilhamento entre threads
-    ou processos diferentes.
+    ou processos diferentes. Caso a conexão com o Redis falhe, retorna ``None``.
+
+    Retorno
+    -------
+    redis.Redis | None
+        Instância de cliente Redis pronta para o uso ou ``None`` quando
+        não for possível inicializar a conexão.
     """
     client = getattr(_thread_local, "client", None)
     if client is None:

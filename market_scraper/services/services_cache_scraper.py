@@ -51,14 +51,15 @@ async def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
     #Monta a chave com o prefixo padronizado e a URL solicitada
     key = f"{_CACHE_PREFIX}{url}"
 
-    #Primeiro tenta recuperar do Redis em executor
-    try:
-        html = await asyncio.to_thread(client.get, key)
-        if html:
-            return html
-    except Exception as err:
-        #Se ocorrer qualquer problema com o Redis, usa o cache local
-        logger.warning("Falha ao recuperar HTML do Redis", erro=str(err))
+    #Primeiro tenta recuperar do Redis em executar, caso disponível
+    if client is not None:
+        try:
+            html = await asyncio.to_thread(client.get, key)
+            if html:
+                return html
+        except Exception as err:
+            #Se ocorrer qualquer problema com o Redis, usa o cache local
+            logger.warning("Falha ao recuperar HTML do Redis", erro=str(err))
 
     #Fallback para o cache em memória
     entry = _cache.get(url)
@@ -90,11 +91,12 @@ async def set_cached_html(url: str, html: str, ttl: int = 300) -> None:
     key = f"{_CACHE_PREFIX}{url}"
 
     #Atualiza o cache no Redis com tempo de expiração definido em executor
-    try:
-        await asyncio.to_thread(client.setex, key, ttl, html)
-    except Exception as err:
-        #Caso o Redis falhe, ignora e segue com o cache local
-        logger.warning("Falha ao armazenar HTML no Redis", erro=str(err))
+    if client is not None:
+        try:
+            await asyncio.to_thread(client.setex, key, ttl, html)
+        except Exception as err:
+            #Caso o Redis falhe, ignora e segue com o cache local
+            logger.warning("Falha ao armazenar HTML no Redis", erro=str(err))
 
     #Sempre armazena no cache local para garantir a reutilização mínima
     _cache[url] = {"html": html, "timestamp": time.time()}

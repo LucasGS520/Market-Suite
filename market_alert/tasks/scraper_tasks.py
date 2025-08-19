@@ -85,6 +85,14 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
 
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
             task_logger.info("collect_product_completed", duration_ms=elapsed_ms)
+            #Atualiza marcador de sucesso no Redis apenas se o cliente estiver disponível
+            if redis_client is not None:
+                redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
+            else:
+                task_logger.warning(
+                    "cache_indisponivel",
+                    detalhe="Redis indisponível, pulando atualização de cache",
+                )
             redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
         except ScraperClientError as req_err:
             status = "failure"
