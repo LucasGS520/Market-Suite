@@ -8,25 +8,14 @@ class DummyClientSuccess:
     def __init__(self, *a, **k):
         pass
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        pass
-
     async def post(self, url, json):
         return httpx.Response(200, json={"ok": True}, request=httpx.Request("POST", url))
 
-class DummyClientErro:
-    def __init__(self, *a, **k):
+    async def aclose(self):
         pass
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        pass
-
+    
+class DummyClientErro(DummyClientSuccess):
     async def post(self, url, json):
         return httpx.Response(500, json={}, request=httpx.Request("POST", url))
 
@@ -41,6 +30,7 @@ async def test_parse_success(monkeypatch):
     cliente = ScraperClient(base_url="http://fake")
     resultado = await cliente.parse("http://url", "monitored")
     assert resultado == {"ok": True}
+    await cliente.aclose()
 
 @pytest.mark.asyncio
 async def test_parse_erro_http(monkeypatch):
@@ -49,6 +39,7 @@ async def test_parse_erro_http(monkeypatch):
     with pytest.raises(ScraperClientError) as exc:
         await cliente.parse("http://url", "monitored")
     assert exc.value.status_code == 500
+    await cliente.aclose()
 
 @pytest.mark.asyncio
 async def test_parse_timeout(monkeypatch):
@@ -56,3 +47,4 @@ async def test_parse_timeout(monkeypatch):
     cliente = ScraperClient(base_url="http://fake")
     with pytest.raises(ScraperClientError):
         await cliente.parse("http://url", "monitored")
+    await cliente.aclose()

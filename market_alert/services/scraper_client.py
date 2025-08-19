@@ -7,7 +7,7 @@ os dados estruturados, tratando erros de comunicação com o serviço
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict
 
 import httpx
@@ -28,9 +28,17 @@ class ScraperClientError(Exception):
 
 @dataclass
 class ScraperClient:
-    """ Cliente simples para interagir com o ``market_scraper`` """
+    """ Cliente simples para interagir com o ``market_scraper``
 
+    Mantém uma instância reutilizável de ``httpx.AsyncClient`` para evitar
+    o custo de criar novas conexões a cada requisição
+    """
     base_url: str = settings.SCRAPER_SERVICE_URL
+    client: httpx.AsyncClient = field(init=False)
+
+    def __post_init__(self) -> None:
+        """ Inicializa o ``AsyncClient`` com URL base e timeout padrão """
+        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
 
     async def parse(self, url: str, product_type: str, **extra: Any) -> Dict[str, Any]:
         """ Envia requisição ``POST`` ao endpoint de parsing de forma assíncrona
@@ -50,13 +58,12 @@ class ScraperClient:
         payload = {"url": url, "product_type": product_type} | extra
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{self.base_url}/scraper/parse",
-                    json=payload,
-                )
-                resp.raise_for_status()
-                return resp.json()
+            resp = await self.client.post(
+                "/scraper/parse",
+                json=payload,
+            )
+            resp.raise_for_status()
+            return resp.json()
         except httpx.TimeoutException as exc:
             raise ScraperClientError(
                 "Tempo limite excedido ao chamar o serviço de scraping",
@@ -70,3 +77,15 @@ class ScraperClient:
             raise ScraperClientError(
                 f"Falha na comunicação com o serviço de scraping: {exc}"
             ) from exc
+
+    async def aclose(self) -> None:
+        """ Encerra a sessão HTTP assíncrona para liberar recursos """
+        await self.client.aclose()
+
+    async def __aenter__(self) -> "ScraperClient":
+        """ Permite usar ``ScraperClient`` como contexto assíncrono """
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        """ Garante que o cliente seja fechado ao sair do contexto """
+        await self.aclose()
