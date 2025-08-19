@@ -117,8 +117,8 @@ def recheck_monitored_products() -> None:
 
                 details = result["details"]
 
-                #Salva os dados atualizados no banco
-                old_price = p.curent_price
+                #Salva os dados atualizados no banco e guarda preço anterior para verificar se houve mudança
+                old_price = p.current_price
                 product = create_or_update_monitored_product_scraped(
                     db=db,
                     user_id=p.user_id,
