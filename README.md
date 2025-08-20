@@ -39,6 +39,30 @@ market_scraper/   # Serviço de scraping
 shared/           # Utilidades e componentes em comum
 ```
 
+## Serviço ``market_alert``
+O `market_alert` centraliza a API e orquestra as tarefas assíncronas do sistema. Ele expõe endpoints REST, persiste dados no PostgreSQL e interage com o `market_scraper`
+para coletar informações dos anúncios.
+
+### Componentes principais
+- **main.py** - inicializa a aplicação FastAPI, configura métricas e rate limiting e registra as rotas.
+- **core/** - carrega variáveis de ambiente e define o ``Celery`` com filas e agendamentos.
+- **routes/**, **schemas/** e **services/** - implementam os endpoints, validam dados e aplicam regras de monitoramento, comparação e alerta.
+- **tasks/** - tarefas ``Celery`` para scraping, comparação de preços e envio de notificações.
+- **notifications/** - gerencia o envio por e-mail, SMS, push, WhatsApp ou Slack.
+- **models/** e **crud/** - mapeiam as tabelas e realizam operações no banco de dados.
+- **utils/** e **templates/** - utilidades e modelos usados na geração das mensagens.
+
+### Fluxo de monitoramento
+1. A rota ``/monitored/scrape`` agenda a coleta de um produto no `Celery`.
+2. A tarefa consulta o ``market_scraper``, atualiza o banco e dispara a comparação de preços.
+3. Se alguma regra for atendida, uma nova tarefa envia as notificações pelos canais configurados.
+4. Tarefas periódicas reexecutam verificações e expõem métricas em ``/metrics``.
+
+### Resultados esperados de ``market_alert``
+- Endpoints retornam confirmações de agendamento enquanto as tarefas populam o banco.
+- Registros de comparação detalham preço médio, menor preço e discrepâncias.
+- Métricas de API, filas e notificações ficam disponíveis para observabilidade.
+
 ## Como o sistema funciona
 1. O usuário realiza requisições para a API via HTTP, normalmente usando um token JWT obtido no login.
 2. A API registra tarefas no Celery para executar coletas de dados, comparação de preços e envio de alertas
