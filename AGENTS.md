@@ -1,5 +1,18 @@
 Este arquivo documenta os principais **agentes de software e serviços automatizados** utilizados no projeto **MarketAlert**. Ele serve como referência para desenvolvedores e ferramentas (como o Codex) entenderem como o sistema é estruturado, especialmente os serviços que rodam em segundo plano ou executam tarefas programadas.
 
+## Diretrizes para agentes de IA e contribuidores
+
+- Ao modificar o código, adicione **comentários e docstrings em Português**.
+- Após qualquer alteração execute os testes com `pytest` para garantir a integridade do projeto.
+- Prefira utilizar `rg` para buscas no código em vez de `grep -R`.
+- Os commits devem ser feitos no branch atual, sem criação de novas branches.
+
+## Estrutura do repositório
+
+- `market_alert/` – API principal e tarefas Celery.
+- `market_scraper/` – serviço de scraping dedicado.
+- `shared/` – utilidades e componentes compartilhados entre os serviços.
+
 ---
 
 ## 1. API Principal (`api`)
@@ -14,15 +27,15 @@ Este arquivo documenta os principais **agentes de software e serviços automatiz
 ## 2. Celery Worker (`celery-worker`)
 
 - **Tipo:** Worker de background com Celery
-- **Responsabilidade:** Executar tarefas assíncronas como scraping, comparação de preços, envio de alertas, coleta de métricas.
+- **Responsabilidade:** Executar tarefas assíncronas como scraping, comparação de preços, envio de alertas e coleta de métricas.
 - **Inicialização:** `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info`
-- **Tarefas Executadas:** 
+- **Tarefas Executadas:**
 - `collect_product_task`
 - `collect_competitor_task`
 - `compare_prices_task`
 - `send_notification_task`
-- `recheck_monitored_products`
-- `recheck_competitor_products`
+- `dispatch_price_alert_task`
+- `send_alert_task`
 
 ---
 
@@ -64,12 +77,26 @@ Este arquivo documenta os principais **agentes de software e serviços automatiz
 
 ---
 
-## 6. Alert Agent (`send_alert_task`)
+## 6. Alert Agents
 
 - **Tipo:** Celery Task
-- **Responsabilidade:** Disparar notificações via email, SMS, push ou WhatsApp
+- **Responsabilidade:** Enviar notificações de preço para um produto monitorado em todos os canais configurados
 - **Input:** ID do produto monitorado + lista de alertas
-- **Resultado:** Envio dos alertas aos usuários
+- **Resultado:** Disparo de alertas correspondentes
+
+### b. `dispatch_price_alert_task`
+
+- **Tipo:** Celery Task
+- **Responsabilidade:** Enviar um único alerta de preço específico
+- **Input:** ID do produto monitorado + alerta individual
+- **Resultado:** Notificação singular para o usuário
+
+### c. `send_alert_task`
+
+- **Tipo:** Celery Task
+- **Responsabilidade:** Realizar o envio efetivo via email, SMS, push, WhatsApp ou Slack
+- **Input:** ID do registro `NotificationLog`
+- **Resultado:** Mensagem enviada ao canal designado
 
 ---
 
