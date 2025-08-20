@@ -16,6 +16,11 @@ __all__ = ["Settings", "settings"]
 class Settings(ConfigBase):
     """ Configurações específicas do serviço de alertas """
 
+    #Configuração do banco de dados
+    DATABASE_URL: str = os.getenv("DATABASE_URL")  # URL de conexão do Postgres
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL não foi encontrada no arquivo .env.market_alert")
+
     #Configurações de email SMTP
     SMTP_HOST: str | None = os.getenv("SMTP_HOST") #Endereço do servidor SMTP
     SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587")) #Porta do SMTP
@@ -32,11 +37,6 @@ class Settings(ConfigBase):
 
     #Chave do Firebase Cloud Messaging (FCM)
     FCM_SERVER_KEY: str | None = os.getenv("FCM_SERVER_KEY") #Autorização do FCM
-
-    #Configuração do banco de dados
-    DATABASE_URL: str = os.getenv("DATABASE_URL") #URL de conexão do Postgres
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL não foi encontrada no arquivo .env.market_alert")
 
     #Segurança e tokens
     SECRET_KEY: str = os.getenv("SECRET_KEY") #Chave para asisnar JWTs
