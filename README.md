@@ -79,6 +79,23 @@ O `market_scraper` é o serviço especializado em coletar dados de anúncios. El
 - Realiza scraping apenas durante a chamada, sem persistir dados.
 - Em caso de bloqueios ou CAPTCHA, tenta recuperar o acesso e retorna erros claros quando necessário.
 
+## Módulo compartilhado ``shared``
+O diretório ``shared`` concentra componentes reutilizáveis que dão suporte aos demais serviços.
+
+### Organização
+- ``__init__.py`` e ``exceptions.py`` - identificam o pacote e centralizam a exceção `ScraperError`.
+- ``core/`` - configurações base e utilitários para leitura de variáveis de ambiente.
+- ``enums/`` - enumerações de códigos de erro e resultados de bloqueios.
+- ``infra/`` - infraestrutura comum: base ORM, scripts Redis e arquivos de observabilidade.
+- ``metrics/`` - métricas Prometheus para HTTP, banco, cache, Celery e scraping.
+- ``schemas/`` - modelos Pydantic que definem o contrato de dados entre os serviços.
+- ``utils/`` - funções auxiliares como normalização de URLs, mascaramento de logs e cliente Redis.
+- ``tests/`` - testes que validam a integração e a consistência dos utilitários compartilhados.
+
+### Papel na arquitetura
+Os serviços ``market_alert`` e ``market_scraper`` importam esses recursos para compartilhar configurações, contratos de dados,
+infraestrutura e métricas. Isso elimina duplicidade, padroniza o tratamento de erros e simplifica a manutenção da suíte.
+
 ## Como o sistema funciona
 1. O usuário realiza requisições para a API via HTTP, normalmente usando um token JWT obtido no login.
 2. A API registra tarefas no Celery para executar coletas de dados, comparação de preços e envio de alertas
