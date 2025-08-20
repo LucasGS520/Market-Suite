@@ -1,6 +1,6 @@
 # Market Suite
 Market Suite (nome de desenvolvimento) é uma plataforma composta por serviços independentes para monitoramento de preços e envio
-de alertas. A solução é divida em três módulos principais:
+de alertas. A solução é dividida em três módulos principais:
 
 - **market_alert** - API FastAPI responsável por gerenciar usuários, produtos monitorados, comparação de preços, regras de alertas e notificações. As tarefas assíncronas são executadas com **Celery**.
 - **market_scraper** - microsserviço dedicado exclusivamente ao *web scraping*. Ele recebe uma URL e devolve as informações extraídas do anúncio.
@@ -9,7 +9,7 @@ de alertas. A solução é divida em três módulos principais:
 A orquestração completa dos serviços é feita pelo arquivo ``docker-compose.yml``, que sobe banco de dados, Redis, API, workers e toda a stack de observabilidade de forma integrada.
 
 ## Visão Geral da Arquitetura
-O diagrama abaixo apresenta como os serviços se comunicam e quais componentes externos são necesários para o funcionamento do sistema.
+O diagrama abaixo apresenta como os serviços se comunicam e quais componentes externos são necessários para o funcionamento do sistema.
 ```mermaid
 graph TD
     User[Usuário] --> API[market_alert]
@@ -30,7 +30,7 @@ graph TD
 * **Usuário → market_alert** - o usuário interage apenas com a API principal.
 * **market_alert → market_scraper** - a API encaminha solicitações de coleta para o serviço de scraping.
 * **Celery Worker** executa as tarefas assíncronas agendadas pela API, como scraping, comparação de preços e envio de notificações.
-* **Celery Beat** agenda execuções periódicas para rechecagens de produtos e coleta de métricas.
+* **Celery Beat** agenda execuções periódicas para rechecagens de produtos e coleta de **métricas**.
 * **PostgreSQL e Redis** armazenam dados persistentes e caches temporários.
 * **Prometheus e Loki** coletam métricas e logs que podem ser visualizados no Grafana.
 
@@ -105,11 +105,11 @@ Os serviços ``market_alert`` e ``market_scraper`` importam esses recursos para 
 infraestrutura e métricas. Isso elimina duplicidade, padroniza o tratamento de erros e simplifica a manutenção da suíte.
 
 ## Como o sistema funciona
-1. O usuário realiza requisições para a API via HTTP, normalmente usando um token JWT obtido no login.
-2. A API registra tarefas no Celery para executar coletas de dados, comparação de preços e envio de alertas
-3. O Celery Worker processa essas tarefas, persistindo informações no PostgreSQL e mantendo estados rápidos no Redis.
-4. O Celery Beat agenda execuções periódicas para rechecagem de produtos e coleta de métricas.
-5. Sempre que uma regra de alerta é satisfeita, o serviço de notificações dispara mensagens por email, SMS ou outros canais.
+1. O usuário cria sua conta, autentica-se e obtém um token JWT para acessar a API
+2. Com o token, cadastra URLs para monitoramento; a API agenda coletas e comparações no Celery.
+3. O Celery Worker processa as tarefas, persiste dados no PostgresSQL e usa o Redis para estados rápidos.
+4. O Celery Beat agenda rechecagens de produtos e coleta métricas de forma periódica.
+5. Quando as regras de alerta são atendidas, o serviço de notificações envia mensagens pelos canais configurados.
 6. Métricas e logs estruturados são expostos ao Prometheus e ao Loki para acompanhamento no Grafana.
 
 
@@ -227,11 +227,6 @@ PLAYWRIGHT_TIMEOUT=30000
 
 ```
 
-## Guia de Uso para o Usuário Final e Funcionamento do Sistema
-1. **Cadastro e autenticação** - o usuário cria sua conta e obtém um token JWT.
-2. **Monitoramento de produtos** - com o token, envia requisições para a API cadastrando URLs a serem monitoradas. A API agenda as tarefas no Celery e registra o produto no banco de dados.
-3. **Recebimento de alertas** - sempre que um preço atende ás regras definidas, notificações são enviadas pelos canais configurados (e-mail, SMS, WhatsApp ou push).
-
 ## Pipeline de Scraping
 1. A API recebe uma URL de produto para monitoramento ou comparação.
 2. Uma tarefa Celery é disparada para o `market_scraper` coletar os dados.
@@ -292,6 +287,14 @@ Content-Type: application/json
 Execute a suíte de testes:
 ```bash
 pytest
+```
+
+Exemplos de execução por módulo:
+
+```bash
+pytest market_alert     # Testes da API
+pytest market_scraper   # Testes do scraper
+pytest shared           # Testes dos componentes compartilhados
 ```
 
 ## Licença
