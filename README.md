@@ -7,6 +7,7 @@ de alertas. A solução é divida em três módulos principais:
 - **shared** - componentes, utilitários e métricas compartilhadas entre os dois serviços.
 
 ## Visão Geral da Arquitetura
+O diagrama abaixo apresenta como os serviços se comunicam e quais componentes externos são necesários para o funcionamento do sistema.
 ```mermaid
 graph TD
     User[Usuário] --> API[market_alert]
@@ -24,14 +25,18 @@ graph TD
     API --> Loki[(Loki + Promtail)]
     Worker --> Loki
 ```
-
-DEVE CONTER EXPLICAÇÕES SOBRE O DIAGRAMA PROPOSTO ACIMA!
+* **Usuário → market_alert** - o usuário interage apenas com a API principal.
+* **market_alert → market_scraper** - a API encaminha solicitaçõesde coleta para o serviço de scraping.
+* **Celery Worker** executa as tarefas assíncronas agendadas pela API, como scraping, comparação de preços e envio de notificações.
+* **Celery Beat** agenda execuções periódicas para rechecagens de produtos e coleta de métricas.
+* **PostgreSQL e Redis** armazenam dados persistentes e caches temporários.
+* **Prometheus e Loki** coletam métricas e logs que podem ser visualizados no Grafana.
 
 ## Estrutura de Diretórios
 ```
 market_alert/     # API principal e tarefas Celery
 market_scraper/   # Serviço de scraping
-shared/           # Utilidades e componentes em comun
+shared/           # Utilidades e componentes em comum
 ```
 
 ## Como o sistema funciona
@@ -45,7 +50,12 @@ shared/           # Utilidades e componentes em comun
 
 ## Primeiros Passos
 ### Requisitos
-- AQUI DEVE ESTAR INCLUIDO UMA LISTA COM REQUISITOS NECESSÁRIOS PARA INICIAR OS PRIMEIROS PASSOS
+Antes de iniciar, garanta que os seguintes itens estão instalados:
+
+* **Python 3.10+**
+* **Docker e Docker Compose** (para execução completa do ambiente)
+* **Redis** e **PostgreSQL** (caso opte por executar os serviços sem Docker)
+* **Playwright** para coleta via navegador headless
 
 1. Criar um ambiente virtual e instalar as dependências:
 ```bash
@@ -57,9 +67,9 @@ playwright install chromium
 ```
 
 2. Configurar as variáveis de ambiente. O projeto utiliza três arquivos `.env`:
-- `./.env.common` - localizado mna RAIZ do projeto (Deve ser revisado essa informação, se a localização está correta)
-- `market_alert/.env.market_alert`
-- `market_scraper/.env.market_scraper`
+   - `./.env.common` - localizado na RAIZ do projeto
+   - `market_alert/.env.market_alert`
+   - `market_scraper/.env.market_scraper`
 
 ### Exemplo de ``.env.common``
 ```env
@@ -153,15 +163,15 @@ PLAYWRIGHT_TIMEOUT=30000
 ```
 
 ## Guia de Uso para o Usuário Final e Funcionamento do Sistema
-
-AQUI DEVE SER UM GUIA DE COMO O USUÁRIO UTILIZA E SE COMUNICA COM O SISTEMA, E TAMBÉM UM BREVE RESUMO EXPLICATIVO DO FUNCIONAMENTO DO SISTEMA
-
-
-
+1. **Cadastro e autenticação** - o usuário cria sua conta e obtém um token JWT.
+2. **Monitoramento de produtos** - com o token, envia requisições para a API cadastrando URLs a serem monitoradas. A API agenda as tarefas no Celery e registra o produto no banco de dados.
+3. **Recebimento de alertas** - sempre que um preço atende ás regras definidas, notificações são enviadas pelos canais configurados (e-mail, SMS, WhatsApp ou push).
 
 ## Pipeline de Scraping
-SERIA INTERESSANTES DOCUMENTAR SOBRE A PIPELINE DE SCRAPING INCLUIDA NO PROJETO, MAS DOCUMENTAR DE UMA MANEIRA INTERESSANTE E BEM EXPLICADA, ASSIM INFORMANDO COMO ESTÁ FUNCIONANDO O A COLETA DE DADOS VIA SCRAPING
-
+1. A API recebe uma URL de produto para monitoramento ou comparação.
+2. Uma tarefa Celery é disparada para o `market_scraper` coletar os dados.
+3. O `market_scraper` utiliza Playwright e diversos gerenciadores (User-Agent, cookies, delays, etc) para simular a navegação humana e extrair as informações do anúncio.
+4. Os dados coletados são retornados para a API, que atualiza o banco e decide se um alerta deve ser enviado.
 
 ## Execução
 Para levantar todo o ambiente com banco de dados, Redis e serviços auxiliares utilize:
@@ -221,4 +231,3 @@ pytest
 
 ## Licença
 Distribuído sob a [MIT License](LICENSE). (APENAS EXEMPLO)
-
