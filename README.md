@@ -6,6 +6,8 @@ de alertas. A solução é divida em três módulos principais:
 - **market_scraper** - microsserviço dedicado exclusivamente ao *web scraping*. Ele recebe uma URL e devolve as informações extraídas do anúncio.
 - **shared** - componentes, utilitários e métricas compartilhadas entre os dois serviços.
 
+A orquestração completa dos serviços é feita pelo arquivo ``docker-compose.yml``, que sobe banco de dados, Redis, API, workers e toda a stack de observabilidade de forma integrada.
+
 ## Visão Geral da Arquitetura
 O diagrama abaixo apresenta como os serviços se comunicam e quais componentes externos são necesários para o funcionamento do sistema.
 ```mermaid
@@ -31,6 +33,12 @@ graph TD
 * **Celery Beat** agenda execuções periódicas para rechecagens de produtos e coleta de métricas.
 * **PostgreSQL e Redis** armazenam dados persistentes e caches temporários.
 * **Prometheus e Loki** coletam métricas e logs que podem ser visualizados no Grafana.
+
+## Benefícios da Arquitetura
+- **Separação de responsabilidades**: o serviço de scraping evolui independentemente da API principal, reduzindo acoplamento.
+- **Escabilidade**: cada módulo pode ser escalado de forma isolada conforme a carga de trabalho
+- **Reutilização**: recursos comuns ficam centralizados no diretório ``shared``, evitando código duplicado.
+- **Observabilidade unificada**: métricas e logs são coletados de todos os serviços de maneira consistente. 
 
 ## Estrutura de Diretórios
 ```
