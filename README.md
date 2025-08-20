@@ -26,7 +26,7 @@ graph TD
     Worker --> Loki
 ```
 * **Usuário → market_alert** - o usuário interage apenas com a API principal.
-* **market_alert → market_scraper** - a API encaminha solicitaçõesde coleta para o serviço de scraping.
+* **market_alert → market_scraper** - a API encaminha solicitações de coleta para o serviço de scraping.
 * **Celery Worker** executa as tarefas assíncronas agendadas pela API, como scraping, comparação de preços e envio de notificações.
 * **Celery Beat** agenda execuções periódicas para rechecagens de produtos e coleta de métricas.
 * **PostgreSQL e Redis** armazenam dados persistentes e caches temporários.
@@ -62,6 +62,22 @@ para coletar informações dos anúncios.
 - Endpoints retornam confirmações de agendamento enquanto as tarefas populam o banco.
 - Registros de comparação detalham preço médio, menor preço e discrepâncias.
 - Métricas de API, filas e notificações ficam disponíveis para observabilidade.
+
+## Serviço ``market_scraper``
+O `market_scraper` é o serviço especializado em coletar dados de anúncios. Ele processa uma URL recebida, respeitando limites de acesso e retornando informações estruturadas para os demais módulos.
+
+### Componentes principais
+- **main.py** - instancia a aplicação FastAPI e registra rotas de saúde e de scraping.
+- **routes/** - expõe as rotas ``/health/ping`` e ``/scrape/parse`` (também acessível por ``/scraper/parse``).
+- **schemas/** - define os modelos ``ScraperRequest`` e ``ScraperResponse`` utilizados nas requisições e respostas.
+- **services/** - executa o fluxo de scraping: controla rate limiting e circuit breaker, recupera o HTML com Playwright, aplica cache e interpreta o conteúdo.
+- **utils/** - reúne auxiliares como rotação de *user agent*, gerenciamento de cookies, delays humanizados, leitura de ``robots.txt`` e funções de preço.
+- **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço.
+
+### Papel na arquitetura
+- Recebe requisições HTTP do ``market_alert`` ou de outros consumidores.
+- Realiza scraping apenas durante a chamada, sem persistir dados.
+- Em caso de bloqueios ou CAPTCHA, tenta recuperar o acesso e retorna erros claros quando necessário.
 
 ## Como o sistema funciona
 1. O usuário realiza requisições para a API via HTTP, normalmente usando um token JWT obtido no login.
