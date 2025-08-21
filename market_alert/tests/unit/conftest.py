@@ -6,21 +6,31 @@ class FakeRedis:
     def __init__(self):
         self.data = {}
         self.scripts = {}
+        self.expiry = {}
 
     def script_load(self, source):
         sha = f"fake-sha-{len(self.scripts)}"
         self.scripts[sha] = source
         return sha
 
+    def _cleanup(self, key):
+        if key in self.expiry and time.time() >= self.expiry[key]:
+            self.expiry.pop(key, None)
+            self.data.pop(key, None)
+
     def set(self, key, value, ex=None):
         self.data[key] = value
-        if ex:
-            self.data[f"ttl:{key}"] = ex
+        if ex is not None:
+            self.expiry[key] = time.time() + ex
+        elif key in self.expiry:
+            self.expiry.pop(key, None)
 
     def get(self, key):
+        self._cleanup(key)
         return self.data.get(key)
 
     def exists(self, key):
+        self._cleanup(key)
         return key in self.data
 
     def evalsha(self, sha, num_keys, redis_key, now_ms, window_ms, limit):
@@ -38,7 +48,18 @@ class FakeRedis:
         return value
 
     def expire(self, key, secs):
-        self.data[f"ttl:{key}"] = secs
+        if key in self.data:
+            self.expiry[key] = time.time() + secs
+            return True
+        return False
+
+    def ttl(self, key):
+        self._cleanup(key)
+        if key not in self.data:
+            return -2
+        if key not in self.expiry:
+            return -1
+        return int(self.expiry[key] - time.time())
 
 
     def zremrangebyscore(self, redis_key, min_score, max_score):
@@ -61,6 +82,7 @@ def fake_redis_client(monkeypatch):
 
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.redis_client", fake_redis, raising=False)
+    monkeypatch.setattr("market_alert.tasks.monitor_tasks.redis_client", fake_redis, raising=False)
     return fake_redis
 
 @pytest.fixture(autouse=True)

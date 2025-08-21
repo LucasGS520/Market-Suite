@@ -41,6 +41,9 @@ BATCH_SIZE_COMPETITOR = int(os.getenv("BATCH_SIZE_COMPETITOR", "20"))
 #Intervalo base usado para reagendamentos automáticos adaptativos
 ADAPTIVE_RECHECK_BASE_INTERVAL = settings.ADAPTIVE_RECHECK_BASE_INTERVAL
 
+#TTL dos heartbeats em segundos (1 hora)
+HEARTBEAT_TTL_SECONDS = 60 * 60
+
 async def _parse_monitored_batch(products):
     """ Executa o parsing de produtos monitorados de forma concorrente """
 
@@ -142,8 +145,8 @@ def recheck_monitored_products() -> None:
             elapsed_ms = int((time.time() - start) * 1000)
             log.info("recheck_monitored_completed", status=status, duration_ms=elapsed_ms, dispatched=len(batch))
 
-            #Atualizar heartbeat
-            redis_client.set("beat:last_scraping", datetime.now(timezone.utc).isoformat())
+            #Atualizar heartbeat com expiração automática
+            redis_client.set("beat:last_scraping", datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL_SECONDS)
 
         except Exception as exc:
             status = "failure"
@@ -218,7 +221,7 @@ def recheck_competitor_products():
             log.info("recheck_competitors_completed", status=status, duration_ms=elapsed_ms, count=len(batch))
 
             #Atualizar heartbeat
-            redis_client.set("beat:last_competitor", datetime.now(timezone.utc).isoformat())
+            redis_client.set("beat:last_competitor", datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL_SECONDS)
 
             #Dispara uma nova task de comparação para cada produto monitorado com mudança de preço
             for mp_id in updated_ids:
