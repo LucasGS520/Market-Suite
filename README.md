@@ -94,7 +94,7 @@ O diretório ``shared`` concentra componentes reutilizáveis que dão suporte ao
 - ``__init__.py`` e ``exceptions.py`` - identificam o pacote e centralizam a exceção `ScraperError`.
 - ``core/`` - configurações base e utilitários para leitura de variáveis de ambiente.
 - ``enums/`` - enumerações de códigos de erro e resultados de bloqueios.
-- ``infra/`` - infraestrutura comum: base ORM, scripts Redis e arquivos de observabilidade.
+- ``infra/`` - infraestrutura comum localizada em ``shared/infra``: base ORM, scripts Redis e arquivos de observabilidade.
 - ``metrics/`` - métricas Prometheus para HTTP, banco, cache, Celery e scraping.
 - ``schemas/`` - modelos Pydantic que definem o contrato de dados entre os serviços, incluindo ``schemas_scraper.py`` com ``ScraperRequest`` e ``ScraperResponse``.
 - ``utils/`` - funções auxiliares como normalização de URLs, mascaramento de logs e cliente Redis.

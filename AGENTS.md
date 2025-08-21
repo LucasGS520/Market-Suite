@@ -168,6 +168,6 @@ Este documento serve como referência para desenvolvedores e ferramentas (como o
 - **Responsabilidade:** Carregar scripts Lua no Redis para RateLimiter
 - **Comando Executado:** 
 ```sh
-redis-cli SCRIPT LOAD "$(cat infra/redis-scripts/sliding_window.lua)"
+redis-cli SCRIPT LOAD "$(cat shared/infra/redis-scripts/sliding_window.lua)"
 ```
 Este helper garante que o script esteja disponível no Redis.
