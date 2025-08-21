@@ -1,4 +1,8 @@
-Este arquivo documenta os principais **agentes de software e serviços automatizados** utilizados no projeto **MarketAlert**. Ele serve como referência para desenvolvedores e ferramentas (como o Codex) entenderem como o sistema é estruturado, especialmente os serviços que rodam em segundo plano ou executam tarefas programadas.
+# MarketSuite (MarketAlert/MarketScraper)
+
+Este arquivo documenta os principais **agentes de software e serviços automatizados** utilizados no projeto **MarketSuite**.
+O serviço de API do projeto é denominado **MarketAlert** e o serviço de scraping **MarketScraper**, contando também com módulos compartilhados.
+Este documento serve como referência para desenvolvedores e ferramentas (como o Codex) entenderem como o sistema é estruturado, especialmente os serviços que rodam em segundo plano ou executam tarefas programadas.
 
 ## Diretrizes para agentes de IA e contribuidores
 
