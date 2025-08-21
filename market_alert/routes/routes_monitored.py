@@ -9,7 +9,7 @@ from uuid import UUID
 from shared.infra.db import get_db
 
 from shared.utils.ml_url import canonicalize_ml_url, is_product_url
-from shared.schemas.products import MonitoredProductCreateScraping
+from shared.schemas.schemas_products import MonitoredProductCreateScraping
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import MonitoredProductResponse

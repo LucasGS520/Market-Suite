@@ -16,7 +16,7 @@ import asyncio
 import structlog
 from sqlalchemy.orm import Session
 
-from shared.schemas.products import CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 from market_alert.services.scraper_client import ScraperClient
 from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped

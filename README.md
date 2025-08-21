@@ -77,7 +77,7 @@ O `market_scraper` é o serviço especializado em coletar dados de anúncios. El
 ### Componentes principais
 - **main.py** - instancia a aplicação FastAPI e registra rotas de saúde e de scraping.
 - **routes/** - expõe as rotas ``/health/ping`` e ``/scrape/parse`` (também acessível por ``/scraper/parse``).
-- **schemas/** - define os modelos ``ScraperRequest`` e ``ScraperResponse`` utilizados nas requisições e respostas.
+- utiliza o contrato ``ScraperRequest`` e ``ScraperResponse`` definido em ``shared/schemas/schemas_scraper.py`` para padronizar requisições e respostas.
 - **services/** - executa o fluxo de scraping: controla rate limiting e circuit breaker, recupera o HTML com Playwright, aplica cache e interpreta o conteúdo.
 - **utils/** - reúne auxiliares como rotação de *user agent*, gerenciamento de cookies, delays humanizados, leitura de ``robots.txt`` e funções de preço.
 - **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço.
@@ -96,7 +96,7 @@ O diretório ``shared`` concentra componentes reutilizáveis que dão suporte ao
 - ``enums/`` - enumerações de códigos de erro e resultados de bloqueios.
 - ``infra/`` - infraestrutura comum: base ORM, scripts Redis e arquivos de observabilidade.
 - ``metrics/`` - métricas Prometheus para HTTP, banco, cache, Celery e scraping.
-- ``schemas/`` - modelos Pydantic que definem o contrato de dados entre os serviços.
+- ``schemas/`` - modelos Pydantic que definem o contrato de dados entre os serviços, incluindo ``schemas_scraper.py`` com ``ScraperRequest`` e ``ScraperResponse``.
 - ``utils/`` - funções auxiliares como normalização de URLs, mascaramento de logs e cliente Redis.
 - ``tests/`` - testes que validam a integração e a consistência dos utilitários compartilhados.
 

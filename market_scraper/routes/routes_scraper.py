@@ -11,9 +11,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 
-from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.schemas.schemas_scraper import ScraperRequest, ScraperResponse
 
-from market_scraper.schemas.schemas_scraper import ScraperRequest, ScraperResponse
 from market_scraper.services.services_scraper_common import scrape_product_common_async
 from market_scraper.utils.price import parse_price_str, parse_optional_price_str
 

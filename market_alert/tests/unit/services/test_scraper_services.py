@@ -7,7 +7,7 @@ from decimal import Decimal
 from celery.bin.result import result
 from sqlalchemy.orm import Session
 
-from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
 from market_alert.services import services_scraper_monitored as monitored
 from market_alert.services import services_scraper_competitor as competitor

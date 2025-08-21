@@ -4,7 +4,7 @@ Os esquemas de scraping de produtos são compartilhados em
 ``shared.schemas.products`` e importados aqui para conveniência
 """
 
-from shared.schemas.products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 from .schemas_products import MonitoredProductResponse, CompetitorProductResponse
 from .schemas_users import UserCreate, UserLogin, UserUpdate, UserResponse
 from .schemas_errors import ScrapingErrorResponse

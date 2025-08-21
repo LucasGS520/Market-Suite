@@ -16,7 +16,7 @@ from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
 from shared.exceptions import ScraperError
 from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
-from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.core.config_alert import settings

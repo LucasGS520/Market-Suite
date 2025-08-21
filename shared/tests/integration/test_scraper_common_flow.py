@@ -9,7 +9,7 @@ import pytest
 
 from shared.tests.conftest import fake_redis
 from shared.metrics import SCRAPING_SUSPENDED_FLAG
-from shared.schemas.products import MonitoredProductCreateScraping
+from shared.schemas.schemas_products import MonitoredProductCreateScraping
 
 try:
     from market_scraper.services import services_scraper_common as mod

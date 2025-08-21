@@ -16,7 +16,7 @@ import structlog
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
-from shared.schemas.products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app

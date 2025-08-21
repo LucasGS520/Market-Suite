@@ -19,7 +19,7 @@ from market_scraper.core.config_scraper import settings
 
 from shared.utils.redis_client import is_scraping_suspended
 from shared.enums import BlockResult
-from shared.schemas.products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.metrics.metrics_scraper import (
     SCRAPER_HTTP_BLOCKED_TOTAL,
     SCRAPER_CAPTCHA_TOTAL,

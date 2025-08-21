@@ -6,7 +6,7 @@ from uuid import uuid4
 from decimal import Decimal
 from sqlalchemy.orm import Session
 
-from shared.schemas.products import MonitoredProductCreateScraping
+from shared.schemas.schemas_products import MonitoredProductCreateScraping
 
 try:
     from market_alert.services import services_scraper_monitored as mod

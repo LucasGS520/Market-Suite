@@ -1,4 +1,4 @@
-""" Esquemas de dados utilizados pelo serviço de scraping """
+""" Modelos Pydantic compartilhados para requisições e respostas de scraping """
 
 from __future__ import annotations
 
