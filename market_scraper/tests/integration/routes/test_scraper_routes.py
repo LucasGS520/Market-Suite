@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
 
 from market_scraper.main import app
@@ -50,7 +52,8 @@ def test_parse_endpoint_com_cache(monkeypatch) -> None:
     assert contador == {"get": 1, "set": 1}
     corpo = resp1.json()
     assert corpo["name"] == "Produto Teste"
-    assert corpo["current_price"] == 10.0
+    #Verifica que o valor é serializado como string e mantém a precisão
+    assert Decimal(corpo["current_price"]) == Decimal("10.00")
 
     #Segunda chamada: HTML vem do cache e ``set_cached_html`` não é invocado
     resp2 = client.post("/scrape/parse", json=payload)
@@ -74,12 +77,10 @@ def test_parse_endpoint_competitor_not_monitored(monkeypatch) -> None:
     resp = client.post("/scrape/parse", json=payload)
     assert resp.status_code == 200
     dados = resp.json()
-    assert dados == {
-        "name": "Produto X",
-        "current_price": 5.0,
-        "old_price": None,
-        "thumbnail": None,
-        "free_shipping": False,
-        "seller": None,
-        "shipping": None,
-    }
+    assert dados["name"] == "Produto X"
+    assert Decimal(dados["current_price"]) == Decimal("5.00")
+    assert dados["old_price"] is None
+    assert dados["thumbnail"] is None
+    assert dados["free_shipping"] is False
+    assert dados["seller"] is None
+    assert dados["shipping"] is None

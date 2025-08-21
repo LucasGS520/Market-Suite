@@ -50,8 +50,9 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
 
     return ScraperResponse(
         name=details.get("name"),
-        current_price=float(parse_price_str(details.get("current_price"), str(payload.url))),
-        old_price=float(parse_optional_price_str(details.get("old_price"), str(payload.url)))
+        #Converte strings de preço para ``Decimal`` garantindo precisão
+        current_price=parse_price_str(details.get("current_price"), str(payload.url)),
+        old_price=parse_optional_price_str(details.get("old_price"), str(payload.url))
         if details.get("old_price")
         else None,
         thumbnail=details.get("thumbnail"),

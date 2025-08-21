@@ -1,5 +1,7 @@
 """ Testes básicos dos endpoints principais da aplicação """
 
+from decimal import Decimal
+
 from fastapi.testclient import TestClient
 
 from market_scraper.main import app
@@ -34,5 +36,5 @@ def test_scraper_parse(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "Produto Teste"
-    assert body["current_price"] == 10.0
+    assert Decimal(body["current_price"]) == Decimal("10.00")
     assert body["free_shipping"] is True
