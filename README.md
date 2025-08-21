@@ -173,6 +173,7 @@ LOCUST_LOGIN_EMAIL=email_do_usuario@exemplo.com
 LOCUST_LOGIN_PASSWORD=senha_do_usuario_exemplo
 
 ```
+> **Nota:** ``LOCUST_LOGIN_EMAIL`` e ``LOCUST_LOGIN_PASSWORD`` devem permanecer a um usuário real.
 
 ### Exemplo de ``.env.market_alert``
 ```env
@@ -282,6 +283,10 @@ Content-Type: application/json
 - Logs enviados ao **Loki/Promtail**.
 - Painéis de visualização no **Grafana** e alertas via **AlertManager**.
 - Auditoria de scraping disponível em `/audit`.
+
+### Metas 
+- **Latência de scraping (P95)** ≤ 5 s.
+- **Taxa de erros de scraping** ≤ 1 %.
 
 ## Testes
 Execute a suíte de testes:

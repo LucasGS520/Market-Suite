@@ -73,3 +73,25 @@ groups:
           description: >
             Mais de 5 falhas de cache por minuto no último 5 minutos,
             indicando baixo reaproveitamento de dados.
+
+      #Alerta quando P95 de latência de scraping excede 5s
+      - alert: HighScrapingLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(scraping_latency_seconds_bucket[5m])) by (le)) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latência P95 de scraping acima de 5s"
+          description: >
+            O tempo de processamento de scraping (P95) está acima de 5 segundos nos últimos 5 minutos.
+
+      #Alerta quando taxa de erros de scraping excede 1%
+      - alert: ScrapingErrorRateHigh
+        expr: (sum(rate(scraper_requests_total{status_code!~"2.."}[5m])) / sum(rate(scraper_requests_total[5m]))) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taxa de erros de scraping acima de 1%"
+          description: >
+            Mais de 1% das requisições de scraping estão retornando status diferente de 2xx nos últimos 5 minutos.
