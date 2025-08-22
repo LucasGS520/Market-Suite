@@ -14,6 +14,7 @@ import asyncio
 import structlog
 
 from fastapi import HTTPException, status
+from watchfiles import awatch
 
 from market_scraper.core.config_scraper import settings
 
@@ -40,6 +41,8 @@ from market_scraper.utils.price import parse_price_str
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.cookie_manager import cookie_manager
 from market_scraper.utils.playwright_client import get_playwright_client
+
+from market_scraper.strategies import get_strategy_for_url
 
 import market_scraper.services.services_parser as parser
 from market_scraper.services.services_parser import CaptchaDetectedError
@@ -228,7 +231,7 @@ async def _parse_html(
     SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="success").inc()
     return {"status": "success", "details": details}
 
-async def scrape_product_common_async(
+async def scrape_playwright_async(
     *,
     url: str,
     user_id: UUID,
@@ -319,6 +322,32 @@ async def scrape_product_common_async(
         url_host=url_host,
         circuit_breaker=circuit_breaker,
         circuit_key=circuit_key,
+        recovery_manager=recovery_manager,
+    )
+
+async def scrape_product_common_async(
+    *,
+    url: str,
+    user_id: UUID,
+    payload: MonitoredProductCreateScraping | CompetitorProductCreateScraping,
+    product_type: Literal["monitored", "competitor"],
+    rate_limiter:RateLimiter | None = None,
+    circuit_breaker: CircuitBreaker | None = None,
+    recovery_manager: BlockRecoveryManager | None = None,
+) -> dict:
+    """ Seleciona e executa a estratégia adequada para a URL """
+
+    strategy = get_strategy_for_url(url)
+    if strategy is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL não suportada")
+
+    return await strategy.get_data(
+        url=url,
+        user_id=user_id,
+        payload=payload,
+        product_type=product_type,
+        rate_limiter=rate_limiter,
+        circuit_breaker=circuit_breaker,
         recovery_manager=recovery_manager,
     )
 
