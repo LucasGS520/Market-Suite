@@ -3,7 +3,7 @@
 from .base import ScrapingStrategy, register_strategy, get_strategy_for_url
 
 #Importa estratégias concretas para registro
-from . import plawright_default
+from . import playwright_default
 
 __all__ = [
     "ScrapingStrategy",
