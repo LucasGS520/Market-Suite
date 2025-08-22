@@ -20,7 +20,8 @@ class ScraperResponse(BaseModel):
     """ Dados retornados após o processamento do scraping
 
     Os campos de preço utilizam ``Decimal`` para preservar a precisão
-    durante operações aritméticas e comparações
+    durante operações aritméticas e comparações.
+    O campo ``marketplace`` registra a origem do anúncio para auditoria.
     """
 
     name: str | None = None
@@ -30,3 +31,4 @@ class ScraperResponse(BaseModel):
     free_shipping: bool = False
     seller: str | None = None
     shipping: str | None = None
+    marketplace: str | None = None

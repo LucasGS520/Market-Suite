@@ -30,7 +30,8 @@ class PlaywrightDefaultStrategy(ScrapingStrategy):
         """ Executa o scraping usando a estratégia padrão """
         from market_scraper.services import services_scraper_common as common
 
-        return await common._scrape_playwright_async(
+        #Utiliza o fluxo padrão baseado em Playwright
+        return await common.scrape_playwright_async(
             url=url,
             user_id=user_id,
             payload=payload,
