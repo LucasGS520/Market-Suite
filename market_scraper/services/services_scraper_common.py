@@ -41,6 +41,7 @@ from market_scraper.utils.price import parse_price_str
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.cookie_manager import cookie_manager
 from market_scraper.utils.playwright_client import get_playwright_client
+from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 
 from market_scraper.strategies import get_strategy_for_url
 
@@ -56,6 +57,8 @@ logger = structlog.get_logger("scraper_common")
 
 #Gerenciador de User-Agent com rotação inteligente
 ua_manager = IntelligentUserAgentManager()
+#Gerenciador de cache inteligente para produtos
+cache_manager = IntelligentCacheManager()
 
 async def fetch_html_playwright(url: str) -> str:
     """ Retorna apenas o HTML da ``url`` utilizando Playwright
@@ -336,12 +339,17 @@ async def scrape_product_common_async(
     recovery_manager: BlockRecoveryManager | None = None,
 ) -> dict:
     """ Seleciona e executa a estratégia adequada para a URL """
+    marketplace = extract_hostname(url)
+    #Verifica se já existe conteúdo cacheado para esta URL e marketplace
+    cached = cache_manager.get(marketplace=marketplace, url=url)
+    if cached:
+        return {"status": "success", "details": cached}
 
     strategy = get_strategy_for_url(url)
     if strategy is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL não suportada")
 
-    return await strategy.get_data(
+    result = await strategy.get_data(
         url=url,
         user_id=user_id,
         payload=payload,
@@ -350,6 +358,12 @@ async def scrape_product_common_async(
         circuit_breaker=circuit_breaker,
         recovery_manager=recovery_manager,
     )
+
+    #Armazena no cache caso o scraping tenha sido bem-sucedido
+    if result.get("status") == "success" and result.get("details"):
+        cache_manager.set(marketplace=marketplace, url=url, value=result["details"])
+
+    return result
 
 def scrape_product_common(
         url: str,
