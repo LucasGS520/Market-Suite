@@ -109,8 +109,9 @@ async def _get_html(
     """ Obtém o HTML da página utilizando cache e recuperação de bloqueios
 
     Antes de realizar a navegação completa, executa uma requisição ``HEAD``
-    condicional com os valores ``ETag`` e ``Last-Modified`` em cache. Caso o
-    servidor responda ``304 Not Modified``, o fluxo é encerrado retornando
+    condicional com os valores ``ETag`` e ``Last-Modified`` em cache,
+    garantindo que apenas strings válidas sejam enviadas. Caso o servidor
+    responda ``304 Not Modified``, o fluxo é encerrado retornando
     a sentinela ``NOT_MODIFIED``
     """
     #Aguarda para simular leitura humana e respeitar a taxa de requisições
@@ -120,11 +121,16 @@ async def _get_html(
     #Recupera cabeçalhos previamente armazenados para uso condicional
     cached_headers = get_cache_headers(target_url)
     conditional_headers: dict[str, str] = {}
-    if cached_headers.get("etag"):
-        conditional_headers["If-None-Match"] = cached_headers["etag"]
-    if cached_headers.get("last_modified"):
+
+    #Garante que apenas valores de texto sejam enviados como cabeçalhos
+    etag = cached_headers.get("etag")
+    if isinstance(etag, str):
+        conditional_headers["If-None-Match"] = etag
+
+    last_modified = cached_headers.get("last_modified")
+    if isinstance(last_modified, str):
         #Reutiliza o valor do cabeçalho HTTP "Last-Modified" salvo anteriormente
-        conditional_headers["If-Modified-Since"] = cached_headers["last_modified"]
+        conditional_headers["If-Modified-Since"] = last_modified
 
     try:
         async with httpx.AsyncClient(follow_redirects=True) as client:

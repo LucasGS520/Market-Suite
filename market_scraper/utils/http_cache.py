@@ -66,7 +66,8 @@ def get_cache_headers(url: str) -> Dict[str, Optional[str]]:
 
     Retorna sempre um dicionário contendo as chaves ``ETag`` e
     ``last_modified``. Quando não houver dados ou o Redis estiver
-    indisponível, os valores serão ``None``.
+    indisponível, os valores serão ``None``. Caso o Redis retorne
+    valores em ``bytes``, eles são decodificados para ``str`` utilizando UTF-8
     """
 
     client = redis_client.get_redis_client()
@@ -77,6 +78,14 @@ def get_cache_headers(url: str) -> Dict[str, Optional[str]]:
     try:
         etag = client.get(f"{_ETAG_PREFIX}{url_hash}")
         last_modified = client.get(f"{_LAST_MODIFIED_PREFIX}{url_hash}")
+
+        #Os clientes Redis normalmente retornam ``bytes``.
+        #Garante que os valores sejam convertidos para ``str`` antes de serem utilizados
+        if isinstance(etag, bytes):
+            etag = etag.decode("utf-8")
+        if isinstance(last_modified, bytes):
+            last_modified = last_modified.decode("utf-8")
+
         return {"etag": etag, "last_modified": last_modified}
     except Exception:
         logger.exception("Falha ao recuperar cabeçalhos de cache no Redis")

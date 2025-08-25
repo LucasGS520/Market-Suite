@@ -4,7 +4,7 @@ import logging
 import pytest
 
 from shared.utils import redis_client
-from market_scraper.utils.http_cache import store_cache_headers, get_cache_headers, ContentSignature, NOT_MODIFIED
+from market_scraper.utils.http_cache import store_cache_headers, get_cache_headers, ContentSignature, _hash_url, NOT_MODIFIED, _ETAG_PREFIX, _LAST_MODIFIED_PREFIX
 
 
 def test_store_and_retrieve_headers(fake_redis):
@@ -59,6 +59,16 @@ def test_cache_headers_expiration(fake_redis):
     headers = get_cache_headers(url)
     assert headers["etag"] is None
     assert headers["last_modified"] is None
+
+def test_get_cache_headers_decodes_bytes(fake_redis):
+    url = "https://example.com/bytes"
+    url_hash = _hash_url(url)
+    fake_redis.set(f"{_ETAG_PREFIX}{url_hash}", b"e-b")
+    fake_redis.set(f"{_LAST_MODIFIED_PREFIX}{url_hash}", b"Mon, 01 Jan 2024 00:00:00 GMT")
+
+    headers = get_cache_headers(url)
+    assert headers["etag"] == "e-b"
+    assert headers["last_modified"] == "Mon, 01 Jan 2024 00:00:00 GMT"
 
 def test_store_cache_headers_logs_error(monkeypatch, caplog):
     class FailingRedis:
