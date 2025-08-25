@@ -8,8 +8,9 @@ from fastapi.testclient import TestClient
 import pytest
 
 from market_scraper.main import app
-from market_scraper.strategies.base import ScrapingStrategy, register_strategy
+from market_scraper.strategies.base import ScrapingStrategy
 from market_scraper.strategies import base as strategy_base
+from market_scraper.services import domain_policy
 from market_scraper.strategies.playwright_default import PlaywrightDefaultStrategy
 
 
@@ -17,7 +18,7 @@ def _preparar_ambiente(monkeypatch) -> None:
     """ Configura dependências para evitar operações externas nos testes """
     #Desabilita uso real de cache
     monkeypatch.setattr("market_scraper.services.services_scraper_common.cache_manager.get", lambda *a, **k: None)
-    monkeypatch.setattr("market_scraper.services_scraper_common.cache_manager.set", lambda *a, **k: None)
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.cache_manager.set", lambda *a, **k: None)
 
     #Evita navegação real pelo Playwright
     async def fake_default_get_data(
@@ -30,6 +31,8 @@ def _preparar_ambiente(monkeypatch) -> None:
         rate_limiter=None,
         circuit_breaker=None,
         recovery_manager=None,
+        headers=None,
+        **kwargs,
     ) -> dict:
         return {"details": {"name": "Fake", "current_price": "R$ 0,00"}}
 
@@ -46,7 +49,7 @@ class FakeMercadoLivreStrategy(ScrapingStrategy):
 
     def supports_url(self, url: str) -> bool:
         """ Suporta apenas URLs do Mercado Livre """
-        return "mercadolivre.com" in url
+        return "mercadolivre.com.br" in url
 
     async def get_data(
         self,
@@ -71,7 +74,6 @@ def test_seleciona_estrategia_mercado_livre(monkeypatch) -> None:
     """ Garante que URLs do Mercado Livre utilizam a estratégia e o padrão """
     _preparar_ambiente(monkeypatch)
     #Limpa estratégias registradas e adiciona a fictícia e a padrão
-    monkeypatch.setattr(strategy_base, "_STRATEGIES", [])
     chamada = {"executada": False}
 
     async def fake_get_data(self, **kwargs):
@@ -84,8 +86,21 @@ def test_seleciona_estrategia_mercado_livre(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(FakeMercadoLivreStrategy, "get_data", fake_get_data)
-    register_strategy(FakeMercadoLivreStrategy())
-    register_strategy(PlaywrightDefaultStrategy())
+    monkeypatch.setattr(
+        domain_policy,
+        "STRATEGY_REGISTRY",
+        {
+            "FAKE": FakeMercadoLivreStrategy,
+            "PLAYWRIGHT": PlaywrightDefaultStrategy,
+        }
+    )
+    monkeypatch.setattr(
+        domain_policy,
+        "DOMAIN_POLICIES",
+        {
+            "mercadolivre.com.br": ["FAKE", "PLAYWRIGHT"]
+        },
+    )
 
     client = TestClient(app)
     resp = client.post(
@@ -115,9 +130,9 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
     assert resp.status_code == 200
     assert escolhido["estrategia"].__class__.__name__ == "AmazonStrategy"
 
-@pytest.mark.xfail(reason="Estratégia da Shoppe ainda não implementada")
-def test_seleciona_estrategia_shoppe(monkeypatch) -> None:
-    """ Teste placeholder para domínio da Shoppe """
+@pytest.mark.xfail(reason="Estratégia da Shopee ainda não implementada")
+def test_seleciona_estrategia_shopee(monkeypatch) -> None:
+    """ Teste placeholder para domínio da Shopee """
     _preparar_ambiente(monkeypatch)
     from market_scraper.services import services_scraper_common as common
 
@@ -131,10 +146,10 @@ def test_seleciona_estrategia_shoppe(monkeypatch) -> None:
     monkeypatch.setattr(common, "get_strategy_for_url", capturar)
     client = TestClient(app)
     resp = client.post(
-        "/scrape/parse", json={"url": "https://shoppe.com.br/produto"}
+        "/scrape/parse", json={"url": "https://shopee.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "ShoppeStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "ShopeeStrategy"
 
 @pytest.mark.xfail(reason="Estratégia da Magalu ainda não implementada")
 def test_seleciona_estrategia_magalu(monkeypatch) -> None:

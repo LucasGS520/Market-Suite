@@ -57,6 +57,8 @@ async def test_scrape_product_common_async_success(monkeypatch):
 
     monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
     monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
     monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
     monkeypatch.setattr(common.parser, "parse_product_details", lambda html, url: {"current_price": "10"})
     monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
@@ -90,6 +92,8 @@ async def test_scrape_product_common_async_timeout(monkeypatch):
 
     monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
     monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
     monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
     monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
     monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
@@ -120,6 +124,8 @@ async def test_scrape_product_common_async_html_not_product(monkeypatch):
 
     monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
     monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
     monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
 
     monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: False)
@@ -159,6 +165,8 @@ async def test_scrape_product_common_async_captcha_detected(monkeypatch):
 
     monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
     monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
     monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
 
     monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
@@ -196,6 +204,8 @@ async def test_scrape_product_common_async_not_price(monkeypatch):
 
     monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
     monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
     monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
 
     monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)

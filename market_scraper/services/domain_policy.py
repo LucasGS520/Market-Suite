@@ -23,11 +23,12 @@ STRATEGY_REGISTRY: Dict[str, Type[ScrapingStrategy]] = {
 }
 
 #Mapeamento entre domínio e a ordem preferencial de estratégias
+#As chaves correspondem aos domínios oficiais de cada marketplace
 #Estratégias não registradas em ``STRATEGY_REGISTRY`` são ignoradas
 DOMAIN_POLICIES: Dict[str, List[str]] = {
-    "shoppe.com": ["JSON", "HTML", "PLAYWRIGHT"],
-    "magazineluiza.com": ["HTML", "PLAYWRIGHT"],
-    "mercadolivre.com": ["HTML", "PLAYWRIGHT"],
+    "shopee.com": ["JSON", "HTML", "PLAYWRIGHT"],
+    "magazineluiza.com.br": ["HTML", "PLAYWRIGHT"],
+    "mercadolivre.com.br": ["HTML", "PLAYWRIGHT"],
 }
 
 def _extract_host(url: str) -> str:
