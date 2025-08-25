@@ -9,6 +9,16 @@ class FakeRedis:
     def __init__(self):
         self.data = {}
         self.scripts = {}
+        self._expirations = {}
+        self.current_time = 0
+
+    def _purge_expired(self):
+        """ Remove chaves expiradas com base no tempo interno """
+        expirados = [k for k, t in self._expirations.items() if t <= self.current_time]
+        for key in expirados:
+            self.data.pop(key, None)
+            self.data.pop(f"ttl:{key}", None)
+            self._expirations.pop(key, None)
 
     def script_load(self, source):
         sha = f"fake-sha-{len(self.scripts)}"
@@ -16,14 +26,22 @@ class FakeRedis:
         return sha
 
     def set(self, key, value, ex=None):
+        self._purge_expired()
         self.data[key] = value
         if ex:
             self.data[f"ttl:{key}"] = ex
+            self._expirations[key] = self.current_time + ex
+        else:
+            self._expirations.pop(key, None)
+            self.data.pop(f"ttl:{key}", None)
+
 
     def get(self, key):
+        self._purge_expired()
         return self.data.get(key)
 
     def exists(self, key):
+        self._purge_expired()
         return key in self.data
 
     def evalsha(self, sha, num_keys, redis_key, now_ms, window_ms, limit):
@@ -41,8 +59,25 @@ class FakeRedis:
         return value
 
     def expire(self, key, secs):
-        self.data[f"ttl:{key}"] = secs
+        self._purge_expired()
+        if key in self.data:
+            self.data[f"ttl:{key}"] = secs
+            self._expirations[key] = self.current_time + secs
 
+    def ttl(self, key):
+        """ Retorna o tempo restante de uma chave em segundos """
+        self._purge_expired()
+        if key not in self.data:
+            return None
+        exp = self._expirations.get(key)
+        if exp is None:
+            return None
+        return max(0, int(exp - self.current_time))
+
+    def advance_time(self, secs: int):
+        """ Avança o relógio interno para simular expiração """
+        self.current_time += secs
+        self._purge_expired()
 
     def zremrangebyscore(self, redis_key, min_score, max_score):
         if redis_key not in self.data:

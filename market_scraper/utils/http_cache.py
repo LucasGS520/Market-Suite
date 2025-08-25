@@ -28,7 +28,8 @@ def store_cache_headers(
     url: str,
     *,
     etag: Optional[str] = None,
-    last_modified: Optional[str] = None
+    last_modified: Optional[str] = None,
+    ttl_seconds: int | None = 86_400,
 ) -> None:
     """ Armazena os cabeçalhos ``ETag`` e ``Last_Modified`` associados à URL
 
@@ -43,9 +44,9 @@ def store_cache_headers(
 
     url_hash = _hash_url(url)
     if etag is not None:
-        client.set(f"{_ETAG_PREFIX}{url_hash}", etag)
+        client.set(f"{_ETAG_PREFIX}{url_hash}", etag, ex=ttl_seconds)
     if last_modified is not None:
-        client.set(f"{_LAST_MODIFIED_PREFIX}{url_hash}", last_modified)
+        client.set(f"{_LAST_MODIFIED_PREFIX}{url_hash}", last_modified, ex=ttl_seconds)
 
 def get_cache_headers(url: str) -> Dict[str, Optional[str]]:
     """ Recupera os valores de ``ETag`` e ``Last-Modified`` para a URL
