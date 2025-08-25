@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from aiohttp import payload_type
+from celery.bin.result import result
 from fastapi import HTTPException, status
 
 from market_scraper.services import services_scraper_common as common
@@ -302,3 +303,118 @@ async def test_scrape_product_common_async_not_modified(monkeypatch):
         product_type="monitored",
     )
     assert resultado == {"status": "NOT_MODIFIED"}
+
+@pytest.mark.asyncio
+async def test_scrape_playwright_async_not_modified_on_304(monkeypatch, fake_redis):
+    url = "https://exemplo.com/item"
+    #Preenche o Redis com cabeçalhos previamente armazenados
+    common.store_cache_headers(url, etag="e1", last_modified="L1")
+
+    capturado = {}
+
+    class Head304:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a, **k):
+            pass
+
+        async def head(self, url, headers=None, cookies=None):
+            capturado["headers"] = headers
+            return SimpleNamespace(status_code=304, headers={})
+
+    monkeypatch.setattr(common.httpx, "AsyncClient", Head304)
+
+    async def fake_fetch_html(url):
+        raise AssertionError("fetch_html_playwright não deve ser chamado")
+
+    async def fake_parse_html(*a, **k):
+        raise AssertionError("_parse_html não deve ser chamado")
+
+    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
+    monkeypatch.setattr(common, "_parse_html", fake_parse_html)
+    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
+    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
+    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
+    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
+    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+
+    payload = SimpleNamespace(product_url=url)
+    resultado = await common.scrape_playwright_async(
+        url=url,
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado == {"status": "NOT_MODIFIED"}
+    async capturado["headers"] == {"If-None-Match": "e1", "If-Modified-Since": "L1"}
+    headers = common.get_cache_headers(url)
+    assert headers["etag"] == "e1"
+    async headers["last_modified"] == "L1"
+
+@pytest.mark.asyncio
+async def test_scrape_playwright_async_signature_skips_parsing(monkeypatch, fake_redis):
+    url = "https://exemplo.com/item"
+    html = "<html>produto</html>"
+
+    #Assinatura e cabeçalhos gravados previamente em Redis
+    common.store_cache_headers(url, etag="e1", last_modified="L1")
+    assinante = common.ContentSignature(url)
+    assinante.update(html)
+
+    cache_html: dict[str, str] = {url: html}
+
+    async def fake_get_cached_html(u):
+        return cache_html.get(u)
+
+    async def fake_set_cached_html(u, h):
+        cache_html[u] = h
+
+    async def fake_fetch_html(url):
+        raise AssertionError("fetch_html_playwright não deve ser chamado")
+
+    async def fake_parse_html(*a, **k):
+        raise AssertionError("_parse_html não deve ser chamado")
+
+    capturado = {}
+
+    class Head200:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a, **k):
+            pass
+
+        async def head(self, url, headers=None, cookies=None):
+            capturado["headers"] = headers
+            return SimpleNamespace(status_code=200, headers={"etag": "e1", "last_modified": "L1"})
+
+    monkeypatch.setattr(common.httpx, "AsyncClient", Head200)
+    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
+    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
+    monkeypatch.setattr(common, "_parse_html", fake_parse_html)
+    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
+    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
+    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
+    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
+    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+
+    payload = SimpleNamespace(product_url=url)
+    resultado = await common.scrape_playwright_async(
+        url=url,
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado == {"status": "NOT_MODIFIED"}
+    assert capturado["headers"] == {"If-None-Match": "e1", "If-Modified-Since": "L1"}
+    assert assinante.get() == assinante.calculate(html)
