@@ -110,6 +110,27 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
     monkeypatch.setattr(common, "get_strategy_for_url", capturar)
     client = TestClient(app)
     resp = client.post(
+        "/scrape/parse", json={"url": "https://www.amazon.com.br/produto"}
+    )
+    assert resp.status_code == 200
+    assert escolhido["estrategia"].__class__.__name__ == "AmazonStrategy"
+
+@pytest.mark.xfail(reason="Estratégia da Shoppe ainda não implementada")
+def test_seleciona_estrategia_shoppe(monkeypatch) -> None:
+    """ Teste placeholder para domínio da Shoppe """
+    _preparar_ambiente(monkeypatch)
+    from market_scraper.services import services_scraper_common as common
+
+    escolhido = {}
+    original = common.get_strategy_for_url
+
+    def capturar(url: str):
+        escolhido["estrategia"] = original(url)
+        return escolhido["estrategia"]
+
+    monkeypatch.setattr(common, "get_strategy_for_url", capturar)
+    client = TestClient(app)
+    resp = client.post(
         "/scrape/parse", json={"url": "https://shoppe.com.br/produto"}
     )
     assert resp.status_code == 200
