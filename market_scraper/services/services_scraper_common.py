@@ -123,6 +123,7 @@ async def _get_html(
     if cached_headers.get("etag"):
         conditional_headers["If-None-Match"] = cached_headers["etag"]
     if cached_headers.get("last_modified"):
+        #Reutiliza o valor do cabeçalho HTTP "Last-Modified" salvo anteriormente
         conditional_headers["If-Modified-Since"] = cached_headers["last_modified"]
 
     try:
@@ -140,6 +141,7 @@ async def _get_html(
         store_cache_headers(
             target_url,
             etag=head_response.headers.get("etag"),
+            #Utiliza a grafia padrão do cabeçalho HTTP ``Last-Modified``
             last_modified=head_response.headers.get("last_modified"),
         )
 
