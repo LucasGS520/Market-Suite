@@ -1,7 +1,9 @@
 """ Testes para utilitários de cache HTTP """
 
+import logging
 import pytest
 
+from shared.utils import redis_client
 from market_scraper.utils.http_cache import store_cache_headers, get_cache_headers, ContentSignature
 
 
@@ -38,3 +40,46 @@ def test_cache_headers_expiration(fake_redis):
     headers = get_cache_headers(url)
     assert headers["etag"] is None
     assert headers["last_modified"] is None
+
+def test_store_cache_headers_logs_error(monkeypatch, caplog):
+    class FailingRedis:
+        def set(self, *a, **k):
+            raise Exception("falha")
+
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: FailingRedis())
+    with caplog.at_level(logging.ERROR):
+        store_cache_headers("https://erro.com", etag="e")
+    assert "Falha ao armazenar cabeçalhos de cache no Redis" in caplog.text
+
+def test_get_cache_headers_logs_error(monkeypatch, caplog):
+    class FailingRedis:
+        def get(self, *a, **k):
+            raise Exception("falha")
+
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: FailingRedis())
+    with caplog.at_level(logging.ERROR):
+        headers = get_cache_headers("https://erro.com")
+    assert headers == {"etag": None, "last_modified": None}
+    assert "Falha ao recuperar cabeçalhos de cache no Redis" in caplog.text
+
+def test_content_signature_logs_error(monkeypatch, caplog):
+    class FailingRedis:
+        def get(self, *a, **k):
+            raise Exception("falha")
+
+        def set(self, *a, **k):
+            raise Exception("falha")
+
+    monkeypatch.setattr(redis_client, "get_redis_client", lambda: FailingRedis())
+
+    signer = ContentSignature("https://erro.com")
+    with caplog.at_level(logging.ERROR):
+        assert signer.get() is None
+        signer.update("<html></html>")
+        assert signer.has_changed("<html></html>") is True
+
+    #Verifica que todas as etapas registram mensagens de erro
+    text = caplog.text
+    assert "Erro ao obter assinatura de conteúdo no Redis" in text
+    assert "Erro ao atualizar assinatura de conteúdo no Redis" in text
+    assert "Erro ao verificar assinatura de conteúdo no Redis" in text

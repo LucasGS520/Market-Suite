@@ -10,10 +10,14 @@ sofreu alterações entre duas requisições.
 from __future__ import annotations
 
 import hashlib
+import logging
 from typing import Dict, Optional
 
 from shared.utils import redis_client
 
+
+#Instancia o logger do módulo para registrar eventos e errors
+logger = logging.getLogger(__name__)
 
 #Prefixos padronizados para as chaves no Redis
 _ETAG_PREFIX = "http_cache:etag:"
@@ -43,10 +47,16 @@ def store_cache_headers(
         return
 
     url_hash = _hash_url(url)
-    if etag is not None:
-        client.set(f"{_ETAG_PREFIX}{url_hash}", etag, ex=ttl_seconds)
-    if last_modified is not None:
-        client.set(f"{_LAST_MODIFIED_PREFIX}{url_hash}", last_modified, ex=ttl_seconds)
+    try:
+        if etag is not None:
+            client.set(f"{_ETAG_PREFIX}{url_hash}", etag, ex=ttl_seconds)
+        if last_modified is not None:
+            client.set(
+                f"{_LAST_MODIFIED_PREFIX}{url_hash}", last_modified, ex=ttl_seconds
+            )
+    except Exception:
+        #Em caso de falha, registra o erro e continua sem iterromper o fluxo
+        logger.exception("Falha ao armazenar cabeçalhos de cache no Redis")
 
 def get_cache_headers(url: str) -> Dict[str, Optional[str]]:
     """ Recupera os valores de ``ETag`` e ``Last-Modified`` para a URL
@@ -61,9 +71,13 @@ def get_cache_headers(url: str) -> Dict[str, Optional[str]]:
         return {"etag": None, "last_modified": None}
 
     url_hash = _hash_url(url)
-    etag = client.get(f"{_ETAG_PREFIX}{url_hash}")
-    last_modified = client.get(f"{_LAST_MODIFIED_PREFIX}{url_hash}")
-    return {"etag": etag, "last_modified": last_modified}
+    try:
+        etag = client.get(f"{_ETAG_PREFIX}{url_hash}")
+        last_modified = client.get(f"{_LAST_MODIFIED_PREFIX}{url_hash}")
+        return {"etag": etag, "last_modified": last_modified}
+    except Exception:
+        logger.exception("Falha ao recuperar cabeçalhos de cache no Redis")
+        return {"etag": None, "last_modified": None}
 
 class ContentSignature:
     """ Gerencia a assinatura de conteúdo HTML de uma URL """
@@ -83,14 +97,21 @@ class ContentSignature:
         client = redis_client.get_redis_client()
         if client is None:
             return None
-        return client.get(self._key())
+        try:
+            return client.get(self._key())
+        except Exception:
+            logger.exception("Erro ao obter assinatura de conteúdo no Redis")
+            return None
 
     def update(self, html: str) -> str:
-        """ Calcula a armazena a assinatura para o HTML fornecido """
+        """ Calcula e armazena a assinatura para o HTML fornecido """
         signature = self.calculate(html)
         client = redis_client.get_redis_client()
         if client is not None:
-            client.set(self._key(), signature)
+            try:
+                client.set(self._key(), signature)
+            except Exception:
+                logger.exception("Erro ao atualizar assinatura de conteúdo no Redis")
         return signature
 
     def has_changed(self, html: str) -> bool:
@@ -107,8 +128,13 @@ class ContentSignature:
 
         key = self._key()
         new_signature = self.calculate(html)
-        old_signature = client.get(key)
-        if old_signature == new_signature:
-            return False
-        client.set(key, new_signature)
-        return True
+        try:
+            old_signature = client.get(key)
+            if old_signature == new_signature:
+                return False
+            client.set(key, new_signature)
+            return True
+        except Exception:
+            logger.exception("Erro ao verificar assinatura de conteúdo no Redis")
+            #Em caso de erro assume que o conteúdo mudou para evitar falsos negativos
+            return True
