@@ -4,7 +4,7 @@ import logging
 import pytest
 
 from shared.utils import redis_client
-from market_scraper.utils.http_cache import store_cache_headers, get_cache_headers, ContentSignature
+from market_scraper.utils.http_cache import store_cache_headers, get_cache_headers, ContentSignature, NOT_MODIFIED
 
 
 def test_store_and_retrieve_headers(fake_redis):
@@ -27,6 +27,25 @@ def test_content_signature_detection(fake_redis):
     assert signer.has_changed(html_a) is False
     assert signer.has_changed(html_b) is True
     assert signer.get() == signer.calculate(html_b)
+
+def test_check_or_update(fake_redis):
+    """ Valida comportamento da verificação e atualização condicional """
+    url = "https://example.com/produto"
+    html_a = "<html>A</html>"
+    html_b = "<html>B</html>"
+
+    signer = ContentSignature(url)
+
+    primeira_assinatura = signer.check_or_update(html_a)
+    assert primeira_assinatura == signer.calculate(html_a)
+
+    #Conteudo igual deve retornar a sentinela NOT_MODIFIED
+    assert signer.check_or_update(html_a) is NOT_MODIFIED
+
+    #Conteudo diferente deve gerar nova assinatura
+    nova_assinatura = signer.check_or_update(html_b)
+    assert nova_assinatura == signer.calculate(html_b)
+    assert signer.get() == nova_assinatura
 
 def test_cache_headers_expiration(fake_redis):
     url = "https://example.com/expira"
@@ -77,9 +96,11 @@ def test_content_signature_logs_error(monkeypatch, caplog):
         assert signer.get() is None
         signer.update("<html></html>")
         assert signer.has_changed("<html></html>") is True
+        signer.check_or_update("<html></html>")
 
     #Verifica que todas as etapas registram mensagens de erro
     text = caplog.text
     assert "Erro ao obter assinatura de conteúdo no Redis" in text
     assert "Erro ao atualizar assinatura de conteúdo no Redis" in text
     assert "Erro ao verificar assinatura de conteúdo no Redis" in text
+    assert "Erro ao verificar/atualizar assinatura de conteúdo no Redis" in text
