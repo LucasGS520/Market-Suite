@@ -17,8 +17,8 @@ from market_scraper.strategies.playwright_default import PlaywrightDefaultStrate
 def _preparar_ambiente(monkeypatch) -> None:
     """ Configura dependências para evitar operações externas nos testes """
     #Desabilita uso real de cache
-    monkeypatch.setattr("common.cache_manager.get", lambda *a, **k: None)
-    monkeypatch.setattr("common.cache_manager.set", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
 
     #Evita navegação real pelo Playwright
     async def fake_default_get_data(
