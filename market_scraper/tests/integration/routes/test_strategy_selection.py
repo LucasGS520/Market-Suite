@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-from typing import Any
-
 """ Testes de seleção dinâmica de estratégias de scraping """
+
+from typing import Any
 
 from fastapi.testclient import TestClient
 import pytest
 
 from market_scraper.main import app
 from market_scraper.strategies.base import ScrapingStrategy
-from market_scraper.strategies import base as strategy_base
 from market_scraper.services import domain_policy
+from market_scraper.services import services_scraper_common as common
 from market_scraper.strategies.playwright_default import PlaywrightDefaultStrategy
 
 
 def _preparar_ambiente(monkeypatch) -> None:
     """ Configura dependências para evitar operações externas nos testes """
     #Desabilita uso real de cache
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.cache_manager.get", lambda *a, **k: None)
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.cache_manager.set", lambda *a, **k: None)
+    monkeypatch.setattr("common.cache_manager.get", lambda *a, **k: None)
+    monkeypatch.setattr("common.cache_manager.set", lambda *a, **k: None)
 
     #Evita navegação real pelo Playwright
     async def fake_default_get_data(
@@ -34,7 +34,10 @@ def _preparar_ambiente(monkeypatch) -> None:
         headers=None,
         **kwargs,
     ) -> dict:
-        return {"details": {"name": "Fake", "current_price": "R$ 0,00"}}
+        return {
+            "status": "success",
+            "details": {"name": "Fake", "current_price": "R$ 0,00"},
+        }
 
     monkeypatch.setattr(
         PlaywrightDefaultStrategy,
@@ -64,42 +67,32 @@ class FakeMercadoLivreStrategy(ScrapingStrategy):
     ) -> dict:
         """ Retorna dados simulados de produto """
         return {
-            "details": {
-                "name": "Produto ML",
-                "current_price": "RS 10,00"
-            }
+            "status": "success",
+            "details": {"name": "Produto ML", "current_price": "RS 10,00"}
         }
 
 def test_seleciona_estrategia_mercado_livre(monkeypatch) -> None:
-    """ Garante que URLs do Mercado Livre utilizam a estratégia e o padrão """
+    """ Garante que URLs do Mercado Livre utilizam a estratégia customizada """
     _preparar_ambiente(monkeypatch)
-    #Limpa estratégias registradas e adiciona a fictícia e a padrão
     chamada = {"executada": False}
 
     async def fake_get_data(self, **kwargs):
         chamada["executada"] = True
         return {
-            "details": {
-                "name": "Produto ML",
-                "current_price": "R$ 10,00",
-            }
+            "status": "success",
+            "details": {"name": "Produto ML", "current_price": "R$ 10,00"},
         }
 
     monkeypatch.setattr(FakeMercadoLivreStrategy, "get_data", fake_get_data)
     monkeypatch.setattr(
         domain_policy,
         "STRATEGY_REGISTRY",
-        {
-            "FAKE": FakeMercadoLivreStrategy,
-            "PLAYWRIGHT": PlaywrightDefaultStrategy,
-        }
+        {"FAKE": FakeMercadoLivreStrategy, "PLAYWRIGHT": PlaywrightDefaultStrategy}
     )
     monkeypatch.setattr(
         domain_policy,
         "DOMAIN_POLICIES",
-        {
-            "mercadolivre.com.br": ["FAKE", "PLAYWRIGHT"]
-        },
+        {"mercadolivre.com.br": ["FAKE", "PLAYWRIGHT"]},
     )
 
     client = TestClient(app)
@@ -115,14 +108,15 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
     _preparar_ambiente(monkeypatch)
     from market_scraper.services import services_scraper_common as common
 
-    escolhido = {}
-    original = common.get_strategy_for_url
+    escolhido: dict[str, Any] = {}
+    original = common.strategies_for
 
     def capturar(url: str):
-        escolhido["estrategia"] = original(url)
-        return escolhido["estrategia"]
+        resultado = original(url)
+        escolhido["estrategia"] = resultado[0]
+        return resultado
 
-    monkeypatch.setattr(common, "get_strategy_for_url", capturar)
+    monkeypatch.setattr(common, "strategies_for", capturar)
     client = TestClient(app)
     resp = client.post(
         "/scrape/parse", json={"url": "https://www.amazon.com.br/produto"}
@@ -134,16 +128,15 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
 def test_seleciona_estrategia_shopee(monkeypatch) -> None:
     """ Teste placeholder para domínio da Shopee """
     _preparar_ambiente(monkeypatch)
-    from market_scraper.services import services_scraper_common as common
-
-    escolhido = {}
-    original = common.get_strategy_for_url
+    escolhido: dict[str, Any] = {}
+    original = common.strategies_for
 
     def capturar(url: str):
-        escolhido["estrategia"] = original(url)
-        return escolhido["estrategia"]
+        resultado = original(url)
+        escolhido["estrategia"] = resultado[0]
+        return resultado
 
-    monkeypatch.setattr(common, "get_strategy_for_url", capturar)
+    monkeypatch.setattr(common, "strategies_for", capturar)
     client = TestClient(app)
     resp = client.post(
         "/scrape/parse", json={"url": "https://shopee.com.br/produto"}
@@ -155,16 +148,15 @@ def test_seleciona_estrategia_shopee(monkeypatch) -> None:
 def test_seleciona_estrategia_magalu(monkeypatch) -> None:
     """ Teste placeholder para o domínio da Magalu """
     _preparar_ambiente(monkeypatch)
-    from market_scraper.services import services_scraper_common as common
-
-    escolhido = {}
-    original = common.get_strategy_for_url
+    escolhido: dict[str, Any] = {}
+    original = common.strategies_for
 
     def capturar(url: str):
-        escolhido["estrategia"] = original(url)
-        return escolhido["estrategia"]
+        resultado = original(url)
+        escolhido["estrategia"] = resultado[0]
+        return resultado
 
-    monkeypatch.setattr(common, "get_strategy_for_url", capturar)
+    monkeypatch.setattr(common, "strategies_for", capturar)
     client = TestClient(app)
     resp = client.post(
         "/scrape/parse", json={"url": "https://www.magazineluiza.com.br/produto"}
