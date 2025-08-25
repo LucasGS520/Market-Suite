@@ -43,7 +43,7 @@ from market_scraper.utils.cookie_manager import cookie_manager
 from market_scraper.utils.playwright_client import get_playwright_client
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 
-from market_scraper.strategies import get_strategy_for_url
+from market_scraper.services.domain_policy import strategies_for
 
 import market_scraper.services.services_parser as parser
 from market_scraper.services.services_parser import CaptchaDetectedError
@@ -345,19 +345,26 @@ async def scrape_product_common_async(
     if cached:
         return {"status": "success", "details": cached}
 
-    strategy = get_strategy_for_url(url)
-    if strategy is None:
+    strategies = strategies_for(url)
+    if not strategies:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL não suportada")
 
-    result = await strategy.get_data(
-        url=url,
-        user_id=user_id,
-        payload=payload,
-        product_type=product_type,
-        rate_limiter=rate_limiter,
-        circuit_breaker=circuit_breaker,
-        recovery_manager=recovery_manager,
-    )
+    result = {"status": "error"}
+    for strategy in strategies:
+        if not strategy.supports_url(url):
+            continue
+        result = await strategy.get_data(
+            url=url,
+            headers=None,
+            user_id=user_id,
+            payload=payload,
+            product_type=product_type,
+            rate_limiter=rate_limiter,
+            circuit_breaker=circuit_breaker,
+            recovery_manager=recovery_manager,
+        )
+        if result.get("status") == "success":
+            break
 
     #Armazena no cache caso o scraping tenha sido bem-sucedido
     if result.get("status") == "success" and result.get("details"):

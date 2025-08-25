@@ -2,52 +2,43 @@ from __future__ import annotations
 
 """ Definições de estratégia de scraping.
 
-Este módulo oferece a classe base ``ScrapingStrategy`` e utilidades 
-para registrar e selecionar estratégias concretas.
+Este módulo fornece a classe abstrata ``ScrapingStrategy`` que representa
+uma estratégia de coleta de dados. As estratégias concretas devem
+informar se suportam a URL desejada e executar a extração dos dados
+do produto, retornando ao menos o nome e o preço.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
+from typing import Any, Dict, Optional
 
 
 class ScrapingStrategy(ABC):
     """ Estratégia genérica de scraping
 
-    Cada estratégia deve informar se suporta a url recebida
-    e executar a coleta retornando ao menos o nome e o preço do produto.
+    Cada estratégia concreta deve declarar se suporta a URL recebida por
+    meio do método :meth:`supports_url` e implementar :meth:`get_data`
+    para realizar a coleta. O atributo ``priority`` pode ser utilizado
+    futuramente para ordenação de execução.
     """
 
     priority: int = 100
 
     @abstractmethod
     def supports_url(self, url: str) -> bool:
-        """ Retorna True se a estratégia consegue lidar com a URL """
+        """ Retorna ``True`` se a estratégia consegue lidar com a URL """
 
     @abstractmethod
     async def get_data(
         self,
-        *,
         url: str,
-        user_id: Any,
-        payload: Any,
-        product_type: str,
-        rate_limiter: Any | None = None,
-        circuit_breaker: Any | None = None,
-        recovery_manager: Any | None = None,
+        headers: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
     ) -> dict:
-        """ Executa o scraping e retorna os dados relevantes """
+        """ Executa o scraping e retorna os dados relevantes
 
-_STRATEGIES: List[ScrapingStrategy] = []
+        Parâmetros adicionais podem ser fornecidos via ``kwargs`` para que
+        cada implementação utilize recursos de anti-bloqueio, cache ou
+        quaisquer dependências necessárias.
+        """
 
-
-def register_strategy(strategy: ScrapingStrategy) -> None:
-    """ Registra uma nova estratégia no repositório interno """
-    _STRATEGIES.append(strategy)
-    _STRATEGIES.sort(key=lambda s: s.priority)
-
-def get_strategy_for_url(url: str) -> Optional[ScrapingStrategy]:
-    """ Retorna a primeira estratégia compatível com a url informada """
-    for strategy in _STRATEGIES:
-        if strategy.supports_url(url):
-            return strategy
-    return None
+__all__ = ["ScrapingStrategy"]

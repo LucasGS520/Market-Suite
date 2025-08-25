@@ -2,9 +2,9 @@ from __future__ import annotations
 
 """ Estratégia padrão utilizando Playwright """
 
-from typing import Any
+from typing import Any, Dict, Optional
 
-from .base import ScrapingStrategy, register_strategy
+from .base import ScrapingStrategy
 
 
 class PlaywrightDefaultStrategy(ScrapingStrategy):
@@ -18,27 +18,15 @@ class PlaywrightDefaultStrategy(ScrapingStrategy):
 
     async def get_data(
         self,
-        *,
         url: str,
-        user_id: Any,
-        payload: Any,
-        product_type: str,
-        rate_limiter: Any | None = None,
-        circuit_breaker: Any | None = None,
-        recovery_manager: Any | None = None,
+        headers: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
     ) -> dict:
-        """ Executa o scraping usando a estratégia padrão """
+        """ Executa o scraping usando a estratégia padrão
+
+        O método delega para ``scrape_playwright_async`` reaproveitando
+        os componentes de anti_bloqueio existentes.
+        """
         from market_scraper.services import services_scraper_common as common
 
-        #Utiliza o fluxo padrão baseado em Playwright
-        return await common.scrape_playwright_async(
-            url=url,
-            user_id=user_id,
-            payload=payload,
-            product_type=product_type,
-            rate_limiter=rate_limiter,
-            circuit_breaker=circuit_breaker,
-            recovery_manager=recovery_manager,
-        )
-
-register_strategy(PlaywrightDefaultStrategy())
+        return await common.scrape_playwright_async(url=url, **kwargs)

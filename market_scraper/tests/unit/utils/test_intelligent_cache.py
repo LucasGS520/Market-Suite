@@ -13,5 +13,5 @@ def test_cache_isolado_por_marketplace() -> None:
     cache.set(marketplace="mercadolivre.com", url=url, value=dado_ml)
     cache.set(marketplace="amazon.com", url=url, value=dado_amz)
 
-    assert cache.get(marketplace="marcadolivre.com", url=url)["name"] == "Produto ML"
+    assert cache.get(marketplace="mercadolivre.com", url=url)["name"] == "Produto ML"
     assert cache.get(marketplace="amazon.com", url=url)["name"] == "Produto AMZ"
