@@ -142,27 +142,27 @@ class ContentSignature:
             #Em caso de erro assume que o conteúdo mudou para evitar falsos negativos
             return True
 
-def check_or_update(self, html: str):
-    """ Verifica se o conteúdo foi modificado e atualiza o Redis conforme necessário
+    def check_or_update(self, html: str):
+        """ Verifica se o conteúdo foi modificado e atualiza o Redis conforme necessário
 
-    Retorna ``NOT_MODIFIED`` quando o hash calculado for igual ao já
-    armazenado para a URL. Caso o conteúdo tenha mudado, salva a nova
-    assinatura no Redis e retorna o hash calculado. Se o Redis estiver
-    indisponível ou ocorrer algum erro, sempre retorna o hash recém
-    calculado.
-    """
-    signature = self.calculate(html)
-    client = redis_client.get_redis_client()
-    if client is None:
-        return signature
+        Retorna ``NOT_MODIFIED`` quando o hash calculado for igual ao já
+        armazenado para a URL. Caso o conteúdo tenha mudado, salva a nova
+        assinatura no Redis e retorna o hash calculado. Se o Redis estiver
+        indisponível ou ocorrer algum erro, sempre retorna o hash recém
+        calculado.
+        """
+        signature = self.calculate(html)
+        client = redis_client.get_redis_client()
+        if client is None:
+            return signature
 
-    key = self._key()
-    try:
-        old_signature = client.get(key)
-        if old_signature == signature:
-            return NOT_MODIFIED
-        client.set(key, signature)
-        return signature
-    except Exception:
-        logger.exception("Erro ao verificar/atualizar assinatura de conteúdo no Redis")
-        return signature
+        key = self._key()
+        try:
+            old_signature = client.get(key)
+            if old_signature == signature:
+                return NOT_MODIFIED
+            client.set(key, signature)
+            return signature
+        except Exception:
+            logger.exception("Erro ao verificar/atualizar assinatura de conteúdo no Redis")
+            return signature

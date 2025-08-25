@@ -14,7 +14,6 @@ import asyncio
 import structlog
 
 from fastapi import HTTPException, status
-from watchfiles import awatch
 
 from market_scraper.core.config_scraper import settings
 
@@ -42,6 +41,9 @@ from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.cookie_manager import cookie_manager
 from market_scraper.utils.playwright_client import get_playwright_client
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
+
+import httpx
 
 from market_scraper.services.domain_policy import strategies_for
 
@@ -103,11 +105,43 @@ async def _get_html(
     human_delay: HumanizedDelayManager,
     circuit_breaker: CircuitBreaker,
     recovery_manager: BlockRecoveryManager,
-) -> str:
-    """ Obtém o HTML da página utilizando cache e recuperação de bloqueios """
+):
+    """ Obtém o HTML da página utilizando cache e recuperação de bloqueios
+
+    Antes de realizar a navegação completa, executa uma requisição ``HEAD``
+    condicional com os valores ``ETag`` e ``Last-Modified`` em cache. Caso o
+    servidor responda ``304 Not Modified``, o fluxo é encerrado retornando
+    a sentinela ``NOT_MODIFIED``
+    """
     #Aguarda para simular leitura humana e respeitar a taxa de requisições
     await human_delay.wait_async(None)
     await throttle.wait_async(identifier="get", circuit_key=circuit_key)
+
+    #Recupera cabeçalhos previamente armazenados para uso condicional
+    cached_headers = get_cache_headers(target_url)
+    conditional_headers: dict[str, str] = {}
+    if cached_headers.get("etag"):
+        conditional_headers["If-None-Match"] = cached_headers["etag"]
+    if cached_headers.get("last_modified"):
+        conditional_headers["If-Modified-Since"] = cached_headers["last_modified"]
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            head_response = await client.head(target_url, headers=conditional_headers)
+    except Exception as err:
+        logger.warning("head_request_failed", url=target_url, error=str(err))
+        head_response = None
+
+    if head_response is not None:
+        SCRAPER_REQUESTS_TOTAL.labels(method="HEAD", status_code=head_response.status_code).inc()
+        if head_response.status_code == 304:
+            SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="not_modified").inc()
+            return NOT_MODIFIED
+        store_cache_headers(
+            target_url,
+            etag=head_response.headers.get("etag"),
+            last_modified=head_response.headers.get("last_modified"),
+        )
 
     html: str | None = await get_cached_html(target_url)
     if html is None:
@@ -132,7 +166,6 @@ async def _get_html(
         except Exception as e:
             logger.error("get_request_failed", url=target_url, error=str(e))
             circuit_breaker.record_failure(circuit_key)
-            block_type = BlockResult.HTTP_429
             msg = str(e).lower()
             if "403" in msg:
                 block_type = BlockResult.HTTP_403
@@ -157,6 +190,12 @@ async def _get_html(
 
     if html is None:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Falha ao obter HTML")
+
+    #Verifica se o conteúdo foi alterado desde a últma coleta
+    signer = ContentSignature(target_url)
+    if signer.check_or_update(html) is NOT_MODIFIED:
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="not_modified").inc()
+        return NOT_MODIFIED
 
     return html
 
@@ -316,6 +355,9 @@ async def scrape_playwright_async(
         circuit_breaker=circuit_breaker,
         recovery_manager=recovery_manager,
     )
+
+    if html is NOT_MODIFIED:
+        return {"status": "NOT_MODIFIED"}
 
     return await _parse_html(
         html,

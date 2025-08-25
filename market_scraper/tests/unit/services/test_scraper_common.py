@@ -1,6 +1,8 @@
 import pytest
 from types import SimpleNamespace
 from uuid import uuid4
+
+from aiohttp import payload_type
 from fastapi import HTTPException, status
 
 from market_scraper.services import services_scraper_common as common
@@ -43,6 +45,26 @@ class DummyRobotsTxtParser:
     async def get_crawl_delay(self, *a, **k):
         return None
 
+class DummyAsyncClient:
+    def __init__(self, *a, **k):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a, **k):
+        pass
+
+    async def head(self, *a, **k):
+        return SimpleNamespace(status_code=200, headers={})
+
+class DummySignature:
+    def __init__(self, *a, **k):
+        pass
+
+    def check_or_update(self, html):
+        return "assinatura"
+
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_success(monkeypatch):
     async def fake_fetch_html(url):
@@ -66,6 +88,10 @@ async def test_scrape_product_common_async_success(monkeypatch):
     monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
     monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
     monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
+    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
+    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr(common, "ContentSignature", DummySignature)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     result = await common.scrape_product_common_async(
@@ -99,6 +125,10 @@ async def test_scrape_product_common_async_timeout(monkeypatch):
     monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
     monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
     monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
+    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
+    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr(common, "ContentSignature", DummySignature)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     with pytest.raises(HTTPException) as exc:
@@ -139,6 +169,10 @@ async def test_scrape_product_common_async_html_not_product(monkeypatch):
     monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
     monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
     monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
+    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
+    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr(common, "ContentSignature", DummySignature)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
 
@@ -180,6 +214,10 @@ async def test_scrape_product_common_async_captcha_detected(monkeypatch):
     monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
     monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
     monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
+    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
+    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr(common, "ContentSignature", DummySignature)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     resultado = await common.scrape_product_common_async(
@@ -219,6 +257,10 @@ async def test_scrape_product_common_async_not_price(monkeypatch):
     monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
     monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
     monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
+    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
+    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr(common, "ContentSignature", DummySignature)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
 
@@ -231,3 +273,32 @@ async def test_scrape_product_common_async_not_price(monkeypatch):
         )
 
     assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_not_modified(monkeypatch):
+    class Head304(DummyAsyncClient):
+        async def head(self, *a, **k):
+            return SimpleNamespace(status_code=304, headers={})
+
+    monkeypatch.setattr(common.httpx, "AsyncClient", Head304)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": "x", "last_modified": "y"})
+    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
+    async def fake_fetch_html(url):
+        raise AssertionError("fetch_html_playwright não deve ser chamado")
+    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
+    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
+    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
+    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
+    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+    assert resultado == {"status": "NOT_MODIFIED"}
