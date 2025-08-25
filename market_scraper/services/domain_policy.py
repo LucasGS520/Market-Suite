@@ -8,9 +8,9 @@ mapa ``STRATEGY_REGISTRY`` e referenciadas em ``DOMAIN_POLICES``
 """
 
 from typing import Dict, List, Type
-from urllib.parse import urlparse
 
 from market_scraper.strategies import ScrapingStrategy, PlaywrightDefaultStrategy
+from market_scraper.utils.http_utils import extract_hostname
 
 
 #Registro de estratégias disponíveis no sistema.
@@ -31,21 +31,15 @@ DOMAIN_POLICIES: Dict[str, List[str]] = {
     "mercadolivre.com.br": ["HTML", "PLAYWRIGHT"],
 }
 
-def _extract_host(url: str) -> str:
-    """ Extrai o host de uma URL normalizando para minúsculas
-
-    O parâmetro ``url`` pode ser qualquer objeto convertível
-    para ``str``, como tipos provenientes do Pydantic.
-    """
-    return urlparse(str(url)).netloc.lower()
 
 def strategies_for(url: str) -> List[ScrapingStrategy]:
     """ Retorna instâncias de estratégias ordenadas para o domínio
 
-    Caso não exista configuração específica para o domínio, a
-    estratégia padrão é utilizada (No momento é Playwright, mas ao decorrer do projeto pode ser alterado).
+    A função utiliza :func:`extract_hostname` para obter o host da URL e,
+    com base nele, seleciona a ordem preferencial de estratégias. Caso o
+    domínio não esteja configurado, a estratégia padrão é retornada.
     """
-    host = _extract_host(url)
+    host = extract_hostname(url)
     for domain, names in DOMAIN_POLICIES.items():
         if domain in host:
             return [STRATEGY_REGISTRY[name]() for name in names if name in STRATEGY_REGISTRY]
