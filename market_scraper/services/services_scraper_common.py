@@ -110,9 +110,10 @@ async def _get_html(
 
     Antes de realizar a navegação completa, executa uma requisição ``HEAD``
     condicional com os valores ``ETag`` e ``Last-Modified`` em cache,
-    garantindo que apenas strings válidas sejam enviadas. Caso o servidor
-    responda ``304 Not Modified``, o fluxo é encerrado retornando
-    a sentinela ``NOT_MODIFIED``
+    garantindo que apenas strings válidas sejam enviadas. A requisição ``HEAD``
+    deve imitar a navegação real adicionando ``User-Agent`` e cookies atuais,
+    reduzindo a chance de bloqueios pelo servidor. Caso o servidor responda
+    ``304 Not Modified``, o fluxo é encerrado retornando a sentinela ``NOT_MODIFIED``
     """
     #Aguarda para simular leitura humana e respeitar a taxa de requisições
     await human_delay.wait_async(None)
@@ -132,12 +133,24 @@ async def _get_html(
         #Reutiliza o valor do cabeçalho HTTP "Last-Modified" salvo anteriormente
         conditional_headers["If-Modified-Since"] = last_modified
 
+    #Adiciona cabeçalhos de navegação real para evitar bloqueios
+    ua = ua_manager.get_user_agent(circuit_key)
+    request_headers = {**conditional_headers, "User-Agent": ua}
+    cookies = cookie_manager.get_cookies(circuit_key)
+
     try:
         async with httpx.AsyncClient(follow_redirects=True) as client:
-            head_response = await client.head(target_url, headers=conditional_headers)
+            head_response = await client.head(
+                target_url, headers=conditional_headers, cookies=cookies
+            )
     except Exception as err:
         logger.warning("head_request_failed", url=target_url, error=str(err))
         head_response = None
+    else:
+        try:
+            cookie_manager.update_from_response(circuit_key, head_response)
+        except Exception:
+            logger.debug("cookie_update_failed", url=target_url)
 
     if head_response is not None:
         SCRAPER_REQUESTS_TOTAL.labels(method="HEAD", status_code=head_response.status_code).inc()
