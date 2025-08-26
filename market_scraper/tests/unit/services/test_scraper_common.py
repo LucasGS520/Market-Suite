@@ -188,6 +188,66 @@ async def test_scrape_product_common_async_html_not_product(monkeypatch):
     assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
 
 @pytest.mark.asyncio
+async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
+    class StrategyNotModified:
+        def supports_url(self, url):
+            return True
+
+        async def get_data(
+            self,
+            *,
+            url,
+            headers,
+            user_id,
+            payload,
+            product_type,
+            rate_limiter,
+            circuit_breaker,
+            recovery_manager,
+        ):
+            return {"status": "NOT_MODIFIED"}
+
+    class StrategyShouldNotRun:
+        called = False
+
+        def supports_url(self, url):
+            return True
+
+        async def get_data(
+            self,
+            *,
+            url,
+            headers,
+            user_id,
+            payload,
+            product_type,
+            rate_limiter,
+            circuit_breaker,
+            recovery_manager,
+        ):
+            StrategyShouldNotRun.called = True
+            return {"status": "success", "details": {"ok": True}}
+
+    #Evita retorno imediato de cache
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+
+    #Força o uso das estratégias fictícias
+    monkeypatch.setattr(common, "strategies_for", lambda url: [StrategyNotModified(), StrategyShouldNotRun()])
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+
+    result = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert result["status"] == "NOT_MODIFIED"
+    assert StrategyShouldNotRun.called is False
+
+@pytest.mark.asyncio
 async def test_scrape_product_common_async_captcha_detected(monkeypatch):
     async def fake_get_cached_html(url):
         return "<html>captcha</html>"

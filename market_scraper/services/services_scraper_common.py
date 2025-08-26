@@ -401,7 +401,14 @@ async def scrape_product_common_async(
     circuit_breaker: CircuitBreaker | None = None,
     recovery_manager: BlockRecoveryManager | None = None,
 ) -> dict:
-    """ Seleciona e executa a estratégia adequada para a URL """
+    """ Seleciona e executa a estratégia adequada para a URL
+
+    As estratégias são avaliadas em sequência até que uma delas consiga
+    extrair os dados do produto ou informe que o conteúdo analisado não
+    foi modificado desde a última coleta. Quando ocorre qualquer um
+    desses cenários, as demais estratégias não são executadas, evitando
+    processamento desnecessário.
+    """
     marketplace = extract_hostname(url)
     #Verifica se já existe conteúdo cacheado para esta URL e marketplace
     cached = cache_manager.get(marketplace=marketplace, url=url)
@@ -426,7 +433,8 @@ async def scrape_product_common_async(
             circuit_breaker=circuit_breaker,
             recovery_manager=recovery_manager,
         )
-        if result.get("status") == "success":
+        #Encerra o loop em caso de sucesso ou quando nenhuma atualização é detecada (``NOT_MODIFIED``)
+        if result.get("status") in ("success", "NOT_MODIFIED"):
             break
 
     #Armazena no cache caso o scraping tenha sido bem-sucedido
