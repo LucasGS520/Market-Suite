@@ -516,3 +516,62 @@ async def test_scrape_playwright_async_robots_forbidden(monkeypatch):
         )
 
     assert exc.value.status_code == status.HTTP_403_FORBIDDEN
+
+@pytest.mark.asyncio
+async def test_get_html_backoff_reduz_taxa_apos_429(monkeypatch):
+    class DummyThrottle:
+        def __init__(self):
+            self.rate = 1.0
+            self.chamadas: list[int] = []
+
+        async def wait_async(self, *a, **k):
+            pass
+
+        async def backoff_async(self, attempt: int, circuit_key: str):
+            self.chamadas.append(attempt)
+            self.rate *= 0.5
+
+    throttle = DummyThrottle()
+
+    async def fake_fetch_html(url):
+        raise Exception("429")
+
+    async def fake_get_cached_html(url):
+        return None
+
+    async def fake_set_cached_html(*a, **k):
+        return None
+
+    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
+    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
+    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common, "cookie_manager", SimpleNamespace(get_cookies=lambda k: {}, update_from_response=lambda *a, **k: None))
+    common._HTTP_429_ATTEMPTS.clear()
+
+    params = dict(
+        target_url="https://exemplo.com",
+        circuit_key="ck",
+        product_type="monitored",
+        url_host="exemplo.com",
+        throttle=throttle,
+        human_delay=DummyHumanizedDelayManager(),
+        circuit_breaker=DummyCircuitBreaker(),
+        recovery_manager=DummyBlockRecoveryManager(),
+    )
+
+    with pytest.raises(HTTPException):
+        await common._get_html(**params)
+
+    taxa_primeira = throttle.rate
+    assert taxa_primeira < 1.0
+    assert throttle.chamadas == [1]
+    assert common._HTTP_429_ATTEMPTS["ck"] == 1
+
+    with pytest.raises(HTTPException):
+        await common._get_html(**params)
+
+    assert throttle.chamadas == [1, 2]
+    assert throttle.rate < taxa_primeira
+    assert common._HTTP_429_ATTEMPTS["ck"] == 2
+
+    common._HTTP_429_ATTEMPTS.clear()

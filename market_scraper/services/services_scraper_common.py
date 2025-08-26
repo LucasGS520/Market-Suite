@@ -63,6 +63,9 @@ ua_manager = IntelligentUserAgentManager()
 #Gerenciador de cache inteligente para produtos
 cache_manager = IntelligentCacheManager()
 
+#Contador de tentativas consecutivas para respostas HTTP 429 por chave de circuito
+_HTTP_429_ATTEMPTS: dict[str, int] = {}
+
 async def fetch_html_playwright(url: str) -> str:
     """ Retorna apenas o HTML da ``url`` utilizando Playwright
 
@@ -198,6 +201,15 @@ async def _get_html(
                 block_type = BlockResult.UNKNOWN
 
             SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            if block_type == BlockResult.HTTP_429:
+                #Incrementa o número de tentativas consecutivas e aplica backoff
+                attempt = _HTTP_429_ATTEMPTS.get(circuit_key, 0) + 1
+                _HTTP_429_ATTEMPTS[circuit_key] = attempt
+                await throttle.backoff_async(attempt, circuit_key)
+            else:
+                #Qualquer outro bloqueio reinicia o contador de tentativas
+                _HTTP_429_ATTEMPTS.pop(circuit_key, None)
+
             html = await _recover_html(
                 block_type,
                 url=target_url,
@@ -213,6 +225,9 @@ async def _get_html(
 
     if html is None:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Falha ao obter HTML")
+
+    #Reseta contador de 429 após obter o conteúdo com sucesso
+    _HTTP_429_ATTEMPTS.pop(circuit_key, None)
 
     #Verifica se o conteúdo foi alterado desde a últma coleta
     signer = ContentSignature(target_url)
