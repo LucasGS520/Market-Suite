@@ -35,7 +35,7 @@ from market_scraper.utils.constants import to_mobile_url, THROTTLE_RATE, THROTTL
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.throttle_manager import ThrottleManager
-from market_scraper.utils.http_utils import extract_hostname
+from market_scraper.utils.http_utils import extract_hostname, parse_retry_after
 from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_scraper.utils.price import parse_price_str
 from market_scraper.utils.robots_txt import RobotsTxtParser
@@ -73,8 +73,17 @@ async def fetch_html_playwright(url: str) -> str:
     elementos obrigatórios antes de capturar o conteúdo.
     """
     async with get_playwright_client() as client:
-        html = await client.fetch_html(url)
-        return html
+        try:
+            html = await client.fetch_html(url)
+            return html
+        except HTTPException as exc:
+            #Quando o Playwright retorna ``429``, respeita o tempo sugerido pelo servidor
+            if exc.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+                wait_for = parse_retry_after((exc.headers or {}).get("Retry-After"))
+                if wait_for:
+                    delay = HumanizedDelayManager()
+                    await delay.wait_async(None, reflection_time=wait_for)
+            raise
 
 async def _recover_html(
     block_type: BlockResult,
@@ -162,6 +171,21 @@ async def _get_html(
         if head_response.status_code == 304:
             SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="not_modified").inc()
             return NOT_MODIFIED
+        if head_response.status_code == 429:
+            retry_after = parse_retry_after(head_response.headers.get("Retry-After"))
+            if retry_after:
+                #Suspende novas tentativas conforme indicação do servidor
+                await human_delay.wait_async(None, reflection_time=retry_after)
+            circuit_breaker.record_failure(circuit_key)
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            return await _recover_html(
+                BlockResult.HTTP_429,
+                url=target_url,
+                url_host=url_host,
+                recovery_manager=recovery_manager,
+                human_delay=human_delay,
+                product_type=product_type,
+            )
         store_cache_headers(
             target_url,
             etag=head_response.headers.get("etag"),
@@ -183,6 +207,29 @@ async def _get_html(
             SCRAPER_HTTP_BLOCKED_TOTAL.inc()
             html = await _recover_html(
                 BlockResult.UNKNOWN,
+                url=target_url,
+                url_host=url_host,
+                recovery_manager=recovery_manager,
+                human_delay=human_delay,
+                product_type=product_type,
+            )
+        except HTTPException as e:
+            #Erros HTTP explícitos retornados pelo Playwright
+            logger.error("get_request_failed", url=target_url, error=str(e))
+            circuit_breaker.record_failure(circuit_key)
+            retry_after = parse_retry_after((e.headers or {}).get("Retry-After"))
+            if e.status_code == status.HTTP_403_FORBIDDEN:
+                block_type = BlockResult.HTTP_403
+            elif e.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+                block_type = BlockResult.HTTP_429
+                if retry_after:
+                    #Aguarda o tempo solicitado pelo servidor antes de prosseguir
+                    await human_delay.wait_async(None, reflection_time=retry_after)
+            else:
+                block_type = BlockResult.UNKNOWN
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            html = await _recover_html(
+                block_type,
                 url=target_url,
                 url_host=url_host,
                 recovery_manager=recovery_manager,

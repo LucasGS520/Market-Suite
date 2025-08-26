@@ -518,6 +518,60 @@ async def test_scrape_playwright_async_robots_forbidden(monkeypatch):
     assert exc.value.status_code == status.HTTP_403_FORBIDDEN
 
 @pytest.mark.asyncio
+async def test_head_retry_after_suspends(monkeypatch):
+    class DelayRecorder:
+        def __init__(self):
+            self.chamadas: list[float] = []
+
+        async def wait_async(self, text, reflection_time: float = 1.0):
+            self.chamadas.append(reflection_time)
+
+    delay_recorder = DelayRecorder()
+
+    class RecoveryOk(DummyBlockRecoveryManager):
+        async def handle_block(self, *a, **k):
+            return "<html>ok</html>"
+
+    class Head429(DummyAsyncClient):
+        async def head(self, *a, **k):
+            return SimpleNamespace(status_code=429, headers={"Retry-After": "3"})
+
+    monkeypatch.setattr(common, "HumanizedDelayManager", lambda: delay_recorder)
+    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
+    monkeypatch.setattr(common, "BlockRecoveryManager", RecoveryOk)
+    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
+    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+    monkeypatch.setattr(common, "fetch_html_playwright", lambda url: (_ for _ in ()).throw(AssertionError("não deve ser chamado")))
+    monkeypatch.setattr(common.httpx, "AsyncClient", Head429)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
+    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
+    monkeypatch.setattr(common, "ContentSignature", DummySignature)
+
+    async def fake_get_cached_html(url):
+        return None
+
+    async def fake_set_cached_html(*a, **k):
+        return None
+
+    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
+    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
+    monkeypatch.setattr(common.parser, "parse_product_details", lambda html, url: {"current_price": "10"})
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "success"
+    assert any(abs(c - 3) < 0.01 for c in delay_recorder.chamadas)
+
+@pytest.mark.asyncio
 async def test_get_html_backoff_reduz_taxa_apos_429(monkeypatch):
     class DummyThrottle:
         def __init__(self):
