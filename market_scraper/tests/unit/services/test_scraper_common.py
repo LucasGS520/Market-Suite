@@ -411,7 +411,9 @@ async def test_scrape_playwright_async_not_modified_on_304(monkeypatch, fake_red
     )
 
     assert resultado == {"status": "NOT_MODIFIED"}
-    assert capturado["headers"] == {"If-None-Match": "e1", "If-Modified-Since": "L1"}
+    assert capturado["headers"].get("If-None-Match") == "e1"
+    assert capturado["headers"].get("If-Modified-Since") == "L1"
+    assert "User-Agent" in capturado["headers"]
     headers = common.get_cache_headers(url)
     assert headers["etag"] == "e1"
     assert headers["last_modified"] == "L1"
@@ -476,5 +478,7 @@ async def test_scrape_playwright_async_signature_skips_parsing(monkeypatch, fake
     )
 
     assert resultado == {"status": "NOT_MODIFIED"}
-    assert capturado["headers"] == {"If-None-Match": "e1", "If-Modified-Since": "L1"}
+    assert capturado["headers"].get("If-None-Match") == "e1"
+    assert capturado["headers"].get("If-Modified-Since") == "L1"
+    assert "User-Agent" in capturado["headers"]
     assert assinante.get() == assinante.calculate(html)

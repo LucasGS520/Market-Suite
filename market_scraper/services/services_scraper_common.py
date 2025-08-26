@@ -133,15 +133,16 @@ async def _get_html(
         #Reutiliza o valor do cabeçalho HTTP "Last-Modified" salvo anteriormente
         conditional_headers["If-Modified-Since"] = last_modified
 
-    #Adiciona cabeçalhos de navegação real para evitar bloqueios
+    #Adiciona cabeçalhos de navegação real (incluindo User-Agent) para evitar bloqueios
     ua = ua_manager.get_user_agent(circuit_key)
     request_headers = {**conditional_headers, "User-Agent": ua}
     cookies = cookie_manager.get_cookies(circuit_key)
 
     try:
         async with httpx.AsyncClient(follow_redirects=True) as client:
+            #Utiliza ``request_headers`` para enviar User-Agent e cabeçalhos condicionais
             head_response = await client.head(
-                target_url, headers=conditional_headers, cookies=cookies
+                target_url, headers=request_headers, cookies=cookies
             )
     except Exception as err:
         logger.warning("head_request_failed", url=target_url, error=str(err))
