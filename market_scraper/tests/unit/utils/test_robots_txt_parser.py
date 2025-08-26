@@ -35,8 +35,11 @@ def mock_http(monkeypatch):
     monkeypatch.setattr("requests.get", fake_get)
     return response
 
-@pytest.mark.asyncio
+@pytest.fixture()
+def no_redis(monkeypatch):
+    monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: None)
 
+@pytest.mark.asyncio
 async def test_crawl_delay_user_agent_exact_and_wildcard(fake_redis, mock_http):
     robots_url = "https://example.com/robots.txt"
     mock_http[robots_url] = type("Resp", (), {
@@ -140,3 +143,35 @@ async def test_is_allowed_handless_allow_and_disallow(fake_redis, mock_http):
     assert await parser.is_allowed("/publico/pagina") is True
     assert await parser.is_allowed("/privado/segredo") is False
     assert await parser.is_allowed("/privado/faq") is True
+
+@pytest.mark.asyncio
+async def test_crawl_delay_sem_redis(no_redis, mock_http):
+    robots_url = "https://noredis.com/robots.txt"
+    mock_http[robots_url] = type("Resp", (), {
+        "text": "User-agent: *\nCrawl-delay: 4",
+        "status_code": 200,
+    })()
+
+    parser = RobotsTxtParser(base_url="https://noredis.com")
+    assert parser.redis is None
+
+    delay = await parser.get_crawl_delay("*")
+    assert delay == 4
+
+@pytest.mark.asyncio
+async def test_is_allowed_sem_redis(no_redis, mock_http):
+    robots_url = "https://noredis.com/robots.txt"
+    mock_http[robots_url] = type("Resp", (), {
+        "text": """
+        User-agent: *
+        Disallow: /privado
+        Allow: /publico
+        """,
+        "status_code": 200,
+    })
+
+    parser = RobotsTxtParser(base_url="https://noredis.com")
+    assert parser.redis is None
+
+    assert await parser.is_allowed("/publico/pagina") is True
+    assert await parser.is_allowed("/privado/segredo") is False

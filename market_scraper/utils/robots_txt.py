@@ -36,9 +36,12 @@ class RobotsTxtParser:
         para que a função seja utilizada em contextos assíncronos sem
         bloquear o loop de eventos.
         """
-        cached = await asyncio.to_thread (self.redis.get, self.cache_key)
+        cached = None
+        if self.redis is not None:
+            cached = await asyncio.to_thread(self.redis.get, self.cache_key)
+
         if cached:
-            #Se for bytes, decodifica; Se já for str, retorna diretamente
+            #Se for bytes, decodifica; se já for str, retorna diretamente
             return cached.decode("utf-8") if isinstance(cached, (bytes, bytearray)) else cached
 
         url = urljoin(self.base, "/robots.txt")
@@ -49,8 +52,9 @@ class RobotsTxtParser:
             logger.warning("robots_fetch_failed", url=url, error=str(e))
             content = ""
 
-        #Salva no Redis para próximas leituras
-        await asyncio.to_thread(self.redis.set, self.cache_key, content, ex=ROBOTS_CACHE_TTL)
+        #Salva no Redis para próximas leituras, caso disponível
+        if self.redis is not None:
+            await asyncio.to_thread(self.redis.set, self.cache_key, content, ex=ROBOTS_CACHE_TTL)
         return content
 
     async def get_crawl_delay(self, user_agent: str = "*") -> Optional[float]:
@@ -98,7 +102,12 @@ class RobotsTxtParser:
 
         #Verifica se já existe resultado em cache para este caminho
         cache_rule_key = f"{self.cache_key}:{user_agent}:{path}"
-        cached = await asyncio.to_thread(self.redis.get, cache_rule_key)
+
+        #Busca regra em cache apenas se Redis estiver acessível
+        cached = None
+        if self.redis is not None:
+            cached = await asyncio.to_thread(self.redis.get, cache_rule_key)
+
         if cached is not None:
             return cached.decode("utf-8") == "1" if isinstance(cached, (bytes, bytearray)) else cached == "1"
 
@@ -152,7 +161,9 @@ class RobotsTxtParser:
                     best_len = rule_len
                     allowed = is_allow
 
-        await asyncio.to_thread(
-            self.redis.set, cache_rule_key, "1" if allowed else "0", ex=ROBOTS_CACHE_TTL
-        )
+        #Armazena a decisão em cache somente se o Redis estiver presente
+        if self.redis is not None:
+            await asyncio.to_thread(
+                self.redis.set, cache_rule_key, "1" if allowed else "0", ex=ROBOTS_CACHE_TTL
+            )
         return allowed
