@@ -12,6 +12,7 @@ from uuid import UUID
 
 import asyncio
 import structlog
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 
@@ -366,6 +367,13 @@ async def scrape_playwright_async(
     if delay:
         throttle.jitter_min = delay * 0.5
         throttle.jitter_max = delay * 1.5
+
+    caminho = urlparse(target_url).path or "/"
+    permitido = await robots.is_allowed(path=caminho, user_agent="*")
+    if not permitido:
+        logger.warning("robots_disallow", url=target_url)
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso proibido pelo robots.txt")
 
     html = await _get_html(
         target_url=target_url,

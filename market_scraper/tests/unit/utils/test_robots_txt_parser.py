@@ -120,3 +120,23 @@ async def test_cache_isolated_per_domain(fake_redis, mock_http):
     assert d2 == 7
     assert parser1.cache_key in fake_redis.store
     assert parser2.cache_key in fake_redis.store
+
+@pytest.mark.asyncio
+async def test_is_allowed_handless_allow_and_disallow(fake_redis, mock_http):
+    robots_url = "https://example.com/robots.txt"
+    mock_http[robots_url] = type("Resp", (), {
+        "text": """
+        User-agent: *
+        Disallow: /privado/
+        Allow: /privado/faq
+        Allow: /publico/
+        """,
+        "status_code": 200
+    })()
+
+    parser = RobotsTxtParser(base_url="https://example.com")
+    parser.redis = fake_redis
+
+    assert await parser.is_allowed("/publico/pagina") is True
+    assert await parser.is_allowed("/privado/segredo") is False
+    assert await parser.is_allowed("/privado/faq") is True

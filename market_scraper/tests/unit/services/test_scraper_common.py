@@ -46,6 +46,9 @@ class DummyRobotsTxtParser:
     async def get_crawl_delay(self, *a, **k):
         return None
 
+    async def is_allowed(self, *a, **k):
+        return True
+
 class DummyAsyncClient:
     def __init__(self, *a, **k):
         pass
@@ -482,3 +485,34 @@ async def test_scrape_playwright_async_signature_skips_parsing(monkeypatch, fake
     assert capturado["headers"].get("If-Modified-Since") == "L1"
     assert "User-Agent" in capturado["headers"]
     assert assinante.get() == assinante.calculate(html)
+
+@pytest.mark.asyncio
+async def test_scrape_playwright_async_robots_forbidden(monkeypatch):
+    url = "https://exemplo.com/proibido"
+
+    class RobotsForbidden(DummyRobotsTxtParser):
+        async def is_allowed(self, *a, **k):
+            return False
+
+    monkeypatch.setattr(common, "RobotsTxtParser", RobotsForbidden)
+    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
+    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
+    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
+    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
+
+    async def fake_get_html(*a, **k):
+        raise AssertionError("_get_html não deve ser chamado")
+
+    monkeypatch.setattr(common, "_get_html", fake_get_html)
+
+    payload = SimpleNamespace(product_url=url)
+
+    with pytest.raises(HTTPException) as exc:
+        await common.scrape_playwright_async(
+            url=url,
+            user_id=uuid4(),
+            payload=payload,
+            product_type="monitored",
+        )
+
+    assert exc.value.status_code == status.HTTP_403_FORBIDDEN
