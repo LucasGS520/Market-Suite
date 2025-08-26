@@ -86,3 +86,19 @@ def test_parse_endpoint_competitor_not_monitored(monkeypatch) -> None:
     assert dados["seller"] is None
     assert dados["shipping"] is None
     assert dados["marketplace"] == "exemplo.com"
+
+def test_parse_endpoint_not_monitored(monkeypatch) -> None:
+    client = TestClient(app)
+
+    #Retorno simulado indicando que não houve modificação no conteúdo
+    async def fake_scrape_product_common_async(*a, **k):
+        return {"status": "NOT_MODIFIED"}
+
+    monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
+
+    payload = {"url": "http://exemplo.com/item"}
+
+    resp = client.post("/scrape/parse", json=payload)
+    #Como nada muda, o endpoint deve responder com 304 sem corpo
+    assert resp.status_code == 304
+    assert resp.text == ""

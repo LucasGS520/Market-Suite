@@ -10,7 +10,7 @@ from decimal import Decimal
 from uuid import UUID
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, status
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.schemas.schemas_scraper import ScraperRequest, ScraperResponse
@@ -24,7 +24,11 @@ router = APIRouter(tags=["scraper"])
 
 @router.post("/parse", response_model=ScraperResponse)
 async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
-    """ Executa o scraping e retorna apenas os dados parseados """
+    """ Executa o scraping e retorna apenas os dados parseados
+
+    Caso o conteúdo não tenha sido modificado desde a última
+    coleta, retorna HTTP 304 sem corpo de resposta.
+    """
 
     if payload.product_type == "monitored":
         base_payload = MonitoredProductCreateScraping(
@@ -44,6 +48,10 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
         payload=base_payload,
         product_type=payload.product_type,
     )
+
+    #Quando o serviço indica que o conteúdo não foi modificado, responde com 304
+    if result.get("status") == "NOT_MODIFIED":
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED)
 
     details = result.get("details")
     if not details:
