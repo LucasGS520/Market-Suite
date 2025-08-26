@@ -4,7 +4,7 @@ import logging
 import pytest
 
 from shared.utils import redis_client
-from market_scraper.utils.http_cache import store_cache_headers, get_cache_headers, ContentSignature, _hash_url, NOT_MODIFIED, _ETAG_PREFIX, _LAST_MODIFIED_PREFIX
+from market_scraper.utils.http_cache import store_cache_headers, get_cache_headers, ContentSignature, _hash_url, NOT_MODIFIED, _ETAG_PREFIX, _LAST_MODIFIED_PREFIX, settings
 
 
 def test_store_and_retrieve_headers(fake_redis):
@@ -47,18 +47,34 @@ def test_check_or_update(fake_redis):
     assert nova_assinatura == signer.calculate(html_b)
     assert signer.get() == nova_assinatura
 
-def test_cache_headers_expiration(fake_redis):
+def test_cache_headers_expiration(fake_redis, monkeypatch):
     url = "https://example.com/expira"
+    monkeypatch.setattr(settings, "ETAG_CACHE_TTL", 60)
     store_cache_headers(
         url,
         etag="e1",
         last_modified="Mon, 01 Jan 2024 00:00:00 GMT",
-        ttl_seconds=60,
     )
     fake_redis.advance_time(61)
     headers = get_cache_headers(url)
     assert headers["etag"] is None
     assert headers["last_modified"] is None
+
+def test_check_or_update_expiration(fake_redis, monkeypatch):
+    url = "https://example.com/produto"
+    html = "<html>A</html>"
+    monkeypatch.setattr(settings, "SIG_CACHE_TTL", 60)
+
+    signer = ContentSignature(url)
+
+    #Primeira atualização armazena assinatura
+    signer.check_or_update(html)
+    #Segunda chamada deve retornar NOT_MODIFIED
+    assert signer.check_or_update(html) is NOT_MODIFIED
+
+    #Após expirar, um novo hash é gerado
+    fake_redis.advance_time(61)
+    assert signer.check_or_update(html) is not NOT_MODIFIED
 
 def test_get_cache_headers_decodes_bytes(fake_redis):
     url = "https://example.com/bytes"

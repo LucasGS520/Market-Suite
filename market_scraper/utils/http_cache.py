@@ -14,6 +14,7 @@ import logging
 from typing import Dict, Optional
 
 from shared.utils import redis_client
+from market_scraper.core.config_scraper import settings
 
 
 #Instancia o logger do módulo para registrar eventos e errors
@@ -36,11 +37,12 @@ def store_cache_headers(
     *,
     etag: Optional[str] = None,
     last_modified: Optional[str] = None,
-    ttl_seconds: int | None = 86_400,
+    ttl_seconds: int | None = None,
 ) -> None:
     """ Armazena os cabeçalhos ``ETag`` e ``Last_Modified`` associados à URL
 
-    Caso o cliente Redis não esteja disponível, a função retorna sem gerar
+    O tempo de vida dos dados é controlado por ``ETAG_CACHE_TTL``. Caso o
+    cliente Redis não esteja disponível, a função retorna sem gerar
     exceções, garantindo que a ausência de cache não interrompa o fluxo
     principal de scraping.
     """
@@ -50,12 +52,13 @@ def store_cache_headers(
         return
 
     url_hash = _hash_url(url)
+    ttl = ttl_seconds if ttl_seconds is not None else settings.ETAG_CACHE_TTL
     try:
         if etag is not None:
-            client.set(f"{_ETAG_PREFIX}{url_hash}", etag, ex=ttl_seconds)
+            client.set(f"{_ETAG_PREFIX}{url_hash}", etag, ex=ttl)
         if last_modified is not None:
             client.set(
-                f"{_LAST_MODIFIED_PREFIX}{url_hash}", last_modified, ex=ttl_seconds
+                f"{_LAST_MODIFIED_PREFIX}{url_hash}", last_modified, ex=ttl
             )
     except Exception:
         #Em caso de falha, registra o erro e continua sem iterromper o fluxo
@@ -92,7 +95,11 @@ def get_cache_headers(url: str) -> Dict[str, Optional[str]]:
         return {"etag": None, "last_modified": None}
 
 class ContentSignature:
-    """ Gerencia a assinatura de conteúdo HTML de uma URL """
+    """ Gerencia a assinatura de conteúdo HTML de uma URL
+
+    As assinaturas expiram conforme ``SIG_CACHE_TTL`` para evitar
+    que valores obsoletos permaneçam no Redis.
+    """
     def __init__(self, url: str):
         self.url = url
 
@@ -121,7 +128,8 @@ class ContentSignature:
         client = redis_client.get_redis_client()
         if client is not None:
             try:
-                client.set(self._key(), signature)
+                #Define um TTL para evitar que assinaturas antigas permaneçam indefinidamente
+                client.set(self._key(), signature, ex=settings.SIG_CACHE_TTL)
             except Exception:
                 logger.exception("Erro ao atualizar assinatura de conteúdo no Redis")
         return signature
@@ -144,7 +152,8 @@ class ContentSignature:
             old_signature = client.get(key)
             if old_signature == new_signature:
                 return False
-            client.set(key, new_signature)
+            #Armazena a nova assinatura com um TTL configurável
+            client.set(key, new_signature, ex=settings.SIG_CACHE_TTL)
             return True
         except Exception:
             logger.exception("Erro ao verificar assinatura de conteúdo no Redis")
@@ -170,7 +179,7 @@ class ContentSignature:
             old_signature = client.get(key)
             if old_signature == signature:
                 return NOT_MODIFIED
-            client.set(key, signature)
+            client.set(key, signature, ex=settings.SIG_CACHE_TTL)
             return signature
         except Exception:
             logger.exception("Erro ao verificar/atualizar assinatura de conteúdo no Redis")
