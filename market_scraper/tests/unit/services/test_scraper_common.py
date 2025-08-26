@@ -456,7 +456,7 @@ async def test_scrape_playwright_async_signature_skips_parsing(monkeypatch, fake
 
         async def head(self, url, headers=None, cookies=None):
             capturado["headers"] = headers
-            return SimpleNamespace(status_code=200, headers={"etag": "e1", "last_modified": "L1"})
+            return SimpleNamespace(status_code=200, headers={"etag": "e1", "Last-Modified": "L1"})
 
     monkeypatch.setattr(common.httpx, "AsyncClient", Head200)
     monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)

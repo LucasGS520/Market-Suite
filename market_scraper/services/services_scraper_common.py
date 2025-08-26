@@ -162,7 +162,7 @@ async def _get_html(
             target_url,
             etag=head_response.headers.get("etag"),
             #Utiliza a grafia padrão do cabeçalho HTTP ``Last-Modified``
-            last_modified=head_response.headers.get("last_modified"),
+            last_modified=head_response.headers.get("Last-Modified"),
         )
 
     html: str | None = await get_cached_html(target_url)
