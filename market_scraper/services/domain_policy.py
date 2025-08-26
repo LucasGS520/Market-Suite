@@ -4,7 +4,7 @@ from __future__ import annotations
 
 Este módulo define a ordem de execução das estratégias de scraping para
 cada marketplace suportado. Novas estratégias podem ser registradas no
-mapa ``STRATEGY_REGISTRY`` e referenciadas em ``DOMAIN_POLICES``
+mapa ``STRATEGY_REGISTRY`` e referenciadas em ``DOMAIN_POLICIES``
 """
 
 from typing import Dict, List, Type
