@@ -17,7 +17,8 @@ import structlog
 from shared.utils.redis_client import get_redis_client
 
 
-logger = structlog.getLogger(__name__)
+#Logger configurado com structlog
+logger = structlog.get_logger(__name__)
 
 class IntelligentCacheManager:
     """ Cache simples com isolamento por marketplace """
