@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+""" Testes de seleção dinâmica de estratégias de scraping """
+
+from typing import Any
+
+from fastapi.testclient import TestClient
+import pytest
+
+from market_scraper.main import app
+from market_scraper.strategies.base import ScrapingStrategy
+from market_scraper.services import domain_policy
+from market_scraper.services import services_scraper_common as common
+from market_scraper.strategies.playwright_default import PlaywrightDefaultStrategy
+
+
+def _preparar_ambiente(monkeypatch) -> None:
+    """ Configura dependências para evitar operações externas nos testes """
+    #Desabilita uso real de cache
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+
+    #Evita navegação real pelo Playwright
+    async def fake_default_get_data(
+        self,
+        *,
+        url,
+        user_id,
+        payload,
+        product_type,
+        rate_limiter=None,
+        circuit_breaker=None,
+        recovery_manager=None,
+        headers=None,
+        **kwargs,
+    ) -> dict:
+        return {
+            "status": "success",
+            "details": {"name": "Fake", "current_price": "R$ 0,00"},
+        }
+
+    monkeypatch.setattr(
+        PlaywrightDefaultStrategy,
+        "get_data",
+        fake_default_get_data,
+    )
+
+class FakeMercadoLivreStrategy(ScrapingStrategy):
+    """ Estratégia fictícia utilizada apenas para testes. """
+
+    priority = 10
+
+    def supports_url(self, url: str) -> bool:
+        """ Suporta apenas URLs do Mercado Livre """
+        return "mercadolivre.com.br" in url
+
+    async def get_data(
+        self,
+        *,
+        url: str,
+        user_id,
+        payload,
+        product_type,
+        rate_limiter=None,
+        circuit_breaker=None,
+        recovery_manager=None,
+    ) -> dict:
+        """ Retorna dados simulados de produto """
+        return {
+            "status": "success",
+            "details": {"name": "Produto ML", "current_price": "RS 10,00"}
+        }
+
+def test_seleciona_estrategia_mercado_livre(monkeypatch) -> None:
+    """ Garante que URLs do Mercado Livre utilizam a estratégia customizada """
+    _preparar_ambiente(monkeypatch)
+    chamada = {"executada": False}
+
+    async def fake_get_data(self, **kwargs):
+        chamada["executada"] = True
+        return {
+            "status": "success",
+            "details": {"name": "Produto ML", "current_price": "R$ 10,00"},
+        }
+
+    monkeypatch.setattr(FakeMercadoLivreStrategy, "get_data", fake_get_data)
+    monkeypatch.setattr(
+        domain_policy,
+        "STRATEGY_REGISTRY",
+        {"FAKE": FakeMercadoLivreStrategy, "PLAYWRIGHT": PlaywrightDefaultStrategy}
+    )
+    monkeypatch.setattr(
+        domain_policy,
+        "DOMAIN_POLICIES",
+        {"mercadolivre.com.br": ["FAKE", "PLAYWRIGHT"]},
+    )
+
+    client = TestClient(app)
+    resp = client.post(
+        "/scrape/parse", json={"url": "https://www.mercadolivre.com.br/item/1"}
+    )
+    assert resp.status_code == 200
+    assert chamada["executada"]
+
+@pytest.mark.xfail(reason="Estratégia da Amazon ainda não implementada")
+def test_seleciona_estrategia_amazon(monkeypatch) -> None:
+    """ Teste placeholder para o domínio da Amazon """
+    _preparar_ambiente(monkeypatch)
+    from market_scraper.services import services_scraper_common as common
+
+    escolhido: dict[str, Any] = {}
+    original = common.strategies_for
+
+    def capturar(url: str):
+        resultado = original(url)
+        escolhido["estrategia"] = resultado[0]
+        return resultado
+
+    monkeypatch.setattr(common, "strategies_for", capturar)
+    client = TestClient(app)
+    resp = client.post(
+        "/scrape/parse", json={"url": "https://www.amazon.com.br/produto"}
+    )
+    assert resp.status_code == 200
+    assert escolhido["estrategia"].__class__.__name__ == "AmazonStrategy"
+
+@pytest.mark.xfail(reason="Estratégia da Shopee ainda não implementada")
+def test_seleciona_estrategia_shopee(monkeypatch) -> None:
+    """ Teste placeholder para domínio da Shopee """
+    _preparar_ambiente(monkeypatch)
+    escolhido: dict[str, Any] = {}
+    original = common.strategies_for
+
+    def capturar(url: str):
+        resultado = original(url)
+        escolhido["estrategia"] = resultado[0]
+        return resultado
+
+    monkeypatch.setattr(common, "strategies_for", capturar)
+    client = TestClient(app)
+    resp = client.post(
+        "/scrape/parse", json={"url": "https://shopee.com.br/produto"}
+    )
+    assert resp.status_code == 200
+    assert escolhido["estrategia"].__class__.__name__ == "ShopeeStrategy"
+
+@pytest.mark.xfail(reason="Estratégia da Magalu ainda não implementada")
+def test_seleciona_estrategia_magalu(monkeypatch) -> None:
+    """ Teste placeholder para o domínio da Magalu """
+    _preparar_ambiente(monkeypatch)
+    escolhido: dict[str, Any] = {}
+    original = common.strategies_for
+
+    def capturar(url: str):
+        resultado = original(url)
+        escolhido["estrategia"] = resultado[0]
+        return resultado
+
+    monkeypatch.setattr(common, "strategies_for", capturar)
+    client = TestClient(app)
+    resp = client.post(
+        "/scrape/parse", json={"url": "https://www.magazineluiza.com.br/produto"}
+    )
+    assert resp.status_code == 200
+    assert escolhido["estrategia"].__class__.__name__ == "MagaluStrategy"

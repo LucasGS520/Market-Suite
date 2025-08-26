@@ -54,6 +54,7 @@ def test_parse_endpoint_com_cache(monkeypatch) -> None:
     assert corpo["name"] == "Produto Teste"
     #Verifica que o valor é serializado como string e mantém a precisão
     assert Decimal(corpo["current_price"]) == Decimal("10.00")
+    assert corpo["marketplace"] == "example.com"
 
     #Segunda chamada: HTML vem do cache e ``set_cached_html`` não é invocado
     resp2 = client.post("/scrape/parse", json=payload)
@@ -84,3 +85,4 @@ def test_parse_endpoint_competitor_not_monitored(monkeypatch) -> None:
     assert dados["free_shipping"] is False
     assert dados["seller"] is None
     assert dados["shipping"] is None
+    assert dados["marketplace"] == "exemplo.com"

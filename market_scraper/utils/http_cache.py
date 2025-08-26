@@ -1,0 +1,186 @@
+""" Utilitários de cache para requisições HTTP
+
+Fornece funções para armazenar e recuperar cabeçalhos ``ETag`` e
+``Last-Modified`` de cada URL usando Redis. Também disponibiliza a classe
+:class:`ContentSignature` responsável por calcular e persistir um hash
+``sha256`` do conteúdo HTML, permitindo detectar quando uma página não
+sofreu alterações entre duas requisições.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from typing import Dict, Optional
+
+from shared.utils import redis_client
+from market_scraper.core.config_scraper import settings
+
+
+#Instancia o logger do módulo para registrar eventos e errors
+logger = logging.getLogger(__name__)
+
+#Prefixos padronizados para as chaves no Redis
+_ETAG_PREFIX = "http_cache:etag:"
+_LAST_MODIFIED_PREFIX = "http_cache:last_modified:"
+_SIGNATURE_PREFIX = "http_cache:signature:"
+
+#Sentinela utilizada para indicar que o conteúdo não foi modificado
+NOT_MODIFIED = object()
+
+def _hash_url(url: str) -> str:
+    """ Gera um hash único para a URL usando ``sha256`` """
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+def store_cache_headers(
+    url: str,
+    *,
+    etag: Optional[str] = None,
+    last_modified: Optional[str] = None,
+    ttl_seconds: int | None = None,
+) -> None:
+    """ Armazena os cabeçalhos ``ETag`` e ``Last_Modified`` associados à URL
+
+    O tempo de vida dos dados é controlado por ``ETAG_CACHE_TTL``. Caso o
+    cliente Redis não esteja disponível, a função retorna sem gerar
+    exceções, garantindo que a ausência de cache não interrompa o fluxo
+    principal de scraping.
+    """
+
+    client = redis_client.get_redis_client()
+    if client is None:
+        return
+
+    url_hash = _hash_url(url)
+    ttl = ttl_seconds if ttl_seconds is not None else settings.ETAG_CACHE_TTL
+    try:
+        if etag is not None:
+            client.set(f"{_ETAG_PREFIX}{url_hash}", etag, ex=ttl)
+        if last_modified is not None:
+            client.set(
+                f"{_LAST_MODIFIED_PREFIX}{url_hash}", last_modified, ex=ttl
+            )
+    except Exception:
+        #Em caso de falha, registra o erro e continua sem iterromper o fluxo
+        logger.exception("Falha ao armazenar cabeçalhos de cache no Redis")
+
+def get_cache_headers(url: str) -> Dict[str, Optional[str]]:
+    """ Recupera os valores de ``ETag`` e ``Last-Modified`` para a URL
+
+    Retorna sempre um dicionário contendo as chaves ``ETag`` e
+    ``last_modified``. Quando não houver dados ou o Redis estiver
+    indisponível, os valores serão ``None``. Caso o Redis retorne
+    valores em ``bytes``, eles são decodificados para ``str`` utilizando UTF-8
+    """
+
+    client = redis_client.get_redis_client()
+    if client is None:
+        return {"etag": None, "last_modified": None}
+
+    url_hash = _hash_url(url)
+    try:
+        etag = client.get(f"{_ETAG_PREFIX}{url_hash}")
+        last_modified = client.get(f"{_LAST_MODIFIED_PREFIX}{url_hash}")
+
+        #Os clientes Redis normalmente retornam ``bytes``.
+        #Garante que os valores sejam convertidos para ``str`` antes de serem utilizados
+        if isinstance(etag, bytes):
+            etag = etag.decode("utf-8")
+        if isinstance(last_modified, bytes):
+            last_modified = last_modified.decode("utf-8")
+
+        return {"etag": etag, "last_modified": last_modified}
+    except Exception:
+        logger.exception("Falha ao recuperar cabeçalhos de cache no Redis")
+        return {"etag": None, "last_modified": None}
+
+class ContentSignature:
+    """ Gerencia a assinatura de conteúdo HTML de uma URL
+
+    As assinaturas expiram conforme ``SIG_CACHE_TTL`` para evitar
+    que valores obsoletos permaneçam no Redis.
+    """
+    def __init__(self, url: str):
+        self.url = url
+
+    def _key(self) -> str:
+        """ Monta a chave exclusiva utilizada no Redis """
+        return f"{_SIGNATURE_PREFIX}{_hash_url(self.url)}"
+
+    def calculate(self, html: str) -> str:
+        """ Calcula o hash ``sha256`` para o conteúdo HTML informado """
+        return hashlib.sha256(html.encode("utf-8")).hexdigest()
+
+    def get(self) -> Optional[str]:
+        """ Obtém a assinatura atual armazenada para a URL """
+        client = redis_client.get_redis_client()
+        if client is None:
+            return None
+        try:
+            return client.get(self._key())
+        except Exception:
+            logger.exception("Erro ao obter assinatura de conteúdo no Redis")
+            return None
+
+    def update(self, html: str) -> str:
+        """ Calcula e armazena a assinatura para o HTML fornecido """
+        signature = self.calculate(html)
+        client = redis_client.get_redis_client()
+        if client is not None:
+            try:
+                #Define um TTL para evitar que assinaturas antigas permaneçam indefinidamente
+                client.set(self._key(), signature, ex=settings.SIG_CACHE_TTL)
+            except Exception:
+                logger.exception("Erro ao atualizar assinatura de conteúdo no Redis")
+        return signature
+
+    def has_changed(self, html: str) -> bool:
+        """ Verifica se o HTML mudou em relação ao valor armazenado
+
+        A primeira chamada sempre irá armazenar o hash do conteúdo e
+        retornar ``True``. Nas chamadas subsequentes, se o hash calculado
+        for idêntico ao anterior, retorna ``False`` indicando que o
+        conteúdo não sofreu alterações
+        """
+        client = redis_client.get_redis_client()
+        if client is None:
+            return True
+
+        key = self._key()
+        new_signature = self.calculate(html)
+        try:
+            old_signature = client.get(key)
+            if old_signature == new_signature:
+                return False
+            #Armazena a nova assinatura com um TTL configurável
+            client.set(key, new_signature, ex=settings.SIG_CACHE_TTL)
+            return True
+        except Exception:
+            logger.exception("Erro ao verificar assinatura de conteúdo no Redis")
+            #Em caso de erro assume que o conteúdo mudou para evitar falsos negativos
+            return True
+
+    def check_or_update(self, html: str):
+        """ Verifica se o conteúdo foi modificado e atualiza o Redis conforme necessário
+
+        Retorna ``NOT_MODIFIED`` quando o hash calculado for igual ao já
+        armazenado para a URL. Caso o conteúdo tenha mudado, salva a nova
+        assinatura no Redis e retorna o hash calculado. Se o Redis estiver
+        indisponível ou ocorrer algum erro, sempre retorna o hash recém
+        calculado.
+        """
+        signature = self.calculate(html)
+        client = redis_client.get_redis_client()
+        if client is None:
+            return signature
+
+        key = self._key()
+        try:
+            old_signature = client.get(key)
+            if old_signature == signature:
+                return NOT_MODIFIED
+            client.set(key, signature, ex=settings.SIG_CACHE_TTL)
+            return signature
+        except Exception:
+            logger.exception("Erro ao verificar/atualizar assinatura de conteúdo no Redis")
+            return signature

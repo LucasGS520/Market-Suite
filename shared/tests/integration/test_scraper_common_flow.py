@@ -57,6 +57,9 @@ class DummyRobotsTxt:
     async def get_crawl_delay(self, user_agent: str = "*") -> None:
         return None
 
+    async def is_allowed(self, *a, **k) -> bool:
+        return True
+
 def test_scrape_product_common_consulta_redis_client():
     payload = MonitoredProductCreateScraping(
         name_identification="Produto Teste",

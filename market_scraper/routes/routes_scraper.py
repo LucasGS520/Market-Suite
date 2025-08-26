@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from uuid import UUID
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 
@@ -48,6 +49,9 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
     if not details:
         raise HTTPException(status_code=500, detail="Falha ao extrair dados")
 
+    parsed = urlparse(str(payload.url))
+    marketplace = parsed.netloc #Extrai domínio para identificar o marketplace
+
     return ScraperResponse(
         name=details.get("name"),
         #Converte strings de preço para ``Decimal`` garantindo precisão
@@ -59,4 +63,5 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
         free_shipping=details.get("shipping") == "Frete Grátis",
         seller=details.get("seller"),
         shipping=details.get("shipping"),
+        marketplace=marketplace,
     )

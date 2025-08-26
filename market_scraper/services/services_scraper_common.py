@@ -12,9 +12,9 @@ from uuid import UUID
 
 import asyncio
 import structlog
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
-from watchfiles import awatch
 
 from market_scraper.core.config_scraper import settings
 
@@ -41,8 +41,12 @@ from market_scraper.utils.price import parse_price_str
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.cookie_manager import cookie_manager
 from market_scraper.utils.playwright_client import get_playwright_client
+from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
 
-from market_scraper.strategies import get_strategy_for_url
+import httpx
+
+from market_scraper.services.domain_policy import strategies_for
 
 import market_scraper.services.services_parser as parser
 from market_scraper.services.services_parser import CaptchaDetectedError
@@ -56,6 +60,8 @@ logger = structlog.get_logger("scraper_common")
 
 #Gerenciador de User-Agent com rotação inteligente
 ua_manager = IntelligentUserAgentManager()
+#Gerenciador de cache inteligente para produtos
+cache_manager = IntelligentCacheManager()
 
 async def fetch_html_playwright(url: str) -> str:
     """ Retorna apenas o HTML da ``url`` utilizando Playwright
@@ -100,11 +106,65 @@ async def _get_html(
     human_delay: HumanizedDelayManager,
     circuit_breaker: CircuitBreaker,
     recovery_manager: BlockRecoveryManager,
-) -> str:
-    """ Obtém o HTML da página utilizando cache e recuperação de bloqueios """
+):
+    """ Obtém o HTML da página utilizando cache e recuperação de bloqueios
+
+    Antes de realizar a navegação completa, executa uma requisição ``HEAD``
+    condicional com os valores ``ETag`` e ``Last-Modified`` em cache,
+    garantindo que apenas strings válidas sejam enviadas. A requisição ``HEAD``
+    deve imitar a navegação real adicionando ``User-Agent`` e cookies atuais,
+    reduzindo a chance de bloqueios pelo servidor. Caso o servidor responda
+    ``304 Not Modified``, o fluxo é encerrado retornando a sentinela ``NOT_MODIFIED``
+    """
     #Aguarda para simular leitura humana e respeitar a taxa de requisições
     await human_delay.wait_async(None)
     await throttle.wait_async(identifier="get", circuit_key=circuit_key)
+
+    #Recupera cabeçalhos previamente armazenados para uso condicional
+    cached_headers = get_cache_headers(target_url)
+    conditional_headers: dict[str, str] = {}
+
+    #Garante que apenas valores de texto sejam enviados como cabeçalhos
+    etag = cached_headers.get("etag")
+    if isinstance(etag, str):
+        conditional_headers["If-None-Match"] = etag
+
+    last_modified = cached_headers.get("last_modified")
+    if isinstance(last_modified, str):
+        #Reutiliza o valor do cabeçalho HTTP "Last-Modified" salvo anteriormente
+        conditional_headers["If-Modified-Since"] = last_modified
+
+    #Adiciona cabeçalhos de navegação real (incluindo User-Agent) para evitar bloqueios
+    ua = ua_manager.get_user_agent(circuit_key)
+    request_headers = {**conditional_headers, "User-Agent": ua}
+    cookies = cookie_manager.get_cookies(circuit_key)
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            #Utiliza ``request_headers`` para enviar User-Agent e cabeçalhos condicionais
+            head_response = await client.head(
+                target_url, headers=request_headers, cookies=cookies
+            )
+    except Exception as err:
+        logger.warning("head_request_failed", url=target_url, error=str(err))
+        head_response = None
+    else:
+        try:
+            cookie_manager.update_from_response(circuit_key, head_response)
+        except Exception:
+            logger.debug("cookie_update_failed", url=target_url)
+
+    if head_response is not None:
+        SCRAPER_REQUESTS_TOTAL.labels(method="HEAD", status_code=head_response.status_code).inc()
+        if head_response.status_code == 304:
+            SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="not_modified").inc()
+            return NOT_MODIFIED
+        store_cache_headers(
+            target_url,
+            etag=head_response.headers.get("etag"),
+            #Utiliza a grafia padrão do cabeçalho HTTP ``Last-Modified``
+            last_modified=head_response.headers.get("Last-Modified"),
+        )
 
     html: str | None = await get_cached_html(target_url)
     if html is None:
@@ -129,7 +189,6 @@ async def _get_html(
         except Exception as e:
             logger.error("get_request_failed", url=target_url, error=str(e))
             circuit_breaker.record_failure(circuit_key)
-            block_type = BlockResult.HTTP_429
             msg = str(e).lower()
             if "403" in msg:
                 block_type = BlockResult.HTTP_403
@@ -154,6 +213,12 @@ async def _get_html(
 
     if html is None:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Falha ao obter HTML")
+
+    #Verifica se o conteúdo foi alterado desde a últma coleta
+    signer = ContentSignature(target_url)
+    if signer.check_or_update(html) is NOT_MODIFIED:
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="not_modified").inc()
+        return NOT_MODIFIED
 
     return html
 
@@ -303,6 +368,13 @@ async def scrape_playwright_async(
         throttle.jitter_min = delay * 0.5
         throttle.jitter_max = delay * 1.5
 
+    caminho = urlparse(target_url).path or "/"
+    permitido = await robots.is_allowed(path=caminho, user_agent="*")
+    if not permitido:
+        logger.warning("robots_disallow", url=target_url)
+        SCRAPER_URL_STATUS_TOTAL.labels(url_host=url_host, status="failure").inc()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso proibido pelo robots.txt")
+
     html = await _get_html(
         target_url=target_url,
         circuit_key=circuit_key,
@@ -313,6 +385,9 @@ async def scrape_playwright_async(
         circuit_breaker=circuit_breaker,
         recovery_manager=recovery_manager,
     )
+
+    if html is NOT_MODIFIED:
+        return {"status": "NOT_MODIFIED"}
 
     return await _parse_html(
         html,
@@ -335,21 +410,47 @@ async def scrape_product_common_async(
     circuit_breaker: CircuitBreaker | None = None,
     recovery_manager: BlockRecoveryManager | None = None,
 ) -> dict:
-    """ Seleciona e executa a estratégia adequada para a URL """
+    """ Seleciona e executa a estratégia adequada para a URL
 
-    strategy = get_strategy_for_url(url)
-    if strategy is None:
+    As estratégias são avaliadas em sequência até que uma delas consiga
+    extrair os dados do produto ou informe que o conteúdo analisado não
+    foi modificado desde a última coleta. Quando ocorre qualquer um
+    desses cenários, as demais estratégias não são executadas, evitando
+    processamento desnecessário.
+    """
+    marketplace = extract_hostname(url)
+    #Verifica se já existe conteúdo cacheado para esta URL e marketplace
+    cached = cache_manager.get(marketplace=marketplace, url=url)
+    if cached:
+        return {"status": "success", "details": cached}
+
+    strategies = strategies_for(url)
+    if not strategies:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL não suportada")
 
-    return await strategy.get_data(
-        url=url,
-        user_id=user_id,
-        payload=payload,
-        product_type=product_type,
-        rate_limiter=rate_limiter,
-        circuit_breaker=circuit_breaker,
-        recovery_manager=recovery_manager,
-    )
+    result = {"status": "error"}
+    for strategy in strategies:
+        if not strategy.supports_url(url):
+            continue
+        result = await strategy.get_data(
+            url=url,
+            headers=None,
+            user_id=user_id,
+            payload=payload,
+            product_type=product_type,
+            rate_limiter=rate_limiter,
+            circuit_breaker=circuit_breaker,
+            recovery_manager=recovery_manager,
+        )
+        #Encerra o loop em caso de sucesso ou quando nenhuma atualização é detecada (``NOT_MODIFIED``)
+        if result.get("status") in ("success", "NOT_MODIFIED"):
+            break
+
+    #Armazena no cache caso o scraping tenha sido bem-sucedido
+    if result.get("status") == "success" and result.get("details"):
+        cache_manager.set(marketplace=marketplace, url=url, value=result["details"])
+
+    return result
 
 def scrape_product_common(
         url: str,

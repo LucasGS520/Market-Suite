@@ -9,3 +9,7 @@ def test_precisao_dos_precos() -> None:
     assert isinstance(dados.current_price, Decimal)
     assert isinstance(dados.old_price, Decimal)
     assert dados.current_price + dados.old_price == Decimal("0.30")
+
+def test_campo_marketplace_presente() -> None:
+    dados = ScraperResponse(current_price="1.00", marketplace="example.com")
+    assert dados.marketplace == "example.com"

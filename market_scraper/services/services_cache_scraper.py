@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Optional, Dict
 import time
 import asyncio
+import threading
 
 import structlog
 
@@ -22,6 +23,8 @@ logger = structlog.get_logger(__name__)
 
 #Estrutura interna de cache em memória
 _cache: Dict[str, Dict[str, object]] = {}
+#Trava para garantir acesso concorrente seguro ao cache em memória
+cache_lock = threading.Lock()
 
 #Prefixo de chave utilizando no Redis para evitar colisões com outros dados
 _CACHE_PREFIX = "scraper:html:"
@@ -61,8 +64,9 @@ async def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
             #Se ocorrer qualquer problema com o Redis, usa o cache local
             logger.warning("Falha ao recuperar HTML do Redis", erro=str(err))
 
-    #Fallback para o cache em memória
-    entry = _cache.get(url)
+    #Fallback para o cache em memória, utiliza Lock para leitura segura do cache local
+    with cache_lock:
+        entry = _cache.get(url)
     if not entry:
         return None
     if time.time() - entry["timestamp"] > max_age:
@@ -98,5 +102,6 @@ async def set_cached_html(url: str, html: str, ttl: int = 300) -> None:
             #Caso o Redis falhe, ignora e segue com o cache local
             logger.warning("Falha ao armazenar HTML no Redis", erro=str(err))
 
-    #Sempre armazena no cache local para garantir a reutilização mínima
-    _cache[url] = {"html": html, "timestamp": time.time()}
+    #Sempre armazena no cache local para garantir a reutilização mínima, a operação é protegida por Lock
+    with cache_lock:
+        _cache[url] = {"html": html, "timestamp": time.time()}

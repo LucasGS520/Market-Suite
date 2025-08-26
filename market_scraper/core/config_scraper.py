@@ -16,6 +16,15 @@ class Settings(ConfigBase):
     #TTL base do cache de scraping
     CACHE_BASE_TTL: int = int(os.getenv("CACHE_BASE_TTL", str(3600))) #Validade do cache
 
+    #TTL para cabeçalhos ETag/Last-Modified
+    ETAG_CACHE_TTL: int = int(os.getenv("ETAG_CACHE_TTL", "86400"))
+
+    #TTL para assinaturas de conteúdo
+    SIG_CACHE_TTL: int = int(os.getenv("SIG_CACHE_TTL", "86400"))
+
+    #Estratégias de scraping habilitadas (ex: playwright, httpx)
+    SCRAPER_STRATEGIES: str = os.getenv("SCRAPER_STRATEGIES", "playwright")
+
     #Parâmetros para o HumanizedDelayManager
     HUMAN_AVG_WPM: int = int(os.getenv("HUMAN_AVG_WPM", "200")) #Palavras/minuto simuladas
     HUMAN_BASE_DELAY: float = float(os.getenv("HUMAN_BASE_DELAY", "1.0")) #Atraso incial
