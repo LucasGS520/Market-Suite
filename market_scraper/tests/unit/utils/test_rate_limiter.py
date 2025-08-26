@@ -1,6 +1,9 @@
 import time
 import os
+import importlib
 import pytest
+
+from market_scraper.utils import rate_limiter as rate_limiter_module
 from market_scraper.utils.rate_limiter import RateLimiter
 
 def test_allow_request_under_limit():
@@ -57,10 +60,9 @@ def test_reset_clears_rate_limiter_state():
     assert limiter.get_count() == 1
 
 def test_lua_script_path_exists():
-    from market_scraper.utils import rate_limiter
 
     caminho = os.path.join(
-        os.path.dirname(rate_limiter.__file__),
+        os.path.dirname(rate_limiter_module.__file__),
         os.pardir,
         os.pardir,
         "shared",
@@ -70,3 +72,25 @@ def test_lua_script_path_exists():
     )
 
     assert os.path.exists(caminho)
+
+def test_rate_limiter_funciona_sem_redis(monkeypatch):
+    rl = importlib.reload(rate_limiter_module)
+    monkeypatch.setattr(rl, "get_redis_client", lambda: None)
+
+    carregado = []
+
+    def falso_loader(_):
+        carregado.append(True)
+        return "sha"
+
+    monkeypatch.setattr(rl, "_load_lua_script", falso_loader)
+
+    limiter = rl.RateLimiter(redis_key="rate:teste", max_requests=3, window_seconds=1)
+
+    assert carregado == []
+    assert limiter.redis is None
+    assert limiter.allow_request() is True
+    assert limiter.get_count() == 0
+
+    #Não deve gerar erro mesmo sem Redis
+    limiter.reset()
