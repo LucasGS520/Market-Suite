@@ -33,10 +33,6 @@ def test_parse_endpoint_com_cache(monkeypatch) -> None:
             "details": {
                 "name": "Produto Teste",
                 "current_price": "R$ 10,00",
-                "old_price": None,
-                "thumbnail": "http://example.com/thumb.jpg",
-                "shipping": "Frete Grátis",
-                "seller": "Loja X",
             }
         }
 

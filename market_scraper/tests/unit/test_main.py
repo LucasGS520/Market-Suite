@@ -22,10 +22,6 @@ def test_scraper_parse(monkeypatch) -> None:
             "details": {
                 "name": "Produto Teste",
                 "current_price": "R$ 10,00",
-                "old_price": None,
-                "thumbnail": "http://example.com/thumb.jpg",
-                "shipping": "Frete Grátis",
-                "seller": "Loja X",
             }
         }
 
@@ -37,4 +33,3 @@ def test_scraper_parse(monkeypatch) -> None:
     body = response.json()
     assert body["name"] == "Produto Teste"
     assert Decimal(body["current_price"]) == Decimal("10.00")
-    assert body["free_shipping"] is True

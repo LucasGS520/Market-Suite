@@ -64,12 +64,5 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
         name=details.get("name"),
         #Converte strings de preço para ``Decimal`` garantindo precisão
         current_price=parse_price_str(details.get("current_price"), str(payload.url)),
-        old_price=parse_optional_price_str(details.get("old_price"), str(payload.url))
-        if details.get("old_price")
-        else None,
-        thumbnail=details.get("thumbnail"),
-        free_shipping=details.get("shipping") == "Frete Grátis",
-        seller=details.get("seller"),
-        shipping=details.get("shipping"),
         marketplace=marketplace,
     )
