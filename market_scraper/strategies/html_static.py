@@ -108,10 +108,15 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return data
 
     async def get_data(self, url: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any) -> dict:
-        """ Executa todo o fluxo de scraping e valida o resultado """
+        """ Executa o scraping e trata falhas de validação dos dados """
         html = await self._fetch_html(url)
         data = self._parse_html(html, url)
-        DataQualityValidator(["name", "current_price"]).validate(data)
+        try:
+            #Valida apenas os campos essenciais antes de retornar
+            DataQualityValidator(["name", "current_price"]).validate(data)
+        except ValueError:
+            #Caso a validação falhe, a estratégia sinaliza erro
+            return {"status": "error"}
         return {"status": "success", "details": data}
 
 
