@@ -47,6 +47,7 @@ from market_scraper.utils.http_cache import get_cache_headers, store_cache_heade
 import httpx
 
 from market_scraper.services.domain_policy import strategies_for
+from market_scraper.services.multi_strategy_orchestrator import MultiStrategyScraperOrchestrator
 
 import market_scraper.services.services_parser as parser
 from market_scraper.services.services_parser import CaptchaDetectedError
@@ -474,11 +475,9 @@ async def scrape_product_common_async(
 ) -> dict:
     """ Seleciona e executa a estratégia adequada para a URL
 
-    As estratégias são avaliadas em sequência até que uma delas consiga
-    extrair os dados do produto ou informe que o conteúdo analisado não
-    foi modificado desde a última coleta. Quando ocorre qualquer um
-    desses cenários, as demais estratégias não são executadas, evitando
-    processamento desnecessário.
+    A função delega a lógica de seleção e execução para o
+    :class:`MultiStrategyScraperOrchestrator`, que também valida
+    os dados obtidos e registra métricas de fallback entre estratégias.
     """
     marketplace = extract_hostname(url)
     #Verifica se já existe conteúdo cacheado para esta URL e marketplace
@@ -486,31 +485,16 @@ async def scrape_product_common_async(
     if cached:
         return {"status": "success", "details": cached}
 
-    strategies = strategies_for(url)
-    if not strategies:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL não suportada")
-
-    result = {"status": "error"}
-    for strategy in strategies:
-        if not strategy.supports_url(url):
-            continue
-        try:
-            result = await strategy.get_data(
-                url=url,
-                headers=None,
-                user_id=user_id,
-                payload=payload,
-                product_type=product_type,
-                rate_limiter=rate_limiter,
-                circuit_breaker=circuit_breaker,
-                recovery_manager=recovery_manager,
-            )
-        except Exception:
-            #Qualquer falha na estratégia atual gera status de erro e permite que o laço continue para tentar a próxima opção disponível
-            result = {"status": "error"}
-        #Encerra o loop em caso de sucesso ou quando nenhuma atualização é detecada (``NOT_MODIFIED``)
-        if result.get("status") in ("success", "NOT_MODIFIED"):
-            break
+    orchestrator = MultiStrategyScraperOrchestrator(strategy_selector=strategies_for)
+    result = await orchestrator.scrape(
+        url=url,
+        user_id=user_id,
+        payload=payload,
+        product_type=product_type,
+        rate_limiter=rate_limiter,
+        circuit_breaker=circuit_breaker,
+        recovery_manager=recovery_manager,
+    )
 
     #Armazena no cache caso o scraping tenha sido bem-sucedido
     if result.get("status") == "success" and result.get("details"):

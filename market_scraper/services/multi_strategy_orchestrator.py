@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+""" Orquestrador de múltiplas estratégias de scraping
+
+Esta classe centraliza a execução sequencial das estratégias de scraping
+para uma determinada URL. A cada tentativa bem sucedida de coleta os dados
+são validados e métricas de observabilidade são atualizadas.
+"""
+
+from typing import Callable, Literal
+from uuid import UUID
+
+from fastapi import HTTPException, status
+
+from market_scraper.services.domain_policy import strategies_for
+from market_scraper.strategies import ScrapingStrategy
+from market_scraper.utils.data_quality_validator import DataQualityValidator
+from market_scraper.utils.circuit_breaker import CircuitBreaker
+from market_scraper.utils.rate_limiter import RateLimiter
+from market_scraper.utils.block_recovery import BlockRecoveryManager
+from shared.metrics.metrics_scraper import SCRAPER_STRATEGY_TOTAL, SCRAPER_FALLBACK_TOTAL
+
+
+class MultiStrategyScraperOrchestrator:
+    """ Controla a ordem e a validação das estratégias de scraping """
+
+    def __init__(
+        self,
+        *,
+        strategy_selector: Callable[[str], list[ScrapingStrategy]] | None = None,
+        validator: DataQualityValidator | None = None,
+    ) -> None:
+        """ Define dependências opcionais para o orquestrador
+
+        ``strategy_selector`` permite injetar uma função customizada que
+        retorna as estratégias disponíveis para uma URL. ``validator`` é
+        utilizado para conferir a qualidade dos dados retornados.
+        """
+        self._strategy_selector = strategy_selector or strategies_for
+        self._validator = validator or DataQualityValidator()
+
+    async def scrape(
+        self,
+        *,
+        url: str,
+        user_id: UUID,
+        payload,
+        product_type: Literal["monitored", "competitor"],
+        rate_limiter: RateLimiter | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        recovery_manager: BlockRecoveryManager | None = None,
+    ) -> dict:
+        """ Executa as estratégias de scraping até obter um resultado válido
+
+        As estratégias são recuperadas via :func:`strategies_for` e
+        executadas em sequência. Antes de cada execução a métrica
+        ``SCRAPER_STRATEGY_TOTAL`` é incrementada. Ao finalizar, o
+        resultado é validado com ``DataQualityValidator``. Em caso de falha
+        de validação, ``SCRAPER_FALLBACK_TOTAL`` é incrementado e a
+        próxima estratégia da fila é tentada
+        """
+        strategies = self._strategy_selector(url)
+        if not strategies:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="URL não suportada",
+            )
+
+        result: dict = {"status": "error"}
+        for strategy in strategies:
+            if not strategy.supports_url(url):
+                continue
+
+            #Atualiza métrica indicando que a estratégia será executada
+            SCRAPER_STRATEGY_TOTAL.labels(strategy.__class__.__name__).inc()
+
+            try:
+                result = await strategy.get_data(
+                    url=url,
+                    headers=None,
+                    user_id=user_id,
+                    payload=payload,
+                    product_type=product_type,
+                    rate_limiter=rate_limiter,
+                    circuit_breaker=circuit_breaker,
+                    recovery_manager=recovery_manager,
+                )
+            except Exception:
+                #Qualquer erro leva à tentativa da próxima estratégia
+                result = {"status": "error"}
+
+            details = result.get("details")
+            if details:
+                try:
+                    #valida dados essenciais antes de aceitar o resultado
+                    self._validator.validate(details)
+                except ValueError:
+                    #Dados inválidos: registra fallback e tenta próxima estratégia
+                    SCRAPER_FALLBACK_TOTAL.inc()
+                    result = {"status": "error"}
+                    continue
+
+            if result.get("status") in ("success", "NOT_MODIFIED"):
+                break
+
+        return result
+
+__all__ = ["MultiStrategyScraperOrchestrator"]

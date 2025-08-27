@@ -82,6 +82,17 @@ SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL = Counter(
     "Total de recuperações bem-sucedidas via navegador Playwright",
 )
 
+SCRAPER_STRATEGY_TOTAL = Counter(
+    "scraper_strategy_total",
+    "Total de execuções por estratégia de scraping",
+    ["strategy"],
+)
+
+SCRAPER_FALLBACK_TOTAL = Counter(
+    "scraper_fallback_total",
+    "Total de fallbacks acionados após falha de validação de dados",
+)
+
 SCRAPER_REQUEST_SIZE_BYTES = Histogram(
     "scraper_request_size_bytes",
     "Distribuição do tamanho das requisições HTTP do scraper (bytes)",
@@ -122,6 +133,8 @@ __all__ = [
     "SCRAPER_CAPTCHA_TOTAL",
     "SCRAPER_BROWSER_FALLBACK_TOTAL",
     "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL",
+    "SCRAPER_STRATEGY_TOTAL",
+    "SCRAPER_FALLBACK_TOTAL",
     "SCRAPER_REQUEST_SIZE_BYTES",
     "SCRAPER_RESPONSE_SIZE_BYTES",
     "SCRAPER_URL_STATUS_TOTAL",

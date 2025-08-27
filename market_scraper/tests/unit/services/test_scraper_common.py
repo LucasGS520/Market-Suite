@@ -86,7 +86,7 @@ async def test_scrape_product_common_async_success(monkeypatch):
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
     monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
-    monkeypatch.setattr(common.parser, "parse_product_details", lambda html, url: {"current_price": "10"})
+    monkeypatch.setattr(common.parser, "parse_product_details", lambda html, url: {"name": "Produto", "current_price": "10"})
     monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
     monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
     monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
@@ -552,7 +552,7 @@ async def test_head_retry_after_suspends(monkeypatch):
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
     monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
-    monkeypatch.setattr(common.parser, "parse_product_details", lambda html, url: {"current_price": "10"})
+    monkeypatch.setattr(common.parser, "parse_product_details", lambda html, url: {"name": "Produto", "current_price": "10"})
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     resultado = await common.scrape_product_common_async(
