@@ -77,7 +77,8 @@ class HtmlStaticStrategy(ScrapingStrategy):
                     if isinstance(offers, list):
                         offers = offers[0] if offers else {}
                     price = offers.get("price") or offers.get("priceSpecification", {}).get("price")
-                    currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceBeforeDiscount")
+                    #Busca a moeda diretamente ou dentro de ``priceSpecification``
+                    currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
                     return {
                         "name": name,
                         "url": url,

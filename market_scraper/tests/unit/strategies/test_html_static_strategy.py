@@ -34,6 +34,16 @@ def html_meta_tags() -> str:
     )
 
 @pytest.fixture
+def html_json_ld_price_spec() -> str:
+    """ HTML com JSON-LD onde a moeda está em ``priceSpecification`` """
+    return (
+        "<html><head>"
+        '<script type="application/ld+json">'
+        '{"@type":"Product","name":"Produto PriceSpec","offers":{"priceSpecification":{"price":"30.00","priceCurrency":"USD"}}}'
+        "</script>" "</head></html>"
+    )
+
+@pytest.fixture
 def html_invalido() -> str:
     """ HTML sem informações necessárias para validação """
     return "<html><head><title>Vazio</title></head></html>"
@@ -67,6 +77,21 @@ async def test_extrai_dados_de_meta_tags(strategy: HtmlStaticStrategy, html_meta
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Meta"
     assert detalhes["current_price"] == "R$ 20,00"
+
+@pytest.mark.asyncio
+async def test_extrai_moeda_de_price_specification(strategy: HtmlStaticStrategy, html_json_ld_price_spec: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Verifica extração da moeda dentro de ``priceSpecification`` """
+    async def fake_fetch(self, url: str) -> str:
+        return html_json_ld_price_spec
+
+    #Ignora validação para testar apenas a extração
+    monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
+    monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto PriceSpec"
+    assert detalhes["current_price"] == "USD 30,00"
 
 @pytest.mark.asyncio
 async def test_retorna_erro_quando_html_invalido(strategy: HtmlStaticStrategy, html_invalido: str, monkeypatch: pytest.MonkeyPatch) -> None:
