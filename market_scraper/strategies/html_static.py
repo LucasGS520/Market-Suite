@@ -132,7 +132,7 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
 
 class ShopeeHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas da Shopee """
-    domain = "shopee.com"
+    domain = "shopee.com.br"
 
 class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas do Magazine Luiza """

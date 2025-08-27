@@ -45,7 +45,7 @@ STRATEGY_REGISTRY: Dict[str, Type[ScrapingStrategy]] = {
 DOMAIN_POLICIES: Dict[str, List[str]] = {
     "mercadolivre.com.br": ["JSON_ML", "HTML_ML", "PLAYWRIGHT"],
     "amazon.com.br": ["JSON_AMAZON", "HTML_AMAZON","PLAYWRIGHT"],
-    "shopee.com": ["JSON_SHOPEE", "HTML_SHOPEE", "PLAYWRIGHT"],
+    "shopee.com.br": ["JSON_SHOPEE", "HTML_SHOPEE", "PLAYWRIGHT"],
     "magazineluiza.com.br": ["JSON_MAGALU", "HTML_MAGALU", "PLAYWRIGHT"],
 }
 

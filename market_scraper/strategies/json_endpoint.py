@@ -46,7 +46,7 @@ class AmazonJsonStrategy(JsonEndpointStrategy):
 
 class ShopeeJsonStrategy(JsonEndpointStrategy):
     """ Stub para futura coleta via API da Shopee """
-    domain = "shopee.com"
+    domain = "shopee.com.br"
 
 class MagaluJsonStrategy(JsonEndpointStrategy):
     """ Stub para futura coleta via API do Magalu """
