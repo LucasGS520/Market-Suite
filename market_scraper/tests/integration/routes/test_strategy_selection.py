@@ -102,11 +102,9 @@ def test_seleciona_estrategia_mercado_livre(monkeypatch) -> None:
     assert resp.status_code == 200
     assert chamada["executada"]
 
-@pytest.mark.xfail(reason="Estratégia da Amazon ainda não implementada")
 def test_seleciona_estrategia_amazon(monkeypatch) -> None:
-    """ Teste placeholder para o domínio da Amazon """
+    """ Garante que URLs da Amazon utilizam a estratégia correta """
     _preparar_ambiente(monkeypatch)
-    from market_scraper.services import services_scraper_common as common
 
     escolhido: dict[str, Any] = {}
     original = common.strategies_for
@@ -122,11 +120,10 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://www.amazon.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "AmazonStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "AmazonJsonEndpointStrategy"
 
-@pytest.mark.xfail(reason="Estratégia da Shopee ainda não implementada")
 def test_seleciona_estrategia_shopee(monkeypatch) -> None:
-    """ Teste placeholder para domínio da Shopee """
+    """ Garante que URLs da Shopee utilizam a estratégia correta """
     _preparar_ambiente(monkeypatch)
     escolhido: dict[str, Any] = {}
     original = common.strategies_for
@@ -142,11 +139,10 @@ def test_seleciona_estrategia_shopee(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://shopee.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "ShopeeStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "ShopeeJsonEndpointStrategy"
 
-@pytest.mark.xfail(reason="Estratégia da Magalu ainda não implementada")
 def test_seleciona_estrategia_magalu(monkeypatch) -> None:
-    """ Teste placeholder para o domínio da Magalu """
+    """ Garante que URLs da Magalu utilizam a estratégia correta """
     _preparar_ambiente(monkeypatch)
     escolhido: dict[str, Any] = {}
     original = common.strategies_for
@@ -162,4 +158,4 @@ def test_seleciona_estrategia_magalu(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://www.magazineluiza.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "MagaluStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "MagaluJsonEndpointStrategy"

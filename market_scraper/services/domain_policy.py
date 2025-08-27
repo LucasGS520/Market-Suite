@@ -9,7 +9,14 @@ mapa ``STRATEGY_REGISTRY`` e referenciadas em ``DOMAIN_POLICIES``
 
 from typing import Dict, List, Type
 
-from market_scraper.strategies import ScrapingStrategy, PlaywrightDefaultStrategy
+from market_scraper.strategies import (
+    ScrapingStrategy,
+    PlaywrightDefaultStrategy,
+    MercadoLivreJsonEndpointStrategy,
+    AmazonJsonEndpointStrategy,
+    ShopeeJsonEndpointStrategy,
+    MagaluJsonEndpointStrategy,
+)
 from market_scraper.utils.http_utils import extract_hostname
 
 
@@ -18,17 +25,20 @@ from market_scraper.utils.http_utils import extract_hostname
 #Novas implementações devem ser adicionadas aqui:
 STRATEGY_REGISTRY: Dict[str, Type[ScrapingStrategy]] = {
     "PLAYWRIGHT": PlaywrightDefaultStrategy,
-    # "HTML": HtmlStrategy, #Exemplos para expansões
-    # "JSON": JsonStrategy,
+    "JSON_ML": MercadoLivreJsonEndpointStrategy,
+    "JSON_AMAZON": AmazonJsonEndpointStrategy,
+    "JSON_SHOPEE": ShopeeJsonEndpointStrategy,
+    "JSON_MAGALU": MagaluJsonEndpointStrategy,
 }
 
 #Mapeamento entre domínio e a ordem preferencial de estratégias
 #As chaves correspondem aos domínios oficiais de cada marketplace
 #Estratégias não registradas em ``STRATEGY_REGISTRY`` são ignoradas
 DOMAIN_POLICIES: Dict[str, List[str]] = {
-    "shopee.com": ["JSON", "HTML", "PLAYWRIGHT"],
-    "magazineluiza.com.br": ["HTML", "PLAYWRIGHT"],
-    "mercadolivre.com.br": ["HTML", "PLAYWRIGHT"],
+    "mercadolivre.com.br": ["JSON_ML", "PLAYWRIGHT"],
+    "amazon.com.br": ["JSON_AMAZON", "PLAYWRIGHT"],
+    "shopee.com": ["JSON_SHOPEE", "PLAYWRIGHT"],
+    "magazineluiza.com.br": ["JSON_MAGALU", "PLAYWRIGHT"],
 }
 
 
