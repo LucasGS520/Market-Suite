@@ -129,7 +129,8 @@ class JsonEndpointStrategy(ScrapingStrategy):
         """ Orquestra a extração dos dados """
         soup = BeautifulSoup(html, "html.parser")
         data = self._extract_from_json_ld(soup, url)
-        if not data or data.get("name"):
+        #Caso o JSON-LD não forneça um nome de produto, recorre ás meta tags
+        if not data or not data.get("name"):
             data = self._extract_from_meta_tags(soup, url)
         return data
 
