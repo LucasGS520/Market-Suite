@@ -8,6 +8,7 @@ import pytest
 from market_scraper.services.services_scraper_common import scrape_product_common_async
 from market_scraper.tests.unit.conftest import fake_redis
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy
 
 
 #HTML de exemplo representando uma página válida de produto no Mercado Livre
@@ -103,6 +104,11 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait", fake_throttle_wait)
 
+    async def fake_fetch_html_static(self, url: str) -> str:
+        return HTML_EXEMPLO
+
+    monkeypatch.setattr(MercadoLivreHtmlStaticStrategy, "_fetch_html", fake_fetch_html_static)
+
 @pytest.mark.asyncio
 async def test_scrape_monitored_product_flow(setup_ambiente: None) -> None:
     user_id = uuid4()
@@ -124,7 +130,7 @@ async def test_scrape_monitored_product_flow(setup_ambiente: None) -> None:
     assert detalhes["name"] == "Produto Exemplo"
     assert detalhes["current_price"] == "R$ 100,00"
     assert detalhes["old_price"] == "R$ 150,00"
-    assert detalhes["shipping"] == "Frete Grátis"
+    assert detalhes["shipping"] == "Frete grátis"
     assert detalhes["seller"] == "Loja Teste"
     assert detalhes["thumbnail"] == "http://example.com/thumb.jpg"
 
@@ -147,5 +153,5 @@ async def test_scrape_competitor_product_flow(setup_ambiente: None) -> None:
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Exemplo"
     assert detalhes["current_price"] == "R$ 100,00"
-    assert detalhes["shipping"] == "Frete Grátis"
+    assert detalhes["shipping"] == ("Frete grátis")
     assert detalhes["seller"] == "Loja Teste"

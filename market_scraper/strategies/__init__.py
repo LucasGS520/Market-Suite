@@ -2,21 +2,21 @@
 
 from .base import ScrapingStrategy
 from .playwright_default import PlaywrightDefaultStrategy
-from .json_endpoint import (
-    JsonEndpointStrategy,
-    MercadoLivreJsonEndpointStrategy,
-    AmazonJsonEndpointStrategy,
-    ShopeeJsonEndpointStrategy,
-    MagaluJsonEndpointStrategy,
+from .html_static import (
+    HtmlStaticStrategy,
+    MercadoLivreHtmlStaticStrategy,
+    AmazonHtmlStaticStrategy,
+    ShopeeHtmlStaticStrategy,
+    MagaluHtmlStaticStrategy,
 )
 
 
 __all__ = [
     "ScrapingStrategy",
     "PlaywrightDefaultStrategy",
-    "JsonEndpointStrategy",
-    "MercadoLivreJsonEndpointStrategy",
-    "AmazonJsonEndpointStrategy",
-    "ShopeeJsonEndpointStrategy",
-    "MagaluJsonEndpointStrategy",
+    "HtmlStaticStrategy",
+    "MercadoLivreHtmlStaticStrategy",
+    "AmazonHtmlStaticStrategy",
+    "ShopeeHtmlStaticStrategy",
+    "MagaluHtmlStaticStrategy",
 ]

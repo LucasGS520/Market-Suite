@@ -12,6 +12,7 @@ from market_scraper.strategies.base import ScrapingStrategy
 from market_scraper.services import domain_policy
 from market_scraper.services import services_scraper_common as common
 from market_scraper.strategies.playwright_default import PlaywrightDefaultStrategy
+from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy, AmazonHtmlStaticStrategy, ShopeeHtmlStaticStrategy, MagaluHtmlStaticStrategy
 
 
 def _preparar_ambiente(monkeypatch) -> None:
@@ -44,6 +45,21 @@ def _preparar_ambiente(monkeypatch) -> None:
         "get_data",
         fake_default_get_data,
     )
+
+    #Evita chamadas HTTP das estratégias HTML
+    async def fake_html_get_data(self, **k):
+        return {
+            "status": "success",
+            "details": {"name": "Fake", "current_price": "R$ 0,00"},
+        }
+
+    for cls in [
+        MercadoLivreHtmlStaticStrategy,
+        AmazonHtmlStaticStrategy,
+        ShopeeHtmlStaticStrategy,
+        MagaluHtmlStaticStrategy,
+    ]:
+        monkeypatch.setattr(cls, "get_data", fake_html_get_data)
 
 class FakeMercadoLivreStrategy(ScrapingStrategy):
     """ Estratégia fictícia utilizada apenas para testes. """
@@ -120,7 +136,7 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://www.amazon.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "AmazonJsonEndpointStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "AmazonHtmlStaticStrategy"
 
 def test_seleciona_estrategia_shopee(monkeypatch) -> None:
     """ Garante que URLs da Shopee utilizam a estratégia correta """
@@ -139,7 +155,7 @@ def test_seleciona_estrategia_shopee(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://shopee.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "ShopeeJsonEndpointStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "ShopeeHtmlStaticStrategy"
 
 def test_seleciona_estrategia_magalu(monkeypatch) -> None:
     """ Garante que URLs da Magalu utilizam a estratégia correta """
@@ -158,4 +174,4 @@ def test_seleciona_estrategia_magalu(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://www.magazineluiza.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "MagaluJsonEndpointStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "MagaluHtmlStaticStrategy"
