@@ -9,6 +9,13 @@ from .html_static import (
     ShopeeHtmlStaticStrategy,
     MagaluHtmlStaticStrategy,
 )
+from .json_endpoint import (
+    JsonEndpointStrategy,
+    MercadoLivreJsonStrategy,
+    AmazonJsonStrategy,
+    ShopeeJsonStrategy,
+    MagaluJsonStrategy,
+)
 
 
 __all__ = [
@@ -19,4 +26,9 @@ __all__ = [
     "AmazonHtmlStaticStrategy",
     "ShopeeHtmlStaticStrategy",
     "MagaluHtmlStaticStrategy",
+    "JsonEndpointStrategy",
+    "MercadoLivreJsonStrategy",
+    "AmazonJsonStrategy",
+    "ShopeeJsonStrategy",
+    "MagaluJsonStrategy",
 ]

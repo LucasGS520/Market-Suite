@@ -136,7 +136,7 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://www.amazon.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "AmazonHtmlStaticStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "AmazonJsonStrategy"
 
 def test_seleciona_estrategia_shopee(monkeypatch) -> None:
     """ Garante que URLs da Shopee utilizam a estratégia correta """
@@ -155,7 +155,7 @@ def test_seleciona_estrategia_shopee(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://shopee.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "ShopeeHtmlStaticStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "ShopeeJsonStrategy"
 
 def test_seleciona_estrategia_magalu(monkeypatch) -> None:
     """ Garante que URLs da Magalu utilizam a estratégia correta """
@@ -174,4 +174,4 @@ def test_seleciona_estrategia_magalu(monkeypatch) -> None:
         "/scrape/parse", json={"url": "https://www.magazineluiza.com.br/produto"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "MagaluHtmlStaticStrategy"
+    assert escolhido["estrategia"].__class__.__name__ == "MagaluJsonStrategy"

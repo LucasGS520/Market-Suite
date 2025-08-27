@@ -74,8 +74,12 @@ class RateLimiter:
     def get_count(self, identifier: Optional[str] = None) -> int:
         """ Retorna quantas requisições foram feitas na janela atual
 
-        Sem Redis, não há contagem, portanto retorna sempre ``0``
+        Quando o Redis está indisponível, a contagem não é realizada e o
+        valor ``0`` é retornado
         """
+        if self.redis is None:
+            return 0
+
         redis_key = self._format_key(identifier)
         now_ms = int(time.time() * 1000)
         window_start = now_ms - self.window_ms

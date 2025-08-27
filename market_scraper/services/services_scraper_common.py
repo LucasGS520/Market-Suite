@@ -494,16 +494,20 @@ async def scrape_product_common_async(
     for strategy in strategies:
         if not strategy.supports_url(url):
             continue
-        result = await strategy.get_data(
-            url=url,
-            headers=None,
-            user_id=user_id,
-            payload=payload,
-            product_type=product_type,
-            rate_limiter=rate_limiter,
-            circuit_breaker=circuit_breaker,
-            recovery_manager=recovery_manager,
-        )
+        try:
+            result = await strategy.get_data(
+                url=url,
+                headers=None,
+                user_id=user_id,
+                payload=payload,
+                product_type=product_type,
+                rate_limiter=rate_limiter,
+                circuit_breaker=circuit_breaker,
+                recovery_manager=recovery_manager,
+            )
+        except Exception:
+            #Qualquer falha na estratégia atual gera status de erro e permite que o laço continue para tentar a próxima opção disponível
+            result = {"status": "error"}
         #Encerra o loop em caso de sucesso ou quando nenhuma atualização é detecada (``NOT_MODIFIED``)
         if result.get("status") in ("success", "NOT_MODIFIED"):
             break

@@ -135,15 +135,14 @@ async def test_scrape_product_common_async_timeout(monkeypatch):
     monkeypatch.setattr(common, "ContentSignature", DummySignature)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
-    with pytest.raises(HTTPException) as exc:
-        await common.scrape_product_common_async(
-            url="https://exemplo.com/item",
-            user_id=uuid4(),
-            payload=payload,
-            product_type="monitored",
-        )
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
 
-    assert exc.value.status_code == status.HTTP_502_BAD_GATEWAY
+    assert resultado["status"] == "error"
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_html_not_product(monkeypatch):
@@ -179,16 +178,14 @@ async def test_scrape_product_common_async_html_not_product(monkeypatch):
     monkeypatch.setattr(common, "ContentSignature", DummySignature)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
 
-    with pytest.raises(HTTPException) as exc:
-        await common.scrape_product_common_async(
-            url="https://exemplo.com/item",
-            user_id=uuid4(),
-            payload=payload,
-            product_type="monitored",
-        )
-
-    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert resultado["status"] == "error"
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
@@ -239,15 +236,14 @@ async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
     monkeypatch.setattr(common, "strategies_for", lambda url: [StrategyNotModified(), StrategyShouldNotRun()])
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
-
-    result = await common.scrape_product_common_async(
+    resultado = await common.scrape_product_common_async(
         url="https://exemplo.com/item",
         user_id=uuid4(),
         payload=payload,
         product_type="monitored",
     )
 
-    assert result["status"] == "NOT_MODIFIED"
+    assert resultado["status"] == "NOT_MODIFIED"
     assert StrategyShouldNotRun.called is False
 
 @pytest.mark.asyncio
@@ -327,16 +323,14 @@ async def test_scrape_product_common_async_not_price(monkeypatch):
     monkeypatch.setattr(common, "ContentSignature", DummySignature)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
 
-    with pytest.raises(HTTPException) as exc:
-        await common.scrape_product_common_async(
-            url="https://exemplo.com/item",
-            user_id=uuid4(),
-            payload=payload,
-            product_type="monitored",
-        )
-
-    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert resultado["status"] == "error"
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_not_modified(monkeypatch):

@@ -115,7 +115,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return {"status": "success", "details": data}
 
 
-# ---------- ESTRATÉGIA DO HTML ESTÁTICO DOS MARKETPLACES ----------
+# ---------- ESTRATÉGIA DO HTML ESTÁTICO DOS MARKETPLACES ---------- #
 class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas do Mercado Livre """
     domain = "mercadolivre.com.br"

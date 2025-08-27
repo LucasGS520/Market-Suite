@@ -130,7 +130,7 @@ async def test_scrape_monitored_product_flow(setup_ambiente: None) -> None:
     assert detalhes["name"] == "Produto Exemplo"
     assert detalhes["current_price"] == "R$ 100,00"
     assert detalhes["old_price"] == "R$ 150,00"
-    assert detalhes["shipping"] == "Frete grátis"
+    assert detalhes["shipping"] == "Frete Grátis"
     assert detalhes["seller"] == "Loja Teste"
     assert detalhes["thumbnail"] == "http://example.com/thumb.jpg"
 
@@ -153,5 +153,5 @@ async def test_scrape_competitor_product_flow(setup_ambiente: None) -> None:
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Exemplo"
     assert detalhes["current_price"] == "R$ 100,00"
-    assert detalhes["shipping"] == ("Frete grátis")
+    assert detalhes["shipping"] == "Frete Grátis"
     assert detalhes["seller"] == "Loja Teste"
