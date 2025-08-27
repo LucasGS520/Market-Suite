@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from numpy.ma.core import identity
-
 """ Estratégias leves baseadas em JSON-LD e meta tags """
 
 from typing import Optional, Dict, Any
@@ -10,10 +8,11 @@ from decimal import Decimal
 
 import httpx
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 
 from .base import ScrapingStrategy
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
-from market_scraper.utils.constants import ThrottleManager
+from market_scraper.utils.throttle_manager import ThrottleManager
 from market_scraper.utils.constants import THROTTLE_RATE, THROTTLE_CAPACITY, JITTER_RANGE, STEALTH_HEADERS
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.services.services_cache_scraper import get_cached_html, set_cached_html
@@ -31,8 +30,15 @@ class JsonEndpointStrategy(ScrapingStrategy):
     domain: str = ""
 
     def supports_url(self, url: str) -> bool:
-        """ Verifica se a URL pertence ao domínio alvo """
-        return self.domain in url
+        """ Verifica se a URL pertence ao domínio alvo
+
+        A validação utiliza ``urlparse`` para extrair o ``netloc`` da URL
+        (host) e confirma que ele termina com o domínio esperado, permitindo
+        que subdomínios legítimos sejam aceitos e evitando coincidências
+        parciais em outros domínios.
+        """
+        netloc = urlparse(url).netloc
+        return netloc.endswith(self.domain)
 
     async def _fetch_html(self, url: str) -> str:
         """ Obtém o HTML com controle de atraso e cache """
