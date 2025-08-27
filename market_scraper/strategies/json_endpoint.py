@@ -53,9 +53,11 @@ class MagaluJsonStrategy(JsonEndpointStrategy):
     domain = "magazineluiza.com.br"
 
 
+#Lista de classes exportadas para facilitar importações diretas
 __all__ = [
     "JsonEndpointStrategy",
     "MercadoLivreJsonStrategy",
+    "AmazonJsonStrategy",
     "ShopeeJsonStrategy",
     "MagaluJsonStrategy",
 ]
