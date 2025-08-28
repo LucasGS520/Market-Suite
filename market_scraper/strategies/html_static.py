@@ -147,13 +147,66 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas do Mercado Livre """
     domain = "mercadolivre.com.br"
 
+    def _parse_html(self, html: str, url: str) -> dict:
+        """ Extrai nome e preço de páginas do Mercado Livre
+
+        A função inicia tentando os métodos genéricos de extração
+        (JSON-LD e meta tags). Caso não obtenha os dados essenciais,
+        realiza um fallback utilizando seletores específicos do site.
+        """
+        soup = BeautifulSoup(html, "html.parser")
+
+        #Primeiro tenta reutilizar os extratores da estratégia base
+        data = self._extract_from_json_ld(soup, url)
+        if not data.get("name") or not data.get("current_price"):
+            data = self._extract_from_meta_tags(soup, url)
+
+        #Se já houver nome e preço válidos, retorna imediatamente
+        if data.get("name") and data.get("current_price"):
+            return data
+
+        # --- FALLBACK PARA SELETORES ESPECÍFICOS DO MERCADO LIVRE ---
+
+        #Título do produto em h1.ui-pdp-title ou meta[name="title"]
+        title_tag = soup.select_one("h1.ui-pdp-title")
+        meta_title = soup.find("meta", attrs={"name": "title"})
+        title: Optional[str] = None
+        if title_tag:
+            title = title_tag.get_text(strip=True)
+        elif meta_title:
+            title = meta_title.get("content")
+
+        #Preço pode estar em duas combinações de classes
+        fraction = soup.select_one(".andes-money-amount__fraction") or soup.select_one(".price-tag-fraction")
+        cents = soup.select_one(".andes-money-amount__cents") or soup.select_one(".price-tag-decimal")
+
+        value: Optional[str] = None
+        if fraction:
+            #Remove separadores de milhar e outros caracteres
+            whole_part = re.sub(r"\D", "", fraction.get_text())
+            value = whole_part
+            if cents:
+                decimal_part = re.sub(r"\D", "", cents.get_text())
+                #Concatena parte inteira e decimal para formar valor numérico
+                value = f"{value}.{decimal_part}"
+
+        return {
+            "name": title,
+            "url": url,
+            #Normaliza o valor monetário utilizando a função da classe base
+            "current_price": self._format_price(value, None)
+        }
+
+
 class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas da Amazon Brasil """
     domain = "amazon.com.br"
 
+
 class ShopeeHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas da Shopee """
     domain = "shopee.com.br"
+
 
 class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas do Magazine Luiza """
