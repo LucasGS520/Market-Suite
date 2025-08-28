@@ -22,6 +22,17 @@ def html_meta_sem_jsonld() -> str:
     )
 
 @pytest.fixture
+def html_com_jsonld() -> str:
+    """ HTML contendo bloco JSON-LD com dados de produto """
+    return (
+        "<html><head>"
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@type":"Product","name":"Produto JSON-LD","offers":{"@type":"Offer","price":"199.90","priceCurrency":"BRL"}}'
+        "</script>"
+        "</head></html>"
+    )
+
+@pytest.fixture
 def html_fallback() -> str:
     """ HTML com apenas elementos ``h1`` e classes de preço """
     return (
@@ -32,7 +43,7 @@ def html_fallback() -> str:
         "</body></html>"
     )
 
-@pytest.mark.asyncio
+@pytest.fixture
 def html_fallback_com_moeda() -> str:
     """ HTML de fallback com meta tag de moeda diferente de BRL """
     return (
@@ -44,6 +55,19 @@ def html_fallback_com_moeda() -> str:
         '<span class="andes-money-amount__cents">45</span>'
         "</body></html>"
     )
+
+@pytest.mark.asyncio
+async def test_extrai_de_json_ld(strategy: MercadoLivreHtmlStaticStrategy, html_com_jsonld: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Valida extração de nome e preço diretamente de um bloco JSON-LD """
+    async def fake_fetch(self, url: str) -> str:
+        return html_com_jsonld
+
+    monkeypatch.setattr(MercadoLivreHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto JSON-LD"
+    assert detalhes["current_price"] == "R$ 199,90"
 
 @pytest.mark.asyncio
 async def test_extrai_de_meta_tags(strategy: MercadoLivreHtmlStaticStrategy, html_meta_sem_jsonld: str, monkeypatch: pytest.MonkeyPatch) -> None:
