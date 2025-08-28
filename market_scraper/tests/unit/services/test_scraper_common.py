@@ -69,70 +69,38 @@ class DummySignature:
     def check_or_update(self, html):
         return "assinatura"
 
-@pytest.mark.asyncio
-async def test_scrape_product_common_async_success(monkeypatch):
-    async def fake_fetch_html(url):
-        return "<html>ok</html>"
+def _configura_orquestrador(monkeypatch, retorno: dict) -> None:
 
-    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
-    async def fake_get_cached_html(url):
-        return None
 
-    async def fake_set_cached_html(*a, **k):
-        return None
+    class OrquestradorFalso:
+        async def scrape(self, **_: dict) -> dict:
+            return retorno
 
-    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
-    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
+    monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", lambda *a, **k: OrquestradorFalso())
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
-    monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
-    monkeypatch.setattr(common.parser, "parse_product_details", lambda html, url: {"name": "Produto", "current_price": "10"})
-    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
-    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
-    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
-    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
-    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
-    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
-    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
-    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
-    monkeypatch.setattr(common, "ContentSignature", DummySignature)
+
+@pytest.mark.asyncio
+async def test_scraper_product_common_async_success(monkeypatch):
+    """ Deve retornar sucesso quando o orquestrador indica dados válidos """
+    _configura_orquestrador(monkeypatch,{"status": "success", "details": {"current_price": "10"}})
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
-    result = await common.scrape_product_common_async(
+    resultado = await common.scrape_product_common_async(
         url="https://exemplo.com/item",
         user_id=uuid4(),
         payload=payload,
         product_type="monitored",
     )
 
-    assert result["status"] == "success"
-    assert result["details"]["current_price"] == "10"
+    assert resultado["status"] == "success"
+    assert resultado["details"]["current_price"] == "10"
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_timeout(monkeypatch):
-    async def fake_fetch_html(url):
-        raise common.PlaywrightTimeoutError("timeout")
+    """ Deve retornar erro quando a estratégia falha """
 
-    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
-    async def fake_get_cached_html(url):
-        return None
-
-    async def fake_set_cached_html(*a, **k):
-        return None
-
-    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
-    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
-    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
-    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
-    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
-    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
-    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
-    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
-    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
-    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
-    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
-    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
-    monkeypatch.setattr(common, "ContentSignature", DummySignature)
+    _configura_orquestrador(monkeypatch, {"status": "error"})
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     resultado = await common.scrape_product_common_async(
@@ -146,36 +114,9 @@ async def test_scrape_product_common_async_timeout(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_html_not_product(monkeypatch):
-    async def fake_get_cached_html(url):
-        return "<html>lista</html>"
+    """ Retorna erro caso a página não pareça ser de produto """
 
-    async def fake_set_cached_html(*a, **k):
-        return None
-
-    async def fake_fetch_html(url):
-        raise AssertionError("fetch_html_playwright não deve ser chamado")
-
-    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
-    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
-    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
-    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
-    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
-
-    monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: False)
-
-    def fake_parse_product_details(html, url):
-        raise AssertionError("parse_product_details não deve ser chamado")
-
-    monkeypatch.setattr(common.parser, "parse_product_details", fake_parse_product_details)
-    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
-    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
-    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
-    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
-    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
-    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
-    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
-    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
-    monkeypatch.setattr(common, "ContentSignature", DummySignature)
+    _configura_orquestrador(monkeypatch, {"status": "error"})
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     resultado = await common.scrape_product_common_async(
@@ -248,36 +189,9 @@ async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_captcha_detected(monkeypatch):
-    async def fake_get_cached_html(url):
-        return "<html>captcha</html>"
+    """ Retorna CAPTCHA quando o orquestrador detecta bloqueio """
 
-    async def fake_set_cached_html(*a, **k):
-        return None
-
-    async def fake_fetch_html(url):
-        return "<html>captcha</html>"
-
-    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
-    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
-    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
-    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
-    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
-
-    monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
-
-    def fake_parse_product_details(html, url):
-        raise common.CaptchaDetectedError(BlockResult.CAPTCHA.value)
-
-    monkeypatch.setattr(common.parser, "parse_product_details", fake_parse_product_details)
-    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
-    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
-    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
-    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
-    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
-    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
-    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
-    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
-    monkeypatch.setattr(common, "ContentSignature", DummySignature)
+    _configura_orquestrador(monkeypatch, {"status": BlockResult.CAPTCHA.value})
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     resultado = await common.scrape_product_common_async(
@@ -291,36 +205,9 @@ async def test_scrape_product_common_async_captcha_detected(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_not_price(monkeypatch):
-    async def fake_get_cached_html(url):
-        return "<html>produtos</html>"
+    """ Retorna erro quando o preço não é encontrado """
 
-    async def fake_set_cached_html(*a, **k):
-        return None
-
-    async def fake_fetch_html(url):
-        return "<html>produto</html>"
-
-    monkeypatch.setattr(common, "get_cached_html", fake_get_cached_html)
-    monkeypatch.setattr(common, "set_cached_html", fake_set_cached_html)
-    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
-    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
-    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
-
-    monkeypatch.setattr(common.parser, "looks_like_product_page", lambda html: True)
-
-    def fake_parse_product_details(html, url):
-        return {"current_price": None}
-
-    monkeypatch.setattr(common.parser, "parse_product_details", fake_parse_product_details)
-    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
-    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
-    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
-    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
-    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
-    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
-    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
-    monkeypatch.setattr(common.httpx, "AsyncClient", DummyAsyncClient)
-    monkeypatch.setattr(common, "ContentSignature", DummySignature)
+    _configura_orquestrador(monkeypatch, {"status": "error"})
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     resultado = await common.scrape_product_common_async(
@@ -334,23 +221,9 @@ async def test_scrape_product_common_async_not_price(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_not_modified(monkeypatch):
-    class Head304(DummyAsyncClient):
-        async def head(self, *a, **k):
-            return SimpleNamespace(status_code=304, headers={})
+    """ Retorna NOT_MODIFIED quando o conteúdo não mudou """
 
-    monkeypatch.setattr(common.httpx, "AsyncClient", Head304)
-    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": "x", "last_modified": "y"})
-    monkeypatch.setattr(common, "store_cache_headers", lambda *a, **k: None)
-    async def fake_fetch_html(url):
-        raise AssertionError("fetch_html_playwright não deve ser chamado")
-    monkeypatch.setattr(common, "fetch_html_playwright", fake_fetch_html)
-    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
-    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
-    monkeypatch.setattr(common, "ThrottleManager", DummyThrottleManager)
-    monkeypatch.setattr(common, "HumanizedDelayManager", DummyHumanizedDelayManager)
-    monkeypatch.setattr(common, "BlockRecoveryManager", DummyBlockRecoveryManager)
-    monkeypatch.setattr(common, "CircuitBreaker", DummyCircuitBreaker)
-    monkeypatch.setattr(common, "RobotsTxtParser", DummyRobotsTxtParser)
+    _configura_orquestrador(monkeypatch, {"status": "NOT_MODIFIED"})
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     resultado = await common.scrape_product_common_async(
