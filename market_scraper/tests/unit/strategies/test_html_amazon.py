@@ -83,3 +83,63 @@ async def test_extrai_de_fallback(strategy: AmazonHtmlStaticStrategy, html_fallb
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Fallback Amazon"
     assert detalhes["current_price"] == "R$ 1.234,56"
+
+@pytest.mark.asyncio
+async def test_extrai_de_saleprice(strategy: AmazonHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante extração a partir de ``#priceblock_saleprice`` """
+    html = (
+        "<html><body>"
+        '<span id="productTitle">Produto Sale Amazon</span>'
+        '<span id="priceblock_saleprice">R$ 2.345,67</span>'
+        "</body></html>"
+    )
+
+    async def fake_fetch(self, url: str) -> str:
+        return html
+
+    monkeypatch.setattr(AmazonHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["current_price"] == "R$ 2.345,67"
+
+@pytest.mark.asyncio
+async def test_extrai_de_price_inside_buybox(strategy: AmazonHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Verifica extração a partir de ``#price_inside_buybox`` """
+
+    html = (
+        "<html><body>"
+        '<span id="productTitle">Produto BuyBox Amazon</span>'
+        '<span id="price_inside_buybox">R$ 3.456,78</span>'
+        "</body></html>"
+    )
+
+    async def fake_fetch(self, url: str) -> str:
+        return html
+
+    monkeypatch.setattr(AmazonHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["current_price"] == "R$ 4.567,89"
+
+@pytest.mark.asyncio
+async def test_extrai_de_whole_fraction(strategy: AmazonHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Combina ``span.a-price-whole`` e ``span.a-price-fraction`` para formar o preço """
+    html = (
+        "<html><body>"
+        '<span id="productTitle">Produto Partes Amazon</span>'
+        '<span class="a-price-symbol">R$</span>'
+        '<span class="a-price-whole">5.678</span>'
+        '<span class="a-price-fraction">90</span>'
+        "</body></html>"
+    )
+
+    async def fake_fetch(self, utl: str) -> str:
+        return html
+
+    monkeypatch.setattr(AmazonHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["current_price"] == "R$ 5.678,90"

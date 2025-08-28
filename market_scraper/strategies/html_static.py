@@ -265,10 +265,13 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
                 else title_tag.get_text(strip=True)
             )
 
-        #Preço pode aparecer como ``priceblock_ourprice``, ``priceblock_dealprice`` ou em ``span.a-offscreen`` em versões mais recentes do layout
+        #Preço pode aparecer em diversos locais dependendo do layout da página
         price_tag = (
             soup.find(id="priceblock_ourprice")
             or soup.find(id="priceblock_dealprice")
+            or soup.find(id="priceblock_saleprice")
+            or soup.find(id="price_inside_buybox")
+            or soup.select_one("#apex_desktop span.a-price > span.a-offscreen")
             or soup.select_one("span.a-offscreen")
         )
         raw_price = price_tag.get_text(strip=True) if price_tag else None
@@ -276,6 +279,19 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
         #Moeda pode estar em meta tags ou ser inserida do símbolo exibido
         currency_tag = soup.find("meta", property="og:price:currency")
         currency: Optional[str] = currency_tag.get("content") if currency_tag else None
+
+        #Fallback para estruturas que dividem o valor em parte inteira e decimal
+        if not raw_price:
+            whole = soup.select_one("span.a-price-whole")
+            fraction = soup.select_one("span.a-price-farction")
+            if whole:
+                #Remove caracteres não numéricos e combina as partes
+                whole_part = re.sub(r"\D", "", whole.get_text())
+                fraction_part = re.sub(r"\D", "", fraction.get_text()) if fraction else "00"
+                raw_price = f"{whole_part}.{fraction_part}"
+                if not currency:
+                    symbol = soup.select_one("span.a-price-symbol")
+                    currency = symbol.get_text(strip=True) if symbol else None
 
         if not currency and raw_price:
             #Extrai símbolos não numéricos do início do preço (ex.: R$)
