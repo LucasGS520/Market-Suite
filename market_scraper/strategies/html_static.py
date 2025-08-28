@@ -233,6 +233,72 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas da Amazon Brasil """
     domain = "amazon.com.br"
 
+    def _parse_html(self, html: str, url: str) -> dict:
+        """ Extrai nome e preço das páginas de produto da Amazon
+
+        O processo reutiliza os extratores genéricos de JSON-LD e meta
+        tags. Quando esses não fornecerem ``name`` ou ``current_price``,
+        realiza um fallback com seletores específicos da Amazon,
+        considerando variações comuns de estrutura.
+        """
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        #Primeiro tenta os extratores genéricos da classe base
+        data = self._extract_from_json_ld(soup, url)
+        if not data.get("name") or not data.get("current_price"):
+            data = self._extract_from_meta_tags(soup, url)
+
+        #Caso já tenha obtido nome e preço, retorna imediatamente
+        if data.get("name") and data.get("current_price"):
+            return data
+
+        # ---------- FALLBACK PARA SELETORES ESPECÍFICOS DA AMAZON ----------
+        #Título pode estar em ``#productTitle`` ou em ``<meta property="og:title">``
+        title_tag = soup.find(id="productTitle") or soup.find("meta", property="og:title")
+        name: Optional[str] = None
+        if title_tag:
+            #Meta tags guardam o conteúdo no atributo ``content``
+            name = (
+                title_tag.get("content")
+                if title_tag.name == "meta"
+                else title_tag.get_text(strip=True)
+            )
+
+        #Preço pode aparecer como ``priceblock_ourprice``, ``priceblock_dealprice`` ou em ``span.a-offscreen`` em versões mais recentes do layout
+        price_tag = (
+            soup.find(id="priceblock_ourprice")
+            or soup.find(id="priceblock_dealprice")
+            or soup.select_one("span.a-offscreen")
+        )
+        raw_price = price_tag.get_text(strip=True) if price_tag else None
+
+        #Moeda pode estar em meta tags ou ser inserida do símbolo exibido
+        currency_tag = soup.find("meta", property="og:price:currency")
+        currency: Optional[str] = currency_tag.get("content") if currency_tag else None
+
+        if not currency and raw_price:
+            #Extrai símbolos não numéricos do início do preço (ex.: R$)
+            symbol_match = re.match(r"[^\d]+", raw_price)
+            currency = symbol_match.group(0).strip() if symbol_match else None
+
+        #Limpa o valor numérico do preço removendo símbolos e separadores
+        numeric_price: Optional[str] = None
+        if raw_price:
+            cleaned = re.sub(r"[^\d.,]", "", raw_price)
+            if "," in cleaned and "." in cleaned:
+                cleaned = cleaned.replace(".", "").replace(",", ".")
+            else:
+                cleaned = cleaned.replace(",", ".")
+            numeric_price = cleaned or None
+
+        return {
+            "name": name,
+            "url": url,
+            #Normaliza o valor monetário utilizando a função da classe base
+            "current_price": self._format_price(numeric_price, currency),
+        }
+
 
 class ShopeeHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas da Shopee """
