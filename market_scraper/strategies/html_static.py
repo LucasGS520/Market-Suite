@@ -214,11 +214,18 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
                     cleaned = cleaned.replace(",", ".")
                 value = cleaned or None
 
+        #Busca a moeda em meta tags específicas caso esteja disponível
+        currency_tag = (
+            soup.find("meta", itemprop="priceCurrency")
+            or soup.find("meta", property="product:price:currency")
+        )
+        currency_value=currency_tag.get("content") if currency_tag else None
+
         return {
             "name": title,
             "url": url,
             #Normaliza o valor monetário utilizando a função da classe base
-            "current_price": self._format_price(value, None),
+            "current_price": self._format_price(value, currency_value),
         }
 
 

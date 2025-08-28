@@ -2,23 +2,6 @@
 
 import pytest
 
-import sys, types, importlib.machinery, importlib.util
-
-from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
-
-#Stubs de utilidades para isolar dependências pesadas durante os testes
-utils_stub = types.ModuleType("market_scraper.utils")
-sys.modules["market_scraper.utils"] = utils_stub
-sys.modules["market_scraper.utils.constants"] = types.SimpleNamespace(STEALTH_HEADERS={}, GENERIC_COOKIES={})
-loader = importlib.machinery.SourceFileLoader(
-    "market_scraper.utils.data_quality_validator",
-    "market_scraper/utils/data_quality_validator.py",
-)
-spec = importlib.util.spec_from_loader(loader.name, loader)
-data_quality_validator = importlib.util.module_from_spec(spec)
-loader.exec_module(data_quality_validator)
-sys.modules[loader.name] = data_quality_validator
-
 from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy
 
 
@@ -50,6 +33,19 @@ def html_fallback() -> str:
     )
 
 @pytest.mark.asyncio
+def html_fallback_com_moeda() -> str:
+    """ HTML de fallback com meta tag de moeda diferente de BRL """
+    return (
+        "<html><head>"
+        '<meta itemprop="priceCurrency" content="USD" />'
+        "</head><body>"
+        '<h1 class="ui-pdp-title">Produto Dólar</h1>'
+        '<span class="andes-money-amount__fraction">123</span>'
+        '<span class="andes-money-amount__cents">45</span>'
+        "</body></html>"
+    )
+
+@pytest.mark.asyncio
 async def test_extrai_de_meta_tags(strategy: MercadoLivreHtmlStaticStrategy, html_meta_sem_jsonld: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante extração correta quando apenas meta tags estão disponíveis """
     async def fake_fetch(self, url: str) -> str:
@@ -74,3 +70,16 @@ async def test_extrai_de_seletores_fallback(strategy: MercadoLivreHtmlStaticStra
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Fallback"
     assert detalhes["current_price"] == "R$ 1.234,56"
+
+@pytest.mark.asyncio
+async def test_extrai_moeda_nao_brl_em_fallback(strategy: MercadoLivreHtmlStaticStrategy, html_fallback_com_moeda: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante que a moeda informada em meta tag seja preservada no fallback """
+    async def fake_fetch(self, url: str) -> str:
+        return html_fallback_com_moeda
+
+    monkeypatch.setattr(MercadoLivreHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto Dólar"
+    assert detalhes["current_price"] == "USD 123,45"
