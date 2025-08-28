@@ -1,7 +1,9 @@
 """ Testes unitários para a estratégia de HTML estático """
 
 import pytest
+import httpx
 from celery.bin.result import result
+from mako.runtime import capture
 
 from market_scraper.strategies.html_static import HtmlStaticStrategy
 
@@ -102,3 +104,33 @@ async def test_retorna_erro_quando_html_invalido(strategy: HtmlStaticStrategy, h
     monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
     resultado = await strategy.get_data("http://exemplo.com/produto")
     assert resultado == {"status": "error"}
+
+@pytest.mark.asyncio
+async def test_define_referer_dinamico(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante que o cabeçalho `´Referer`` corresponde ao domínio base """
+    capturado: dict = {}
+
+    class DummyClient:
+        """ Cliente ``httpx`` falso que captura os cabeçalhos enviados """
+        def __init__(self, *a, **k):
+            capturado.update(k.get("headers", {}))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def get(self, url: str):
+            class Resp:
+                text = ""
+
+                def raise_for_status(self) -> None:
+                    pass
+
+            return Resp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
+    estrategia = HtmlStaticStrategy()
+    await estrategia._fetch_html("https://exemplo.com/produto")
+    assert capturado["Referer"] == "https://exemplo.com/"

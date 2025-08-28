@@ -37,8 +37,18 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return netloc.endswith(self.domain)
 
     async def _fetch_html(self, url: str) -> str:
-        """ Baixa o HTML utilizando ``httpx`` com cabeçalhos stealth e cookies """
-        async with httpx.AsyncClient(headers=STEALTH_HEADERS, cookies=GENERIC_COOKIES, timeout=10) as client:
+        """ Baixa o HTML utilizando ``httpx`` com cabeçalhos stealth e ``Referer`` dinâmico
+
+        Antes de realizar a requisição, o domínio base da URL é calculado para
+        preencher o cabeçalho ``Referer`` com o formato
+        ``<esquema>://<domínio>/``. Dessa forma, cada site recebe um valor
+        coerente e evita bloqueios por referências incorretas
+        """
+        parsed = urlparse(url)
+        base_domain = f"{parsed.scheme}://{parsed.netloc}/"
+        headers = {**STEALTH_HEADERS, "Referer": base_domain}
+
+        async with httpx.AsyncClient(headers=headers, cookies=GENERIC_COOKIES, timeout=10) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             return resp.text
