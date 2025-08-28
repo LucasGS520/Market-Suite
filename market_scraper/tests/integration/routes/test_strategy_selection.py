@@ -37,7 +37,7 @@ def _preparar_ambiente(monkeypatch) -> None:
     ) -> dict:
         return {
             "status": "success",
-            "details": {"name": "Fake", "current_price": "R$ 0,00"},
+            "details": {"name": "Fake", "current_price": "R$ 10,00"},
         }
 
     monkeypatch.setattr(
@@ -50,7 +50,7 @@ def _preparar_ambiente(monkeypatch) -> None:
     async def fake_html_get_data(self, **k):
         return {
             "status": "success",
-            "details": {"name": "Fake", "current_price": "R$ 0,00"},
+            "details": {"name": "Fake", "current_price": "R$ 10,00"},
         }
 
     for cls in [

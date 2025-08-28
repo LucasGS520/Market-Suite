@@ -85,12 +85,12 @@ SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL = Counter(
 SCRAPER_STRATEGY_TOTAL = Counter(
     "scraper_strategy_total",
     "Total de execuções por estratégia de scraping",
-    ["strategy"],
+    ["strategy", "status"],
 )
 
 SCRAPER_FALLBACK_TOTAL = Counter(
     "scraper_fallback_total",
-    "Total de fallbacks acionados após falha de validação de dados",
+    "Total de fallbacks acionados entre estratégias após falha de validação de dados",
 )
 
 SCRAPER_REQUEST_SIZE_BYTES = Histogram(

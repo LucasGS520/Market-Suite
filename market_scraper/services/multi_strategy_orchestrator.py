@@ -53,11 +53,11 @@ class MultiStrategyScraperOrchestrator:
         """ Executa as estratégias de scraping até obter um resultado válido
 
         As estratégias são recuperadas via :func:`strategies_for` e
-        executadas em sequência. Antes de cada execução a métrica
-        ``SCRAPER_STRATEGY_TOTAL`` é incrementada. Ao finalizar, o
-        resultado é validado com ``DataQualityValidator``. Em caso de falha
-        de validação, ``SCRAPER_FALLBACK_TOTAL`` é incrementado e a
-        próxima estratégia da fila é tentada
+        executadas em sequência. Ao final de cada tentativa a métrica
+        ``SCRAPER_STRATEGY_TOTAL`` registra a estratégia utilizada e o
+        status obtido. Caso o resultado não seja aproveitável,
+        ``SCRAPER_FALLBACK_TOTAL`` é incrementado e a próxima
+        estratégia da fila é tentada
         """
         strategies = self._strategy_selector(url)
         if not strategies:
@@ -67,12 +67,9 @@ class MultiStrategyScraperOrchestrator:
             )
 
         result: dict = {"status": "error"}
-        for strategy in strategies:
+        for idx, strategy in enumerate(strategies):
             if not strategy.supports_url(url):
                 continue
-
-            #Atualiza métrica indicando que a estratégia será executada
-            SCRAPER_STRATEGY_TOTAL.labels(strategy.__class__.__name__).inc()
 
             try:
                 result = await strategy.get_data(
@@ -85,23 +82,33 @@ class MultiStrategyScraperOrchestrator:
                     circuit_breaker=circuit_breaker,
                     recovery_manager=recovery_manager,
                 )
+                status_label = result.get("status", "error")
             except Exception:
-                #Qualquer erro leva à tentativa da próxima estratégia
+                #Qualquer exceção marca a execução como erro
                 result = {"status": "error"}
+                status_label = "exception"
 
             details = result.get("details")
             if details:
                 try:
-                    #valida dados essenciais antes de aceitar o resultado
+                    #Valida dados essenciais antes de aceitar o resultado
                     self._validator.validate(details)
                 except ValueError:
-                    #Dados inválidos: registra fallback e tenta próxima estratégia
-                    SCRAPER_FALLBACK_TOTAL.inc()
+                    #Dados inválidos: registra status e prepara fallback
+                    status_label = "invalid"
                     result = {"status": "error"}
-                    continue
 
-            if result.get("status") in ("success", "NOT_MODIFIED"):
+            #Registra a execução da estratégia com o status obtido
+            SCRAPER_STRATEGY_TOTAL.labels(
+                strategy.__class__.__name__, status_label
+            ).inc()
+
+            if status_label in ("success", "NOT_MODIFIED"):
                 break
+
+            #Caso o resultado não seja aproveitável, registra fallback
+            if idx < len(strategies) - 1:
+                SCRAPER_FALLBACK_TOTAL.inc()
 
         return result
 
