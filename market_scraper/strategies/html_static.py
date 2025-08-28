@@ -267,12 +267,14 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
 
         #Preço pode aparecer em diversos locais dependendo do layout da página
         price_tag = (
-            soup.find(id="priceblock_ourprice")
+            soup.select_one("#corePriceDisplay_desktop_feature_div span.a-offscreen")
+            or soup.select_one(".apexPriceToPay span.a-offscreen")
+            #Fallback para outros seletores conhecidos apenas se o principal falhar
+            or soup.find(id="priceblock_ourprice")
             or soup.find(id="priceblock_dealprice")
             or soup.find(id="priceblock_saleprice")
             or soup.find(id="price_inside_buybox")
             or soup.select_one("#apex_desktop span.a-price > span.a-offscreen")
-            or soup.select_one("span.a-offscreen")
         )
         raw_price = price_tag.get_text(strip=True) if price_tag else None
 

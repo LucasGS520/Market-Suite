@@ -121,7 +121,7 @@ async def test_extrai_de_price_inside_buybox(strategy: AmazonHtmlStaticStrategy,
     resultado = await strategy.get_data("http://exemplo.com/produto")
     detalhes = resultado["details"]
     assert resultado["status"] == "success"
-    assert detalhes["current_price"] == "R$ 4.567,89"
+    assert detalhes["current_price"] == "R$ 3.456,78"
 
 @pytest.mark.asyncio
 async def test_extrai_de_whole_fraction(strategy: AmazonHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -143,3 +143,25 @@ async def test_extrai_de_whole_fraction(strategy: AmazonHtmlStaticStrategy, monk
     detalhes = resultado["details"]
     assert resultado["status"] == "success"
     assert detalhes["current_price"] == "R$ 5.678,90"
+
+@pytest.mark.asyncio
+async def test_prioriza_core_price_display(strategy: AmazonHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Seleciona o preço correto quando há mútiplos ``span.a-offscreen`` """
+    html = (
+        "<html><body>"
+        '<span id="productTitle">Produto CorePrice</span>'
+        '<div id="corePriceDisplay_desktop_feature_div">'
+        '<span class="a-price"><span class="a-offscreen">R$ 9,99</span></span>'
+        '</div>'
+        '<div id="outro"><span class="a-offscreen">R$ 100,00</span></div>'
+        "</body></html>"
+    )
+
+    async def fake_fetch(self, url: str) -> str:
+        return html
+
+    monkeypatch.setattr(AmazonHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["status"] == "success"
+    assert resultado["status"] == "success"
+    assert detalhes["current_price"] == "R$ 9,99"
