@@ -168,33 +168,57 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
         # --- FALLBACK PARA SELETORES ESPECÍFICOS DO MERCADO LIVRE ---
 
         #Título do produto em h1.ui-pdp-title ou meta[name="title"]
+        #Como último recurso utiliza ``soup.find(`h1`)`` caso as alternativas específicas não estejam presentes
         title_tag = soup.select_one("h1.ui-pdp-title")
         meta_title = soup.find("meta", attrs={"name": "title"})
+        generic_h1 = soup.find("h1") if not title_tag and not meta_title else None
         title: Optional[str] = None
         if title_tag:
             title = title_tag.get_text(strip=True)
         elif meta_title:
             title = meta_title.get("content")
 
-        #Preço pode estar em duas combinações de classes
-        fraction = soup.select_one(".andes-money-amount__fraction") or soup.select_one(".price-tag-fraction")
-        cents = soup.select_one(".andes-money-amount__cents") or soup.select_one(".price-tag-decimal")
+        elif generic_h1:
+            title = generic_h1.get_text(strip=True)
+
+        #Preço pode estar em diversas combinações de classes
+        fraction = (
+            soup.select_one(".andes-money-amount__fraction")
+            or soup.select_one(".price-tag-fraction")
+            or soup.find("span", {"class": "price-tag-fraction"})
+        )
+        cents = (
+            soup.select_one(".andes-money-amount__cents")
+            or soup.select_one(".price-tag-decimal")
+        )
 
         value: Optional[str] = None
         if fraction:
-            #Remove separadores de milhar e outros caracteres
+            #Remove separadores de milhar e outros caracteres da parte inteira
             whole_part = re.sub(r"\D", "", fraction.get_text())
             value = whole_part
             if cents:
                 decimal_part = re.sub(r"\D", "", cents.get_text())
-                #Concatena parte inteira e decimal para formar valor numérico
+                #Concatena parte inteira e decimal para formar o valor
                 value = f"{value}.{decimal_part}"
+
+        else:
+            #Fallback para ``span[itemprop=`price`]`` caso não exista estrutura de fração/centavos
+            itemprop_price = soup.find("span", itemprop="price")
+            if itemprop_price:
+                raw_price = itemprop_price.get("content") or itemprop_price.get_text(strip=True)
+                cleaned = re.sub(r"[^\d.,]", "", raw_price)
+                if "," in cleaned and "." in cleaned:
+                    cleaned = cleaned.replace(".", "").replace(",", ".")
+                else:
+                    cleaned = cleaned.replace(",", ".")
+                value = cleaned or None
 
         return {
             "name": title,
             "url": url,
             #Normaliza o valor monetário utilizando a função da classe base
-            "current_price": self._format_price(value, None)
+            "current_price": self._format_price(value, None),
         }
 
 
