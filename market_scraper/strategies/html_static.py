@@ -254,8 +254,14 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
             return data
 
         # ---------- FALLBACK PARA SELETORES ESPECÍFICOS DA AMAZON ----------
-        #Título pode estar em ``#productTitle`` ou em ``<meta property="og:title">``
-        title_tag = soup.find(id="productTitle") or soup.find("meta", property="og:title")
+        #Título pode estar em ``#productTitle``, ``span[id*=`productTitle`]`` ou ``#title``
+        #Prioriza ``#productTitle`` > ``#title`` > ``<meta property="og:title">``
+        title_tag = (
+            soup.find(id=re.compile("^productTitle$", re.I))
+            or soup.find("span", id=re.compile("productTitle", re.I))
+            or soup.find(id=re.compile("^title$", re.I))
+            or soup.find("meta", property="og:title")
+        )
         name: Optional[str] = None
         if title_tag:
             #Meta tags guardam o conteúdo no atributo ``content``
@@ -285,7 +291,7 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
         #Fallback para estruturas que dividem o valor em parte inteira e decimal
         if not raw_price:
             whole = soup.select_one("span.a-price-whole")
-            fraction = soup.select_one("span.a-price-farction")
+            fraction = soup.select_one("span.a-price-fraction")
             if whole:
                 #Remove caracteres não numéricos e combina as partes
                 whole_part = re.sub(r"\D", "", whole.get_text())

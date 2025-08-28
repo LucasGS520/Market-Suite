@@ -162,6 +162,51 @@ async def test_prioriza_core_price_display(strategy: AmazonHtmlStaticStrategy, m
 
     monkeypatch.setattr(AmazonHtmlStaticStrategy, "_fetch_html", fake_fetch)
     resultado = await strategy.get_data("http://exemplo.com/produto")
-    detalhes = resultado["status"] == "success"
+    detalhes = resultado["details"]
     assert resultado["status"] == "success"
     assert detalhes["current_price"] == "R$ 9,99"
+
+@pytest.mark.asyncio
+async def test_extrai_de_title(strategy: AmazonHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Utiliza ``#title`` quando ``#productTitle`` não está presente """
+    html = (
+        "<html><head>"
+        '<meta property="og:title" content="Produto Meta" />'
+        "</head><body>"
+        '<span id="Title">Produto Pelo Title</span>'
+        '<span id="priceblock_ourprice">R$ 1.111,00</span>'
+        "</body></html>"
+    )
+
+    async def fake_fetch(self, url: str) -> str:
+        return html
+
+    monkeypatch.setattr(AmazonHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto Pelo Title"
+    assert detalhes["current_price"] == "R$ 1.111,00"
+
+@pytest.mark.asyncio
+async def test_prioriza_producttitle_variado(strategy: AmazonHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Prioriza ids que contenham ``productTitle`` sobre ``#title`` e meta tags """
+    html = (
+        "<html><head>"
+        '<meta property="og:title" content="Produto Meta" />'
+        "</head><body>"
+        '<span id="PRODUCTTITLE123">Produto Variado</span>'
+        '<span id="title">Outro Produto</span>'
+        '<span id="priceblock_ourprice">R$ 2.222,00</span>'
+        "</body></html>"
+    )
+
+    async def fake_fetch(self, url: str) -> str:
+        return html
+
+    monkeypatch.setattr(AmazonHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto Variado"
+    assert detalhes["current_price"] == "R$ 2.222,00"
