@@ -91,8 +91,19 @@ class HtmlStaticStrategy(ScrapingStrategy):
         name = soup.find("meta", property="og:title") or soup.find("title")
         price = soup.find("meta", itemprop="price") or soup.find("meta", property="product:price:amount")
         currency = soup.find("meta", property="product:price:currency") or soup.find("meta", itemprop="priceCurrency")
+
+        #Determina o valor do nome considerando meta-tags e a tag <title>
+        name_value: Optional[str] = None
+        if name:
+            if name.name == "meta":
+                #Em meta-tags o nome é definido pelo atributo ``content``
+                name_value = name.get("content")
+            else:
+                #Para a tag <title> utilizamos o texto interno
+                name_value = name.text
+
         return {
-            "name": name.get("content") if name else None,
+            "name": name_value,
             "url": url,
             "current_price": self._format_price(
                 price.get("content") if price else None,
