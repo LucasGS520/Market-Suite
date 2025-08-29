@@ -15,9 +15,14 @@ from decimal import Decimal
 
 import httpx
 from aiohttp import payload_type
+from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from market_scraper.utils.constants import USER_AGENTS
 from market_scraper.utils.data_quality_validator import DataQualityValidator
+from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+
+#Gerenciador de cache reutilizado para chamadas ao endpoint da Shopee
+cache_manager = IntelligentCacheManager()
 
 from .base import ScrapingStrategy
 
@@ -67,6 +72,11 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
             Cabeçalhos opcionais a serem mesclados aos padrões. É útils para
             inserir identificadores de sessão ou personalizações externas.
         """
+        #Verifica se há dados recentes em cache para evitar nova requisição
+        cached = cache_manager.get(marketplace="shopee", url=url)
+        if cached is not None:
+            return cached
+
         #Extrai ``shopid`` e ``itemid`` presentes na URL
         parsed = urlparse(url)
         match = re.search(r"i\.(\d+)\.(\d+)", parsed.path)
@@ -99,14 +109,29 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
                 client.headers["x-csrftoken"] = csrf
 
             params = {"itemid": itemid, "shopid": shopid}
-            resp = await client.get(api_url, params=params)
 
-            #Falhas de autenticação retornam erro simples para ativar fallback
-            if resp.status_code in (401, 403):
+            async def _retryable(exc: Exception) -> bool:
+                """ Define quais exceções devem ser consideradas transitórias """
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+                    code = exc.response.status_code
+                    return code == 429 or code >= 500
+                return isinstance(exc, httpx.HTTPError)
+
+            try:
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=1, max=4),
+                    retry=retry_if_exception(_retryable),
+                    reraise=True,
+                ):
+                    with attempt:
+                        resp = await client.get(api_url, params=params)
+                        if resp.status_code in (401, 403):
+                            return {"status": "error"}
+                        resp.raise_for_status()
+                        payload = resp.json().get("data", {})
+            except httpx.HTTPError:
                 return {"status": "error"}
-
-            resp.raise_for_status()
-            payload = resp.json().get("data", {})
 
         #Formata o preço retornado pela API (valor inteiro em centavos * 1000)
         price_raw = payload.get("price")
@@ -141,7 +166,9 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
         except Exception:
             return {"status": "error"}
 
-        return {"status": "success", "details": details}
+        result = {"status": "success", "details": details}
+        cache_manager.set(marketplace="shopee", url=url, value=result)
+        return result
 
 
 class MagaluJsonStrategy(JsonEndpointStrategy):
