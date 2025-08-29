@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 from .base import ScrapingStrategy
 from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
 from market_scraper.utils.data_quality_validator import DataQualityValidator
+from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 
 
 class HtmlStaticStrategy(ScrapingStrategy):
@@ -31,6 +32,9 @@ class HtmlStaticStrategy(ScrapingStrategy):
     priority = 10
     domain: str = ""
 
+    #Gerenciador de User-Agent para rotacionar cabeçalhos e minimizar bloqueios
+    _ua_manager = IntelligentUserAgentManager()
+
     def supports_url(self, url: str) -> bool:
         """ Verifica se a URL pertence ao domínio esperado """
         netloc = urlparse(url).netloc
@@ -39,14 +43,14 @@ class HtmlStaticStrategy(ScrapingStrategy):
     async def _fetch_html(self, url: str) -> str:
         """ Baixa o HTML utilizando ``httpx`` com cabeçalhos stealth e ``Referer`` dinâmico
 
-        Antes de realizar a requisição, o domínio base da URL é calculado para
-        preencher o cabeçalho ``Referer`` com o formato
-        ``<esquema>://<domínio>/``. Dessa forma, cada site recebe um valor
-        coerente e evita bloqueios por referências incorretas
+        O método também rotaciona o ``User-Agent`` para reduzir bloqueios,
+        garantindo que cada requisição pareça vir de um navegador distinto.
         """
         parsed = urlparse(url)
         base_domain = f"{parsed.scheme}://{parsed.netloc}/"
         headers = {**STEALTH_HEADERS, "Referer": base_domain}
+        #Rotaciona o User-Agent a cada chamada para imitar diferentes navegadores
+        headers["User-Agent"] = self._ua_manager.get_user_agent("html_static")
 
         async with httpx.AsyncClient(headers=headers, cookies=GENERIC_COOKIES, timeout=10) as client:
             resp = await client.get(url)

@@ -1,6 +1,7 @@
 """ Testes específicos para a estratégia ShopeeHtmlStaticStrategy """
 
 import pytest
+import httpx
 
 from market_scraper.strategies.html_static import ShopeeHtmlStaticStrategy
 
@@ -59,3 +60,37 @@ async def test_fallback_para_meta_tags(strategy: ShopeeHtmlStaticStrategy, html_
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Meta"
     assert detalhes["current_price"] == "R$ 20,00"
+
+@pytest.mark.asyncio
+async def test_envia_user_agent(strategy: ShopeeHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Verifica se o cabeçalho ``User-Agent`` é enviado na requisição HTTP """
+
+    capturado: dict = {}
+
+    class DummyResponse:
+        """ Simula resposta de sucesso do ``httpx`` """
+
+        text = ""
+
+        def raise_for_status(self) -> None:
+            pass
+
+    class DummyAsyncClient:
+        """ Cliente assíncrono fictício que registra os cabeçalhos enviados """
+        def __init__(self, headers=None, cookies=None, timeout=None):
+            capturado.update(headers or {})
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def get(self, url: str) -> DummyResponse:
+            return DummyResponse()
+
+    #Substitui o cliente real pelo fictício para inspecionar os cabeçalhos
+    monkeypatch.setattr(httpx, "AsyncClient", DummyAsyncClient)
+
+    await strategy._fetch_html("http://exemplo.com/produto")
+    assert "User-Agent" in capturado

@@ -8,6 +8,7 @@ para o domínio mobile.
 
 from typing import Tuple, Union, Dict
 from urllib.parse import urlparse, urlunparse
+import random
 from market_scraper.core.config_scraper import settings
 from shared.utils.ml_url import PRODUCT_HOSTS
 
@@ -44,6 +45,7 @@ STEALTH_HEADERS: Dict[str, str] = {
     "DNT": "1",
     "Sec-GPC": "1",
     "Referer": "https://www.mercadolivre.com.br/",
+    "User-Agent": random.choice(USER_AGENTS),
 }
 
 # ---------- COOKIES GENÉRICOS ----------
