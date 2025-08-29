@@ -1,0 +1,78 @@
+""" Testes para a estratégia estática do Magazine Luiza """
+
+import pytest
+
+from market_scraper.strategies.html_static import MagaluHtmlStaticStrategy
+
+
+@pytest.fixture
+def strategy() -> MagaluHtmlStaticStrategy:
+    """ Instância da estratégia do Magalu para os testes """
+    return MagaluHtmlStaticStrategy()
+
+@pytest.fixture
+def html_com_jsonld() -> str:
+    """ HTML fictício contendo bloco JSON-LD válido """
+    return (
+        "<html><head>"
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@type":"Product","name":"Produto JSON-LD Magalu","offers":{"@type":"Offer","price":"199.90","priceCurrency":"BRL"}}'
+        "</script>"
+        "</head></html>"
+    )
+
+@pytest.fixture
+def html_meta_tags() -> str:
+    """ HTML com meta-tags de título e preço """
+    return (
+        "<html><head>"
+        '<meta property="og:title" content="Produto Meta Magalu" />'
+        '<meta itemprop="price" content="123.45" />'
+        '<meta itemprop="priceCurrency" content="BRL" />'
+        "</head></html>"
+    )
+
+@pytest.fixture
+def html_initial_state() -> str:
+    """ HTML contendo ``window.__INITIAL_STATE__`` com dados de produto """
+    return (
+        "<html><head>"
+        '<script>window.__INITIAL_STATE__ = {"produto": {"info": {"name": "Produto State Magalu", "price": 55.66}}};</script>'
+        "</head></html>"
+    )
+
+@pytest.mark.asyncio
+async def test_extrai_de_json_ld(strategy: MagaluHtmlStaticStrategy, html_com_jsonld: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Valida extração de nome e preço a partir de bloco JSON-LD """
+    async def fake_fetch(self, url: str) -> str:
+        return html_com_jsonld
+
+    monkeypatch.setattr(MagaluHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["detials"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto JSON-LD Magalu"
+    assert detalhes["current_price"] == "R$ 199,90"
+
+@pytest.mark.asyncio
+async def test_extrai_de_meta_tags(strategy: MagaluHtmlStaticStrategy, html_meta_tags: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante extração correta quando apenas meta-tags estão presentes """
+    async def fake_fetch(self, url: str) -> str:
+        return html_meta_tags
+
+    monkeypatch.setattr(MagaluHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto State Magalu"
+    assert detalhes["current_price"] == "R$ 55,66"
+
+@pytest.mark.asyncio
+async def test_falha_validacao(strategy: MagaluHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Retorna status de erro quando os dados essenciais estão ausentes """
+    async def fake_fetch(self, url: str) -> str:
+        return "<html></html>"
+
+    monkeypatch.setattr(MagaluHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    assert resultado == {"status": "error"}
