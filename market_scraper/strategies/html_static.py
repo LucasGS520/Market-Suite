@@ -119,8 +119,16 @@ class HtmlStaticStrategy(ScrapingStrategy):
     def _extract_from_meta_tags(self, soup: BeautifulSoup, url: str) -> dict:
         """ Extrai dados de meta-tags como alternativa ao JSON-LD """
         name = soup.find("meta", property="og:title") or soup.find("title")
-        price = soup.find("meta", itemprop="price") or soup.find("meta", property="product:price:amount")
-        currency = soup.find("meta", property="product:price:currency") or soup.find("meta", itemprop="priceCurrency")
+        price = (
+                soup.find("meta", itemprop="price")
+                or soup.find("meta", property="og:price:amount")
+                or soup.find("meta", property="product:price:amount")
+        )
+        currency = (
+                soup.find("meta", itemprop="priceCurrency")
+                or soup.find("meta", property="og:price:currency")
+                or soup.find("meta", property="product:price:currency")
+        )
 
         #Determina o valor do nome considerando meta-tags e a tag <title>
         name_value: Optional[str] = None

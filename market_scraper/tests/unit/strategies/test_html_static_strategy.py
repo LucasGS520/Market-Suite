@@ -36,6 +36,17 @@ def html_meta_tags() -> str:
     )
 
 @pytest.fixture
+def html_og_meta_tags() -> str:
+    """ HTML contendo apenas meta tags ``og:price:*`` """
+    return (
+        "<html><head>"
+        '<meta property="og:title" content="Produto OG" />'
+        '<meta property="og:price:amount" content="25.00" />'
+        '<meta property="og:price:currency" content="USD" />'
+        "</head></html>"
+    )
+
+@pytest.fixture
 def html_json_ld_price_spec() -> str:
     """ HTML com JSON-LD onde a moeda está em ``priceSpecification`` """
     return (
@@ -99,6 +110,21 @@ async def test_extrai_dados_de_meta_tags(strategy: HtmlStaticStrategy, html_meta
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Meta"
     assert detalhes["current_price"] == "R$ 20,00"
+
+@pytest.mark.asyncio
+async def test_extrai_de_meta_tags_og(strategy: HtmlStaticStrategy, html_og_meta_tags: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante extração quando apenas tags ``og:price:*`` estão disponíveis """
+    async def fake_fetch(self, url: str) -> str:
+        return html_og_meta_tags
+
+    #Ignora validações rígidas para focar apenas na extração
+    monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
+    monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto OG"
+    assert detalhes["current_price"] == "USD 25,00"
 
 @pytest.mark.asyncio
 async def test_extrai_moeda_de_price_specification(strategy: HtmlStaticStrategy, html_json_ld_price_spec: str, monkeypatch: pytest.MonkeyPatch) -> None:
