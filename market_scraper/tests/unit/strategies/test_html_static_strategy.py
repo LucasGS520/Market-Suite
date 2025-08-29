@@ -46,6 +46,26 @@ def html_json_ld_price_spec() -> str:
     )
 
 @pytest.fixture
+def html_json_ld_offers_list() -> str:
+    """ HTML com JSON-LD em que ``offers`` contém uma lista interna """
+    return (
+        "<html><head>"
+        '<script type="application/ld+json">'
+        '{"@type":"Product","name":"Produto Lista","offers":{"@type":"AggregateOffer","offers":[{"price":"15.00","priceCurrency":"BRL"}]}}'
+        "</script>" "</head></html>"
+    )
+
+@pytest.fixture
+def html_json_ld_low_price() -> str:
+    """ HTML com JSON-LD usando ``lowPrice`` sem ``price`` """
+    return (
+        "<html><head>"
+        '<script type="application/ld+json">'
+        '{"@type":"Product","name":"Produto Low","offers":{"lowPrice":"40.00","priceCurrency":"BRL"}}'
+        "</script>" "</head></html>"
+    )
+
+@pytest.fixture
 def html_invalido() -> str:
     """ HTML sem informações necessárias para validação """
     return "<html><head><title>Vazio</title></head></html>"
@@ -94,6 +114,34 @@ async def test_extrai_moeda_de_price_specification(strategy: HtmlStaticStrategy,
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto PriceSpec"
     assert detalhes["current_price"] == "USD 30,00"
+
+@pytest.mark.asyncio
+async def test_extrai_de_ofertas_agrupadas(strategy: HtmlStaticStrategy, html_json_ld_offers_list: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante extração quando ``offers`` possui lista interna """
+    async def fake_fetch(self, url: str) -> str:
+        return html_json_ld_offers_list
+
+    monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
+    monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto Lista"
+    assert detalhes["current_price"] == "R$ 15,00"
+
+@pytest.mark.asyncio
+async def test_extrai_low_price_quando_price_ausente(strategy: HtmlStaticStrategy, html_json_ld_low_price: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Utiliza ``lowPrice`` como preço quando ``price`` não existe """
+    async def fake_fetch(self, url: str) -> str:
+        return html_json_ld_low_price
+
+    monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
+    monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto Low"
+    assert detalhes["current_price"] == "R$ 40,00"
 
 @pytest.mark.asyncio
 async def test_retorna_erro_quando_html_invalido(strategy: HtmlStaticStrategy, html_invalido: str, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -67,7 +67,12 @@ class HtmlStaticStrategy(ScrapingStrategy):
 
 
     def _extract_from_json_ld(self, soup: BeautifulSoup, url: str) -> dict:
-        """ Procura blocos JSON-LD de produto e extrai informações principais """
+        """ Procura blocos JSON-LD de produto e extrai informações principais
+
+        A função também trata estruturas onde ``offers`` contém outra lista
+        ``offers`` (caso comum em ``AggregateOffer``) e utiliza os campos
+        ``lowPrice`` ou ``highPrice`` quando ``price`` estiver ausente.
+        """
         for tag in soup.find_all("script", type="application/ld+json"):
             try:
                 content = json.loads(tag.string or "{}")
@@ -84,9 +89,20 @@ class HtmlStaticStrategy(ScrapingStrategy):
                 if isinstance(item, dict) and item.get("@type") == "Product":
                     name = item.get("name") or item.get("description") or item.get("sku")
                     offers = item.get("offers") or {}
+                    #Caso ``offers`` seja uma lista, utiliza o primeiro elemento
                     if isinstance(offers, list):
                         offers = offers[0] if offers else {}
-                    price = offers.get("price") or offers.get("priceSpecification", {}).get("price")
+                    #Alguns sites definem ``offers`` dentro do outro bloco ``offers`` conforme o padrão ``AggregateOffer``.
+                    elif isinstance(offers, dict) and isinstance(offers.get("offers"), list):
+                        offers = offers["offers"][0] if offers["offers"] else {}
+
+                    #Busca o preço em diferentes campos, incluindo ``lowPrice`` e ``highPrice`` quando ``price`` não estiver disponível.
+                    price = (
+                        offers.get("price")
+                        or offers.get("priceSpecification", {}).get("price")
+                        or offers.get("lowPrice")
+                        or offers.get("highPrice")
+                    )
                     #Busca a moeda diretamente ou dentro de ``priceSpecification``
                     currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
                     return {
