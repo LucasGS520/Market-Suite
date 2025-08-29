@@ -385,7 +385,18 @@ class ShopeeHtmlStaticStrategy(HtmlStaticStrategy):
                     return {}
 
                 name_dict = _deep_search(page_props, {"name", "title"})
-                price_dict = _deep_search(page_props, {"price", "pricedisplay", "amount"})
+                #Inclui chaves alternativas utilizadas pela shopee para representar preços
+                price_dict = _deep_search(
+                    page_props,
+                    {
+                        "price",
+                        "pricedisplay",
+                        "amount",
+                        "price_min",
+                        "price_before_discount",
+                        "price_min_before_discount",
+                    },
+                )
                 currency_dict = _deep_search(page_props, {"currency", "currencysymbol"})
 
                 name = next(iter(name_dict.values())) if name_dict else None
@@ -400,6 +411,10 @@ class ShopeeHtmlStaticStrategy(HtmlStaticStrategy):
                     else:
                         cleaned = cleaned.replace(",", ".")
                     price = cleaned or None
+
+                elif isinstance(price, int):
+                    #Valores inteiros costumam representar o preço multiplicado por 100000
+                    price = Decimal(price) / Decimal("100000")
 
                 if name and price is not None:
                     return {

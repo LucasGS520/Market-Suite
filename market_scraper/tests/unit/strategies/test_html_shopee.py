@@ -62,6 +62,47 @@ async def test_fallback_para_meta_tags(strategy: ShopeeHtmlStaticStrategy, html_
     assert detalhes["current_price"] == "R$ 20,00"
 
 @pytest.mark.asyncio
+async def test_normaliza_preco_inteiro(strategy: ShopeeHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante a conversão correta quando o preço é fornecido como inteiro """
+    html = (
+        "<html><head>"
+        '<script id="__NEXT_DATA__">'
+        '{"props":{"pageProps":{"product":{"name":"Produto Int","price":123456,"currency":"BRL"}}}}'
+        "</script>"
+        "</head></html>"
+    )
+
+    async def fake_fetch(self, url: str) -> str:
+        return html
+
+    monkeypatch.setattr(ShopeeHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["current_price"] == "R$ 1,23"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("campo", ["price_min", "price_before_discount", "price_min_before_discount"])
+async def test_busca_preco_em_campos_alternativos(strategy: ShopeeHtmlStaticStrategy, campo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Verifica extração de preço em diferentes chaves alternativas """
+    html = (
+        "<html><head>"
+        '<script id="__NEXT_DATA__">'
+        '{"props":{"pageProps":{"product":{"name":"Produto Alt","currency":"BRL","%s":123456}}}}'
+        "</script>"
+        "</head></html>"
+    ) % campo
+
+    async def fake_fetch(self, url: str) -> str:
+        return html
+
+    monkeypatch.setattr(ShopeeHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["current_price"] == "R$ 1,23"
+
+@pytest.mark.asyncio
 async def test_envia_user_agent(strategy: ShopeeHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Verifica se o cabeçalho ``User-Agent`` é enviado na requisição HTTP """
 
