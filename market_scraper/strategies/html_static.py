@@ -444,6 +444,86 @@ class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas do Magazine Luiza """
     domain = "magazineluiza.com.br"
 
+    def _parse_html(self, html: str, url: str) -> dict:
+        """ Extrai nome e preço das páginas do Magazine Luiza
+
+        Retorna sempre um dicionário contendo ``name`` e ``current_price``.
+        Caso algum valor não seja localizado, o campo correspondente será
+        ``None`` ou vazio, permitindo que ``DataQualityValidator`` da classe
+        sinalize inconsistência.
+        """
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        #Tenta extrair via bloco JSON-LD específico de produto
+        data = self._extract_from_json_ld(soup, url)
+        if data.get("name") and data.get("current_price"):
+            return data
+
+        #Incializa variáveis que poderão ser preenchidas pelos fallbacks
+        name: Optional[str] = None
+        price: Optional[str] = None
+
+        #Fallback para meta tags padrão
+        name_tag = soup.find("meta", property="og:title")
+        price_tag = soup.find("meta", itemprop="price")
+        if name_tag:
+            name = name_tag.get("content")
+        if price_tag:
+            price = price_tag.get("content")
+        if name and price:
+            return {
+                "name": name,
+                "url": url,
+                "current_price": self._format_price(price, None),
+            }
+
+        #Ultimo recurso é estado inicial embutido em script
+        script_tag = soup.find("script", string=re.compile("window.__INITIAL_STATE__"))
+        if script_tag and script_tag.string:
+            match = re.search(
+                r"window.__INITIAL_STATE__\s*=\s*(\{.*?\})\s*;",
+                script_tag.string,
+                re.DOTALL,
+            )
+            if match:
+                try:
+                    state = json.loads(match.group(1))
+
+                    #Busca recursiva por chaves relevantes
+                    def _deep_search(obj: Any, keys: set[str]):
+                        if isinstance(obj, dict):
+                            for k, v in obj.items():
+                                lk = k.lower()
+                                if lk in keys and not isinstance(v, (dict, list)):
+                                    return {lk: v}
+                                found = _deep_search(v, keys)
+                                if found:
+                                    return found
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                found = _deep_search(item, keys)
+                                if found:
+                                    return found
+                        return {}
+
+                    name_dict = _deep_search(state, {"name", "title"})
+                    price_dict = _deep_search(state, {"price", "priceValue", "bestprice"})
+                    if name_dict:
+                        name = next(iter(name_dict.values()))
+                    if price_dict:
+                        price = next(iter(price_dict.values()))
+                except json.JSONDecodeError:
+                    #Se o JSON estiver malformado, o fallback é ignorado
+                    pass
+
+        return {
+            "name": name,
+            "url": url,
+            #Normaliza o valor monetário utilizando a função da classe base
+            "current_price": self._format_price(price, None),
+        }
+
 
 __all__ = [
     "HtmlStaticStrategy",

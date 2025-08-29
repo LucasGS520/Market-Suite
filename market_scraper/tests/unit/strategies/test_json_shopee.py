@@ -165,7 +165,7 @@ async def test_utiliza_cache_para_chamadas_repetidas(monkeypatch: pytest.MonkeyP
 
         async def __aexit__(self, exc_type, exc, tb):
             pass
-        
+
         async def get(self, url: str, params: dict | None = None) -> DummyResponse:
             data = {"name": "Produto", "price": 123456}
             if "api/v4/item/get" in url:
