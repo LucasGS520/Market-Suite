@@ -110,6 +110,18 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
 
         #Formata o preço retornado pela API (valor inteiro em centavos * 1000)
         price_raw = payload.get("price")
+
+        #Caso ``price`` não exista, tenta campos alternativas de preço
+        if price_raw is None:
+            for fallback_key in ("price_min", "price_max", "price_before_discount"):
+                price_raw = payload.get(fallback_key)
+                if price_raw is not None:
+                    break
+            else:
+                models = payload.get("models") or []
+                if isinstance(models, list) and models:
+                    price_raw = models[0].get("price")
+
         current_price = ""
         if price_raw is not None:
             try:

@@ -2,7 +2,6 @@
 
 import pytest
 import httpx
-from celery.bin.result import result
 
 from market_scraper.strategies.json_endpoint import ShopeeJsonStrategy
 
@@ -28,8 +27,18 @@ class DummyResponse:
             raise httpx.HTTPStatusError("erro", request=None, response=None)
 
 @pytest.mark.asyncio
-async def test_retorna_dados_em_caso_de_sucesso(monkeypatch: pytest.MonkeyPatch, strategy: ShopeeJsonStrategy) -> None:
-    """ Verifica fluxo completo retornando nome e preço formatado """
+@pytest.mark.parametrize(
+    "dados_preco",
+    [
+        {"price": 123456},
+        {"price_min": 123456},
+        {"price_max": 123456},
+        {"price_before_discount": 123456},
+        {"models": [{"price": 123456}]},
+    ]
+)
+async def test_retorna_dados_em_caso_de_sucesso(monkeypatch: pytest.MonkeyPatch, strategy: ShopeeJsonStrategy, dados_preco: dict) -> None:
+    """ Verifica fluxo completo retornado nome e preço a partir de diferentes campos """
     def fake_validate(self, data: dict) -> None:
         pass
 
@@ -47,7 +56,9 @@ async def test_retorna_dados_em_caso_de_sucesso(monkeypatch: pytest.MonkeyPatch,
 
         async def get(self, url: str, params: dict | None = None) -> DummyResponse:
             if "api/v4/item/get" in url:
-                return DummyResponse(200, {"data": {"name": "Produto", "price": 123456}})
+                data = {"name": "Produto"}
+                data.update(dados_preco)
+                return DummyResponse(200, {"data": data})
             #Primeira chamada captura cookie CSRF
             self.cookies["csrftoken"] = "abc123"
             return DummyResponse(200)
