@@ -344,6 +344,74 @@ class ShopeeHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas da Shopee """
     domain = "shopee.com.br"
 
+    def _parse_html(self, html: str, url: str) -> dict:
+        """ Extrai dados de nome e preço específicos da Shopee
+
+        A rotina procura inicialmente pelo script ``<script id="__NEXT_DATA__">``
+        que contém um JSON com o estado completo da página. A partir desse JSON é
+        feita uma busca recursiva dentro de ``props.pageProps`` para localizar
+        campos de nome e preço do produto. Se qualquer etapa falhar, os métodos
+        genéricos de extração da classe base são utilizados como fallback
+        """
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        #Primeiro tenta JSON embutido em __NEXT_DATA__
+        script_tag = soup.find("script", id="__NEXT_DATA__")
+        if script_tag and script_tag.string:
+            try:
+                data = json.loads(script_tag.string)
+                page_props = data.get("props", {}).get("pageProps", {})
+
+                #Busca recursiva por chaves relevantes dentro de ``pageProps``
+                def _deep_search(obj: Any, keys: set[str]):
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            lk = k.lower()
+                            if lk in keys and not isinstance(v, (dict, list)):
+                                return {lk: v}
+                            found = _deep_search(v, keys)
+                            if found:
+                                return found
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            found = _deep_search(item, keys)
+                            if found:
+                                return found
+                    return {}
+
+                name_dict = _deep_search(page_props, {"name", "title"})
+                price_dict = _deep_search(page_props, {"price", "pricedisplay", "amount"})
+                currency_dict = _deep_search(page_props, {"currency", "currencysymbol"})
+
+                name = next(iter(name_dict.values())) if name_dict else None
+                price = next(iter(price_dict.values())) if price_dict else None
+                currency = next(iter(currency_dict.values())) if currency_dict else None
+
+                #Normaliza o preço encontrado para facilitar a conversão monetária
+                if isinstance(price, str):
+                    cleaned = re.sub(r"[^\d.,]", "", price)
+                    if "," in cleaned and "." in cleaned:
+                        cleaned = cleaned.replace(".", "").replace(",", ".")
+                    else:
+                        cleaned = cleaned.replace(",", ".")
+                    price = cleaned or None
+
+                if name and price is not None:
+                    return {
+                        "name": name,
+                        "url": url,
+                        "current_price": self._format_price(price, currency),
+                    }
+            except json.JSONDecodeError:
+                pass
+
+        # ---------- FALLBACK UTILIZA EXTRATORES GENÉRICOS DE CLASSE BASE ----------
+        data = self._extract_from_json_ld(soup, url)
+        if not data.get("name") or not data.get("current_price"):
+            data = self._extract_from_meta_tags(soup, url)
+        return data
+
 
 class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas do Magazine Luiza """
