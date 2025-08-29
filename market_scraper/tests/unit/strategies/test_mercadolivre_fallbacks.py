@@ -3,24 +3,27 @@
 import pytest
 import sys, types, importlib.machinery, importlib.util
 
+from alembic.util.pyfiles import load_module_py
 from celery.bin.result import result
 
-from market_scraper.tests.unit.strategies.test_html_mercadolivre import utils_stub, data_quality_validator
+#Importações para simular módulos mínimos necessários
 from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
 
-#Stubs mínimos para evitar dependências complexas
-utils_stub = types.ModuleType("market_scraper.utils")
-utils_stub.__path__ = []
-sys.modules["market_scraper.utils"] = utils_stub
-sys.modules["market_scraper.utils.constants"] = types.SimpleNamespace(STEALTH_HEADERS={}, GENERIC_COOKIES={})
-loader = importlib.machinery.SourceFileLoader(
-    "market_scraper.utils.data_quality_validator",
-    "market_scraper/utils/data_quality_validator.py",
-)
-spec = importlib.util.spec_from_loader(loader.name, loader)
-data_quality_validator = importlib.util.module_from_spec(spec)
-loader.exec_module(data_quality_validator)
-sys.modules[loader.name] = data_quality_validator
+@pytest.fixture(autouse=True)
+def stub_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Configura módulos mínimos de utilidades para o teste e restaura ao final """
+    utils_stub = types.ModuleType("market_scraper.utils")
+    utils_stub.__path__ = []
+    monkeypatch.setattr(sys.modules, "market_scraper.utils", utils_stub)
+    monkeypatch.setitem(sys.modules, "market_scraper.utils.constants", types.SimpleNamespace(STEALTH_HEADERS={}, GENERIC_COOKIES={}))
+    loader = importlib.machinery.SourceFileLoader(
+        "market_scraper.utils.data_quality_validator",
+        "market_scraper/utils/data_quality_validator.py",
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    data_quality_validator = importlib.util.module_from_spec(spec)
+    loader.exec_module(data_quality_validator)
+    monkeypatch.setitem(sys.modules, loader.name, data_quality_validator)
 
 from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy
 
