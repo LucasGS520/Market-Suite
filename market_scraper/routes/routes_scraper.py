@@ -58,7 +58,8 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
         raise HTTPException(status_code=500, detail="Falha ao extrair dados")
 
     parsed = urlparse(str(payload.url))
-    marketplace = parsed.netloc #Extrai domínio para identificar o marketplace
+    #Extrai o hostname, se não existir usa ``netloc`` como fallback para identificar corretamente o marketplace
+    marketplace = parsed.hostname or parsed.netloc
 
     return ScraperResponse(
         name=details.get("name"),
