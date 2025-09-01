@@ -14,7 +14,6 @@ import re
 from decimal import Decimal
 
 import httpx
-from streamlit import query_params
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from market_scraper.utils.data_quality_validator import DataQualityValidator
@@ -92,9 +91,9 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
         if match:
             shopid, itemid = match.groups()
         else:
-            query_params = parse_qs(parsed.query)
-            shopid = query_params.get("shopid", [None])[0]
-            itemid = query_params.get("itemid", [None])[0]
+            qs_params = parse_qs(parsed.query)
+            shopid = qs_params.get("shopid", [None])[0]
+            itemid = qs_params.get("itemid", [None])[0]
 
         if not shopid or not itemid:
             return {"status": "error"}
