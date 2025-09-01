@@ -60,12 +60,18 @@ def strategies_for(url: str) -> List[ScrapingStrategy]:
     Playwright é utilizada.
     """
     host = extract_hostname(url)
+
+    def _corresponds_domain(host: str, domain: str) -> bool:
+        """ Verifica se o host pertence exatamente ao seu domínio """
+        return host == domain or host.endswith("." + domain)
+
     for domain, names in DOMAIN_POLICIES.items():
-        if domain in host:
+        if _corresponds_domain(host, domain):
             return [
                 STRATEGY_REGISTRY[name]()
                 for name in names
                 if name in STRATEGY_REGISTRY
             ]
+
     #Fallback para a estratégia padrão quando o domínio não é reconhecido
     return [PlaywrightDefaultStrategy()]
