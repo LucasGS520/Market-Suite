@@ -129,7 +129,11 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
                         if resp.status_code in (401, 403):
                             return {"status": "error"}
                         resp.raise_for_status()
-                        payload = resp.json().get("data", {})
+                        #Tenta decodificar o JSON da resposta; se falhar, retorna erro
+                        try:
+                            payload = resp.json().get("data", {})
+                        except ValueError:
+                            return {"status": "error"}
             except httpx.HTTPError:
                 return {"status": "error"}
 

@@ -10,6 +10,11 @@ from market_scraper.strategies.json_endpoint import ShopeeJsonStrategy
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 
 
+@pytest.fixture(autouse=True)
+def limpar_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Reinicia o cache compartilhado antes de cada teste """
+    monkeypatch.setattr("market_scraper.strategies.json_endpoint.cache_manager", IntelligentCacheManager())
+
 @pytest.fixture
 def strategy() -> ShopeeJsonStrategy:
     """ Instância da estratégia de API da Shopee """
@@ -101,6 +106,36 @@ async def test_retorna_erro_em_falha_de_autenticacao(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
     monkeypatch.setattr("market_scraper.strategies.json_endpoint.DataQualityValidator.validate", fake_validate)
+
+    resultado = await strategy.get_data("https://shopee.com.br/produto-i.1.2")
+    assert resultado == {"status": "error"}
+
+@pytest.mark.asyncio
+async def test_retorna_erro_quando_json_invalido(monkeypatch: pytest.MonkeyPatch, strategy: ShopeeJsonStrategy) -> None:
+    """ Assegura que JSON malformado resulte em ``{"status": "error"}`` """
+    class InvalidResponse(DummyResponse):
+        def json(self) -> dict:
+            raise ValueError("invalid json")
+
+    class DummyClient:
+        def __init__(self, *a, **k) -> None:
+            self.headers = k.get("headers", {})
+            self.cookies: dict = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def get(self, url: str, params: dict | None = None) -> DummyResponse:
+            if "api/v4/item/get" in url:
+                return InvalidResponse(200)
+            self.cookies["csrftoken"] = "abc"
+            return DummyResponse(200)
+
+    monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
+    monkeypatch.setattr("market_scraper.strategies.json_endpoint.DataQualityValidator.validate", lambda self, data: None)
 
     resultado = await strategy.get_data("https://shopee.com.br/produto-i.1.2")
     assert resultado == {"status": "error"}
