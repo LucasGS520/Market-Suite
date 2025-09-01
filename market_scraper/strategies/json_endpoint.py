@@ -9,12 +9,12 @@ principal faça o **fallback** automático para outras estratégias.
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import re
 from decimal import Decimal
 
 import httpx
-from aiohttp import payload_type
+from streamlit import query_params
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from market_scraper.utils.constants import USER_AGENTS
@@ -77,12 +77,21 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
         if cached is not None:
             return cached
 
-        #Extrai ``shopid`` e ``itemid`` presentes na URL
+        #Extrai ``shopid`` e ``itemid`` do caminho ou dos parâmetros da URL
         parsed = urlparse(url)
+        shopid: Optional[str] = None
+        itemid: Optional[str] = None
+
         match = re.search(r"i\.(\d+)\.(\d+)", parsed.path)
-        if not match:
+        if match:
+            shopid, itemid = match.groups()
+        else:
+            query_params = parse_qs(parsed.query)
+            shopid = query_params.get("shopid", [None])[0]
+            itemid = query_params.get("itemid", [None])[0]
+
+        if not shopid or not itemid:
             return {"status": "error"}
-        shopid, itemid = match.groups()
 
         api_url = f"{parsed.scheme}://{parsed.netloc}/api/v4/item/get"
 

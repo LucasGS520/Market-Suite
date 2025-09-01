@@ -82,6 +82,38 @@ async def test_retorna_dados_em_caso_de_sucesso(monkeypatch: pytest.MonkeyPatch,
     assert detalhes["current_price"] == "R$ 1,23"
 
 @pytest.mark.asyncio
+async def test_aceita_url_com_parametros(monkeypatch: pytest.MonkeyPatch, strategy: ShopeeJsonStrategy) -> None:
+    """ Permite URLs que informam ``shopid`` e ``itemid`` na query """
+    def fake_validate(self, data: dict) -> None:
+        pass
+
+    class DummyClient:
+        """ Cliente que diferencia chamadas com e sem parâmetros """
+        def __init__(self, *a, **k) -> None:
+            self.headers = k.get("headers", {})
+            self.cookies: dict = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def get(self, url: str, params: dict | None = None) -> DummyResponse:
+            if "api/v4/item/get" in url and params:
+                data = {"name": "Produto", "price": 123456}
+                return DummyResponse(200, {"data": data})
+            self.cookies["csrftoken"] = "abc"
+            return DummyResponse(200)
+
+    monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
+    monkeypatch.setattr("market_scraper.strategies.json_endpoint.DataQualityValidator.validate", fake_validate)
+
+    url = "https://shopee.com.br/api/v4/item/get?itemid=2&shopid=1&foo=bar"
+    resultado = await strategy.get_data(url)
+    assert resultado["status"] == "success"
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [401, 403])
 async def test_retorna_erro_em_falha_de_autenticacao(monkeypatch: pytest.MonkeyPatch, strategy: ShopeeJsonStrategy, status_code: int) -> None:
     """ Garante que respostas 401/403 resultam em ``{"status": "error"}`` """
