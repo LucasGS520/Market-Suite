@@ -11,6 +11,7 @@ from typing import Callable, Literal
 from uuid import UUID
 
 from fastapi import HTTPException, status
+import structlog
 
 from market_scraper.services.domain_policy import strategies_for
 from market_scraper.strategies import ScrapingStrategy
@@ -20,6 +21,9 @@ from market_scraper.utils.rate_limiter import RateLimiter
 from market_scraper.utils.block_recovery import BlockRecoveryManager
 from shared.metrics.metrics_scraper import SCRAPER_STRATEGY_TOTAL, SCRAPER_FALLBACK_TOTAL
 
+
+#Logger configurado para este módulo
+logger = structlog.get_logger("multi_strategy_orchestrator")
 
 class MultiStrategyScraperOrchestrator:
     """ Controla a ordem e a validação das estratégias de scraping """
@@ -83,7 +87,9 @@ class MultiStrategyScraperOrchestrator:
                     recovery_manager=recovery_manager,
                 )
                 status_label = result.get("status", "error")
-            except Exception:
+            except Exception as err:
+                #Registra o erro para facilitar diagnóstico no scraping
+                logger.exception("erro_inesperado_estrategia", erro=(err))
                 #Qualquer exceção marca a execução como erro
                 result = {"status": "error"}
                 status_label = "exception"
