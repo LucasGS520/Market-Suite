@@ -95,9 +95,9 @@ class MultiStrategyScraperOrchestrator:
                 status_label = "exception"
 
             details = result.get("details")
-            if details:
+            if details is not None:
                 try:
-                    #Valida dados essenciais antes de aceitar o resultado
+                    #Valida dados essenciais mesmo quando o dicionário está vazio, antes de aceitar o resultado
                     self._validator.validate(details)
                 except ValueError:
                     #Dados inválidos: registra status e prepara fallback
