@@ -11,7 +11,6 @@ from typing import Dict, List, Type
 
 from market_scraper.strategies import (
     ScrapingStrategy,
-    PlaywrightDefaultStrategy,
     MercadoLivreJsonStrategy,
     AmazonJsonStrategy,
     ShopeeJsonStrategy,
@@ -28,7 +27,6 @@ from market_scraper.utils.http_utils import extract_hostname
 #O valor corresponde à classe responsável por executar a coleta.
 #Novas implementações devem ser adicionadas aqui:
 STRATEGY_REGISTRY: Dict[str, Type[ScrapingStrategy]] = {
-    "PLAYWRIGHT": PlaywrightDefaultStrategy,
     "JSON_ML": MercadoLivreJsonStrategy,
     "JSON_AMAZON": AmazonJsonStrategy,
     "JSON_SHOPEE": ShopeeJsonStrategy,
@@ -43,10 +41,10 @@ STRATEGY_REGISTRY: Dict[str, Type[ScrapingStrategy]] = {
 #As chaves correspondem aos domínios oficiais de cada marketplace
 #Estratégias não registradas em ``STRATEGY_REGISTRY`` são ignoradas
 DOMAIN_POLICIES: Dict[str, List[str]] = {
-    "mercadolivre.com.br": ["JSON_ML", "HTML_ML", "PLAYWRIGHT"],
-    "amazon.com.br": ["JSON_AMAZON", "HTML_AMAZON","PLAYWRIGHT"],
-    "shopee.com.br": ["JSON_SHOPEE", "HTML_SHOPEE", "PLAYWRIGHT"],
-    "magazineluiza.com.br": ["JSON_MAGALU", "HTML_MAGALU", "PLAYWRIGHT"],
+    "mercadolivre.com.br": ["JSON_ML", "HTML_ML"],
+    "amazon.com.br": ["JSON_AMAZON", "HTML_AMAZON"],
+    "shopee.com.br": ["JSON_SHOPEE", "HTML_SHOPEE"],
+    "magazineluiza.com.br": ["JSON_MAGALU", "HTML_MAGALU"],
 }
 
 
@@ -56,8 +54,8 @@ def strategies_for(url: str) -> List[ScrapingStrategy]:
     A resolução utiliza :func:`extract_hostname` para identificar o host da
     URL e então monta uma lista **sequencial** de instâncias conforme
     ``DOMAIN_POLICIES``. Estratégias desconhecidas são ignoradas e, caso o
-    domínio não possua configuração específica, a estratégia padrão via
-    Playwright é utilizada.
+    domínio não possui configuração específica, nenhuma estratégia pesada
+    é aplicada nesse momento (Se necessário Playwright add em próximas etapas)
     """
     host = extract_hostname(url)
 
@@ -73,5 +71,5 @@ def strategies_for(url: str) -> List[ScrapingStrategy]:
                 if name in STRATEGY_REGISTRY
             ]
 
-    #Fallback para a estratégia padrão quando o domínio não é reconhecido
-    return [PlaywrightDefaultStrategy()]
+    #Quando domínio não é reconhecido, nenhuma estratégia é retornada
+    return []

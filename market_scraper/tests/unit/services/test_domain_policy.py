@@ -6,5 +6,4 @@ from market_scraper.strategies.playwright_default import PlaywrightDefaultStrate
 
 def test_dominios_semelhantes_nao_sao_correlacionados():
     estrategias = strategies_for("https://fakeamazon.com.br/produto")
-    assert len(estrategias) == 1
-    assert isinstance(estrategias[0], PlaywrightDefaultStrategy)
+    assert estrategias == []
