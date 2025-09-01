@@ -256,8 +256,9 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
         currency_tag = (
             soup.find("meta", itemprop="priceCurrency")
             or soup.find("meta", property="product:price:currency")
+            or soup.find("meta", property="og:price:currency")
         )
-        currency_value=currency_tag.get("content") if currency_tag else None
+        currency_value = currency_tag.get("content") if currency_tag else None
 
         return {
             "name": title,
