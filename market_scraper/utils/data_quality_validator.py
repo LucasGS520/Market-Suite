@@ -4,10 +4,6 @@ from typing import Iterable
 from decimal import Decimal, InvalidOperation
 import re
 
-from humanize import thousands_separator
-from numpy.f2py.symbolic import normalize
-from pydantic_core.core_schema import decimal_schema
-
 
 class DataQualityValidator:
     """ Verifica consistência básica dos dados obtidos no parser """
