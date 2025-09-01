@@ -499,7 +499,7 @@ class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
                         return {}
 
                     name_dict = _deep_search(state, {"name", "title"})
-                    price_dict = _deep_search(state, {"price", "priceValue", "bestprice"})
+                    price_dict = _deep_search(state, {"price", "pricevalue", "bestprice"})
                     if name_dict:
                         name = next(iter(name_dict.values()))
                     if price_dict:

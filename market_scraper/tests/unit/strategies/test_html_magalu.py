@@ -42,6 +42,16 @@ def html_initial_state() -> str:
         "</head></html>"
     )
 
+@pytest.fixture
+def html_initial_state_pricevalue() -> str:
+    """ HTML contendo ``window.__INITIAL_STATE__`` com campo ``priceValue`` """
+    return (
+        "<html><head>"
+        '<script>window.__INITIAL_STATE__ = {"produto": {"info": {"title": "Produto PriceValue Magalu", "priceValue": 77.88}}};</script>'
+        "</head></html>"
+    )
+
+
 @pytest.mark.asyncio
 async def test_extrai_de_json_ld(strategy: MagaluHtmlStaticStrategy, html_com_jsonld: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Valida extração de nome e preço a partir de bloco JSON-LD """
@@ -80,6 +90,19 @@ async def test_extrai_de_estado_embutido(strategy: MagaluHtmlStaticStrategy, htm
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto State Magalu"
     assert detalhes["current_price"] == "R$ 55,66"
+
+@pytest.mark.asyncio
+async def test_extrai_pricevalue_de_estado_embutido(strategy: MagaluHtmlStaticStrategy, html_initial_state_pricevalue: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante extração de ``priceValue`` do ``window.__INITIAL_STATE__`` """
+    async def fake_fetch(self, url: str) -> str:
+        return html_initial_state_pricevalue
+
+    monkeypatch.setattr(MagaluHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto PriceValue Magalu"
+    assert detalhes["current_price"] == "R$ 77,88"
 
 @pytest.mark.asyncio
 async def test_falha_validacao(strategy: MagaluHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
