@@ -180,6 +180,16 @@ async def test_retorna_erro_quando_html_invalido(strategy: HtmlStaticStrategy, h
     assert resultado == {"status": "error"}
 
 @pytest.mark.asyncio
+async def test_retorna_erro_quando_fetch_falha(strategy: HtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Retorna erro caso ocorra ``HTTPError`` ao baixar a página """
+    async def fake_fetch(self, url: str) -> str:
+        raise httpx.HTTPError("falha simulada")
+
+    monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    assert resultado == {"status": "error"}
+
+@pytest.mark.asyncio
 async def test_define_referer_dinamico(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante que o cabeçalho `´Referer`` corresponde ao domínio base """
     capturado: dict = {}

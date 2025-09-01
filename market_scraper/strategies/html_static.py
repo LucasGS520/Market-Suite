@@ -158,8 +158,18 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return data
 
     async def get_data(self, url: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any) -> dict:
-        """ Executa o scraping e trata falhas de validação dos dados """
-        html = await self._fetch_html(url)
+        """ Executa o scraping e trata falhas de validação dos dados
+
+        Em caso de falha na requisição, o método retorna um dicionário
+        de erro indicando que a coleta não foi bem-sucedida.
+        """
+        try:
+            #Realiza o download do HTML da página alvo
+            html = await self._fetch_html(url)
+        except httpx.HTTPError:
+            #Se ocorrer erro de rede ou status inválido, sinaliza falha
+            return {"status": "error"}
+
         data = self._parse_html(html, url)
         try:
             #Valida apenas os campos essenciais antes de retornar
