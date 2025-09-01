@@ -1,6 +1,7 @@
 """ Testes para a estratégia estática do Magazine Luiza """
 
 import pytest
+from celery.bin.result import result
 
 from market_scraper.strategies.html_static import MagaluHtmlStaticStrategy
 
@@ -23,12 +24,12 @@ def html_com_jsonld() -> str:
 
 @pytest.fixture
 def html_meta_tags() -> str:
-    """ HTML com meta-tags de título e preço """
+    """ HTML com meta-tags utilizando ``og:price:amount`` e moeda explícita """
     return (
         "<html><head>"
         '<meta property="og:title" content="Produto Meta Magalu" />'
-        '<meta itemprop="price" content="123.45" />'
-        '<meta itemprop="priceCurrency" content="BRL" />'
+        '<meta property="og:price:amount" content="321.00" />'
+        '<meta property="og:price:currency" content="USD" />'
         "</head></html>"
     )
 
@@ -49,16 +50,29 @@ async def test_extrai_de_json_ld(strategy: MagaluHtmlStaticStrategy, html_com_js
 
     monkeypatch.setattr(MagaluHtmlStaticStrategy, "_fetch_html", fake_fetch)
     resultado = await strategy.get_data("http://exemplo.com/produto")
-    detalhes = resultado["detials"]
+    detalhes = resultado["details"]
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto JSON-LD Magalu"
     assert detalhes["current_price"] == "R$ 199,90"
 
 @pytest.mark.asyncio
 async def test_extrai_de_meta_tags(strategy: MagaluHtmlStaticStrategy, html_meta_tags: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Garante extração correta quando apenas meta-tags estão presentes """
+    """ Garante extração correta a partir de meta-tags ``og:price:amount`` """
     async def fake_fetch(self, url: str) -> str:
         return html_meta_tags
+
+    monkeypatch.setattr(MagaluHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    detalhes = resultado["details"]
+    assert resultado["status"] == "success"
+    assert detalhes["name"] == "Produto Meta Magalu"
+    assert detalhes["current_price"] == "USD 321,00"
+
+@pytest.mark.asyncio
+async def test_extrai_de_estado_embutido(strategy: MagaluHtmlStaticStrategy, html_initial_state: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Utiliza o ``window.__INITIAL_STATE__`` quando outras fontes falham """
+    async def fake_fetch(self, url: str) -> str:
+        return html_initial_state
 
     monkeypatch.setattr(MagaluHtmlStaticStrategy, "_fetch_html", fake_fetch)
     resultado = await strategy.get_data("http://exemplo.com/produto")

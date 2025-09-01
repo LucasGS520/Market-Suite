@@ -460,23 +460,14 @@ class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
         if data.get("name") and data.get("current_price"):
             return data
 
+        #Próxima tentativa é extrair meta-tags comuns em páginas do Magalu
+        data = self._extract_from_json_ld(soup, url)
+        if data.get("name") and data.get("current_price"):
+            return data
+
         #Incializa variáveis que poderão ser preenchidas pelos fallbacks
         name: Optional[str] = None
         price: Optional[str] = None
-
-        #Fallback para meta tags padrão
-        name_tag = soup.find("meta", property="og:title")
-        price_tag = soup.find("meta", itemprop="price")
-        if name_tag:
-            name = name_tag.get("content")
-        if price_tag:
-            price = price_tag.get("content")
-        if name and price:
-            return {
-                "name": name,
-                "url": url,
-                "current_price": self._format_price(price, None),
-            }
 
         #Ultimo recurso é estado inicial embutido em script
         script_tag = soup.find("script", string=re.compile("window.__INITIAL_STATE__"))
