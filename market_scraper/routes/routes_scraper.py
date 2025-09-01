@@ -16,7 +16,7 @@ from shared.schemas.schemas_products import MonitoredProductCreateScraping, Comp
 from shared.schemas.schemas_scraper import ScraperRequest, ScraperResponse
 
 from market_scraper.services.services_scraper_common import scrape_product_common_async
-from market_scraper.utils.price import parse_price_str, parse_optional_price_str
+from market_scraper.utils.price import parse_price_str
 
 
 #Roteador sem prefixo; os caminhos base são definidos na aplicação principal
