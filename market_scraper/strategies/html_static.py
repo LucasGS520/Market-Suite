@@ -461,7 +461,7 @@ class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
             return data
 
         #Próxima tentativa é extrair meta-tags comuns em páginas do Magalu
-        data = self._extract_from_json_ld(soup, url)
+        data = self._extract_from_meta_tags(soup, url)
         if data.get("name") and data.get("current_price"):
             return data
 
