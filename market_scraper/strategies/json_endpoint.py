@@ -17,9 +17,9 @@ import httpx
 from streamlit import query_params
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
-from market_scraper.utils.constants import USER_AGENTS
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 
 #Gerenciador de cache reutilizado para chamadas ao endpoint da Shopee
 cache_manager = IntelligentCacheManager()
@@ -61,8 +61,14 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
     """ Estratégia que consome diretamente a API JSON pública da Shopee """
     domain = "shopee.com.br"
 
+    #Gerenciador de User-Agent para rotacionar cabeçalhos em cada requisição
+    _ua_manager = IntelligentUserAgentManager()
+
     async def get_data(self, url: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any) -> dict:
         """ Obtém informações de produto via endpoint ``/api/v4/item/get``
+
+        O ``User-Agent`` é rotacionado a cada requisição para reduzir
+        bloqueios e imitar acessos de navegadores distintos.
 
         Parâmetros
         ----------
@@ -97,7 +103,9 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
 
         #cabeçalhos mínimos exigidos pela API
         req_headers = {
-            "User-Agent": (headers or {}).get("User-Agent", USER_AGENTS[0]),
+            "User-Agent": (headers or {}).get(
+                "User-Agent", self._ua_manager.get_user_agent("shopee_json")
+            ),
             "Accept-Language": "pt-BR,pt;q=0.9",
             "Referer": url,
         }
