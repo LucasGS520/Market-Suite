@@ -77,10 +77,11 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
             Cabeçalhos opcionais a serem mesclados aos padrões. É útils para
             inserir identificadores de sessão ou personalizações externas.
         """
-        #Verifica se há dados recentes em cache para evitar nova requisição
+        #Verifica se há dados recentes de produto em cache para evitar nova requisição
         cached = cache_manager.get(marketplace="shopee", url=url)
         if cached is not None:
-            return cached
+            #O cache armazena somente os dados do produto
+            return {"status": "success", "details": cached}
 
         #Extrai ``shopid`` e ``itemid`` do caminho ou dos parâmetros da URL
         parsed = urlparse(url)
@@ -187,7 +188,8 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
             return {"status": "error"}
 
         result = {"status": "success", "details": details}
-        cache_manager.set(marketplace="shopee", url=url, value=result)
+        #Salva apenas os detalhes do produto no cache para reutilizações futuras
+        cache_manager.set(marketplace="shopee", url=url, value=details)
         return result
 
 
