@@ -23,7 +23,7 @@ class BlockRecoveryManager:
 
     Este gerenciador rotaciona o ``User-Agent``, reseta cookies e prolonga
     o delay de requisições. Ao final, ativa uma suspensão temporária no Redis
-    utilizando ``suspend_scraping`` para evitar novas tentativas agresisvas
+    utilizando ``suspend_scraping`` para evitar novas tentativas agressivas
     """
     ua_manager: Optional[IntelligentUserAgentManager] = None
     cookie_manager: Optional[CookieManager] = None
