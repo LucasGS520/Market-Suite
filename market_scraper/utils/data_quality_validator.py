@@ -8,17 +8,31 @@ import re
 class DataQualityValidator:
     """ Verifica consistência básica dos dados obtidos no parser """
 
-    def __init__(self, mandatory_fields: Iterable[str] | None = None) -> None:
-        #Apenas ``name`` e ``current_price`` são verificados
+    def __init__(
+        self,
+        mandatory_fields: Iterable[str] | None = None,
+        expected_currency: str | None = None,
+    ) -> None:
+        """ Inicializa o validador com campos obrigatórios e moeda esperada opcional """
+        #Apenas ``name`` e ``current_price`` são verificados por padrão
         self.mandatory_fields = list(mandatory_fields or [
             "name",
             "current_price",
         ])
+        #Moeda esperada, como ``R$`` ou ``US$``
+        self.expected_currency = expected_currency
 
     def _parse_price(self, value: str) -> Decimal:
-        """ Converte texto monetário em ``Decimal``, aceitando múltiplas moedas """
+        """ Converte texto monetário em ``Decimal`` e validando a moeda quando configurado """
         #Verifica se o valor é negativo
         is_negative = "-" in value
+
+        #Quando houver moeda configurada, comparar prefixo/símbolo do texto
+        if self.expected_currency:
+            match = re.match(r"\s*([^\d\s-]+)", value)
+            currency = match.group(1).strip() if match else ""
+            if currency != self.expected_currency:
+                raise ValueError(f"Moeda diferente da esperada: {currency}")
 
         #Remove caracteres que não sejam dígitos ou separadores de milhar/decimal
         cleaned = re.sub(r"[^0-9,\.]+", "", value)

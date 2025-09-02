@@ -49,3 +49,14 @@ def test_extra_fields_are_ignored():
     data["seller"] = "1"
     data.update({"seller": "Loja X", "url": "https://exemplo.com/p/1"})
     DataQualityValidator().validate(data)
+
+def test_mismatched_currency_raises_value_error():
+    """ Certificar que moeda divergente dispare ``ValueError`` """
+    data = {"name": "Produto", "current_price": "US$ 10,00"}
+    with pytest.raises(ValueError):
+        DataQualityValidator(expected_currency="R$").validate(data)
+
+def test_expected_currency_is_accepted():
+    """ Verificar que a moeda esperada seja aceita sem erro """
+    data = {"name": "Produto", "current_price": "R$ 10,00"}
+    DataQualityValidator(expected_currency="R$").validate(data)
