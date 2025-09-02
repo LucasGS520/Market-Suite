@@ -17,6 +17,17 @@ class EstrategiaFalha:
     async def get_data(self, **k):
         raise RuntimeError("falha")
 
+class EstrategiaDadosInvalidos:
+    """ Estratégia qye retorna campos vazios, considerados inválidos """
+    def supports_url(self, url: str) -> bool:
+        return True
+
+    async def get_data(self, **k):
+        return {
+            "status": "success",
+            "details": {"name": "", "current_price": ""},
+        }
+
 class EstrategiaSucesso:
     """ Estratégia que retorna dados válidos """
     def supports_url(self, url: str) -> bool:
@@ -52,4 +63,38 @@ async def test_contadores_de_fallback_e_estrategia():
     assert (SCRAPER_STRATEGY_TOTAL.labels("EstrategiaSucesso", "success")._value.get() == 1)
 
     #Houve um fallback entre as estratégias
+    assert SCRAPER_FALLBACK_TOTAL._value.get() == 1
+
+@pytest.mark.asyncio
+async def test_fallback_quando_dados_invalidos():
+    """ Deve acionar fallback quando a primeira estratégia retorna dados inválidos """
+    #Reinicia contadores para cenário de teste
+    SCRAPER_STRATEGY_TOTAL._metrics.clear()
+    SCRAPER_FALLBACK_TOTAL._value.set(0)
+
+    orchestrator = MultiStrategyScraperOrchestrator(
+        strategy_selector=lambda url: [EstrategiaDadosInvalidos(), EstrategiaSucesso()]
+    )
+
+    resultado = await orchestrator.scrape(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=SimpleNamespace(),
+        product_type="monitored",
+    )
+
+    #O retorno final deve vir da segunda estratégia com dados válidos
+    assert resultado["status"] == "success"
+    assert resultado["details"]["name"] == "Produto"
+    assert resultado["details"]["current_price"] == "10"
+
+    #A primeira estratégia forneceu dados inválidos e a segunda obteve sucesso
+    assert (
+        SCRAPER_STRATEGY_TOTAL.labels("EstrategiaDadosInvalidos", "invalid")._value.get() == 1
+    )
+    assert (
+        SCRAPER_STRATEGY_TOTAL.labels("EstrategiaSucesso", "success")._value.get() == 1
+    )
+
+    #O orchestrador acionou fallback entre as duas estratégias
     assert SCRAPER_FALLBACK_TOTAL._value.get() == 1
