@@ -10,6 +10,7 @@ são validados e métricas de observabilidade são atualizadas.
 from typing import Callable, Literal
 from uuid import UUID
 
+import asyncio
 from fastapi import HTTPException, status
 import structlog
 
@@ -33,15 +34,19 @@ class MultiStrategyScraperOrchestrator:
         *,
         strategy_selector: Callable[[str], list[ScrapingStrategy]] | None = None,
         validator: DataQualityValidator | None = None,
+        strategy_timeout: float | None = None,
     ) -> None:
         """ Define dependências opcionais para o orquestrador
 
         ``strategy_selector`` permite injetar uma função customizada que
         retorna as estratégias disponíveis para uma URL. ``validator`` é
         utilizado para conferir a qualidade dos dados retornados.
+        ``strategy_timeout`` define o tempo máximo para execução
+        de cada estratégia.
         """
         self._strategy_selector = strategy_selector or strategies_for
         self._validator = validator or DataQualityValidator()
+        self._strategy_timeout = strategy_timeout
 
     async def scrape(
         self,
@@ -57,11 +62,10 @@ class MultiStrategyScraperOrchestrator:
         """ Executa as estratégias de scraping até obter um resultado válido
 
         As estratégias são recuperadas via :func:`strategies_for` e
-        executadas em sequência. Ao final de cada tentativa a métrica
-        ``SCRAPER_STRATEGY_TOTAL`` registra a estratégia utilizada e o
-        status obtido. Caso o resultado não seja aproveitável,
-        ``SCRAPER_FALLBACK_TOTAL`` é incrementado e a próxima
-        estratégia da fila é tentada
+        executadas em sequência. Cada execução é limitada por
+        ``strategy_timeout`` através de ``asyncio.wait_for``. Ao
+        final de cada tentativa a métrica ``SCRAPER_STRATEGY_TOTAL``
+        registra estratégia utilizada e o status obtido.
         """
         strategies = self._strategy_selector(url)
         if not strategies:
@@ -76,20 +80,30 @@ class MultiStrategyScraperOrchestrator:
                 continue
 
             try:
-                result = await strategy.get_data(
-                    url=url,
-                    headers=None,
-                    user_id=user_id,
-                    payload=payload,
-                    product_type=product_type,
-                    rate_limiter=rate_limiter,
-                    circuit_breaker=circuit_breaker,
-                    recovery_manager=recovery_manager,
+                result = await asyncio.wait_for(
+                    strategy.get_data(
+                        url=url,
+                        headers=None,
+                        user_id=user_id,
+                        payload=payload,
+                        product_type=product_type,
+                        rate_limiter=rate_limiter,
+                        circuit_breaker=circuit_breaker,
+                        recovery_manager=recovery_manager,
+                    ),
+                    timeout=self._strategy_timeout,
                 )
                 status_label = result.get("status", "error")
+            except asyncio.TimeoutError:
+                #Tempo excedido: marca como falha e registra aviso
+                logger.warning(
+                    "strategy_timeout", strategy=strategy.__class__.__name__
+                )
+                result = {"status": "error"}
+                status_label = "timeout"
             except Exception as err:
                 #Registra o erro para facilitar diagnóstico no scraping
-                logger.exception("erro_inesperado_estrategia", erro=(err))
+                logger.exception("unexpected_error_strategy", erro=(err))
                 #Qualquer exceção marca a execução como erro
                 result = {"status": "error"}
                 status_label = "exception"

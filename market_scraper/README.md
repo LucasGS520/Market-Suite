@@ -5,8 +5,8 @@ O objetivo é extrair apenas os campos essenciais ``name`` e ``current_price`` d
 ## Visão Geral do Fluxo
 1. A rota ``/parse`` recebe a URL do produto.
 2. A função ``scrape_product_common_async`` normaliza o endereço para a versão mobile, consulta o cache e aciona o orquestrador.
-3. O ``MultiStrategyScraperOrchestrator`` seleciona as estratégias definidas pela política de domínio e executa cada uma em sequência.
-4. Após cada tentativa os dados são validados pelo ``DataQualityValidator``; em caso de falha ocorre fallback para a próxima estratégia.
+3. O ``MultiStrategyScraperOrchestrator`` seleciona as estratégias definidas pela política de domínio e executa cada uma em sequência com limite de tempo configurável via ``asyncio.wait_for``.
+4. Após cada tentativa os dados são validados pelo ``DataQualityValidator``; timeouts ou falhas acionam fallback para a próxima estratégia.
 5. Quando o resultado é válido ele é armazenado no ``IntelligentCacheManager`` e retornado solicitante.
 
 ## Políticas de Domínio
