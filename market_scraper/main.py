@@ -6,8 +6,12 @@ expostas pelo serviço
 
 from fastapi import FastAPI
 
-from market_scraper.routes import routes_health, routes_scraper
-
+try:
+    #Importação relativa quando executado como parte do pacote
+    from .routes import routes_health, routes_scraper
+except ImportError:
+    #Fallaback para execução direta a partir do diretório do serviço
+    from routes import routes_health, routes_scraper
 
 #Instância principal do aplicativo FastAPI
 app = FastAPI(title="MarketScraper")
