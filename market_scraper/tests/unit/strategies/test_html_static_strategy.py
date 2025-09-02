@@ -2,8 +2,6 @@
 
 import pytest
 import httpx
-from celery.bin.result import result
-from mako.runtime import capture
 
 from market_scraper.strategies.html_static import HtmlStaticStrategy
 

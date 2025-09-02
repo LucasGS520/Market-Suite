@@ -4,8 +4,6 @@ import pytest
 import httpx
 import asyncio
 
-from celery.bin.result import result
-
 from market_scraper.strategies.json_endpoint import ShopeeJsonStrategy
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 

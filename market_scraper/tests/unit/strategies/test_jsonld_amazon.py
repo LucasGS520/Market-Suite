@@ -1,7 +1,6 @@
 """ Testes básicos para a estratégia da Amazon JSON-LD """
 
 import pytest
-from celery.bin.result import result
 
 from market_scraper.strategies.html_static import AmazonHtmlStaticStrategy
 

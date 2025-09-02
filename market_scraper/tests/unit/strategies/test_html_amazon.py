@@ -1,7 +1,6 @@
 """ Testes para extratores específicos da Amazon """
 
 import pytest
-from celery.bin.result import result
 
 from market_scraper.strategies.html_static import AmazonHtmlStaticStrategy
 
@@ -74,7 +73,7 @@ async def test_extrai_de_json_ld_offers_array(strategy: AmazonHtmlStaticStrategy
 
     monkeypatch.setattr(AmazonHtmlStaticStrategy, "_fetch_html", fake_fetch)
     resultado = await strategy.get_data("http://exemplo.com/produto")
-    detalhes = resultado["status"] == "success"
+    detalhes = resultado["details"]
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Nested Amazon"
     assert detalhes["current_price"] == "R$ 77,88"

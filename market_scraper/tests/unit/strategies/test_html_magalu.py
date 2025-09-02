@@ -1,7 +1,6 @@
 """ Testes para a estratégia estática do Magazine Luiza """
 
 import pytest
-from celery.bin.result import result
 
 from market_scraper.strategies.html_static import MagaluHtmlStaticStrategy
 
