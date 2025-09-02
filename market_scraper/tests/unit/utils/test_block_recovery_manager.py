@@ -37,7 +37,7 @@ def test_handle_block_rotaciona_ua(monkeypatch):
                 text = "<html>ok</html>"
                 cookies = {}
 
-                def raises_for_status(self):
+                def raise_for_status(self):
                     return None
 
             return Resp()
