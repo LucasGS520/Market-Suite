@@ -194,7 +194,7 @@ services:
     volumes:
       - ./market_scraper:/app/market_scraper
       - ./shared/infra:/market_scraper/infra
-      - ./shared:/market_scraper/shared
+      - ./shared:/app/shared
     networks:
       - monitoring-net
 
