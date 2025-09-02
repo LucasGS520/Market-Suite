@@ -61,7 +61,7 @@ services:
     env_file:
       - ./market_alert/.env.market_alert
     environment:
-      - ENV_FILE=./market_alert/.env.market_alert
+      - ENV_FILE=.env.market_alert
     volumes:
       - ./market_alert:/market_alert
       - ./shared/infra:/market_alert/infra
@@ -87,7 +87,7 @@ services:
     env_file:
       - ./market_alert/.env.market_alert
     environment:
-      - ENV_FILE=./market_alert/.env.market_alert
+      - ENV_FILE=.env.market_alert
     command:
       - uvicorn
       - "main:app"
@@ -143,7 +143,7 @@ services:
     env_file:
       - ./market_alert/.env.market_alert
     environment:
-      - ENV_FILE=./market_alert/.env.market_alert
+      - ENV_FILE=.env.market_alert
     command:
       - celery
       - "-A"
