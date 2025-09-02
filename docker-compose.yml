@@ -181,7 +181,7 @@ services:
       - REDIS_PORT=6379
     command:
       - uvicorn
-      - "main:app"
+      - "market_scraper.main:app"
       - "--host"
       - "0.0.0.0"
       - "--port"
