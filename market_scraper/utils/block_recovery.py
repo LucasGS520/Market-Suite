@@ -7,12 +7,10 @@ import structlog
 
 from shared.enums import BlockResult
 from shared.utils.redis_client import suspend_scraping
-from shared.metrics.metrics_scraper import SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL
 
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.cookie_manager import CookieManager
-from market_scraper.utils.playwright_client import get_playwright_client
 
 
 logger = structlog.get_logger("block_recovery")
@@ -38,11 +36,7 @@ class BlockRecoveryManager:
         self.cookie_manager = self.cookie_manager or CookieManager()
 
     async def handle_block(self, block_type: BlockResult, session_id: str | None = None, url: str | None = None) -> Optional[str]:
-        """ Aplica ações de mitigação e tenta recuperar o HTML via navegador
-
-        Se ``url`` for informado e o bloqueio indicar ``HTTP_403`` ou ``captcha``,
-        a função tenta obter o HTML utilizando o Playwright de forma assíncrona.
-        """
+        """ Aplica ações de mitigação quando o scraping é bloqueado """
         severity_map = {
             BlockResult.HTTP_429: 1,
             BlockResult.HTTP_403: 2,
@@ -57,16 +51,6 @@ class BlockRecoveryManager:
         self.delay_manager.prolong()
 
         recovered_html: Optional[str] = None
-
-        if block_type in {BlockResult.CAPTCHA, BlockResult.HTTP_403} and url:
-            try:
-                async with get_playwright_client() as client:
-                    recovered_html = await client.fetch_html(
-                        url, session_id=session_id
-                    )
-                SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL.inc()
-            except Exception as exc:
-                logger.warning("browser_fallback_failed", url=url, error=str(exc))
 
         idx = min(self._severity - 1, len(self.suspension_steps) - 1)
         suspend_seconds = self.suspension_steps[idx]

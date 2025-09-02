@@ -77,7 +77,6 @@ def test_scrape_product_common_consulta_redis_client():
     with patch.object(rc, "get_redis_client", return_value=fake_redis), \
         patch.object(rc, "metrics", metrics_stub), \
         patch.object(mod, "is_scraping_suspended", wraps=rc.is_scraping_suspended) as suspended_mock, \
-        patch.object(mod, "fetch_html_playwright", AsyncMock(return_value="<html></html>")), \
         patch.object(mod, "get_cached_html", AsyncMock(return_value=None)), \
         patch.object(mod, "set_cached_html", AsyncMock()), \
         patch.object(mod.parser, "looks_like_product_page", return_value=True), \

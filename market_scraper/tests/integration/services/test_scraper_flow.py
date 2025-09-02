@@ -73,21 +73,6 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
 
-    #Evita chamadas reais ao Playwright e ao cache de Redis
-    async def fake_fetch_html_playwright(url: str) -> str:
-        return HTML_EXEMPLO
-
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.fetch_html_playwright", fake_fetch_html_playwright)
-
-    async def fake_get_cached_html(*a, **k):
-        return None
-
-    async def fake_set_cached_html(*a, **k):
-        return None
-
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.get_cached_html", fake_get_cached_html)
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.set_cached_html", fake_set_cached_html)
-
     #Impedindo delays e leituras de robots.txt
     async def fake_fetch_robots(self):
         return ""

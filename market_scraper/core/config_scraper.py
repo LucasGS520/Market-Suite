@@ -22,9 +22,6 @@ class Settings(ConfigBase):
     #TTL para assinaturas de conteúdo
     SIG_CACHE_TTL: int = int(os.getenv("SIG_CACHE_TTL", "86400"))
 
-    #Estratégias de scraping habilitadas (ex: playwright, httpx)
-    SCRAPER_STRATEGIES: str = os.getenv("SCRAPER_STRATEGIES", "playwright")
-
     #Parâmetros para o HumanizedDelayManager
     HUMAN_AVG_WPM: int = int(os.getenv("HUMAN_AVG_WPM", "200")) #Palavras/minuto simuladas
     HUMAN_BASE_DELAY: float = float(os.getenv("HUMAN_BASE_DELAY", "1.0")) #Atraso incial
@@ -42,10 +39,6 @@ class Settings(ConfigBase):
         os.getenv("COMPETITOR_SERVICE_RATE_LIMIT", "200")
     ) #Limite para serviços de concorrentes
     RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "3600")) #Janela de rate limit
-
-    #Parametros do Playwright
-    PLAYWRIGHT_HEADLESS: bool = os.getenv("PLAYWRIGHT_HEADLESS", "1") == "1" #Executa sem interface
-    PLAYWRIGHT_TIMEOUT: int = int(os.getenv("PLAYWRIGHT_TIMEOUT", "30000")) #Timeout padrão (ms)
 
     #Intervalo base para o AdaptiveRecheckManager
     ADAPTIVE_RECHECK_BASE_INTERVAL: int = int(

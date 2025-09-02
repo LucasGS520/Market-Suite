@@ -11,7 +11,6 @@ from market_scraper.main import app
 from market_scraper.strategies.base import ScrapingStrategy
 from market_scraper.services import domain_policy
 from market_scraper.services import services_scraper_common as common
-from market_scraper.strategies.playwright_default import PlaywrightDefaultStrategy
 from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy, AmazonHtmlStaticStrategy, ShopeeHtmlStaticStrategy, MagaluHtmlStaticStrategy
 
 
@@ -20,31 +19,6 @@ def _preparar_ambiente(monkeypatch) -> None:
     #Desabilita uso real de cache
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
-
-    #Evita navegação real pelo Playwright
-    async def fake_default_get_data(
-        self,
-        *,
-        url,
-        user_id,
-        payload,
-        product_type,
-        rate_limiter=None,
-        circuit_breaker=None,
-        recovery_manager=None,
-        headers=None,
-        **kwargs,
-    ) -> dict:
-        return {
-            "status": "success",
-            "details": {"name": "Fake", "current_price": "R$ 10,00"},
-        }
-
-    monkeypatch.setattr(
-        PlaywrightDefaultStrategy,
-        "get_data",
-        fake_default_get_data,
-    )
 
     #Evita chamadas HTTP das estratégias HTML
     async def fake_html_get_data(self, **k):
@@ -103,12 +77,12 @@ def test_seleciona_estrategia_mercado_livre(monkeypatch) -> None:
     monkeypatch.setattr(
         domain_policy,
         "STRATEGY_REGISTRY",
-        {"FAKE": FakeMercadoLivreStrategy, "PLAYWRIGHT": PlaywrightDefaultStrategy}
+        {"FAKE": FakeMercadoLivreStrategy}
     )
     monkeypatch.setattr(
         domain_policy,
         "DOMAIN_POLICIES",
-        {"mercadolivre.com.br": ["FAKE", "PLAYWRIGHT"]},
+        {"mercadolivre.com.br": ["FAKE"]},
     )
 
     client = TestClient(app)

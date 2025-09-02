@@ -74,12 +74,12 @@ SCRAPER_CAPTCHA_TOTAL = Counter(
 
 SCRAPER_BROWSER_FALLBACK_TOTAL = Counter(
     "scraper_browser_fallback_total",
-    "Total de vezes que o scraper recorreu para o BrowserManager em modo headless",
+    "Total de vezes que o scraper recorreu a um navegador headless",
 )
 
 SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL = Counter(
     "scraper_browser_recovery_success_total",
-    "Total de recuperações bem-sucedidas via navegador Playwright",
+    "Total de recuperações bem-sucedidas via navegador headless",
 )
 
 SCRAPER_STRATEGY_TOTAL = Counter(
