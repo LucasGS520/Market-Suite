@@ -74,6 +74,8 @@ para coletar informações dos anúncios.
 ## Serviço ``market_scraper``
 O `market_scraper` é o serviço especializado em coletar dados de anúncios. Ele processa uma URL recebida, respeitando limites de acesso e retornando informações estruturadas para os demais módulos.
 
+Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML estático consulte [`market_scraper/README.md`](market_scraper/README.md).
+
 ### Componentes principais
 - **main.py** - instancia a aplicação FastAPI e registra rotas de saúde e de scraping.
 - **routes/** - expõe as rotas ``/health/ping`` e ``/scrape/parse`` (também acessível por ``/scraper/parse``).
