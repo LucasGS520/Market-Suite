@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 import structlog
+import httpx
 
 from shared.enums import BlockResult
 from shared.utils.redis_client import suspend_scraping
@@ -11,6 +12,8 @@ from shared.utils.redis_client import suspend_scraping
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.cookie_manager import CookieManager
+from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.http_utils import extract_hostname
 
 
 logger = structlog.get_logger("block_recovery")
@@ -35,8 +38,18 @@ class BlockRecoveryManager:
         self.ua_manager = self.ua_manager or IntelligentUserAgentManager()
         self.cookie_manager = self.cookie_manager or CookieManager()
 
-    async def handle_block(self, block_type: BlockResult, session_id: str | None = None, url: str | None = None) -> Optional[str]:
-        """ Aplica ações de mitigação quando o scraping é bloqueado """
+    async def handle_block(
+            self,
+            block_type: BlockResult,
+            session_id: str | None = None,
+            url: str | None = None,
+    ) -> Optional[str]:
+        """ Aplica ações de mitigação quando o scraping é bloqueado
+
+        Após rotacionar recursos e suspender temporariamente o scraping,
+        tenta recuperar o HTML por uma nova requisição. Se a tentativa
+        direta falhar, recorre ao ``IntelligentCacheManager``.
+        """
         severity_map = {
             BlockResult.HTTP_429: 1,
             BlockResult.HTTP_403: 2,
@@ -56,6 +69,33 @@ class BlockRecoveryManager:
         suspend_seconds = self.suspension_steps[idx]
         #Registra no Redis uma suspensão temporária do scraping
         suspend_scraping(suspend_seconds)
+
+        result_log = "falha"
+        if url:
+            headers = {}
+            cookies = None
+            if session_id:
+                headers["User-Agent"] = self.ua_manager.get_user_agent(session_id)
+                cookies = self.cookie_manager.get_cookies(session_id)
+            try:
+                async with httpx.AsyncClient(headers=headers, cookies=cookies, timeout=10) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    recovered_html = resp.text
+                    self.cookie_manager.update_from_response(session_id or "", resp)
+                    result_log = "requisicao"
+            except Exception:
+                cache = IntelligentCacheManager()
+                marketplace = extract_hostname(url)
+                try:
+                    cached = cache.get(marketplace=marketplace, url=url) or {}
+                    recovered_html = cached.get("html")
+                    if recovered_html:
+                        result_log = "cache"
+                except Exception:
+                    recovered_html = None
+
+        logger.info("retentativa_bloqueio", type=block_type.name, result=result_log,)
 
         return recovered_html
 

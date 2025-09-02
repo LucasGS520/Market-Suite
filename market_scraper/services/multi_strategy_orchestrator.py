@@ -96,9 +96,7 @@ class MultiStrategyScraperOrchestrator:
                 status_label = result.get("status", "error")
             except asyncio.TimeoutError:
                 #Tempo excedido: marca como falha e registra aviso
-                logger.warning(
-                    "strategy_timeout", strategy=strategy.__class__.__name__
-                )
+                logger.warning("strategy_timeout", strategy=strategy.__class__.__name__)
                 result = {"status": "error"}
                 status_label = "timeout"
             except Exception as err:

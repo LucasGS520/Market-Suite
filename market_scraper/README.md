@@ -29,7 +29,7 @@ Quando essas fontes falham, regras específicas de cada domínio (Mercado Livre,
 - **IntelligentCacheManager** - armazena resultados de produtos por domínio e URL para reduzir requisições repetidas.
 - **DataQualityValidator** - garante que ``name`` e ``current_price`` estejam presentes e que o preço seja válido.
 - **IntelligentUserAgentManager** - rotaciona ``User-Agent`` para cada requisição, evitando bloqueios.
-- **BlockRecoveryManager** e **HumanizedDelayManager** - auxiliam na recuperação de bloqueios e inserem atrasos para simular navegação humana.
+- **BlockRecoveryManager** e **HumanizedDelayManager** - auxiliam na recuperação de bloqueios, rotacionam recursos e, após uma suspensão temporária, tentam nova requisição ou consultam o cache para obter o HTML, registrando o resultado em log.
 
 ## Resultado Esperado
 Para cada URL o serviço retorna um dicionário com ``name`` e ``current_price``. Se o conteúdo não mudou desde a última coleta o endpoint responde **304 Not Modified**. 
