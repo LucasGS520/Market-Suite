@@ -70,7 +70,12 @@ JITTER_RANGE: Tuple[float, float] = (settings.JITTER_MIN, settings.JITTER_MAX)
 
 # ---------- FUNÇÃO UTILITÁRIA PARA CONVERTER URL "DESKTOP" EM "MOBILE" ----------
 def to_mobile_url(url: Union[str, object]) -> str:
-    """ Substitui o domínio principal pelo domínio mobile, Se o host não for Mercado Livre padrão, retorna a url original """
+    """ Converte URLs do Mercado Livre para o domínio mobile
+
+    Caso a URL não pertença ao Mercado Livre, ela é retornada sem
+    modificações. O caminho é preservado e o host é sempre
+    substituído por ``m.mercadolivre.com.br``.
+    """
 
     url_str = str(url) #Garante que é uma string para o urlparse
     parsed = urlparse(url_str)
@@ -81,12 +86,8 @@ def to_mobile_url(url: Union[str, object]) -> str:
         #Se já for mobile ou domínio diferente, mantém a URL original
         return url_str
 
-    #Se a rota contém '/p/' (link direto para Mercado Livre mobile), retorna intacto
-    if "/p/" in parsed.path:
-        return url_str
-
-    #Tudo após 'mercadolivre' deve manter exatamente como foi colado
+    #Sempre substitui o host pelo domínio mobile, independentemente da rota
     new_netloc = MOBILE_DOMAIN
 
-    #Monta a nova URL com o host corrigido
+    #Monta a nova URL com o host corrigido mantendo o caminho intacto
     return urlunparse(parsed._replace(netloc=new_netloc))
