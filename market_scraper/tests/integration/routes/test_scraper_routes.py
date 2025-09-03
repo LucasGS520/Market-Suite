@@ -111,3 +111,21 @@ def test_parse_endpoint_erro_estrategia(monkeypatch) -> None:
     resp = client.post("/scrape/parse", json=payload)
     assert resp.status_code == 422
     assert resp.json() == {"detail": "falha simulada"}
+
+def test_parse_endpoint_erro_detail(monkeypatch) -> None:
+    client = TestClient(app)
+
+    #Simula retorno de falha com chave ``detail``
+    async def fake_scrape_product_common_async(*a, **k):
+        return {"status": "error", "detail": "motivo"}
+
+    #Substitui a função real pela versão simulada
+    monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
+
+    payload = {"url": "https://exemplo.com/item"}
+    resp = client.post("/scrape/parse", json=payload)
+
+    #O endpoint deve responder com 422 e repassar a mensagem de ``detail``
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": "motivo"}
+    
