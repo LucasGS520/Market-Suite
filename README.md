@@ -181,6 +181,8 @@ LOCUST_LOGIN_PASSWORD=senha_do_usuario_exemplo
 ```env
 DATABASE_URL=postgresql+psycopg2://usuario:senha@db:5432/banco_de_dados
 
+REDIS_PASSWORD=senha
+
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USERNAME=usuario
@@ -207,6 +209,8 @@ SCRAPER_SERVICE_URL=http://url_serviço_de_scraping
 
 ### Exemplo de ``.env.market_scraper``
 ```env
+REDIS_PASSWORD=senha
+
 CACHE_BASE_TTL=3600
 
 ETAG_CACHE_TTL=86400
