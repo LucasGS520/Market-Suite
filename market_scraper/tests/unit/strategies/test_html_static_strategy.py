@@ -216,3 +216,30 @@ async def test_define_referer_dinamico(monkeypatch: pytest.MonkeyPatch) -> None:
     estrategia = HtmlStaticStrategy()
     await estrategia._fetch_html("https://exemplo.com/produto")
     assert capturado["Referer"] == "https://exemplo.com/"
+
+@pytest.mark.asyncio
+async def test_segue_redirecionamento(strategy: HtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante que ``_fetch_html`` segue redirecionamento e retorna o HTML final """
+    conteudo_final = "<html><body>ok</body></html>"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/produto":
+            #Simula resposta 302 apontando para a URL final
+            return httpx.Response(302, headers={"Location": "http://teste.com/produto-final"})
+        if request.url.path == "/produto-final":
+            #Retorna o HTML final após seguir o redirecionamento
+            return httpx.Response(200, text=conteudo_final)
+        return httpx.Response(404)
+
+    transporte = httpx.MockTransport(handler)
+
+    original_async_client = httpx.AsyncClient
+
+    def client_factory(*args, **kwargs):
+        kwargs["transport"] = transporte
+        return original_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+
+    html = await strategy._fetch_html("http://teste.com/produto")
+    assert html == conteudo_final

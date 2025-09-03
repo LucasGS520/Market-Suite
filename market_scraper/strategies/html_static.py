@@ -49,6 +49,8 @@ class HtmlStaticStrategy(ScrapingStrategy):
 
         O método também rotaciona o ``User-Agent`` para reduzir bloqueios,
         garantindo que cada requisição pareça vir de um navegador distinto.
+        Segue automaticamente redirecionamentos HTTP (como respostas ``302``)
+        para retornar o HTML final.
         """
         parsed = urlparse(url)
         base_domain = f"{parsed.scheme}://{parsed.netloc}/"
@@ -56,7 +58,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
         #Rotaciona o User-Agent a cada chamada para imitar diferentes navegadores
         headers["User-Agent"] = self._ua_manager.get_user_agent("html_static")
 
-        async with httpx.AsyncClient(headers=headers, cookies=GENERIC_COOKIES, timeout=10) as client:
+        async with httpx.AsyncClient(headers=headers, cookies=GENERIC_COOKIES, timeout=10, follow_redirects=True) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             return resp.text
