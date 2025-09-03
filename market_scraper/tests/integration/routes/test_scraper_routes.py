@@ -98,3 +98,16 @@ def test_parse_endpoint_not_monitored(monkeypatch) -> None:
     #Como nada muda, o endpoint deve responder com 304 sem corpo
     assert resp.status_code == 304
     assert resp.text == ""
+
+def test_parse_endpoint_erro_estrategia(monkeypatch) -> None:
+    client = TestClient(app)
+
+    async def fake_scrape_product_common_async(*a, **k):
+        return {"status": "error", "message": "falha simulada"}
+
+    monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
+
+    payload = {"url": "http://exemplo.com/item"}
+    resp = client.post("/scrape/parse", json=payload)
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": "falha simulada"}

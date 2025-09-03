@@ -17,7 +17,7 @@ class DummyClientSuccess:
     
 class DummyClientErro(DummyClientSuccess):
     async def post(self, url, json):
-        return httpx.Response(500, json={}, request=httpx.Request("POST", url))
+        return httpx.Response(422, json={}, request=httpx.Request("POST", url))
 
 class DummyClientTimeout(DummyClientSuccess):
     async def post(self, url, json):
@@ -38,7 +38,7 @@ async def test_parse_erro_http(monkeypatch):
     cliente = ScraperClient(base_url="http://fake")
     with pytest.raises(ScraperClientError) as exc:
         await cliente.parse("http://url", "monitored")
-    assert exc.value.status_code == 500
+    assert exc.value.status_code == 422
     await cliente.aclose()
 
 @pytest.mark.asyncio

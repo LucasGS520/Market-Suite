@@ -32,6 +32,9 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
 
     Caso o conteúdo não tenha sido modificado desde a última
     coleta, retorna HTTP 304 sem corpo de resposta.
+    Retorna HTTP 422 quando a estratégia de scraping não consegue
+    extrair informações válidas, incluindo a mensagem de erro
+    informada pela estratégia.
     """
 
     if payload.product_type == "monitored":
@@ -61,7 +64,11 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
     if not details:
         #Registra o resultado retornado pelo serviço quando o scraping falha
         logger.error("scrape_failed", result=result, url=str(payload.url))
-        raise HTTPException(status_code=500, detail="Não foi possível extrair dados do produto")
+        message = result.get("message") or result.get("detail") or "Não foi possível extrair dados do produto"
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=message
+        )
 
     parsed = urlparse(str(payload.url))
     #Extrai o hostname, se não existir usa ``netloc`` como fallback para identificar corretamente o marketplace
