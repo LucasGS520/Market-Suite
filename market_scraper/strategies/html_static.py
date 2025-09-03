@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from streamlit import status
+
 """ Estratégia baseadas em HTML estático """
 
 import json
@@ -166,15 +168,20 @@ class HtmlStaticStrategy(ScrapingStrategy):
     async def get_data(self, url: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any) -> dict:
         """ Executa o scraping e trata falhas de validação dos dados
 
-        Em caso de falha na requisição, o método retorna um dicionário
-        de erro indicando que a coleta não foi bem-sucedida.
+        Em caso de falha na requisição, o método registra o status HTTP,
+        o cabeçalho ``Location`` (quando presente) e um trecho do corpo
+        da resposta. Nessas situações, retorna um dicionário de erro
+        indicando que a coleta não foi bem-sucedida
         """
         try:
             #Realiza o download do HTML da página alvo
             html = await self._fetch_html(url)
         except httpx.HTTPError as exc:
-            #Registra a exceção com a URL e o status HTTP quando disponível
-            logger.exception("Falha na requisição HTML", url=url, status=getattr(getattr(exc, "response", None), "status_code", None))
+            #Registra detalhes da resposta para facilitar depuração
+            resp = getattr(exc, "response", None)
+            location = resp.headers.get("location") if resp else None
+            body = resp.text[:200] if resp and resp.text else None
+            logger.exception("Falha na requisição HTML", url=url, status=getattr(resp, "status_code", None), location=location, body=body)
             #Se ocorrer erro de rede ou status inválido, sinaliza falha
             return {"status": "error"}
 

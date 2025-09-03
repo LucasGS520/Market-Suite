@@ -1,5 +1,7 @@
 """ Testes unitários para a estratégia de HTML estático """
 
+import logging
+
 import pytest
 import httpx
 
@@ -243,3 +245,27 @@ async def test_segue_redirecionamento(strategy: HtmlStaticStrategy, monkeypatch:
 
     html = await strategy._fetch_html("http://teste.com/produto")
     assert html == conteudo_final
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [302, 404])
+async def test_log_inclui_location_quando_http_error(strategy: HtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch, caplog, status: int) -> None:
+    """ Simula erros HTTP e verifica se o cabeçalho ``Location`` é registrado no log """
+    location = f"https://erro.com/{status}"
+
+    async def fake_fetch(self, url: str) -> str:
+        request = httpx.Request("GET", url)
+        response = httpx.Response(
+            status_code=status,
+            headers={"Location": location},
+            request=request,
+            text="x" * 300,
+        )
+        raise httpx.HTTPStatusError("erro", request=request, response=response)
+
+    monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
+
+    with caplog.at_level(logging.ERROR):
+        resultado = await strategy.get_data("http://exemplo.com/produto")
+
+    assert resultado == {"status": "error"}
+    assert location in caplog.text

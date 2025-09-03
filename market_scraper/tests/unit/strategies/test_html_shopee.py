@@ -118,7 +118,7 @@ async def test_envia_user_agent(strategy: ShopeeHtmlStaticStrategy, monkeypatch:
 
     class DummyAsyncClient:
         """ Cliente assíncrono fictício que registra os cabeçalhos enviados """
-        def __init__(self, headers=None, cookies=None, timeout=None):
+        def __init__(self, headers=None, cookies=None, timeout=None, **kwargs):
             capturado.update(headers or {})
 
         async def __aenter__(self):
