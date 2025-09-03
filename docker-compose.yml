@@ -25,11 +25,18 @@ services:
     command:
       - sh
       - -c
-      - redis-server --requirepass "$REDIS_PASSWORD"
+      - |
+        exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly no --save ""
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     ports:
       - "6379:6379"
     volumes:
       - ./shared/infra/redis-scripts:/etc/redis/scripts:ro
+    restart: unless-stopped
     networks:
       - monitoring-net
 
@@ -40,15 +47,18 @@ services:
     env_file:
       - .env.common
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     entrypoint:
       - sh
       - -c
       - |
-        until redis-cli -h redis -a "$REDIS_PASSWORD" ping; do sleep 1; done
-        redis-cli -h redis -a "$REDIS_PASSWORD" SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+        export REDISCLI_AUTH="$$REDIS_PASSWORD";
+        until redis-cli -h redis ping | grep -q PONG; do sleep 1; done;
+        redis-cli -h redis SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
     volumes:
       - ./shared/infra/redis-scripts:/etc/redis/scripts:ro
+    restart: on-failure
     networks:
       - monitoring-net
 
@@ -98,9 +108,12 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - db
-      - redis
-      - redis-init
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
     volumes:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
@@ -124,9 +137,12 @@ services:
     ports:
       - "8001:8001"
     depends_on:
-      - db
-      - redis
-      - redis-init
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
     volumes:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
@@ -157,9 +173,12 @@ services:
     ports:
       - "8002:8002"
     depends_on:
-      - redis
-      - redis-init
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
     volumes:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
@@ -189,8 +208,12 @@ services:
     ports:
       - "8010:8000"
     depends_on:
-      - redis
-      - redis-init
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
     volumes:
       - ./market_scraper:/app/market_scraper
       - ./shared/infra:/market_scraper/infra
