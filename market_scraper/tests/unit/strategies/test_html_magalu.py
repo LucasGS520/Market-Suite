@@ -127,10 +127,23 @@ async def test_fallback_jsonld_invalido(strategy: MagaluHtmlStaticStrategy, html
 
 @pytest.mark.asyncio
 async def test_falha_validacao(strategy: MagaluHtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Retorna status de erro quando os dados essenciais estão ausentes """
+    """ Retorna status de erro detalhado quando os dados essenciais estão ausentes """
     async def fake_fetch(self, url: str) -> str:
         return "<html></html>"
 
+    #Força a validação a apontar erro explicíto
+    def fake_validate(self, data: dict) -> None:
+        raise ValueError("dados incompletos")
+
+    capturado: dict = {}
+
+    def fake_warning(msg, **k):
+        capturado.update(k)
+
     monkeypatch.setattr(MagaluHtmlStaticStrategy, "_fetch_html", fake_fetch)
+    monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", fake_validate)
+    monkeypatch.setattr("market_scraper.strategies.html_static.logger.warning", fake_warning)
+
     resultado = await strategy.get_data("http://exemplo.com/produto")
-    assert resultado == {"status": "error"}
+    assert resultado == {"status": "error", "detail": "dados incompletos"}
+    assert capturado.get("erro") == "dados incompletos"

@@ -189,11 +189,11 @@ class HtmlStaticStrategy(ScrapingStrategy):
         try:
             #Valida apenas os campos essenciais antes de retornar
             DataQualityValidator(["name", "current_price"]).validate(data)
-        except ValueError:
-            #Registra a falha de validação para facilitar diagnóstico
-            logger.warning("Falha na validação dos dados", url=url)
-            #Caso a validação falhe, a estratégia sinaliza erro
-            return {"status": "error"}
+        except ValueError as exc:
+            #Registra a falha de validação com o detalhe da exceção para que possamos rastrear rapidamente o motivo do erro
+            logger.warning("Falha na validação dos dados", url=url, erro=str(exc))
+            #Propaga o motivo da falha de volta para o endpoint chamador e permitindo que a API informe ao cliente qual campo foi rejeitado
+            return {"status": "error", "detail": str(exc)}
         return {"status": "success", "details": data}
 
 
