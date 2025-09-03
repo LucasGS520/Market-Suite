@@ -6,15 +6,34 @@ from typing import Literal
 from uuid import UUID
 from decimal import Decimal
 
-from pydantic import BaseModel, HttpUrl
+from pydantic import AnyHttpUrl, BaseModel, field_validator
 
 
 class ScraperRequest(BaseModel):
-    """ Estrutura esperada na requisição de scraping de anúncios """
+    """ Estrutura esperada na requisição de scraping de anúncios
 
-    url: HttpUrl
+    Este esquema aceita URLs com ou sem esquema definido e garante
+    que, na ausência do protocolo, ``https://`` seja automaticamente
+    prefixado. Isso facilita o consumo do endpoint por clientes que
+    fornecem apenas o domínio ou caminho do recurso.
+    """
+
+    url: AnyHttpUrl
     product_type: Literal["monitored", "competitor"] = "monitored"
     user_id: UUID | None = None
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def ensure_scheme(cls, value: str) -> str:
+        """ Garante que a URL possua esquema
+
+        Caso o valor informado não contenha ``http://`` ou ``https://``,
+        o protocolo ``https://`` é automaticamente adicionado antes da
+        validação do campo.
+        """
+        if isinstance(value, str) and not value.startswith(("http://", "https://")):
+            return f"https://{value}"
+        return value
 
 class ScraperResponse(BaseModel):
     """ Dados retornados após o processamento do scraping

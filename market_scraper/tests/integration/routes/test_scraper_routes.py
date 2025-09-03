@@ -40,7 +40,7 @@ def test_parse_endpoint_com_cache(monkeypatch) -> None:
     monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
     monkeypatch.setattr("market_scraper.services.services_cache_scraper.set_cached_html", fake_set_cached_html)
 
-    payload = {"url": "http://example.com/item"}
+    payload = {"url": "example.com/item"}
 
     #Primeira chamada: cache vazio, HTML deve ser armazenado
     resp1 = client.post("/scrape/parse", json=payload)
@@ -51,6 +51,8 @@ def test_parse_endpoint_com_cache(monkeypatch) -> None:
     #Verifica que o valor é serializado como string e mantém a precisão
     assert Decimal(corpo["current_price"]) == Decimal("10.00")
     assert corpo["marketplace"] == "example.com"
+    #Confirma que o esquema HTTPS foi adicionado automaticamente
+    assert "https://exemple.com/item" in cache
 
     #Segunda chamada: HTML vem do cache e ``set_cached_html`` não é invocado
     resp2 = client.post("/scrape/parse", json=payload)
@@ -69,7 +71,7 @@ def test_parse_endpoint_competitor_not_monitored(monkeypatch) -> None:
     monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
     monkeypatch.setattr("market_scraper.routes.routes_scraper.MonitoredProductCreateScraping", fake_monitored)
 
-    payload = {"url": "http://exemplo.com/item", "product_type": "competitor"}
+    payload = {"url": "exemplo.com/item", "product_type": "competitor"}
 
     resp = client.post("/scrape/parse", json=payload)
     assert resp.status_code == 200
@@ -92,7 +94,7 @@ def test_parse_endpoint_not_monitored(monkeypatch) -> None:
 
     monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
 
-    payload = {"url": "http://exemplo.com/item"}
+    payload = {"url": "exemplo.com/item"}
 
     resp = client.post("/scrape/parse", json=payload)
     #Como nada muda, o endpoint deve responder com 304 sem corpo
@@ -107,7 +109,7 @@ def test_parse_endpoint_erro_estrategia(monkeypatch) -> None:
 
     monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
 
-    payload = {"url": "http://exemplo.com/item"}
+    payload = {"url": "exemplo.com/item"}
     resp = client.post("/scrape/parse", json=payload)
     assert resp.status_code == 422
     assert resp.json() == {"detail": "falha simulada"}
@@ -122,10 +124,9 @@ def test_parse_endpoint_erro_detail(monkeypatch) -> None:
     #Substitui a função real pela versão simulada
     monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
 
-    payload = {"url": "https://exemplo.com/item"}
+    payload = {"url": "exemplo.com/item"}
     resp = client.post("/scrape/parse", json=payload)
 
     #O endpoint deve responder com 422 e repassar a mensagem de ``detail``
     assert resp.status_code == 422
     assert resp.json() == {"detail": "motivo"}
-    

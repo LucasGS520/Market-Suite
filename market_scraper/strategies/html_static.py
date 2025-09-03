@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from streamlit import status
 
 """ Estratégia baseadas em HTML estático """
 
