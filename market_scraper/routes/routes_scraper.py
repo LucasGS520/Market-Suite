@@ -11,6 +11,7 @@ from uuid import UUID
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Response, status
+import structlog
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.schemas.schemas_scraper import ScraperRequest, ScraperResponse
@@ -18,6 +19,9 @@ from shared.schemas.schemas_scraper import ScraperRequest, ScraperResponse
 from market_scraper.services.services_scraper_common import scrape_product_common_async
 from market_scraper.utils.price import parse_price_str
 
+
+#Logger estruturado para acompanhar as requisições do scraper
+logger = structlog.get_logger(__name__)
 
 #Roteador sem prefixo; os caminhos base são definidos na aplicação principal
 router = APIRouter(tags=["scraper"])
@@ -55,7 +59,9 @@ async def parse_endpoint(payload: ScraperRequest) -> ScraperResponse:
 
     details = result.get("details")
     if not details:
-        raise HTTPException(status_code=500, detail="Falha ao extrair dados")
+        #Registra o resultado retornado pelo serviço quando o scraping falha
+        logger.error("scrape_failed", result=result, url=str(payload.url))
+        raise HTTPException(status_code=500, detail="Não foi possível extrair dados do produto")
 
     parsed = urlparse(str(payload.url))
     #Extrai o hostname, se não existir usa ``netloc`` como fallback para identificar corretamente o marketplace
