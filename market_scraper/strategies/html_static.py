@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import httpx
+import structlog
 from bs4 import BeautifulSoup
 
 from .base import ScrapingStrategy
@@ -16,6 +17,9 @@ from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 
+
+#Logger estruturado para acompanhar eventos de scraping
+logger = structlog.get_logger(__name__)
 
 class HtmlStaticStrategy(ScrapingStrategy):
     """ Estratégia genérica que realiza scraping em HTML estático
@@ -166,7 +170,9 @@ class HtmlStaticStrategy(ScrapingStrategy):
         try:
             #Realiza o download do HTML da página alvo
             html = await self._fetch_html(url)
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
+            #Registra a exceção com a URL e o status HTTP quando disponível
+            logger.exception("Falha na requisição HTML", url=url, status=getattr(getattr(exc, "response", None), "status_code", None))
             #Se ocorrer erro de rede ou status inválido, sinaliza falha
             return {"status": "error"}
 
@@ -175,6 +181,8 @@ class HtmlStaticStrategy(ScrapingStrategy):
             #Valida apenas os campos essenciais antes de retornar
             DataQualityValidator(["name", "current_price"]).validate(data)
         except ValueError:
+            #Registra a falha de validação para facilitar diagnóstico
+            logger.warning("Falha na validação dos dados", url=url)
             #Caso a validação falhe, a estratégia sinaliza erro
             return {"status": "error"}
         return {"status": "success", "details": data}
