@@ -7,8 +7,7 @@ por camadas externas, como o módulo ``market_alert``.
 
 from __future__ import annotations
 
-from idlelib.window import add_windows_to_menu
-from typing import Optional, Literal
+from typing import Literal
 from uuid import UUID
 
 import asyncio
