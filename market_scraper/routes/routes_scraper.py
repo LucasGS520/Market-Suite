@@ -37,6 +37,8 @@ async def parse_endpoint(payload: ScraperRequest = Body(..., example={"url": "ht
     validação, verificamos se o domínio é suportado e se corresponde a
     uma página de produto. Quando o conteúdo não sofre alterações desde
     a última coleta, o endpoint responde com ``HTTP 304`` sem corpo.
+    O serviço também pode retornar mensagens específicas de bloqueio
+    quando o marketplace impede a coleta, facilitando o diagnóstico.
     """
     incompatibility = check_url_compatibility(str(payload.url))
     if incompatibility:
@@ -71,8 +73,8 @@ async def parse_endpoint(payload: ScraperRequest = Body(..., example={"url": "ht
     details = result.get("details")
     if not details:
         #Registra o resultado retornado pelo serviço quando o scraping falha
-        logger.error("scrape_failed", result=result, url=str(payload.url))
-        message = result.get("message") or result.get("detail") or "Não foi possível extrair dados do produto"
+        message = result.get("detail") or result.get("message") or "Não foi possível extrair dados do produto"
+        logger.error("scrape_failed", status=result.get("status"), detail=message, url=str(payload.url))
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=message,
