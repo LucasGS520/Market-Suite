@@ -27,7 +27,8 @@ def test_scraper_parse(monkeypatch) -> None:
 
     monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
 
-    payload = {"url": "http://example.com/produto"}
+    #URL simulada de produto válida para passar pela validação
+    payload = {"url": "www.mercadolivre.com.br/MLB-1"}
     response = client.post("/scrape/parse", json=payload)
     assert response.status_code == 200
     body = response.json()
