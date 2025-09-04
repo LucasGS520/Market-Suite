@@ -16,9 +16,15 @@ from decimal import Decimal
 import httpx
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_exponential
 
+import logging
+
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
+
+
+#Logger local para registro de eventos da estratégia
+logger = logging.getLogger(__name__)
 
 #Gerenciador de cache reutilizado para chamadas ao endpoint da Shopee
 cache_manager = IntelligentCacheManager()
@@ -101,8 +107,8 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
 
         api_url = f"{parsed.scheme}://{parsed.netloc}/api/v4/item/get"
 
-        #cabeçalhos mínimos exigidos pela API
-        req_headers = {
+        #Cabeçalhos básicos usados para a primeira solicitação ao produto
+        base_headers = {
             "User-Agent": (headers or {}).get(
                 "User-Agent", self._ua_manager.get_user_agent("shopee_json")
             ),
@@ -110,24 +116,42 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
             "Referer": url,
         }
         if headers:
-            req_headers.update(headers)
+            base_headers.update(headers)
 
-        async with httpx.AsyncClient(headers=req_headers, timeout=10) as client:
-            #Primeira requisição opcional para popular cookies e possível CSRF
+        async with httpx.AsyncClient(headers=base_headers, timeout=10) as client:
+            #Primeira requisição opcional para obter cookies e possíveis tokens
             try:
-                await client.get(url)
+                pre_resp = await client.get(url)
+                csrftoken = getattr(pre_resp, "cookies", {}).get("csrftoken")
+                etag = getattr(pre_resp, "headers", {}).get("if-none-match-")
             except httpx.HTTPError:
-                #Falhas aqui não impedem fluxo principal
-                pass
+                #Falhas não impedem fluxo principal; tokens permanecem ausentes
+                csrftoken = None
+                etag = None
 
-            #Adiciona cabeçalho de CSRF se o cookie estiver presente
-            csrf = client.cookies.get("csrftoken")
-            if csrf:
-                client.headers["x-csrftoken"] = csrf
+            #Cabeçalhos específicos exigidos pelo endpoint JSON da Shopee
+            req_headers = {
+                "User-Agent": client.headers.get("User-Agent"),
+                "Accept-Language": client.headers.get("User-Agent"),
+                "Referer": url,
+                "X-Requested-With": "XMLHttpRequest",
+                "x-api-source": "pc",
+                "Accept": "application/json",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-User": "?1",
+            }
+            if csrftoken:
+                req_headers["x-csrftoken"] = csrftoken
+            if etag:
+                req_headers["If-None-Match-"] = etag
+            if headers:
+                req_headers.update(headers)
 
             params = {"itemid": itemid, "shopid": shopid}
 
-            async def _retryable(exc: Exception) -> bool:
+            def _retryable(exc: Exception) -> bool:
                 """ Define quais exceções devem ser consideradas transitórias """
                 if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
                     code = exc.response.status_code
@@ -142,7 +166,10 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
                     reraise=True,
                 ):
                     with attempt:
+                        client.headers.update(req_headers)
                         resp = await client.get(api_url, params=params)
+                        if resp.status_code != 200:
+                            logger.error("Shopee respondeu com %s: %s", resp.status_code, resp.text[:200])
                         if resp.status_code in (401, 403):
                             return {"status": "error"}
                         resp.raise_for_status()
