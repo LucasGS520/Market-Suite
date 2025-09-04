@@ -17,6 +17,7 @@ from .base import ScrapingStrategy
 from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
+from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
 
 
 #Logger estruturado para acompanhar eventos de scraping
@@ -45,13 +46,13 @@ class HtmlStaticStrategy(ScrapingStrategy):
         netloc = urlparse(url).netloc
         return netloc.endswith(self.domain)
 
-    async def _fetch_html(self, url: str) -> str:
-        """ Baixa o HTML utilizando ``httpx`` com cabeçalhos stealth e ``Referer`` dinâmico
+    async def _fetch_html(self, url: str) -> httpx.Response:
+        """ Executa a requisição HTTP e retorna o ``httpx.Response`` obtido
 
-        O método também rotaciona o ``User-Agent`` para reduzir bloqueios,
-        garantindo que cada requisição pareça vir de um navegador distinto.
-        Segue automaticamente redirecionamentos HTTP (como respostas ``302``)
-        para retornar o HTML final.
+        Antes de enviar a requisição são aplicados cabeçalhos realistas e o
+        ``Referer`` dinâmico. Também são adicionados os valores de ``ETag`` e
+        ``Last-Modified`` previamente armazenados para a URL, permitindo que o
+        servidor retorne ``304 Not Modified`` quando o conteúdo não mudou.
         """
         parsed = urlparse(url)
         base_domain = f"{parsed.scheme}://{parsed.netloc}/"
@@ -59,10 +60,30 @@ class HtmlStaticStrategy(ScrapingStrategy):
         #Rotaciona o User-Agent a cada chamada para imitar diferentes navegadores
         headers["User-Agent"] = self._ua_manager.get_user_agent("html_static")
 
-        async with httpx.AsyncClient(headers=headers, cookies=GENERIC_COOKIES, timeout=10, follow_redirects=True) as client:
+        #Recupera valores de cache para condicionar a requisição
+        cache_headers = get_cache_headers(url)
+        if cache_headers.get("etag"):
+            headers["If-None-Match"] = cache_headers["etag"]
+        if cache_headers.get("last_modified"):
+            headers["If-Modified-Since"] = cache_headers["last_modified"]
+
+        async with httpx.AsyncClient(
+            headers=headers,
+            cookies=GENERIC_COOKIES,
+            timeout=10,
+            follow_redirects=True,
+        ) as client:
             resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.text
+
+        #Armazena cabeçalhos de cache para futuras requisições
+        store_cache_headers(
+            url,
+            etag=resp.headers.get("ETag"),
+            last_modified=resp.headers.get("Last-Modified"),
+        )
+
+        resp.raise_for_status()
+        return resp
 
     def _format_price(self, value: Any, currency: Optional[str]) -> str:
         """ Formata um valor numérico para o padrão monetário brasileiro """
@@ -175,8 +196,11 @@ class HtmlStaticStrategy(ScrapingStrategy):
         o domínio de origem para auxiliar a identificação do bloqueio.
         """
         try:
-            #Realiza o download do HTML da página alvo
-            html = await self._fetch_html(url)
+            #Realiza o donwload da página alvo
+            resp = await self._fetch_html(url)
+            #Suporte a testes que retornam apenas string em ``_fetch_html``
+            if not isinstance(resp, httpx.Response):
+                resp = httpx.Response(200, text=str(resp))
         except httpx.HTTPError as exc:
             #Registra detalhes da resposta para facilitar depuração
             resp = getattr(exc, "response", None)
@@ -196,6 +220,17 @@ class HtmlStaticStrategy(ScrapingStrategy):
                 }
             #Se ocorrer erro de rede ou status inválido, sinaliza falha genérica
             return {"status": "error"}
+
+        if resp.status_code == 304:
+            #Quando o servidor indica que o conteúdo não mudou, repassa o status
+            return {"status": "NOT_MODIFIED"}
+
+        html = resp.text
+
+        #Verifica a assinatura do conteúdo para detectar mudanças de forma independente
+        signature = ContentSignature(url).check_or_update(html)
+        if signature is NOT_MODIFIED:
+            return {"status": "NOT_MODIFIED"}
 
         data = self._parse_html(html, url)
         try:

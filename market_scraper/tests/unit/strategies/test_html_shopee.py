@@ -110,8 +110,8 @@ async def test_envia_user_agent(strategy: ShopeeHtmlStaticStrategy, monkeypatch:
 
     class DummyResponse:
         """ Simula resposta de sucesso do ``httpx`` """
-
         text = ""
+        headers: dict = {}
 
         def raise_for_status(self) -> None:
             pass
