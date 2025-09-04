@@ -145,6 +145,29 @@ async def test_is_allowed_handless_allow_and_disallow(fake_redis, mock_http):
     assert await parser.is_allowed("/privado/faq") is True
 
 @pytest.mark.asyncio
+async def test_is_allowed_respeita_user_agent_especifico(fake_redis, mock_http):
+    """ Verifica se regras específicas de ``User-Agent`` têm precedência sobre o wildcard """
+    robots_url = "https://ua.com/robots.txt"
+    mock_http[robots_url] = type("Resp", (), {
+        "text": """
+         User-agent: Googlebot
+        Disallow: /privado
+
+        User-agent: *
+        Allow: /
+        """,
+        "status_code": 200,
+    })()
+
+    parser = RobotsTxtParser(base_url="https://ua.com")
+    parser.redis = fake_redis
+
+    #Goglebot é bloqeuado
+    assert await parser.is_allowed("/privado", "Googlebot") is False
+    #Outros agentes são liberados pelo Wildcard
+    assert await parser.is_allowed("/privado", "MeuBot") is True
+
+@pytest.mark.asyncio
 async def test_crawl_delay_sem_redis(no_redis, mock_http):
     robots_url = "https://noredis.com/robots.txt"
     mock_http[robots_url] = type("Resp", (), {

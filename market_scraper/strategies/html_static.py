@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from idlelib.window import add_windows_to_menu
 
 """ Estratégia baseadas em HTML estático """
 
@@ -9,6 +10,7 @@ from decimal import Decimal
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
+import asyncio
 import httpx
 import structlog
 from bs4 import BeautifulSoup
@@ -18,6 +20,7 @@ from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
+from market_scraper.utils.robots_txt import RobotsTxtParser
 
 
 #Logger estruturado para acompanhar eventos de scraping
@@ -57,8 +60,12 @@ class HtmlStaticStrategy(ScrapingStrategy):
         parsed = urlparse(url)
         base_domain = f"{parsed.scheme}://{parsed.netloc}/"
         headers = {**STEALTH_HEADERS, "Referer": base_domain}
-        #Rotaciona o User-Agent a cada chamada para imitar diferentes navegadores
-        headers["User-Agent"] = self._ua_manager.get_user_agent("html_static")
+        #Utiliza o User-Agent previamente selecionado ou gera um novo
+        headers["User-Agent"] = getattr(
+            self,
+            "_pending_ua",
+            self._ua_manager.get_user_agent("html_static"),
+        )
 
         #Recupera valores de cache para condicionar a requisição
         cache_headers = get_cache_headers(url)
@@ -74,6 +81,10 @@ class HtmlStaticStrategy(ScrapingStrategy):
             follow_redirects=True,
         ) as client:
             resp = await client.get(url)
+
+        #Limpa o User-Agent armazenado para a próxima chamada
+        if hasattr(self, "_pending_ua"):
+            delattr(self, "_pending_ua")
 
         #Armazena cabeçalhos de cache para futuras requisições
         store_cache_headers(
@@ -195,6 +206,21 @@ class HtmlStaticStrategy(ScrapingStrategy):
         ``blocked`` é informado ao chamador. A mensagem de detalhe inclui
         o domínio de origem para auxiliar a identificação do bloqueio.
         """
+        #Define o User-Agent que será utilizado tanto para o robots.txt quanto para a requisição
+        ua = self._ua_manager.get_user_agent("html_static")
+        parser = RobotsTxtParser(base_url=url)
+        path = urlparse(url).path or "/"
+
+        #Interrompe caso o caminho seja proibido pelo robots.txt
+        if not await parser.is_allowed(path, ua):
+            return {"status": "blocked", "detail": "Bloqueado pelo robots.txt"}
+        #Aguarda o tempo recomendado antes de continuar
+        delay = await parser.get_crawl_delay(ua)
+        if delay:
+            await asyncio.sleep(delay)
+        #Armazena o User-Agent para uso na requisição HTTP
+        self._pending_ua = ua
+
         try:
             #Realiza o donwload da página alvo
             resp = await self._fetch_html(url)

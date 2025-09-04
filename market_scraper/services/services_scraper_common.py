@@ -7,10 +7,12 @@ por camadas externas, como o módulo ``market_alert``.
 
 from __future__ import annotations
 
+from idlelib.window import add_windows_to_menu
 from typing import Optional, Literal
 from uuid import UUID
 
 import asyncio
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 
@@ -20,6 +22,8 @@ from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.rate_limiter import RateLimiter
 from market_scraper.utils.circuit_breaker import CircuitBreaker
 from market_scraper.utils.block_recovery import BlockRecoveryManager
+from market_scraper.utils.robots_txt import RobotsTxtParser
+from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
@@ -29,6 +33,8 @@ from market_scraper.services.multi_strategy_orchestrator import MultiStrategyScr
 
 #Gerenciador de cache inteligente para produtos
 cache_manager = IntelligentCacheManager()
+#Gerenciador de user-agent para consultas ao robots.txt
+ua_manager = IntelligentUserAgentManager()
 
 async def scrape_product_common_async(
     *,
@@ -50,6 +56,22 @@ async def scrape_product_common_async(
     #Converte a URL para formato canônico (mobile) para evitar variações
     normalized_url = to_mobile_url(url)
     marketplace = extract_hostname(normalized_url)
+
+    #Verifica diretivas de robots.txt antes de prosseguir
+    parser = RobotsTxtParser(base_url=normalized_url)
+    user_agent = ua_manager.get_user_agent("scraper_common")
+    path = urlparse(normalized_url).path or "/"
+    #Aborta com HTTP 403 quando o caminho não é permitido
+    if not await parser.is_allowed(path, user_agent):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bloqueado pelo robots.txt",
+        )
+    #Respeita o crawl-delay recomendado pelo site
+    delay = await parser.get_crawl_delay(user_agent)
+    if delay:
+        await asyncio.sleep(delay)
+
     #Verifica se já existe conteúdo cacheado para a URL normalizada e o marketplace
     cached = cache_manager.get(marketplace=marketplace, url=normalized_url)
     if cached:

@@ -20,6 +20,14 @@ def _preparar_ambiente(monkeypatch) -> None:
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
 
+    #Impede acesso real a Redis e leitura de robots.txt
+    monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: None)
+
+    async def fake_fetch_robots(self):
+        return ""
+
+    monkeypatch.setattr("market_scraper.utils.robots_txt.RobotsTxtParser._fetch_robots", fake_fetch_robots)
+
     #Evita chamadas HTTP das estratégias HTML
     async def fake_html_get_data(self, **k):
         return {
