@@ -21,6 +21,7 @@ from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
 from market_scraper.utils.robots_txt import RobotsTxtParser
+from market_scraper.utils.throttle_manager import ThrottleManager
 
 
 #Logger estruturado para acompanhar eventos de scraping
@@ -205,6 +206,8 @@ class HtmlStaticStrategy(ScrapingStrategy):
         o bloqueio é registrado no ``recovery_manager`` e o status
         ``blocked`` é informado ao chamador. A mensagem de detalhe inclui
         o domínio de origem para auxiliar a identificação do bloqueio.
+        Também aguarda a liberação do ``ThrottleManager`` antes de cada
+        requisição HTML, evitando excesso de chamadas.
         """
         #Define o User-Agent que será utilizado tanto para o robots.txt quanto para a requisição
         ua = self._ua_manager.get_user_agent("html_static")
@@ -221,8 +224,13 @@ class HtmlStaticStrategy(ScrapingStrategy):
         #Armazena o User-Agent para uso na requisição HTTP
         self._pending_ua = ua
 
+        #Aguarda o sinal do ``ThrottleManager`` quando disponível
+        throttle: ThrottleManager | None = kwargs.get("throttle_manager")
+        if throttle:
+            await throttle.wait_async(urlparse(url).netloc, url)
+
         try:
-            #Realiza o donwload da página alvo
+            #Realiza o download da página alvo
             resp = await self._fetch_html(url)
             #Suporte a testes que retornam apenas string em ``_fetch_html``
             if not isinstance(resp, httpx.Response):

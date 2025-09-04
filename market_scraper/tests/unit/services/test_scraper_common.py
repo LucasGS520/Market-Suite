@@ -98,6 +98,7 @@ async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
             rate_limiter,
             circuit_breaker,
             recovery_manager,
+            throttle_manager,
         ):
             return {"status": "NOT_MODIFIED"}
 
@@ -118,6 +119,7 @@ async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
             rate_limiter,
             circuit_breaker,
             recovery_manager,
+            throttle_manager,
         ):
             StrategyShouldNotRun.called = True
             return {"status": "success", "details": {"ok": True}}

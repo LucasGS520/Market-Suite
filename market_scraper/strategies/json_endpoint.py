@@ -21,6 +21,7 @@ import logging
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
+from market_scraper.utils.throttle_manager import ThrottleManager
 
 
 #Logger local para registro de eventos da estratégia
@@ -73,7 +74,9 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
         """ Obtém informações de produto via endpoint ``/api/v4/item/get``
 
         O ``User-Agent`` é rotacionado a cada requisição para reduzir
-        bloqueios e imitar acessos de navegadores distintos.
+        bloqueios e imitar acessos de navegadores distintos. Antes de cada
+        chamada HTTP, o ``ThrottleManager`` (quando informado) é consultado
+        para evitar excesso de requisições.
 
         Parâmetros
         ----------
@@ -118,9 +121,13 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
         if headers:
             base_headers.update(headers)
 
+        throttle: ThrottleManager | None = kwargs.get("throttle_manager")
+
         async with httpx.AsyncClient(headers=base_headers, timeout=10) as client:
             #Primeira requisição opcional para obter cookies e possíveis tokens
             try:
+                if throttle:
+                    await throttle.wait_async(parsed.netloc, url)
                 pre_resp = await client.get(url)
                 csrftoken = getattr(pre_resp, "cookies", {}).get("csrftoken")
                 etag = getattr(pre_resp, "headers", {}).get("if-none-match-")
@@ -167,6 +174,8 @@ class ShopeeJsonStrategy(JsonEndpointStrategy):
                 ):
                     with attempt:
                         client.headers.update(req_headers)
+                        if throttle:
+                            await throttle.wait_async(parsed.netloc, url)
                         resp = await client.get(api_url, params=params)
                         if resp.status_code != 200:
                             logger.error("Shopee respondeu com %s: %s", resp.status_code, resp.text[:200])

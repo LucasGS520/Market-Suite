@@ -145,6 +145,18 @@ async def test_backoff_async_reduces_rate_and_calls_circuit_breaker(monkeypatch,
     assert len(fake_async_sleep) == 1
     assert fake_async_sleep[0] > 0.0
 
+def test_backoff_respects_min_rate(monkeypatch):
+    """ Garante que o ``backoff`` nunca reduz a taxa abaixo do valor mínimo """
+    monkeypatch.setattr("random.uniform", lambda a, b: 0.5)
+    fake_cb = Mock()
+    monkeypatch.setattr("market_scraper.utils.throttle_manager.CircuitBreaker", lambda: fake_cb)
+
+    tm = ThrottleManager(rate=0.02, capacity=1, min_rate=0.01, decrease_factor=0.5)
+    tm.backoff(attempt=1, circuit_key="t")
+    tm.backoff(attempt=1, circuit_key="t")
+
+    assert tm.rate >= 0.01
+
 def test_wait_raises_when_rate_limiter_blocks(monkeypatch):
     """ Espera que wait() lance HTTPException 429 se o rate limiter negar a requisição """
     fake_rate = Mock()

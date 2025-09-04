@@ -20,6 +20,7 @@ from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.circuit_breaker import CircuitBreaker
 from market_scraper.utils.rate_limiter import RateLimiter
 from market_scraper.utils.block_recovery import BlockRecoveryManager
+from market_scraper.utils.throttle_manager import ThrottleManager
 from shared.metrics.metrics_scraper import SCRAPER_STRATEGY_TOTAL, SCRAPER_FALLBACK_TOTAL
 
 
@@ -35,18 +36,21 @@ class MultiStrategyScraperOrchestrator:
         strategy_selector: Callable[[str], list[ScrapingStrategy]] | None = None,
         validator: DataQualityValidator | None = None,
         strategy_timeout: float | None = None,
+        throttle_manager: ThrottleManager | None = None,
     ) -> None:
         """ Define dependências opcionais para o orquestrador
 
         ``strategy_selector`` permite injetar uma função customizada que
         retorna as estratégias disponíveis para uma URL. ``validator`` é
         utilizado para conferir a qualidade dos dados retornados.
-        ``strategy_timeout`` define o tempo máximo para execução
-        de cada estratégia.
+        ``strategy_timeout`` define o tempo máximo para execução de cada
+        estratégia. ``throttle_manager`` controla o ritmo das requisições
+        HTML, evitando excesso de chamadas ao mesmo domínio.
         """
         self._strategy_selector = strategy_selector or strategies_for
         self._validator = validator or DataQualityValidator()
         self._strategy_timeout = strategy_timeout
+        self._throttle_manager = throttle_manager or ThrottleManager(rate=1.0, capacity=1)
 
     async def scrape(
         self,
@@ -90,6 +94,7 @@ class MultiStrategyScraperOrchestrator:
                         rate_limiter=rate_limiter,
                         circuit_breaker=circuit_breaker,
                         recovery_manager=recovery_manager,
+                        throttle_manager=self._throttle_manager,
                     ),
                     timeout=self._strategy_timeout,
                 )

@@ -87,7 +87,11 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_throttle_wait(self, circuit_key: str, identifier: str | None = None) -> None:
         return None
 
+    async def fake_throttle_wait_async(self, circuit_key: str, identifier: str | None = None) -> None:
+        return None
+
     monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait", fake_throttle_wait)
+    monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait_async", fake_throttle_wait_async)
 
     async def fake_fetch_html_static(self, url: str) -> str:
         return HTML_EXEMPLO
