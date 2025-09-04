@@ -3,7 +3,7 @@
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
-from unittest.mock import patch, AsyncMock, Mock
+from unittest.mock import patch, Mock
 
 import pytest
 
@@ -77,8 +77,8 @@ def test_scrape_product_common_consulta_redis_client():
     with patch.object(rc, "get_redis_client", return_value=fake_redis), \
         patch.object(rc, "metrics", metrics_stub), \
         patch.object(mod, "is_scraping_suspended", wraps=rc.is_scraping_suspended) as suspended_mock, \
-        patch.object(mod, "get_cached_html", AsyncMock(return_value=None)), \
-        patch.object(mod, "set_cached_html", AsyncMock()), \
+        patch.object(mod.cache_manager, "get", return_value=None), \
+        patch.object(mod.cache_manager, "set", Mock()), \
         patch.object(mod.parser, "looks_like_product_page", return_value=True), \
         patch.object(mod.parser, "parse_product_details", return_value={"current_price": "10.00"}), \
         patch.object(mod, "HumanizedDelayManager", DummyHumanDelay), \

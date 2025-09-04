@@ -38,7 +38,6 @@ def test_parse_endpoint_com_cache(monkeypatch) -> None:
 
     #Substitui as funções reais pelo comportamento simulado
     monkeypatch.setattr("market_scraper.routes.routes_scraper.scrape_product_common_async", fake_scrape_product_common_async)
-    monkeypatch.setattr("market_scraper.services.services_cache_scraper.set_cached_html", fake_set_cached_html)
 
     payload = {"url": "www.mercadolivre.com.br/MLB-1"}
 
