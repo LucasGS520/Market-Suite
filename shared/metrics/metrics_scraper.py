@@ -74,12 +74,23 @@ SCRAPER_CAPTCHA_TOTAL = Counter(
 
 SCRAPER_BROWSER_FALLBACK_TOTAL = Counter(
     "scraper_browser_fallback_total",
-    "Total de vezes que o scraper recorreu para o BrowserManager em modo headless",
+    "Total de vezes que o scraper recorreu a um navegador headless",
 )
 
 SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL = Counter(
     "scraper_browser_recovery_success_total",
-    "Total de recuperações bem-sucedidas via navegador Playwright",
+    "Total de recuperações bem-sucedidas via navegador headless",
+)
+
+SCRAPER_STRATEGY_TOTAL = Counter(
+    "scraper_strategy_total",
+    "Total de execuções por estratégia de scraping",
+    ["strategy", "status"],
+)
+
+SCRAPER_FALLBACK_TOTAL = Counter(
+    "scraper_fallback_total",
+    "Total de fallbacks acionados entre estratégias após falha de validação de dados",
 )
 
 SCRAPER_REQUEST_SIZE_BYTES = Histogram(
@@ -122,6 +133,8 @@ __all__ = [
     "SCRAPER_CAPTCHA_TOTAL",
     "SCRAPER_BROWSER_FALLBACK_TOTAL",
     "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL",
+    "SCRAPER_STRATEGY_TOTAL",
+    "SCRAPER_FALLBACK_TOTAL",
     "SCRAPER_REQUEST_SIZE_BYTES",
     "SCRAPER_RESPONSE_SIZE_BYTES",
     "SCRAPER_URL_STATUS_TOTAL",

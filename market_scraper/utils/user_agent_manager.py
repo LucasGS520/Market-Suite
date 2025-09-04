@@ -16,10 +16,26 @@ class IntelligentUserAgentManager:
         self.sessions: dict[str, dict] = {}
         self.lock = threading.Lock()
 
+    def _purge_expired_sessions(self, now: float) -> None:
+        """ Remove da memória as sessões cujo tempo excedeu ``session_timeout`` """
+        expired = [
+            sid for sid, data in self.sessions.items()
+            if (now - data["start_time"]) >= self.session_timeout
+        ]
+        for sid in expired:
+            self.sessions.pop(sid, None)
+
+    def purge_expired_sessions(self) -> None:
+        """ Expõe limpeza manual das sessões expiradas """
+        now = time.monotonic()
+        with self.lock:
+            self._purge_expired_sessions(now)
+
     def get_user_agent(self, session_id: str) -> str:
         """ Retorna o user-agent da sessão, rotacionando quando necessário """
         now = time.monotonic()
         with self.lock:
+            self._purge_expired_sessions(now)
             sess = self.sessions.get(session_id)
             if (
                 sess is None

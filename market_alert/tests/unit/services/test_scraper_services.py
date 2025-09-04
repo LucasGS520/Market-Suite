@@ -1,10 +1,7 @@
-import os
 import pytest
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 from decimal import Decimal
-
-from celery.bin.result import result
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping

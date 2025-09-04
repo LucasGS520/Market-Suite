@@ -74,11 +74,13 @@ para coletar informações dos anúncios.
 ## Serviço ``market_scraper``
 O `market_scraper` é o serviço especializado em coletar dados de anúncios. Ele processa uma URL recebida, respeitando limites de acesso e retornando informações estruturadas para os demais módulos.
 
+Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML estático consulte [`market_scraper/README.md`](market_scraper/README.md).
+
 ### Componentes principais
 - **main.py** - instancia a aplicação FastAPI e registra rotas de saúde e de scraping.
 - **routes/** - expõe as rotas ``/health/ping`` e ``/scrape/parse`` (também acessível por ``/scraper/parse``).
 - utiliza o contrato ``ScraperRequest`` e ``ScraperResponse`` definido em ``shared/schemas/schemas_scraper.py`` para padronizar requisições e respostas.
-- **services/** - executa o fluxo de scraping: controla rate limiting e circuit breaker, recupera o HTML com Playwright, aplica cache e interpreta o conteúdo.
+- **services/** - executa o fluxo de scraping: controla rate limiting e circuit breaker, anteriormente recuperava o HTML com Playwright (desativado temporariamente), aplica cache e interpreta o conteúdo.
 - **utils/** - reúne auxiliares como rotação de *user agent*, gerenciamento de cookies, delays humanizados, leitura de ``robots.txt`` e funções de preço.
 - **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço.
 
@@ -120,7 +122,7 @@ Antes de iniciar, garanta que os seguintes itens estão instalados:
 * **Python 3.10+**
 * **Docker e Docker Compose** (para execução completa do ambiente)
 * **Redis** e **PostgreSQL** (caso opte por executar os serviços sem Docker)
-* **Playwright** para coleta via navegador headless
+* **Playwright** para coleta via navegador headless (Desativado nessa etapa do projeto)
 
 1. Criar um ambiente virtual e instalar as dependências:
 ```bash
@@ -179,6 +181,8 @@ LOCUST_LOGIN_PASSWORD=senha_do_usuario_exemplo
 ```env
 DATABASE_URL=postgresql+psycopg2://usuario:senha@db:5432/banco_de_dados
 
+REDIS_PASSWORD=senha
+
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USERNAME=usuario
@@ -205,6 +209,8 @@ SCRAPER_SERVICE_URL=http://url_serviço_de_scraping
 
 ### Exemplo de ``.env.market_scraper``
 ```env
+REDIS_PASSWORD=senha
+
 CACHE_BASE_TTL=3600
 
 ETAG_CACHE_TTL=86400
@@ -236,7 +242,7 @@ PLAYWRIGHT_TIMEOUT=30000
 ## Pipeline de Scraping
 1. A API recebe uma URL de produto para monitoramento ou comparação.
 2. Uma tarefa Celery é disparada para o `market_scraper` coletar os dados.
-3. O `market_scraper` utiliza Playwright e diversos gerenciadores (User-Agent, cookies, delays, etc) para simular a navegação humana e extrair as informações do anúncio.
+3. O `market_scraper` utiliza Playwright e diversos gerenciadores (User-Agent, cookies, delays, etc) para simular a navegação humana e extrair as informações do anúncio (**Temporariamente Desativado**)
 4. Os dados coletados são retornados para a API, que atualiza o banco e decide se um alerta deve ser enviado.
 
 ### Proteções ativas por etapa

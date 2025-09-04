@@ -11,7 +11,7 @@ from market_scraper.main import app
 from market_scraper.strategies.base import ScrapingStrategy
 from market_scraper.services import domain_policy
 from market_scraper.services import services_scraper_common as common
-from market_scraper.strategies.playwright_default import PlaywrightDefaultStrategy
+from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy, AmazonHtmlStaticStrategy, ShopeeHtmlStaticStrategy, MagaluHtmlStaticStrategy
 
 
 def _preparar_ambiente(monkeypatch) -> None:
@@ -20,30 +20,20 @@ def _preparar_ambiente(monkeypatch) -> None:
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
 
-    #Evita navegação real pelo Playwright
-    async def fake_default_get_data(
-        self,
-        *,
-        url,
-        user_id,
-        payload,
-        product_type,
-        rate_limiter=None,
-        circuit_breaker=None,
-        recovery_manager=None,
-        headers=None,
-        **kwargs,
-    ) -> dict:
+    #Evita chamadas HTTP das estratégias HTML
+    async def fake_html_get_data(self, **k):
         return {
             "status": "success",
-            "details": {"name": "Fake", "current_price": "R$ 0,00"},
+            "details": {"name": "Fake", "current_price": "R$ 10,00"},
         }
 
-    monkeypatch.setattr(
-        PlaywrightDefaultStrategy,
-        "get_data",
-        fake_default_get_data,
-    )
+    for cls in [
+        MercadoLivreHtmlStaticStrategy,
+        AmazonHtmlStaticStrategy,
+        ShopeeHtmlStaticStrategy,
+        MagaluHtmlStaticStrategy,
+    ]:
+        monkeypatch.setattr(cls, "get_data", fake_html_get_data)
 
 class FakeMercadoLivreStrategy(ScrapingStrategy):
     """ Estratégia fictícia utilizada apenas para testes. """
@@ -87,79 +77,79 @@ def test_seleciona_estrategia_mercado_livre(monkeypatch) -> None:
     monkeypatch.setattr(
         domain_policy,
         "STRATEGY_REGISTRY",
-        {"FAKE": FakeMercadoLivreStrategy, "PLAYWRIGHT": PlaywrightDefaultStrategy}
+        {"FAKE": FakeMercadoLivreStrategy}
     )
     monkeypatch.setattr(
         domain_policy,
         "DOMAIN_POLICIES",
-        {"mercadolivre.com.br": ["FAKE", "PLAYWRIGHT"]},
+        {"mercadolivre.com.br": ["FAKE"]},
     )
 
     client = TestClient(app)
     resp = client.post(
-        "/scrape/parse", json={"url": "https://www.mercadolivre.com.br/item/1"}
+        "/scrape/parse", json={"url": "https://www.mercadolivre.com.br/MLB-1"}
     )
     assert resp.status_code == 200
     assert chamada["executada"]
 
-@pytest.mark.xfail(reason="Estratégia da Amazon ainda não implementada")
 def test_seleciona_estrategia_amazon(monkeypatch) -> None:
-    """ Teste placeholder para o domínio da Amazon """
+    """ Garante que URLs da Amazon utilizam a estratégia correta """
     _preparar_ambiente(monkeypatch)
-    from market_scraper.services import services_scraper_common as common
 
     escolhido: dict[str, Any] = {}
     original = common.strategies_for
 
     def capturar(url: str):
         resultado = original(url)
-        escolhido["estrategia"] = resultado[0]
+        #Armazena a sequência de estratégias escolhidas para verificação
+        escolhido["estrategias"] = resultado
         return resultado
 
     monkeypatch.setattr(common, "strategies_for", capturar)
     client = TestClient(app)
     resp = client.post(
-        "/scrape/parse", json={"url": "https://www.amazon.com.br/produto"}
+        "/scrape/parse", json={"url": "https://www.amazon.com.br/dp/ABC123"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "AmazonStrategy"
+    assert escolhido["estrategias"][0].__class__.__name__ == "AmazonJsonStrategy"
+    assert escolhido["estrategias"][1].__class__.__name__ == "AmazonHtmlStaticStrategy"
 
-@pytest.mark.xfail(reason="Estratégia da Shopee ainda não implementada")
 def test_seleciona_estrategia_shopee(monkeypatch) -> None:
-    """ Teste placeholder para domínio da Shopee """
+    """ Garante que URLs da Shopee utilizam a estratégia correta """
     _preparar_ambiente(monkeypatch)
     escolhido: dict[str, Any] = {}
     original = common.strategies_for
 
     def capturar(url: str):
         resultado = original(url)
-        escolhido["estrategia"] = resultado[0]
+        escolhido["estrategias"] = resultado
         return resultado
 
     monkeypatch.setattr(common, "strategies_for", capturar)
     client = TestClient(app)
     resp = client.post(
-        "/scrape/parse", json={"url": "https://shopee.com.br/produto"}
+        "/scrape/parse", json={"url": "https://shopee.com.br/produto-i.1.2"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "ShopeeStrategy"
+    assert escolhido["estrategias"][0].__class__.__name__ == "ShopeeJsonStrategy"
+    assert escolhido["estrategias"][1].__class__.__name__ == "ShopeeHtmlStaticStrategy"
 
-@pytest.mark.xfail(reason="Estratégia da Magalu ainda não implementada")
 def test_seleciona_estrategia_magalu(monkeypatch) -> None:
-    """ Teste placeholder para o domínio da Magalu """
+    """ Garante que URLs da Magalu utilizam a estratégia correta """
     _preparar_ambiente(monkeypatch)
     escolhido: dict[str, Any] = {}
     original = common.strategies_for
 
     def capturar(url: str):
         resultado = original(url)
-        escolhido["estrategia"] = resultado[0]
+        escolhido["estrategias"] = resultado
         return resultado
 
     monkeypatch.setattr(common, "strategies_for", capturar)
     client = TestClient(app)
     resp = client.post(
-        "/scrape/parse", json={"url": "https://www.magazineluiza.com.br/produto"}
+        "/scrape/parse", json={"url": "https://www.magazineluiza.com.br/produto/p/abc123"}
     )
     assert resp.status_code == 200
-    assert escolhido["estrategia"].__class__.__name__ == "MagaluStrategy"
+    assert escolhido["estrategias"][0].__class__.__name__ == "MagaluJsonStrategy"
+    assert escolhido["estrategias"][1].__class__.__name__ == "MagaluHtmlStaticStrategy"

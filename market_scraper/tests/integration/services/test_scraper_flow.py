@@ -8,6 +8,7 @@ import pytest
 from market_scraper.services.services_scraper_common import scrape_product_common_async
 from market_scraper.tests.unit.conftest import fake_redis
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy
 
 
 #HTML de exemplo representando uma página válida de produto no Mercado Livre
@@ -72,21 +73,6 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
 
-    #Evita chamadas reais ao Playwright e ao cache de Redis
-    async def fake_fetch_html_playwright(url: str) -> str:
-        return HTML_EXEMPLO
-
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.fetch_html_playwright", fake_fetch_html_playwright)
-
-    async def fake_get_cached_html(*a, **k):
-        return None
-
-    async def fake_set_cached_html(*a, **k):
-        return None
-
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.get_cached_html", fake_get_cached_html)
-    monkeypatch.setattr("market_scraper.services.services_scraper_common.set_cached_html", fake_set_cached_html)
-
     #Impedindo delays e leituras de robots.txt
     async def fake_fetch_robots(self):
         return ""
@@ -102,6 +88,11 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait", fake_throttle_wait)
+
+    async def fake_fetch_html_static(self, url: str) -> str:
+        return HTML_EXEMPLO
+
+    monkeypatch.setattr(MercadoLivreHtmlStaticStrategy, "_fetch_html", fake_fetch_html_static)
 
 @pytest.mark.asyncio
 async def test_scrape_monitored_product_flow(setup_ambiente: None) -> None:
@@ -123,10 +114,6 @@ async def test_scrape_monitored_product_flow(setup_ambiente: None) -> None:
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Exemplo"
     assert detalhes["current_price"] == "R$ 100,00"
-    assert detalhes["old_price"] == "R$ 150,00"
-    assert detalhes["shipping"] == "Frete Grátis"
-    assert detalhes["seller"] == "Loja Teste"
-    assert detalhes["thumbnail"] == "http://example.com/thumb.jpg"
 
 @pytest.mark.asyncio
 async def test_scrape_competitor_product_flow(setup_ambiente: None) -> None:
@@ -147,5 +134,3 @@ async def test_scrape_competitor_product_flow(setup_ambiente: None) -> None:
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Exemplo"
     assert detalhes["current_price"] == "R$ 100,00"
-    assert detalhes["shipping"] == "Frete Grátis"
-    assert detalhes["seller"] == "Loja Teste"

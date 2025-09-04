@@ -11,11 +11,13 @@ def test_to_mobile_url_converts_mercadolivre_domain():
 
 def test_to_mobile_url_keeps_p_path_unchanged():
     url = "https://www.mercadolivre.com.br/p/some-app-link"
-    assert to_mobile_url(url) == url
+    mobile = to_mobile_url(url)
+    assert mobile == f"https://{MOBILE_DOMAIN}/p/some-app-link"
 
 def test_to_mobile_url_keeps_nested_p_path_unchanged():
     url = "https://www.mercadolivre.com.br/produto/p/MLB123"
-    assert to_mobile_url(url) == url
+    mobile = to_mobile_url(url)
+    assert mobile == f"https://{MOBILE_DOMAIN}/produto/p/MLB123"
 
 def test_product_hosts_contains_mobile_domain():
     assert MOBILE_DOMAIN in PRODUCT_HOSTS

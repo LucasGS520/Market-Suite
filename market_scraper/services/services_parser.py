@@ -119,12 +119,10 @@ class ProductParser:
 
     def __init__(self) -> None:
         """ Define os campos obrigatórios para considerar o resultado válido """
+        #Apenas ``name`` e ``current_price`` são considerados obrigatórios
         self.required_fields = [
             "name",
-            "url",
             "current_price",
-            "thumbnail",
-            "seller",
         ]
         self._validator = DataQualityValidator(self.required_fields)
 

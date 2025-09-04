@@ -117,7 +117,11 @@ class ContentSignature:
         if client is None:
             return None
         try:
-            return client.get(self._key())
+            old_signature = client.get(self._key())
+            #Decodifica o valor retornado para garantir tipo ``str``
+            if isinstance(old_signature, bytes):
+                old_signature = old_signature.decode("utf-8")
+            return old_signature
         except Exception:
             logger.exception("Erro ao obter assinatura de conteúdo no Redis")
             return None
@@ -150,6 +154,9 @@ class ContentSignature:
         new_signature = self.calculate(html)
         try:
             old_signature = client.get(key)
+            #Decodifica a assinatura anterior para comparação
+            if isinstance(old_signature, bytes):
+                old_signature = old_signature.decode("utf-8")
             if old_signature == new_signature:
                 return False
             #Armazena a nova assinatura com um TTL configurável
@@ -177,6 +184,9 @@ class ContentSignature:
         key = self._key()
         try:
             old_signature = client.get(key)
+            #Decodifica o valor retornado antes da comparação
+            if isinstance(old_signature, bytes):
+                old_signature = old_signature.decode("utf-8")
             if old_signature == signature:
                 return NOT_MODIFIED
             client.set(key, signature, ex=settings.SIG_CACHE_TTL)

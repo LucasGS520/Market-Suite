@@ -59,6 +59,9 @@ async def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
         try:
             html = await asyncio.to_thread(client.get, key)
             if html:
+                #O Redis retorna ``bytes``, converte para ``str`` para manter compatibilidade com o restante do código
+                if isinstance(html, bytes):
+                    html = html.decode("utf-8")
                 return html
         except Exception as err:
             #Se ocorrer qualquer problema com o Redis, usa o cache local
@@ -70,6 +73,9 @@ async def get_cached_html(url: str, max_age: int = 300) -> Optional[str]:
     if not entry:
         return None
     if time.time() - entry["timestamp"] > max_age:
+        #Remove entradas expiradas do cache local para libertar memória
+        with cache_lock:
+            del _cache[url]
         return None
     return entry["html"]
 

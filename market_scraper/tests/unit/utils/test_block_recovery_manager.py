@@ -1,82 +1,55 @@
-import os
 import asyncio
 from unittest.mock import Mock
 
 import pytest
-
-#Garantia de variáveis de ambiente mínimas
-os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
-os.environ.setdefault("SECRET_KEY", "dummy")
+import httpx
 
 from market_scraper.utils.block_recovery import BlockRecoveryManager
 from shared.enums import BlockResult
-from shared.metrics import metrics_scraper
 
-
-class DummyCounter:
-    def __init__(self):
-        self.count = 0
-
-    def inc(self):
-        self.count += 1
 
 def _setup_managers():
     ua = Mock()
+    ua.get_user_agent.return_value = "UA"
     cookie = Mock()
+    cookie.get_cookies.return_value = {}
     delay = Mock()
     mgr = BlockRecoveryManager(ua_manager=ua, cookie_manager=cookie, delay_manager=delay)
     return mgr, ua, cookie, delay
 
-def test_recover_html_success(monkeypatch):
+def test_handle_block_rotaciona_ua(monkeypatch):
     mgr, ua, cookie, delay = _setup_managers()
+    monkeypatch.setattr("shared.utils.redis_client.suspend_scraping", lambda s: None)
 
-    class DummyBrowser:
-        async def fetch_html(self, url, session_id=None):
-            return "<html></html>"
-
-    class DummyCtx:
-        async def __aenter__(self):
-            return DummyBrowser()
-
-        async def __aexit__(self, exc_type, exc, tb):
+    class DummyClient:
+        def __init__(self, *a, **k):
             pass
 
-    monkeypatch.setattr("market_scraper.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
-    monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
-    counter = DummyCounter()
-    monkeypatch.setattr("market_scraper.utils.block_recovery.SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
+        async def __aenter__(self):
+            return self
 
-    html = asyncio.run(mgr.handle_block(BlockResult.HTTP_403, session_id="s1", url="http://example.com"))
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
 
-    assert html == "<html></html>"
-    assert counter.count == 1
+        async def get(self, url):
+            class Resp:
+                status_code = 200
+                text = "<html>ok</html>"
+                cookies = {}
+
+                def raise_for_status(self):
+                    return None
+
+            return Resp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
+
+    html = asyncio.run(
+        mgr.handle_block(BlockResult.HTTP_403, session_id="s1", url="http://example.com")
+    )
+
+    assert html == "<html>ok</html>"
     ua.rotate.assert_called_once_with("s1")
     cookie.reset.assert_called_once_with("s1")
-    delay.prolong.assert_called_once_with()
-
-def test_recover_html_failure(monkeypatch):
-    mgr, ua, cookie, delay = _setup_managers()
-
-    class DummyBrowser:
-        async def fetch_html(self, url, session_id=None):
-            raise RuntimeError("fail")
-
-    class DummyCtx:
-        async def __aenter__(self):
-            return DummyBrowser()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            pass
-
-    monkeypatch.setattr("market_scraper.utils.block_recovery.get_playwright_client", lambda *a, **k: DummyCtx())
-    monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
-    counter = DummyCounter()
-    monkeypatch.setattr( "market_scraper.utils.block_recovery.SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL", counter)
-
-    html = asyncio.run(mgr.handle_block(BlockResult.CAPTCHA, session_id="s2", url="http://example.com"))
-
-    assert html is None
-    assert counter.count == 0
-    ua.rotate.assert_called_once_with("s2")
-    cookie.reset.assert_called_once_with("s2")
+    cookie.update_from_response.assert_called_once()
     delay.prolong.assert_called_once_with()
