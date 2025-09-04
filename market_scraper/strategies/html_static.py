@@ -169,9 +169,10 @@ class HtmlStaticStrategy(ScrapingStrategy):
 
         Em caso de falha na requisição, o método registra o status HTTP,
         o cabeçalho ``Location`` (quando presente) e um trecho do corpo
-        da resposta. Além disso, quando a Shopee retorna **HTTP 403**
+        da resposta. Além disso, quando o domíno alvo retorna **HTTP 403**
         o bloqueio é registrado no ``recovery_manager`` e o status
-        ``blocked`` é informado ao chamador.
+        ``blocked`` é informado ao chamador. A mensagem de detalhe inclui
+        o domínio de origem para auxiliar a identificação do bloqueio.
         """
         try:
             #Realiza o download do HTML da página alvo
@@ -182,15 +183,16 @@ class HtmlStaticStrategy(ScrapingStrategy):
             location = resp.headers.get("location") if resp else None
             body = resp.text[:200] if resp and resp.text else None
             logger.exception("Falha na requisição HTML", url=url, status=getattr(resp, "status_code", None), location=location, body=body)
-            #Caso a Shopee responda com 403, registra o bloqueio
+            #Caso o domínio responda com 403, registra o bloqueio
             if resp and resp.status_code == 403:
                 recovery_manager = kwargs.get("recovery_manager")
                 if recovery_manager:
                     #Informa ao gerenciador que houve bloqueio pelo domínio
                     recovery_manager.register_block(url=url, status=403)
+                domain = urlparse(url).netloc
                 return {
                     "status": "blocked",
-                    "detail": "HTTP 403 recebido da Shopee",
+                    "detail": f"HTTP 403 recebido de {domain}",
                 }
             #Se ocorrer erro de rede ou status inválido, sinaliza falha genérica
             return {"status": "error"}
