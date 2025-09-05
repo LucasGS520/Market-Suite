@@ -79,8 +79,6 @@ def test_scrape_product_common_consulta_redis_client():
         patch.object(mod, "is_scraping_suspended", wraps=rc.is_scraping_suspended) as suspended_mock, \
         patch.object(mod.cache_manager, "get", return_value=None), \
         patch.object(mod.cache_manager, "set", Mock()), \
-        patch.object(mod.parser, "looks_like_product_page", return_value=True), \
-        patch.object(mod.parser, "parse_product_details", return_value={"current_price": "10.00"}), \
         patch.object(mod, "HumanizedDelayManager", DummyHumanDelay), \
         patch.object(mod, "ThrottleManager", DummyThrottle), \
         patch.object(mod, "RobotsTxtParser", DummyRobotsTxt):
