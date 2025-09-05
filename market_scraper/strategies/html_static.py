@@ -14,6 +14,7 @@ import asyncio
 import httpx
 import structlog
 from bs4 import BeautifulSoup
+import logging
 
 from .base import ScrapingStrategy
 from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
@@ -28,6 +29,9 @@ from market_scraper.utils.throttle_manager import ThrottleManager
 
 #Logger estruturado para acompanhar eventos de scraping
 logger = structlog.get_logger(__name__)
+
+#Logger padrão para capturar mensagens em ambientes de teste
+py_logger = logging.getLogger(__name__)
 
 #Instância compartilhada do cache inteligente para leitura de headers e conteúdos
 cache_manager = IntelligentCacheManager()
@@ -252,7 +256,16 @@ class HtmlStaticStrategy(ScrapingStrategy):
             resp = getattr(exc, "response", None)
             location = resp.headers.get("location") if resp else None
             body = resp.text[:200] if resp and resp.text else None
+            #Registra também no logger padrão para que testes possam capturar a mensagem
+            py_logger.exception(
+                "Falha na requisição HTML url=%s status=%s location=%s body=%s",
+                url,
+                getattr(resp, "status_code", None),
+                location,
+                body,
+            )
             logger.exception("Falha na requisição HTML", url=url, status=getattr(resp, "status_code", None), location=location, body=body)
+
             #Caso o domínio responda com 403, registra o bloqueio
             if resp and resp.status_code == 403:
                 recovery_manager = kwargs.get("recovery_manager")
