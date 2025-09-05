@@ -46,7 +46,8 @@ async def test_scrape_product_common_async_cached(monkeypatch):
         product_type="monitored",
     )
 
-    assert resultado == {"status": "success", "details": dados_cache}
+    assert resultado["status"] == "success"
+    assert resultado["details"] == entrada_cache
     assert OrquestradorRegistro.instanciado is False
     assert OrquestradorRegistro.scrape_chamado is False
 

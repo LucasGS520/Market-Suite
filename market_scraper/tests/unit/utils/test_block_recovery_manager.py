@@ -53,3 +53,26 @@ def test_handle_block_rotaciona_ua(monkeypatch):
     cookie.reset.assert_called_once_with("s1")
     cookie.update_from_response.assert_called_once()
     delay.prolong.assert_called_once_with()
+
+def test_handle_block_timeout_progressivo(monkeypatch):
+    """ Garante que o timeout aumenta progressivamente a cada bloqueio """
+    mgr, *_ = _setup_managers()
+    monkeypatch.setattr("shared.utils.redis_client.suspend_scraping", lambda s: None)
+
+    timeouts: list[int] = []
+
+    class DummyClient:
+        def __init__(self, *a, **k):
+            timeouts.append(k.get("timeout"))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url):
+            class Resp:
+                status_code = 200
+                text = "<html></html>"
+
