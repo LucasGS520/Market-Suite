@@ -74,7 +74,7 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
 
     #Impedindo delays e leituras de robots.txt
-    async def fake_fetch_robots(self):
+    async def fake_fetch_robots(self, user_agent: str):
         return ""
 
     monkeypatch.setattr("market_scraper.utils.robots_txt.RobotsTxtParser._fetch_robots", fake_fetch_robots)

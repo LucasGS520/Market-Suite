@@ -26,27 +26,32 @@ class RobotsTxtParser:
     def __init__(self, base_url: str):
         parsed = urlparse(base_url)
         self.base = f"{parsed.scheme}://{parsed.netloc}"
+        #Prefixo de cache apenas por domínio; o user-agent será acrescido nas chaves
         self.cache_key = f"{ROBOTS_CACHE_KEY}:{self.base}"
         self.redis = get_redis_client()
 
-    async def _fetch_robots(self) -> str:
-        """ Recupera o conteúdo de ``robots.txt`` de forma assíncrona
+    async def _fetch_robots(self, user_agent: str) -> str:
+        """ Recupera o conteúdo de ``robots.txt`` considerando o ``user-agent`` informado
 
-        A leitura do Redis e a requisição HTTP são executadas em *thread pool*
-        para que a função seja utilizada em contextos assíncronos sem
-        bloquear o loop de eventos.
+        A mesma origem pode retornar conteúdo distinto para agentes
+        desktop ou mobile, por isso o resultado é armazenado no cache
+        utilizando a combinação ``domínio + user-agent``.
         """
+        #Monta chave de cache específica para este user-agent
+        cache_key = f"{self.cache_key}:{user_agent}"
+
         cached = None
         if self.redis is not None:
-            cached = await asyncio.to_thread(self.redis.get, self.cache_key)
+            cached = await asyncio.to_thread(self.redis.get, cache_key)
 
         if cached:
             #Se for bytes, decodifica; se já for str, retorna diretamente
             return cached.decode("utf-8") if isinstance(cached, (bytes, bytearray)) else cached
 
         url = urljoin(self.base, "/robots.txt")
+        headers = {"User-Agent": user_agent}
         try:
-            response = await asyncio.to_thread(requests.get, url, timeout=5)
+            response = await asyncio.to_thread(requests.get, url, timeout=5, headers=headers)
             content = response.text if response.status_code == 200 else ""
         except requests.exceptions.RequestException as e:
             logger.warning("robots_fetch_failed", url=url, error=str(e))
@@ -54,12 +59,12 @@ class RobotsTxtParser:
 
         #Salva no Redis para próximas leituras, caso disponível
         if self.redis is not None:
-            await asyncio.to_thread(self.redis.set, self.cache_key, content, ex=ROBOTS_CACHE_TTL)
+            await asyncio.to_thread(self.redis.set, cache_key, content, ex=ROBOTS_CACHE_TTL)
         return content
 
     async def get_crawl_delay(self, user_agent: str = "*") -> Optional[float]:
         """ Retorna o valor de Crawl-Delay (em segundos) para o user_agent definido """
-        text = await self._fetch_robots()
+        text = await self._fetch_robots(user_agent)
         lines = text.splitlines()
 
         delays = {}
@@ -111,7 +116,7 @@ class RobotsTxtParser:
         if cached is not None:
             return cached.decode("utf-8") == "1" if isinstance(cached, (bytes, bytearray)) else cached == "1"
 
-        text = await self._fetch_robots()
+        text = await self._fetch_robots(user_agent)
         lines = text.splitlines()
 
         rules: dict[str, list[tuple[str, bool]]] = {}

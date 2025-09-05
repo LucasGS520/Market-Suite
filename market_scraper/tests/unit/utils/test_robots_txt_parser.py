@@ -25,12 +25,13 @@ def mock_http(monkeypatch):
     response = {}
 
     def fake_get(url, *args, **kwargs):
+        ua = kwargs.get("headers", {}).get("User-Agent")
         class FakeResponse:
             def __init__(self, text, status_code=200):
                 self.text = text
                 self.status_code = status_code
 
-        return response[url]
+        return response[(url, ua)]
 
     monkeypatch.setattr("requests.get", fake_get)
     return response
@@ -42,7 +43,9 @@ def no_redis(monkeypatch):
 @pytest.mark.asyncio
 async def test_crawl_delay_user_agent_exact_and_wildcard(fake_redis, mock_http):
     robots_url = "https://example.com/robots.txt"
-    mock_http[robots_url] = type("Resp", (), {
+    ua_google = "Googlebot"
+    ua_custom = "MyCustomBot"
+    resp = type("Resp", (), {
         "text": """
         User-agent: Googlebot
         Crawl-delay: 10
@@ -52,33 +55,34 @@ async def test_crawl_delay_user_agent_exact_and_wildcard(fake_redis, mock_http):
         """,
         "status_code": 200
     })()
+    mock_http[(robots_url, ua_google)] = resp
+    mock_http[(robots_url, ua_custom)] = resp
 
     parser = RobotsTxtParser(base_url="https://example.com")
     parser.redis = fake_redis
 
-    #Chave de cache deve incluir o domínio
-    expected_key = parser.cache_key
-
     #Caso exato -> deve retornar 10
-    delay = await parser.get_crawl_delay("Googlebot")
+    delay = await parser.get_crawl_delay(ua_google)
     assert delay == 10
 
     #Outro agente qualquer -> wildcard 5
-    delay2 = await parser.get_crawl_delay("MyCustomBot")
+    delay2 = await parser.get_crawl_delay(ua_custom)
     assert delay2 == 5
 
-    #Conteúdo foi salvo usando a chave de domínio
-    assert expected_key in fake_redis.store
+    #Cada user-agent possui sua própria chave em cache
+    assert f"{parser.cache_key}:{ua_google}" in fake_redis.store
+    assert f"{parser.cache_key}:{ua_custom}" in fake_redis.store
 
 @pytest.mark.asyncio
 async def test_robots_txt_parser_uses_redis_cache(fake_redis, mock_http):
     robots_url = "https://cached.com/robots.txt"
     parser = RobotsTxtParser(base_url="https://cached.com")
     parser.redis = fake_redis
-    cache_key = parser.cache_key
+    ua = "AnyBot"
+    cache_key = f"{parser.cache_key}:{ua}"
 
-    #Primeira resposta vem do HTTP é cacheada
-    mock_http[robots_url] = type("Resp", (), {
+    #Primeira resposta vem do HTTP e é cacheada
+    mock_http[(robots_url, ua)] = type("Resp", (), {
         "text": """
         User-agent: *
         Crawl-delay: 8
@@ -86,15 +90,15 @@ async def test_robots_txt_parser_uses_redis_cache(fake_redis, mock_http):
         "status_code": 200
     })()
 
-    delay = await parser.get_crawl_delay("AnyBot")
+    delay = await parser.get_crawl_delay(ua)
     assert delay == 8
     assert fake_redis.store.get(cache_key)
 
     #Remove o mock HTTP para garantir que cache está sendo usado
-    del mock_http[robots_url]
+    del mock_http[(robots_url, ua)]
 
     #Segunda chamada deve retornar valor armazenado, não lançar erro
-    delay2 = await parser.get_crawl_delay("AnyBot")
+    delay2 = await parser.get_crawl_delay(ua)
     assert delay2 == 8
 
 @pytest.mark.asyncio
@@ -102,11 +106,12 @@ async def test_cache_isolated_per_domain(fake_redis, mock_http):
     robots_url1 = "https://site1.com/robots.txt"
     robots_url2 = "https://site2.com/robots.txt"
 
-    mock_http[robots_url1] = type("Resp", (), {
+    ua = "*"
+    mock_http[(robots_url1, ua)] = type("Resp", (), {
         "text": "User-agent: *\nCrawl-delay: 3",
         "status_code": 200
     })()
-    mock_http[robots_url2] = type("Resp", (), {
+    mock_http[(robots_url2, ua)] = type("Resp", (), {
         "text": "User-agent: *\nCrawl-delay: 7",
         "status_code": 200,
     })()
@@ -116,18 +121,19 @@ async def test_cache_isolated_per_domain(fake_redis, mock_http):
     parser2 = RobotsTxtParser(base_url="https://site2.com")
     parser2.redis = fake_redis
 
-    d1 = await parser1.get_crawl_delay("*")
-    d2 = await parser2.get_crawl_delay("*")
+    d1 = await parser1.get_crawl_delay(ua)
+    d2 = await parser2.get_crawl_delay(ua)
 
     assert d1 == 3
     assert d2 == 7
-    assert parser1.cache_key in fake_redis.store
-    assert parser2.cache_key in fake_redis.store
+    assert f"{parser1.cache_key}:{ua}" in fake_redis.store
+    assert f"{parser2.cache_key}:{ua}" in fake_redis.store
 
 @pytest.mark.asyncio
 async def test_is_allowed_handless_allow_and_disallow(fake_redis, mock_http):
     robots_url = "https://example.com/robots.txt"
-    mock_http[robots_url] = type("Resp", (), {
+    ua = "*"
+    mock_http[(robots_url, ua)] = type("Resp", (), {
         "text": """
         User-agent: *
         Disallow: /privado/
@@ -140,15 +146,15 @@ async def test_is_allowed_handless_allow_and_disallow(fake_redis, mock_http):
     parser = RobotsTxtParser(base_url="https://example.com")
     parser.redis = fake_redis
 
-    assert await parser.is_allowed("/publico/pagina") is True
-    assert await parser.is_allowed("/privado/segredo") is False
-    assert await parser.is_allowed("/privado/faq") is True
+    assert await parser.is_allowed("/publico/pagina", ua) is True
+    assert await parser.is_allowed("/privado/segredo", ua) is False
+    assert await parser.is_allowed("/privado/faq", ua) is True
 
 @pytest.mark.asyncio
 async def test_is_allowed_respeita_user_agent_especifico(fake_redis, mock_http):
     """ Verifica se regras específicas de ``User-Agent`` têm precedência sobre o wildcard """
     robots_url = "https://ua.com/robots.txt"
-    mock_http[robots_url] = type("Resp", (), {
+    resp = type("Resp", (), {
         "text": """
          User-agent: Googlebot
         Disallow: /privado
@@ -158,6 +164,8 @@ async def test_is_allowed_respeita_user_agent_especifico(fake_redis, mock_http):
         """,
         "status_code": 200,
     })()
+    mock_http[(robots_url, "Googlebot")] = resp
+    mock_http[(robots_url, "MeuBot")] = resp
 
     parser = RobotsTxtParser(base_url="https://ua.com")
     parser.redis = fake_redis
@@ -170,7 +178,8 @@ async def test_is_allowed_respeita_user_agent_especifico(fake_redis, mock_http):
 @pytest.mark.asyncio
 async def test_crawl_delay_sem_redis(no_redis, mock_http):
     robots_url = "https://noredis.com/robots.txt"
-    mock_http[robots_url] = type("Resp", (), {
+    ua = "*"
+    mock_http[(robots_url, ua)] = type("Resp", (), {
         "text": "User-agent: *\nCrawl-delay: 4",
         "status_code": 200,
     })()
@@ -178,13 +187,14 @@ async def test_crawl_delay_sem_redis(no_redis, mock_http):
     parser = RobotsTxtParser(base_url="https://noredis.com")
     assert parser.redis is None
 
-    delay = await parser.get_crawl_delay("*")
+    delay = await parser.get_crawl_delay(ua)
     assert delay == 4
 
 @pytest.mark.asyncio
 async def test_is_allowed_sem_redis(no_redis, mock_http):
     robots_url = "https://noredis.com/robots.txt"
-    mock_http[robots_url] = type("Resp", (), {
+    ua = "*"
+    mock_http[(robots_url, ua)] = type("Resp", (), {
         "text": """
         User-agent: *
         Disallow: /privado
@@ -196,5 +206,5 @@ async def test_is_allowed_sem_redis(no_redis, mock_http):
     parser = RobotsTxtParser(base_url="https://noredis.com")
     assert parser.redis is None
 
-    assert await parser.is_allowed("/publico/pagina") is True
-    assert await parser.is_allowed("/privado/segredo") is False
+    assert await parser.is_allowed("/publico/pagina", ua) is True
+    assert await parser.is_allowed("/privado/segredo", ua) is False
