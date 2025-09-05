@@ -18,6 +18,7 @@ from fastapi import HTTPException, status
 from market_scraper.utils.constants import to_mobile_url
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.http_cache import get_cache_headers
 from market_scraper.utils.rate_limiter import RateLimiter
 from market_scraper.utils.circuit_breaker import CircuitBreaker
 from market_scraper.utils.block_recovery import BlockRecoveryManager
@@ -48,9 +49,13 @@ async def scrape_product_common_async(
     """ Seleciona e executa a estratégia adequada para a URL
 
     A URL é normalizada para um formato canônico (mobile) antes de
-    consultar o cache e disparar as estratégias. A função delega a lógica
-    de seleção e execução para o :class:`MultiStrategyScraperOrchestrator`,
-    que também valida os dados obtidos e registra métricas de fallback entre estratégias
+    consultar o cache e disparar as estratégias. A função delega a
+    lógica de seleção e execução para o :class:`MultiStrategyScraperOrchestrator`
+    que também valida os dados obtidos e registra métricas de fallback
+    entre estratégias. Quando o scraping é bem-sucedido, os dados e os
+    cabeçalhos ``ETag``/``Last-Modified`` utilizados pelo ``http_cache``
+    são armazenados juntos no ``IntelligentCacheManager`` para evitar
+    requisições desnecessárias no futuro.
     """
     #Converte a URL para formato canônico (mobile) para evitar variações
     normalized_url = to_mobile_url(url)
@@ -74,6 +79,8 @@ async def scrape_product_common_async(
     #Verifica se já existe conteúdo cacheado para a URL normalizada e o marketplace
     cached = cache_manager.get(marketplace=marketplace, url=normalized_url)
     if cached:
+        #Quando o valor armazenado possui campos auxiliares, retorna apenas os dados
+        detalhes = cached.get("data", cached)
         return {"status": "success", "details": cached}
 
     orchestrator = MultiStrategyScraperOrchestrator(strategy_selector=strategies_for)
@@ -89,7 +96,13 @@ async def scrape_product_common_async(
 
     #Armazena no cache caso o scraping tenha sido bem-sucedido
     if result.get("status") == "success" and result.get("details"):
-        cache_manager.set(marketplace=marketplace, url=normalized_url, value=result["details"])
+        #Inclui cabeçalhos de ETag/Last-Modified para requisições condicionais futuras
+        headers_cache = get_cache_headers(normalized_url)
+        cache_manager.set(
+            marketplace=marketplace,
+            url=normalized_url,
+            value={"data": result["details"], "headers": headers_cache},
+        )
 
     return result
 

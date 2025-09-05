@@ -1,11 +1,15 @@
 """ Testes unitários para a estratégia de HTML estático """
 import http.client
 import logging
+from idlelib.colorizer import matched_named_groups
 
 import pytest
 import httpx
 
+import market_scraper.strategies.html_static as html_static_module
 from market_scraper.strategies.html_static import HtmlStaticStrategy
+from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.http_utils import extract_hostname
 
 
 @pytest.fixture
@@ -213,6 +217,39 @@ async def test_retorna_not_modified_quando_resposta_304(strategy: HtmlStaticStra
     monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
     resultado = await strategy.get_data("http://exemplo.com/produto")
     assert resultado == {"status": "NOT_MODIFIED"}
+
+@pytest.mark.asyncio
+async def test_fetch_html_usa_cache_para_pular_requisicao(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Retorna 304 e não realiza chamada HTTP quando há conteúdo no cache """
+    url = "https://exemplo.com/produto"
+    monkeypatch.setattr(html_static_module, "cache_manager", IntelligentCacheManager())
+    marketplace = extract_hostname(url)
+    html_static_module.cache_manager.set(
+        marketplace=marketplace,
+        url=url,
+        value={"data": {"current_price": "1"}, "headers": {"etag": "abc"}},
+    )
+
+    class DummyClient:
+        chamado = False
+
+        def __init__(self, *a, **k):
+            DummyClient.chamado = True
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def get(self, url: str):
+            return httpx.Response(200, text="")
+
+    monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
+    estrategia = HtmlStaticStrategy()
+    resp = await estrategia._fetch_html(url)
+    assert resp.status_code == 304
+    assert DummyClient.chamado is False
 
 @pytest.mark.asyncio
 async def test_define_referer_dinamico(monkeypatch: pytest.MonkeyPatch) -> None:

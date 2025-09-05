@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .json_endpoint import cache_manager
+
 """ Estratégia baseadas em HTML estático """
 
 import json
@@ -17,6 +19,8 @@ from .base import ScrapingStrategy
 from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
+from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.throttle_manager import ThrottleManager
@@ -24,6 +28,9 @@ from market_scraper.utils.throttle_manager import ThrottleManager
 
 #Logger estruturado para acompanhar eventos de scraping
 logger = structlog.get_logger(__name__)
+
+#Instância compartilhada do cache inteligente para leitura de headers e conteúdos
+cache_manager = IntelligentCacheManager()
 
 class HtmlStaticStrategy(ScrapingStrategy):
     """ Estratégia genérica que realiza scraping em HTML estático
@@ -53,8 +60,9 @@ class HtmlStaticStrategy(ScrapingStrategy):
 
         Antes de enviar a requisição são aplicados cabeçalhos realistas e o
         ``Referer`` dinâmico. Também são adicionados os valores de ``ETag`` e
-        ``Last-Modified`` previamente armazenados para a URL, permitindo que o
-        servidor retorne ``304 Not Modified`` quando o conteúdo não mudou.
+        ``Last-Modified`` previamente armazenados para a URL. Quando os dados
+        do ``IntelligentCacheManager`` ainda são válidos, a requisição HTTP é
+        evitada retornando diretamente ``304``.
         """
         parsed = urlparse(url)
         base_domain = f"{parsed.scheme}://{parsed.netloc}/"
@@ -66,8 +74,14 @@ class HtmlStaticStrategy(ScrapingStrategy):
             self._ua_manager.get_user_agent("html_static"),
         )
 
-        #Recupera valores de cache para condicionar a requisição
-        cache_headers = get_cache_headers(url)
+        marketplace = extract_hostname(url)
+        cached = cache_manager.get(marketplace=marketplace, url=url)
+        if cached and cached.get("data"):
+            #Conteúdo já disponível no cache inteligente; evita nova requisição
+            return httpx.Response(304)
+
+        #Recupera valores de ETag/Last-Modified do cache combinado
+        cache_headers = cached.get("headers") if cached else get_cache_headers(url)
         if cache_headers.get("etag"):
             headers["If-None-Match"] = cache_headers["etag"]
         if cache_headers.get("last_modified"):
