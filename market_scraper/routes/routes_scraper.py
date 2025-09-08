@@ -1,7 +1,6 @@
-""" Rotas HTTP que expõem o parsing de produtos
+""" Rotas HTTP para parsing de produtos
 
-Permite que serviços externos enviem uma URL e recebam de volta
-os dados estruturados do anúncio, sem qualquer persistência de dados.
+Permite a serviços enviar uma URL e receber os dados do anúncio sem persistência. 
 """
 
 from __future__ import annotations
@@ -24,21 +23,15 @@ from market_scraper.utils.url_validation import check_url_compatibility
 #Logger estruturado para acompanhar as requisições do scraper
 logger = structlog.get_logger(__name__)
 
-#Roteador sem prefixo; os caminhos base são definidos na aplicação principal
+#Roteador sem prefixo; caminhos base definidos na aplicação principal
 router = APIRouter(tags=["scraper"])
 
 @router.post("/parse", response_model=ScraperResponse)
 async def parse_endpoint(payload: ScraperRequest = Body(..., example={"url": "https://www.mercadolivre.com.br/MLB-1", "product_type": "monitored"})) -> ScraperResponse:
     """ Executa o scraping e retorna apenas os dados parseados
 
-    A validação do corpo da requisição é realizada automaticamente pelo
-    FastAPI. Caso a URL seja inválida, o manipulador global de
-    ``RequestValidationError`` retornará uma mensagem amigável. Após a
-    validação, verificamos se o domínio é suportado e se corresponde a
-    uma página de produto. Quando o conteúdo não sofre alterações desde
-    a última coleta, o endpoint responde com ``HTTP 304`` sem corpo.
-    O serviço também pode retornar mensagens específicas de bloqueio
-    quando o marketplace impede a coleta, facilitando o diagnóstico.
+    Valida o corpo e o domínio; responde 304 quando não há
+    mudanças ou informa bloqueios do marketplace.
     """
     incompatibility = check_url_compatibility(str(payload.url))
     if incompatibility:
@@ -81,7 +74,7 @@ async def parse_endpoint(payload: ScraperRequest = Body(..., example={"url": "ht
         )
 
     parsed = urlparse(str(payload.url))
-    #Extrai o hostname, se não existir usa ``netloc`` como fallback para identificar corretamente o marketplace
+    #Extrai o hostname; usa ``netloc`` como fallback para identificar marketplace
     marketplace = parsed.hostname or parsed.netloc
 
     return ScraperResponse(
