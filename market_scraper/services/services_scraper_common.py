@@ -70,10 +70,11 @@ async def scrape_product_common_async(
     e, quando disponíveis, os cabeçalhos ``ETag``/``Last-Modified`` do
     ``http_cache`` também são salvos para evitar requisições desnecessárias
     no futuro. O cache é reaproveitado apenas quando contém os campos
-    essenciais ``name`` e ``current_price``. Em casos de erro o retorno
-    sempre inclui o campo ``detail`` explicando o motivo da falha. Quando o
-    servidor responde com ``NOT_MODIFIED`` o status é repassado diretamente
-    e os dados do cache são anexados quando existentes.
+    essenciais ``name`` e ``current_price`` e passa pela validação do
+    ``DataQualityValidator``. Em casos de erro o retorno sempre inclui o
+    campo ``detail`` explicando o motivo de falha. Quando o servidor
+    responde com ``NOT_MODIFIED`` o status é repassado diretamente e os
+    dados do cache são anexados quando existentes.
     """
     #Registra o início do fluxo de scraping
     logger.info("start_scraping", url=url, product_type=product_type)
@@ -106,25 +107,31 @@ async def scrape_product_common_async(
         logger.info("cache_found", url=normalized_url)
         #Quando o valor armazenado possui campos auxiliares, retorna apenas os dados
         details = cached.get("data", cached)
-        #Valida se o cache possui os campos essenciais; caso contrário, ignora
-        if details.get("name") and details.get("current_price") is not None:
+        try:
+            validator.validate(details)
+        except ValueError as err:
+            logger.info("cache_invalid", url=normalized_url, reason=str(err))
+        else:
             logger.info("cache_used", url=normalized_url)
-            return {"status": "success", "details": cached}
-        logger.info("cache_invalid", url=normalized_url)
+            return {"status": "success", "details": details}
     else:
         logger.info("cache_not_found", url=normalized_url)
 
     orchestrator = MultiStrategyScraperOrchestrator(strategy_selector=strategies_for)
     logger.info("running_orchestrator", url=normalized_url)
-    result = await orchestrator.scrape(
-        url=normalized_url,
-        user_id=user_id,
-        payload=payload,
-        product_type=product_type,
-        rate_limiter=rate_limiter,
-        circuit_breaker=circuit_breaker,
-        recovery_manager=recovery_manager,
-    )
+    try:
+        result = await orchestrator.scrape(
+            url=normalized_url,
+            user_id=user_id,
+            payload=payload,
+            product_type=product_type,
+            rate_limiter=rate_limiter,
+            circuit_breaker=circuit_breaker,
+            recovery_manager=recovery_manager,
+        )
+    except Exception as err:
+        logger.exception("orchestrator_exception", url=normalized_url, error=str(err))
+        return {"status": "error", "detail": f"Erro interno no scraping: {err}"}
     status_result = result.get("status")
     details = result.get("details")
     logger.info("return_orchestrator", status=status_result)
@@ -155,7 +162,7 @@ async def scrape_product_common_async(
         return {"status": "success", "details": details}
     
     if status_result == "NOT_MODIFIED":
-        #Quando o servidor indica que o recurso não mudou, não há necessidade de processar o resultado. Caso exista um valor cachead ele é anexado ao retorno apenas para fins informativos.   
+        #Quando o servidor indica que o recurso não mudou, não há necessidade de processar o resultado. Caso exista um valor cacheado ele é anexado ao retorno apenas para fins informativos.   
         logger.info("content_not_modified", url=normalized_url)
         cached = cache_manager.get(marketplace=marketplace, url=normalized_url)
         if cached:

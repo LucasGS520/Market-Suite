@@ -47,9 +47,38 @@ async def test_scrape_product_common_async_cached(monkeypatch):
     )
 
     assert resultado["status"] == "success"
-    assert resultado["details"] == entrada_cache
+    assert resultado["details"] == dados_cache
     assert OrquestradorRegistro.instanciado is False
     assert OrquestradorRegistro.scrape_chamado is False
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_cache_incompleto(monkeypatch):
+    """ Ignora cache inválido e aciona o orquestrador """
+    cache_invalido = {"data": {"name": "Produto", "current_price": None}}
+
+    class OrquestradorRegistro:
+        chamado = False
+
+        async def scrape(self, **k):
+            OrquestradorRegistro.chamado = True
+            return {"status": "success", "details": {"name": "Válido", "current_price": "10"}}
+
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: cache_invalido)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {})
+    monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", lambda *a, **k: OrquestradorRegistro())
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "success"
+    assert resultado["details"]["name"] == "Válido"
+    assert OrquestradorRegistro.chamado is True
 
 @pytest.mark.asyncio
 async def test_scraper_product_common_async_success(monkeypatch):
@@ -152,6 +181,43 @@ async def test_scrape_product_common_async_timeout(monkeypatch):
 
     assert resultado["status"] == "error"
     assert resultado["detail"] == "Falha ao coletar dados do scraping"
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_detail_propagado(monkeypatch):
+    """ Propaga detalhe específico de erro """
+    _configura_orquestrador(monkeypatch, {"status": "error", "detail": "falha"})
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado == {"status": "error", "detail": "falha"}
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_orquestrador_exception(monkeypatch):
+    """ Captura exceção inesperada do orquestrador """
+    class OrqFalho:
+        async def scrape(self, **k):
+            raise RuntimeError("quebrou")
+        
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", lambda *a, **k: OrqFalho())
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "error"
+    assert "quebrou" in resultado["detail"]
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
