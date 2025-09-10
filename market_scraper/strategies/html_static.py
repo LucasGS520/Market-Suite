@@ -2,15 +2,10 @@ from __future__ import annotations
 
 from .json_endpoint import cache_manager
 
-""" Estratégia baseadas em HTML estático
+""" Estratégias para HTML estático
 
-Prioriza Parsel (lxml) para parsing de HTML, meta-tags e JSON-LD,
-mantendo BeautifulSoup apenas como fallback com backend ``lxml``.
-
-Exemplos com Parsel:
-- CSS: ``Selector(text=html).css('meta[property="og:title"]::attr(content)').get()``
-- XPath: ``Selector(text=html).xpath('//script[@type="application/ld+json"]/text()').getall()``
-"""
+Prioriza Parsel/lxml para extrair nome e preço via JSON-LD e meta-tags;
+BeautifulSoup(lxml) é utilizado apenas como fallback. """
 
 import json
 import re
@@ -31,7 +26,12 @@ from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.http_utils import extract_hostname
-from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
+from market_scraper.utils.http_cache import (
+    get_cache_headers,
+    store_cache_headers,
+    ContentSignature,
+    NOT_MODIFIED,
+)
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.throttle_manager import ThrottleManager
 
@@ -45,17 +45,13 @@ py_logger = logging.getLogger(__name__)
 #Instância compartilhada do cache inteligente para leitura de headers e conteúdos
 cache_manager = IntelligentCacheManager()
 
-class HtmlStaticStrategy(ScrapingStrategy):
-    """ Estratégia genérica que realiza scraping em HTML estático
 
-    A classe efetua uma requisição HTTP simples utilizando ``httpx`` com
-    cabeçalhos de navegação realistas e cookies padrão definidos em
-    ``STEALTH_HEADERS`` e ``GENERIC_COOKIES``. Em seguida tenta obter o
-    nome e o preço do produto a partir de blocos ``JSON-LD`` (quando ``@type``
-    é ``Product``). Caso esses dados não estejam presentes, é realizado um fallback
-    para meta tags e seletores simples. Os campos resultantes são validados pelo
-    ``DataQualityValidator``.
-    """
+class HtmlStaticStrategy(ScrapingStrategy):
+    """ Estratégia base para páginas HTML estáticas
+
+    Faz GET com cabeçalhos realistas, extrai nome/preço via JSON-LD
+    (``@type=Product``) e faz fallback em meta-tags. Valida com
+    ``DataQualityValidator``. """
 
     priority = 10
     domain: str = ""
@@ -69,14 +65,12 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return netloc.endswith(self.domain)
 
     async def _fetch_html(self, url: str) -> httpx.Response:
-        """ Executa a requisição HTTP e retorna o ``httpx.Response`` obtido
+        """ Faz GET com headers realistas e cache condicional
 
-        Antes de enviar a requisição são aplicados cabeçalhos realistas e o
-        ``Referer`` dinâmico. Também são adicionados os valores de ``ETag`` e
-        ``Last-Modified`` previamente armazenados para a URL. Quando os dados
-        do ``IntelligentCacheManager`` ainda são válidos, a requisição HTTP é
-        evitada retornando diretamente ``304``.
-        """
+        Aplica User-Agent/Referer e cookies; envia ``If-None-Match`` e
+        ``If-Modified-Since`` quando disponíveis, salvando ETag/Last-Modified
+        no retorno. Retorna: ``httpx.Response``. Levanta ``httpx.HTTPError``
+        via ``raise_for_status``. """
         parsed = urlparse(url)
         base_domain = f"{parsed.scheme}://{parsed.netloc}/"
         headers = {**STEALTH_HEADERS, "Referer": base_domain}
@@ -134,14 +128,8 @@ class HtmlStaticStrategy(ScrapingStrategy):
         formatted = f"{amount:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
         return f"{symbol} {formatted}".strip()
 
-
     def _extract_from_json_ld_parsel(self, sel: Selector, url: str) -> dict:
-        """ Extrai dados de JSON-LD usando Parsel (prioritário)
-
-        - Busca blocos ``<script type="application/ld+json">``
-        - Suporta ``@graph`` e listas
-        - Considera ``price``, ``priceSpecification.price``, ``lowPrice`` e ``highPrice``
-        """
+        """ Extrai JSON-LD (prioritário) com suporte a ``@graph``/listas e campos de preço comuns """
         scripts = sel.xpath('//script[@type="application/ld+json"]/text()').getall()
         for raw in scripts:
             try:
@@ -179,7 +167,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return {}
 
     def _extract_from_meta_tags_parsel(self, sel: Selector, url: str) -> dict:
-        """ Extrai ``name`` e ``current_price`` a partir de meta-tags com Parsel """
+        """ Extrai ``name`` e ``current_price`` de meta-tags (Parsel) """
         name_value = (
             sel.css('meta[property="og:title"]::attr(content)').get()
             or sel.css("title::text").get()
@@ -200,14 +188,8 @@ class HtmlStaticStrategy(ScrapingStrategy):
             "current_price": self._format_price(price_value, currency_value),
         }
 
-
     def _extract_from_json_ld(self, soup: BeautifulSoup, url: str) -> dict:
-        """ Procura blocos JSON-LD de produto e extrai informações principais
-
-        A função também trata estruturas onde ``offers`` contém outra lista
-        ``offers`` (caso comum em ``AggregateOffer``) e utiliza os campos
-        ``lowPrice`` ou ``highPrice`` quando ``price`` estiver ausente.
-        """
+        """ Procura JSON-LD (Product), trata ``@graph``/AggregateOffer e campos de preço """
         for tag in soup.find_all("script", type="application/ld+json"):
             try:
                 content = json.loads(tag.string or "{}")
@@ -248,17 +230,17 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return {}
 
     def _extract_from_meta_tags(self, soup: BeautifulSoup, url: str) -> dict:
-        """ Extrai dados de meta-tags como alternativa ao JSON-LD """
+        """ Extrai dados de meta-tags (alternativa ao JSON-LD) """
         name = soup.find("meta", property="og:title") or soup.find("title")
         price = (
-                soup.find("meta", itemprop="price")
-                or soup.find("meta", property="og:price:amount")
-                or soup.find("meta", property="product:price:amount")
+            soup.find("meta", itemprop="price")
+            or soup.find("meta", property="og:price:amount")
+            or soup.find("meta", property="product:price:amount")
         )
         currency = (
-                soup.find("meta", itemprop="priceCurrency")
-                or soup.find("meta", property="og:price:currency")
-                or soup.find("meta", property="product:price:currency")
+            soup.find("meta", itemprop="priceCurrency")
+            or soup.find("meta", property="og:price:currency")
+            or soup.find("meta", property="product:price:currency")
         )
 
         #Determina o valor do nome considerando meta-tags e a tag <title>
@@ -277,15 +259,11 @@ class HtmlStaticStrategy(ScrapingStrategy):
             "current_price": self._format_price(
                 price.get("content") if price else None,
                 currency.get("content") if currency else None,
-            )
+            ),
         }
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Orquestra a extração dos dados do HTML informado
-
-        Prioriza Parsel/lxml e faz fallback para BeautifulSoup(lxml)
-        apenas se necessário para compatibilidade.
-        """
+        """ Orquestra a extração priorizando Parsel/lxml com fallback para BeautifulSoup(lxml) """
         sel = Selector(text=html)
         data = self._extract_from_json_ld_parsel(sel, url)
         if not data or not data.get("name"):
@@ -299,17 +277,12 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return data
 
     async def get_data(self, url: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any) -> dict:
-        """ Executa o scraping e trata falhas de validação dos dados
+        """ Executa scraping com robots.txt, throttle, cache e validação
 
-        Em caso de falha na requisição, o método registra o status HTTP,
-        o cabeçalho ``Location`` (quando presente) e um trecho do corpo
-        da resposta. Além disso, quando o domíno alvo retorna **HTTP 403**
-        o bloqueio é registrado no ``recovery_manager`` e o status
-        ``blocked`` é informado ao chamador. A mensagem de detalhe inclui
-        o domínio de origem para auxiliar a identificação do bloqueio.
-        Também aguarda a liberação do ``ThrottleManager`` antes de cada
-        requisição HTML, evitando excesso de chamadas.
-        """
+        Fluxo: respeita robots.txt (allow/delay), aplica throttle, baixa HTML,
+        verifica assinatura/ETag, extrai e valida ``name``/``current_price``.
+        Retorna: ``{"status": success|error|blocked|NOT_MODIFIED, ...}``.
+        Em 403, registra bloqueio no ``recovery_manager`` quando informado. """
         #Define o User-Agent que será utilizado tanto para o robots.txt quanto para a requisição
         ua = self._ua_manager.get_user_agent("html_static")
         parser = RobotsTxtParser(base_url=url)
@@ -349,7 +322,13 @@ class HtmlStaticStrategy(ScrapingStrategy):
                 location,
                 body,
             )
-            logger.exception("Falha na requisição HTML", url=url, status=getattr(resp, "status_code", None), location=location, body=body)
+            logger.exception(
+                "Falha na requisição HTML",
+                url=url,
+                status=getattr(resp, "status_code", None),
+                location=location,
+                body=body,
+            )
 
             #Caso o domínio responda com 403, registra o bloqueio
             if resp and resp.status_code == 403:
@@ -394,12 +373,7 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
     domain = "mercadolivre.com.br"
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Extrai nome e preço de páginas do Mercado Livre
-
-        A função inicia tentando os métodos genéricos de extração
-        (JSON-LD e meta tags). Caso não obtenha os dados essenciais,
-        realiza um fallback utilizando seletores específicos do site.
-        """
+        """ Extrai nome/preço via JSON-LD/meta e fallbacks específicos do Mercado Livre """
         # Prioriza Parsel/lxml
         sel = Selector(text=html)
         data = self._extract_from_json_ld_parsel(sel, url)
@@ -476,13 +450,7 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
     domain = "amazon.com.br"
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Extrai nome e preço das páginas de produto da Amazon
-
-        O processo reutiliza os extratores genéricos de JSON-LD e meta
-        tags. Quando esses não fornecerem ``name`` ou ``current_price``,
-        realiza um fallback com seletores específicos da Amazon,
-        considerando variações comuns de estrutura.
-        """
+        """ Extrai nome/preço (JSON-LD/meta) com fallbacks específicos da Amazon """
 
         # Parsel first: tenta JSON-LD/meta
         sel = Selector(text=html)
@@ -568,13 +536,7 @@ class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
     domain = "magazineluiza.com.br"
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Extrai nome e preço das páginas do Magazine Luiza
-
-        Retorna sempre um dicionário contendo ``name`` e ``current_price``.
-        Caso algum valor não seja localizado, o campo correspondente será
-        ``None`` ou vazio, permitindo que ``DataQualityValidator`` da classe
-        sinalize inconsistência.
-        """
+        """ Extrai nome/preço (JSON-LD/meta) e usa fallbacks comuns do Magalu """
 
         # Parsel first: tenta JSON-LD/meta
         sel = Selector(text=html)
