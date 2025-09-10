@@ -54,7 +54,7 @@ async def test_scrape_product_common_async_cached(monkeypatch):
 @pytest.mark.asyncio
 async def test_scraper_product_common_async_success(monkeypatch):
     """ Deve retornar sucesso quando o orquestrador indica dados válidos """
-    _configura_orquestrador(monkeypatch, {"status": "success", "details": {"current_price": "10"}})
+    _configura_orquestrador(monkeypatch, {"status": "success", "details": {"name": "Produto", "current_price": "10"}})
     capturado: dict = {}
     monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": "e1", "last_modified": "11"})
     monkeypatch.setattr(common.cache_manager, "set", lambda *, marketplace, url, value, ttl=None: capturado.update(value=value))
@@ -70,6 +70,31 @@ async def test_scraper_product_common_async_success(monkeypatch):
     assert resultado["status"] == "success"
     assert resultado["details"]["current_price"] == "10"
     assert capturado["value"]["headers"] == {"etag": "e1", "last_modified": "11"}
+
+@pytest.mark.asyncio
+async def test_scraper_product_common_async_missing_field(monkeypatch):
+    """ Retorna erro detalhado quando campo essencial está ausente """
+    _configura_orquestrador(monkeypatch, {"status": "success", "details": {"current_price": "10"}})
+    set_chamado = False
+
+    def _set_mock(*, marketplace, url, value, ttl=None):
+        nonlocal set_chamado
+        set_chamado = True
+
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {})
+    monkeypatch.setattr(common.cache_manager, "set", _set_mock)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "error"
+    assert "Campo obrigatório" in resultado["details"]["error"]
+    assert set_chamado is False
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_timeout(monkeypatch):

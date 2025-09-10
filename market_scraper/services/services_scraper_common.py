@@ -24,6 +24,7 @@ from market_scraper.utils.circuit_breaker import CircuitBreaker
 from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
+from market_scraper.utils.data_quality_validator import DataQualityValidator
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
@@ -33,8 +34,12 @@ from market_scraper.services.multi_strategy_orchestrator import MultiStrategyScr
 
 #Gerenciador de cache inteligente para produtos
 cache_manager = IntelligentCacheManager()
+
 #Gerenciador de user-agent para consultas ao robots.txt
 ua_manager = IntelligentUserAgentManager()
+
+#Validador simples de campos essenciais do scraping
+validator = DataQualityValidator()
 
 async def scrape_product_common_async(
     *,
@@ -52,11 +57,13 @@ async def scrape_product_common_async(
     consultar o cache e disparar as estratégias. A função delega a
     lógica de seleção e execução para o :class:`MultiStrategyScraperOrchestrator`
     que também valida os dados obtidos e registra métricas de fallback
-    entre estratégias. Quando o scraping é bem-sucedido, os dados e os
-    cabeçalhos ``ETag``/``Last-Modified`` utilizados pelo ``http_cache``
-    são armazenados juntos no ``IntelligentCacheManager`` para evitar
-    requisições desnecessárias no futuro. O cache é reaproveitado apenas
-    quando contém os campos essenciais ``name`` e ``current_price``.
+    entre estratégias. Após o scraping, os campos essenciais são
+    verificados novamente para garantir consistência. Quando o scraping
+    é bem-sucedido, os dados e os cabeçalhos ``ETag``/``Last-Modified``
+    utilizados pelo ``http_cache`` são armazenados juntos no
+    ``IntelligentCacheManager`` para evitar requisições desnecessárias no
+    futuro. O cache é reaproveitado apenas quando contém os campos
+    essenciais ``name`` e ``current_price``.
     """
     #Converte a URL para formato canônico (mobile) para evitar variações
     normalized_url = to_mobile_url(url)
@@ -96,15 +103,21 @@ async def scrape_product_common_async(
         circuit_breaker=circuit_breaker,
         recovery_manager=recovery_manager,
     )
-
-    #Armazena no cache caso o scraping tenha sido bem-sucedido
-    if result.get("status") == "success" and result.get("details"):
+    details = result.get("details")
+    if result.get("status") == "success" and details:
+        try:
+            #Garante que os campos essenciais estejam corretos
+            validator.validate(details)
+        except ValueError as err:
+            #Retorna erro informando o campo ausente ou inválido
+            return {"status": "error", "details": {"error": str(err)}}
+ 
         #Inclui cabeçalhos de ETag/Last-Modified para requisições condicionais futuras
         headers_cache = get_cache_headers(normalized_url)
         cache_manager.set(
             marketplace=marketplace,
             url=normalized_url,
-            value={"data": result["details"], "headers": headers_cache},
+            value={"data": details, "headers": headers_cache},
         )
 
     return result
