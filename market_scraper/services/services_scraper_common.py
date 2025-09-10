@@ -79,8 +79,8 @@ async def scrape_product_common_async(
     #Registra o início do fluxo de scraping
     logger.info("start_scraping", url=url, product_type=product_type)
 
-    #Converte a URL para formato canônico (mobile) para evitar variações
-    normalized_url = to_mobile_url(url)
+    #Mantém a URL original, sem normalização para mobile
+    normalized_url = url
     marketplace = extract_hostname(normalized_url)
 
     #Verifica diretivas de robots.txt antes de prosseguir
