@@ -10,8 +10,6 @@ from market_scraper.strategies import (
     MercadoLivreHtmlStaticStrategy,
     AmazonJsonStrategy,
     AmazonHtmlStaticStrategy,
-    ShopeeJsonStrategy,
-    ShopeeHtmlStaticStrategy,
     MagaluJsonStrategy,
     MagaluHtmlStaticStrategy,
 )
@@ -33,10 +31,6 @@ def test_dominios_semelhantes_nao_sao_correlacionados():
         (
             "https://www.amazon.com.br/produto",
             [AmazonJsonStrategy(), AmazonHtmlStaticStrategy()],
-        ),
-        (
-            "https://www.shopee.com.br/produto",
-            [ShopeeJsonStrategy(), ShopeeHtmlStaticStrategy()],
         ),
         (
             "https://www.magazineluiza.com.br/produto",

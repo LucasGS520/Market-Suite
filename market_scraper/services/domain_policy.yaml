@@ -1,11 +1,9 @@
 strategies:
   JSON_ML: MercadoLivreJsonStrategy
   JSON_AMAZON: AmazonJsonStrategy
-  JSON_SHOPEE: ShopeeJsonStrategy
   JSON_MAGALU: MagaluJsonStrategy
   HTML_ML: MercadoLivreHtmlStaticStrategy
   HTML_AMAZON: AmazonHtmlStaticStrategy
-  HTML_SHOPEE: ShopeeHtmlStaticStrategy
   HTML_MAGALU: MagaluHtmlStaticStrategy
 policies:
   mercadolivre.com.br:
@@ -14,9 +12,6 @@ policies:
   amazon.com.br:
     - JSON_AMAZON
     - HTML_AMAZON
-  shopee.com.br:
-    - JSON_SHOPEE
-    - HTML_SHOPEE
   magazineluiza.com.br:
     - JSON_MAGALU
     - HTML_MAGALU

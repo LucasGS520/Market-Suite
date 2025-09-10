@@ -11,7 +11,7 @@ from market_scraper.main import app
 from market_scraper.strategies.base import ScrapingStrategy
 from market_scraper.services import domain_policy
 from market_scraper.services import services_scraper_common as common
-from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy, AmazonHtmlStaticStrategy, ShopeeHtmlStaticStrategy, MagaluHtmlStaticStrategy
+from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy, AmazonHtmlStaticStrategy, MagaluHtmlStaticStrategy
 
 
 def _preparar_ambiente(monkeypatch) -> None:
@@ -38,7 +38,6 @@ def _preparar_ambiente(monkeypatch) -> None:
     for cls in [
         MercadoLivreHtmlStaticStrategy,
         AmazonHtmlStaticStrategy,
-        ShopeeHtmlStaticStrategy,
         MagaluHtmlStaticStrategy,
     ]:
         monkeypatch.setattr(cls, "get_data", fake_html_get_data)
@@ -122,25 +121,7 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
     assert escolhido["estrategias"][0].__class__.__name__ == "AmazonJsonStrategy"
     assert escolhido["estrategias"][1].__class__.__name__ == "AmazonHtmlStaticStrategy"
 
-def test_seleciona_estrategia_shopee(monkeypatch) -> None:
-    """ Garante que URLs da Shopee utilizam a estratégia correta """
-    _preparar_ambiente(monkeypatch)
-    escolhido: dict[str, Any] = {}
-    original = common.strategies_for
-
-    def capturar(url: str):
-        resultado = original(url)
-        escolhido["estrategias"] = resultado
-        return resultado
-
-    monkeypatch.setattr(common, "strategies_for", capturar)
-    client = TestClient(app)
-    resp = client.post(
-        "/scrape/parse", json={"url": "https://shopee.com.br/produto-i.1.2"}
-    )
-    assert resp.status_code == 200
-    assert escolhido["estrategias"][0].__class__.__name__ == "ShopeeJsonStrategy"
-    assert escolhido["estrategias"][1].__class__.__name__ == "ShopeeHtmlStaticStrategy"
+    
 
 def test_seleciona_estrategia_magalu(monkeypatch) -> None:
     """ Garante que URLs da Magalu utilizam a estratégia correta """

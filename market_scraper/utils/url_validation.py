@@ -21,7 +21,6 @@ from shared.utils.ml_url import canonicalize_ml_url
 _PRODUCT_CHECKS: Dict[str, Callable[[str], bool]] = {
     "mercadolivre.com.br": lambda url: canonicalize_ml_url(url) is not None,
     "amazon.com.br": lambda url: "/dp/" in urlparse(url).path or "/gp/product" in urlparse(url).path,
-    "shopee.com.br": lambda url: bool(re.search(r"-i\.\d+\.\d+", url)) or "/product/" in urlparse(url).path,
     "magazineluiza.com.br": lambda url: "/p/" in urlparse(url).path,
 }
 
