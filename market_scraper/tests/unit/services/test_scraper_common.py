@@ -259,3 +259,31 @@ async def test_scrape_product_common_async_not_modified(monkeypatch):
     )
 
     assert resultado == {"status": "NOT_MODIFIED"}
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_not_modified_com_cache(monkeypatch):
+    """ Retorna NOT_MODIIFED anexando dados do cache quando existentes """
+    _configura_orquestrador(monkeypatch, {"status": "NOT_MODIFIED"})
+
+    dados_cache = {"name": "Produto Cache", "current_price": "50"}
+    entrada_cache = {"data": dados_cache}
+
+    contador = {"vezes": 0}
+
+    def _get_cache(*_, **__):
+        contador["vezes"] += 1
+        #Retorna None na primeira chamada (pré-orquestrador) e o cache na segunda
+        return entrada_cache if contador["vezes"] > 1 else None
+    
+    monkeypatch.setattr(common.cache_manager, "get", _get_cache)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "NOT_MODIFIED"
+    assert resultado["details"] == entrada_cache

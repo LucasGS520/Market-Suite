@@ -2,7 +2,9 @@
 
 Responsável apenas por obter e interpretar o HTML dos produtos.
 Qualquer persistência de dados ou autenticação deve ser tratada
-por camadas externas, como o módulo ``market_alert``.
+por camadas externas, como o módulo ``market_alert``. Também
+realiza o pré-processamento dos dados, tratamento de status
+especiais (bloqueios e ``NOT_MODIFIED``) e integração com cache.
 """
 
 from __future__ import annotations
@@ -69,7 +71,9 @@ async def scrape_product_common_async(
     ``http_cache`` também são salvos para evitar requisições desnecessárias
     no futuro. O cache é reaproveitado apenas quando contém os campos
     essenciais ``name`` e ``current_price``. Em casos de erro o retorno
-    sempre inclui o campo ``detail`` explicando o motivo da falha.
+    sempre inclui o campo ``detail`` explicando o motivo da falha. Quando o
+    servidor responde com ``NOT_MODIFIED`` o status é repassado diretamente
+    e os dados do cache são anexados quando existentes.
     """
     #Registra o início do fluxo de scraping
     logger.info("start_scraping", url=url, product_type=product_type)
@@ -150,8 +154,18 @@ async def scrape_product_common_async(
         logger.info("scraping_success", url=normalized_url)
         return {"status": "success", "details": details}
     
-    special_status = {b.value for b in BlockResult} | {"NOT_MODIFIED"}
+    if status_result == "NOT_MODIFIED":
+        #Quando o servidor indica que o recurso não mudou, não há necessidade de processar o resultado. Caso exista um valor cachead ele é anexado ao retorno apenas para fins informativos.   
+        logger.info("content_not_modified", url=normalized_url)
+        cached = cache_manager.get(marketplace=marketplace, url=normalized_url)
+        if cached:
+            logger.info("content_not_modified", url=normalized_url)
+            return {"status": "NOT_MODIFIED", "details": cached}
+        return {"status": "NOT_MODIFIED"}
+    
+    special_status = {b.value for b in BlockResult}
     if status_result in special_status:
+        #Propaga o status para que camadas superiores decidam como tratar a situação.
         logger.warning("special_status", status=status_result, url=normalized_url)
         return result
     
