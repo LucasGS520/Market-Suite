@@ -26,6 +26,7 @@ from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 
+from shared.enums import BlockResult
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
 from market_scraper.services.domain_policy import strategies_for
@@ -63,7 +64,8 @@ async def scrape_product_common_async(
     utilizados pelo ``http_cache`` são armazenados juntos no
     ``IntelligentCacheManager`` para evitar requisições desnecessárias no
     futuro. O cache é reaproveitado apenas quando contém os campos
-    essenciais ``name`` e ``current_price``.
+    essenciais ``name`` e ``current_price``. Em casos de erro o retorno
+    sempre inclui o campo ``detail`` explicando o motivo da falha.
     """
     #Converte a URL para formato canônico (mobile) para evitar variações
     normalized_url = to_mobile_url(url)
@@ -103,14 +105,17 @@ async def scrape_product_common_async(
         circuit_breaker=circuit_breaker,
         recovery_manager=recovery_manager,
     )
+    status_result = result.get("status")
     details = result.get("details")
-    if result.get("status") == "success" and details:
+    if status_result == "success":
+        if not details:
+            return {"status": "error", "detail": "Dados do produto ausentes"}
         try:
             #Garante que os campos essenciais estejam corretos
             validator.validate(details)
         except ValueError as err:
             #Retorna erro informando o campo ausente ou inválido
-            return {"status": "error", "details": {"error": str(err)}}
+            return {"status": "error", "detail": str(err)}
  
         #Inclui cabeçalhos de ETag/Last-Modified para requisições condicionais futuras
         headers_cache = get_cache_headers(normalized_url)
@@ -119,8 +124,14 @@ async def scrape_product_common_async(
             url=normalized_url,
             value={"data": details, "headers": headers_cache},
         )
-
-    return result
+        return {"status": "success", "details": details}
+    
+    special_status = {b.value for b in BlockResult} | {"NOT_MODIFIED"}
+    if status_result in special_status:
+        return result
+    
+    message = result.get("detail") or result.get("message") or "Falha ao coletar dados do scraping"
+    return {"status": "error", "detail": message}
 
 def scrape_product_common(
         url: str,

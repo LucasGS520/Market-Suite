@@ -93,8 +93,23 @@ async def test_scraper_product_common_async_missing_field(monkeypatch):
     )
 
     assert resultado["status"] == "error"
-    assert "Campo obrigatório" in resultado["details"]["error"]
+    assert "Campo obrigatório" in resultado["detail"]
     assert set_chamado is False
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_missing_details(monkeypatch):
+    """ Retorna erro quando o orquestrador não fornece dados """
+    _configura_orquestrador(monkeypatch, {"status": "success", "details": None})
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado == {"status": "error", "detail": "Dados do produto ausentes"}
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_timeout(monkeypatch):
@@ -111,6 +126,7 @@ async def test_scrape_product_common_async_timeout(monkeypatch):
     )
 
     assert resultado["status"] == "error"
+    assert resultado["detail"] == "Falha ao coletar dados do scraping"
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
