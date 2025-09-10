@@ -14,6 +14,7 @@ import asyncio
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
+import structlog
 
 from market_scraper.utils.constants import to_mobile_url
 from market_scraper.utils.http_utils import extract_hostname
@@ -32,6 +33,9 @@ from shared.schemas.schemas_products import MonitoredProductCreateScraping, Comp
 from market_scraper.services.domain_policy import strategies_for
 from market_scraper.services.multi_strategy_orchestrator import MultiStrategyScraperOrchestrator
 
+
+#Logger estruturado para registrar o fluxo do scraping
+logger = structlog.get_logger("scraper_common")
 
 #Gerenciador de cache inteligente para produtos
 cache_manager = IntelligentCacheManager()
@@ -67,6 +71,9 @@ async def scrape_product_common_async(
     essenciais ``name`` e ``current_price``. Em casos de erro o retorno
     sempre inclui o campo ``detail`` explicando o motivo da falha.
     """
+    #Registra o início do fluxo de scraping
+    logger.info("start_scraping", url=url, product_type=product_type)
+
     #Converte a URL para formato canônico (mobile) para evitar variações
     normalized_url = to_mobile_url(url)
     marketplace = extract_hostname(normalized_url)
@@ -77,6 +84,7 @@ async def scrape_product_common_async(
     path = urlparse(normalized_url).path or "/"
     #Aborta com HTTP 403 quando o caminho não é permitido
     if not await parser.is_allowed(path, user_agent):
+        logger.warning("blocking_robots", url=normalized_url, user_agent=user_agent)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bloqueado pelo robots.txt",
@@ -84,18 +92,26 @@ async def scrape_product_common_async(
     #Respeita o crawl-delay recomendado pelo site
     delay = await parser.get_crawl_delay(user_agent)
     if delay:
+        logger.info("waiting_crawl_delay", delay=delay)
         await asyncio.sleep(delay)
 
     #Verifica se já existe conteúdo cacheado para a URL normalizada e o marketplace
+    logger.info("checking_cache", url=normalized_url)
     cached = cache_manager.get(marketplace=marketplace, url=normalized_url)
     if cached:
+        logger.info("cache_found", url=normalized_url)
         #Quando o valor armazenado possui campos auxiliares, retorna apenas os dados
-        detalhes = cached.get("data", cached)
+        details = cached.get("data", cached)
         #Valida se o cache possui os campos essenciais; caso contrário, ignora
-        if detalhes.get("name") and detalhes.get("current_price") is not None:
+        if details.get("name") and details.get("current_price") is not None:
+            logger.info("cache_used", url=normalized_url)
             return {"status": "success", "details": cached}
+        logger.info("cache_invalid", url=normalized_url)
+    else:
+        logger.info("cache_not_found", url=normalized_url)
 
     orchestrator = MultiStrategyScraperOrchestrator(strategy_selector=strategies_for)
+    logger.info("running_orchestrator", url=normalized_url)
     result = await orchestrator.scrape(
         url=normalized_url,
         user_id=user_id,
@@ -107,14 +123,17 @@ async def scrape_product_common_async(
     )
     status_result = result.get("status")
     details = result.get("details")
+    logger.info("return_orchestrator", status=status_result)
     if status_result == "success":
         if not details:
+            logger.error("missing_details", url=normalized_url)
             return {"status": "error", "detail": "Dados do produto ausentes"}
         try:
             #Garante que os campos essenciais estejam corretos
             validator.validate(details)
         except ValueError as err:
             #Retorna erro informando o campo ausente ou inválido
+            logger.error("validation_failed", erro=str(err), url=normalized_url)
             return {"status": "error", "detail": str(err)}
  
         #Inclui cabeçalhos de ETag/Last-Modified para requisições condicionais futuras
@@ -124,13 +143,17 @@ async def scrape_product_common_async(
             url=normalized_url,
             value={"data": details, "headers": headers_cache},
         )
+        logger.info("stored_cache", url=normalized_url)
+        logger.info("scraping_success", url=normalized_url)
         return {"status": "success", "details": details}
     
     special_status = {b.value for b in BlockResult} | {"NOT_MODIFIED"}
     if status_result in special_status:
+        logger.warning("special_status", status=status_result, url=normalized_url)
         return result
     
     message = result.get("detail") or result.get("message") or "Falha ao coletar dados do scraping"
+    logger.error("scraping_failed", url=normalized_url, details=message)
     return {"status": "error", "detail": message}
 
 def scrape_product_common(
@@ -143,6 +166,7 @@ def scrape_product_common(
         recovery_manager: BlockRecoveryManager | None = None
 ) -> dict:
     """ Executa ``scrape_product_common_async`` em contexto síncrono """
+    logger.info("start_scraping_sync", url=url, product_type=product_type)
     return asyncio.run(
         scrape_product_common_async(
             url=url,
