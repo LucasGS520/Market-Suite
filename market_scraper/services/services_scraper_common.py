@@ -64,10 +64,10 @@ async def scrape_product_common_async(
     que também valida os dados obtidos e registra métricas de fallback
     entre estratégias. Após o scraping, os campos essenciais são
     verificados novamente para garantir consistência. Quando o scraping
-    é bem-sucedido, os dados e os cabeçalhos ``ETag``/``Last-Modified``
-    utilizados pelo ``http_cache`` são armazenados juntos no
-    ``IntelligentCacheManager`` para evitar requisições desnecessárias no
-    futuro. O cache é reaproveitado apenas quando contém os campos
+    é bem-sucedido, os dados são armazenados no ``IntelligentCacheManager``
+    e, quando disponíveis, os cabeçalhos ``ETag``/``Last-Modified`` do
+    ``http_cache`` também são salvos para evitar requisições desnecessárias
+    no futuro. O cache é reaproveitado apenas quando contém os campos
     essenciais ``name`` e ``current_price``. Em casos de erro o retorno
     sempre inclui o campo ``detail`` explicando o motivo da falha.
     """
@@ -136,12 +136,15 @@ async def scrape_product_common_async(
             logger.error("validation_failed", erro=str(err), url=normalized_url)
             return {"status": "error", "detail": str(err)}
  
-        #Inclui cabeçalhos de ETag/Last-Modified para requisições condicionais futuras
+        #Inclui cabeçalhos de ETag/Last-Modified para requisições condicionais futuras apenas se houverem valores válidos
         headers_cache = get_cache_headers(normalized_url)
+        cache_value = {"data": details}
+        if headers_cache.get("etag") or headers_cache.get("last_modified"):
+            cache_value["headers"] = headers_cache
         cache_manager.set(
             marketplace=marketplace,
             url=normalized_url,
-            value={"data": details, "headers": headers_cache},
+            value=cache_value,
         )
         logger.info("stored_cache", url=normalized_url)
         logger.info("scraping_success", url=normalized_url)

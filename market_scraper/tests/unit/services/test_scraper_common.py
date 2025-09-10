@@ -72,6 +72,31 @@ async def test_scraper_product_common_async_success(monkeypatch):
     assert capturado["value"]["headers"] == {"etag": "e1", "last_modified": "11"}
 
 @pytest.mark.asyncio
+async def test_scraper_product_common_async_success_sem_headers(monkeypatch):
+    """ Não deve adicionar cabeçalhos ao cache quando inexistente """
+    _configura_orquestrador(monkeypatch, {"status": "success", "details": {"name": "Produto", "current_price": "10"}})
+
+    capturado: dict = {}
+
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {"etag": None, "last_modified": None})
+
+    def _set_cache(*, marketplace, url, value, ttl=None):
+        capturado["value"] = value
+
+    monkeypatch.setattr(common.cache_manager, "set", _set_cache)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "success"
+    assert "headers" not in capturado["value"]
+
+@pytest.mark.asyncio
 async def test_scraper_product_common_async_missing_field(monkeypatch):
     """ Retorna erro detalhado quando campo essencial está ausente """
     _configura_orquestrador(monkeypatch, {"status": "success", "details": {"current_price": "10"}})
