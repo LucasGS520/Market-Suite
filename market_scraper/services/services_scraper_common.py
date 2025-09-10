@@ -55,7 +55,8 @@ async def scrape_product_common_async(
     entre estratégias. Quando o scraping é bem-sucedido, os dados e os
     cabeçalhos ``ETag``/``Last-Modified`` utilizados pelo ``http_cache``
     são armazenados juntos no ``IntelligentCacheManager`` para evitar
-    requisições desnecessárias no futuro.
+    requisições desnecessárias no futuro. O cache é reaproveitado apenas
+    quando contém os campos essenciais ``name`` e ``current_price``.
     """
     #Converte a URL para formato canônico (mobile) para evitar variações
     normalized_url = to_mobile_url(url)
@@ -81,7 +82,9 @@ async def scrape_product_common_async(
     if cached:
         #Quando o valor armazenado possui campos auxiliares, retorna apenas os dados
         detalhes = cached.get("data", cached)
-        return {"status": "success", "details": cached}
+        #Valida se o cache possui os campos essenciais; caso contrário, ignora
+        if detalhes.get("name") and detalhes.get("current_price") is not None:
+            return {"status": "success", "details": cached}
 
     orchestrator = MultiStrategyScraperOrchestrator(strategy_selector=strategies_for)
     result = await orchestrator.scrape(

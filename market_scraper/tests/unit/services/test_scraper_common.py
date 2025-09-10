@@ -20,7 +20,7 @@ def _configura_orquestrador(monkeypatch, retorno: dict) -> None:
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_cached(monkeypatch):
     """ Deve usar o cache e evitar a chamada do orquestrador """
-    dados_cache = {"current_price": "50"}
+    dados_cache = {"name": "Produto Cache", "current_price": "50"}
     entrada_cache = {"data": dados_cache, "headers": {"etag": "abc"}}
 
     class OrquestradorRegistro:

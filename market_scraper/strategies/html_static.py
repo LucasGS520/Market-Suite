@@ -506,11 +506,11 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
             return data
 
         # ---------- FALLBACK PARA SELETORES ESPECÍFICOS DA AMAZON (PARSEL) ----------
-        #Título pode estar em ``#productTitle``, ``span[id*=`productTitle`]`` ou ``#title``
+        #Título pode estar em ``#productTitle``, variações de ``id`` contendo "productTitle" (ignorando maiúsculas/minúsculas) ou em ``#title``; Os seletores XPath utilizam ``translate`` para normalizar o ``id``. 
         name = (
             sel.css("#productTitle::text").get()
-            or sel.css("span[id*='productTitle']::text").get()
-            or sel.css("#title::text").get()
+            or sel.xpath("//span[contains(translate(@id, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'producttitle')]/text()").get()
+            or sel.xpath("//*[translate(@id, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='title']/text()").get()
             or sel.css('meta[property="og:title"]::attr(content)').get()
         )
 
