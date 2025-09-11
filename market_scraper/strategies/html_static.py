@@ -21,6 +21,9 @@ import structlog
 from bs4 import BeautifulSoup
 from parsel import Selector
 import logging
+from time import perf_counter
+
+from shared.metrics.metrics_parser import PARSER_FAILURE_TOTAL, PARSER_SUCCESS_TOTAL, PARSER_DURATION_SECONDS
 
 from .base import ScrapingStrategy
 from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
@@ -180,80 +183,112 @@ class HtmlStaticStrategy(ScrapingStrategy):
         return {}
 
     def _extract_from_json_ld_parsel(self, sel: Selector, url: str) -> dict:
-        """ Extrai JSON-LD (prioritário) com suporte a ``@graph``/listas e campos de preço comuns """
-        scripts = sel.xpath('//script[@type="application/ld+json"]/text()').getall()
-        for raw in scripts:
-            try:
-                content = json.loads(raw or "{}")
-            except json.JSONDecodeError:
-                continue
-            itens: list[Any]
-            if isinstance(content, dict):
-                itens = content.get("@graph", []) if "@graph" in content else [content]
-            elif isinstance(content, list):
-                itens = content
-            else:
-                itens = []
-            for item in itens:
-                if isinstance(item, dict) and item.get("@type") == "Product":
-                    name = item.get("name") or item.get("description") or item.get("sku")
-                    offers = item.get("offers") or {}
-                    if isinstance(offers, list):
-                        offers = offers[0] if offers else {}
-                    elif isinstance(offers, dict) and isinstance(offers.get("offers"), list):
-                        offers = offers["offers"][0] if offers["offers"] else {}
+        """ Extrai JSON-LD (prioritário) com suporte a ``@graph``/listas """
+        home = perf_counter()
+        try:
+            scripts = sel.xapth('//script[@type="application/ld+josn"]/text()').getall()
+            for raw in scripts:
+                try:
+                    content = json.loads(raw or "{}")
+                except json.JSONDecodeError as exc:
+                    logger.debug("JSON inválido em script JSON-LD", url=url, erro=str(exc))
+                    continue
+                items: list[Any]
+                if isinstance(content, dict):
+                    items = content.get("@graph", []) if "@graph" in content else [content]
+                elif isinstance(content, list):
+                    items = content
+                else:
+                    items = []
+                for item in items:
+                    if isinstance(item, dict) and item.get("@type") == "Product":
+                        name = item.get("name") or item.get("description") or item.get("sku")
+                        offers = item.get("offers") or {}
+                        if isinstance(offers, list):
+                            offers = offers[0] if offers else {}
+                        elif isinstance(offers, dict) and isinstance(offers.get("offers"), list):
+                            offers = offers["offers"][0] if offers["offers"] else {}
 
-                    price = (
-                        offers.get("price")
-                        or offers.get("priceSpecification", {}).get("price")
-                        or offers.get("lowPrice")
-                        or offers.get("highPrice")
-                    )
-                    currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
-                    return {
-                        "name": name,
-                        "url": url,
-                        "current_price": self._format_price(price, currency),
-                    }
-        return {}
+                        price = (
+                            offers.get("price")
+                            or offers.get("priceSpecification", {}).get("price")
+                            or offers.get("lowPrice")
+                            or offers.get("highPrice")
+                        )
+                        currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
+                        PARSER_SUCCESS_TOTAL.labels(library="parsel").inc()
+                        return {
+                            "name": name,
+                            "url": url,
+                            "current_price": self._format_price(price, currency),
+                        }
+            PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
+            return {}
+        except Exception as exc:
+            PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
+            logger.exception("Erro ao extrair JSON-LD com Parsel", url=url, erro=str(exc))
+            return {}
+        finally:
+            PARSER_DURATION_SECONDS.labels(library="parsel").observe(
+                perf_counter() - home
+            )
 
     def _extract_from_meta_tags_parsel(self, sel: Selector, url: str) -> dict:
         """ Extrai ``name`` e ``current_price`` de meta-tags (Parsel) """
-        name_value = (
-            sel.css('meta[property="og:title"]::attr(content)').get()
-            or sel.css("title::text").get()
-        )
-        price_value = (
-            sel.css('meta[itemprop="price"]::attr(content)').get()
-            or sel.css('meta[property="og:price:amount"]::attr(content)').get()
-            or sel.css('meta[property="product:price:amount"]::attr(content)').get()
-        )
-        currency_value = (
-            sel.css('meta[itemprop="priceCurrency"]::attr(content)').get()
-            or sel.css('meta[property="og:price:currency"]::attr(content)').get()
-            or sel.css('meta[property="product:price:currency"]::attr(content)').get()
-        )
-        return {
-            "name": name_value,
-            "url": url,
-            "current_price": self._format_price(price_value, currency_value),
-        }
+        home = perf_counter()
+        try:
+            name_value = (
+                sel.css('meta[property="og:title"]::attr(content)').get()
+                or sel.css("title::text").get()
+            )
+            price_value = (
+                sel.css('meta[itemprop="price"]::attr(content)').get()
+                or sel.css('meta[property="og:price:amount"]::attr(content)').get()
+                or sel.css('meta[property="product:price:amount"]::attr(content)').get()
+            )
+            currency_value = (
+                sel.css('meta[itemprop="priceCurrency"]::attr(content)').get()
+                or sel.css('meta[property="og:price:currency"]::attr(content)').get()
+                or sel.css('meta[property="product:price:currency"]::attr(content)').get()
+            )
+            data = {
+                "name": name_value,
+                "url": url,
+                "current_price": self._format_price(price_value, currency_value),
+            }
+            if data.get("name") and data.get("current_price"):
+                PARSER_SUCCESS_TOTAL.labels(library="parsel").inc()
+            else:
+                PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
+            return data
+        except Exception as exc:
+            PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
+            logger.exception("Erro ao extrair meta-tags com Parsel", url=url, erro=str(exc))
+            return {}
+        finally:
+            PARSER_DURATION_SECONDS.labels(library="parsel").observe(
+                perf_counter() - home
+            )
+        
 
     def _extract_from_json_ld(self, soup: BeautifulSoup, url: str) -> dict:
-        """ Procura JSON-LD (Product), trata ``@graph``/AggregateOffer e campos de preço """
-        for tag in soup.find_all("script", type="application/ld+json"):
-            try:
-                content = json.loads(tag.string or "{}")
-            except json.JSONDecodeError:
-                continue
-            itens: list[Any]
+        """ Procura JSON-LD (Product) com BeautifulSoup """
+        home = perf_counter()
+        try:
+            for tag in soup.find_all("script", type="application/ld+json"):
+                try:
+                    content = json.loads(tag.string or "{}")
+                except json.JSONDecodeError as exc:
+                    logger.debug("JSON inválido em script JSON-LD (bs4)", url=url, erro=str(exc))
+                    continue
+            items: list[Any]
             if isinstance(content, dict):
-                itens = content.get("@graph", []) if "@graph" in content else [content]
+                items = content.get("@graph", []) if "@graph" in content else [content]
             elif isinstance(content, list):
-                itens = content
+                items = content
             else:
-                itens = []
-            for item in itens:
+                items = []
+            for item in items:
                 if isinstance(item, dict) and item.get("@type") == "Product":
                     name = item.get("name") or item.get("description") or item.get("sku")
                     offers = item.get("offers") or {}
@@ -273,45 +308,72 @@ class HtmlStaticStrategy(ScrapingStrategy):
                     )
                     #Busca a moeda diretamente ou dentro de ``priceSpecification``
                     currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
+                    PARSER_SUCCESS_TOTAL.labels(library="beautifulsoup").inc()
                     return {
                         "name": name,
                         "url": url,
                         "current_price": self._format_price(price, currency),
                     }
-        return {}
+            PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
+            return {}
+        except Exception as exc:
+            PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
+            logger.exception("Erro ao extrair JSON-LD com BeautifulSoup", url=url, erro=str(exc))
+            return {}
+        finally:
+            PARSER_DURATION_SECONDS.labels(library="beautifulsoup").observe(
+                perf_counter() - home
+            )
 
     def _extract_from_meta_tags(self, soup: BeautifulSoup, url: str) -> dict:
-        """ Extrai dados de meta-tags (alternativa ao JSON-LD) """
-        name = soup.find("meta", property="og:title") or soup.find("title")
-        price = (
-            soup.find("meta", itemprop="price")
-            or soup.find("meta", property="og:price:amount")
-            or soup.find("meta", property="product:price:amount")
-        )
-        currency = (
-            soup.find("meta", itemprop="priceCurrency")
-            or soup.find("meta", property="og:price:currency")
-            or soup.find("meta", property="product:price:currency")
-        )
+        """ Extrai dados de meta-tags (alternativa ao JSON-LD) usando BeautifulSoup """
+        home = perf_counter()
+        try:
+            name = soup.find("meta", property="og:title") or soup.find("title")
+            price = (
+                soup.find("meta", itemprop="price")
+                or soup.find("meta", property="og:price:amount")
+                or soup.find("meta", property="product:price:amount")
+            )
+            currency = (
+                soup.find("meta", itemprop="priceCurrency")
+                or soup.find("meta", property="og:price:currency")
+                or soup.find("meta", property="product:price:currency")
+            )
 
-        #Determina o valor do nome considerando meta-tags e a tag <title>
-        name_value: Optional[str] = None
-        if name:
-            if name.name == "meta":
-                #Em meta-tags o nome é definido pelo atributo ``content``
-                name_value = name.get("content")
+            #Determina o valor do nome considerando meta-tags e a tag <title>
+            name_value: Optional[str] = None
+            if name:
+                if name.name == "meta":
+                    #Em meta-tags o nome é definido pelo atributo ``content``
+                    name_value = name.get("content")
+                else:
+                    #Para a tag <title> utilizamos o texto interno
+                    name_value = name.text
+
+            data = {
+                "name": name_value,
+                "url": url,
+                "current_price": self._format_price(
+                    price.get("content") if price else None,
+                    currency.get("content") if currency else None,
+                ),
+            }
+            if data.get("name") and data.get("current_price"):
+                PARSER_SUCCESS_TOTAL.labels(library="beautifulsoup").inc()
             else:
-                #Para a tag <title> utilizamos o texto interno
-                name_value = name.text
-
-        return {
-            "name": name_value,
-            "url": url,
-            "current_price": self._format_price(
-                price.get("content") if price else None,
-                currency.get("content") if currency else None,
-            ),
-        }
+                PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
+            return data
+        except Exception as exc:
+            PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
+            logger.exception(
+                "Erro ao extrair meta-tags com BeautifulSoup", url=url, erro=str(exc)
+            )
+            return {}
+        finally:
+            PARSER_DURATION_SECONDS.labels(library="beautifulsoup").observe(
+                perf_counter() - home
+            )
 
     def _parse_html(self, html: str, url: str) -> dict:
         """ Orquestra a extração inicia tentando extrair dados estruturados com extruct priorizando Parsel/lxml com fallback para BeautifulSoup(lxml) """
