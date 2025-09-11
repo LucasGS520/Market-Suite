@@ -140,7 +140,7 @@ def test_parse_endpoint_url_invalida() -> None:
 def test_parse_endpoint_dominio_nao_suportado() -> None:
     client = TestClient(app)
 
-    resp = client.post("/scrape/parse", json={"url": "https://example.com/produto"})
+    resp = client.post("/scrape/parse", json={"url": "https://dominioinexistente.com/produto"})
     assert resp.status_code == 400
     assert resp.json() == {"detail": "Marketplace ainda não suportado"}
 

@@ -1,7 +1,7 @@
 """ Utilidades de login simples com MechanicalSoup
 
 Este módulo fornece função auxiliar para fluxos de autenticação leves,
-permitindo navegar por fomulários e capturar cookies de sessão sem
+permitindo navegar por formulários e capturar cookies de sessão sem
 recorrer a navegadores pesados.
 """
 
@@ -35,7 +35,7 @@ async def login_and_get_cookies(config: Dict[str, str]) -> Dict[str, str]:
         browser = mechanicalsoup.StatefulBrowser()
         try:
             browser.open(config["url"])
-            if config.get("form_selctor"):
+            if config.get("form_selector"):
                 browser.select_form(config["form_selector"])
             for field, value in (config.get("fields") or {}).items():
                 browser[field] = value

@@ -14,5 +14,5 @@ def test_extrai_json_ld_basico() -> None:
     )
     dados = extract_structured_data(html, "https://exemplo.com")
     assert dados["json-ld"][0]["@type"] == "Product"
-    assert dados["json-ld"][0]["name"] == "Product Extruct"
+    assert dados["json-ld"][0]["name"] == "Produto Extruct"
     

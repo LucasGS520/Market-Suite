@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 import extruct
 from w3lib.html import get_base_url
+from json import JSONDecodeError
 
 
 def extract_structured_data(html: str, url: Optional[str] = None) -> Dict[str, Any]:
@@ -19,16 +20,21 @@ def extract_structured_data(html: str, url: Optional[str] = None) -> Dict[str, A
     Parâmetros:
         html: Conteúdo HTML bruto obtido do site
         url: URL da página, utilizada como base para resolver caminhos relativos.
-        O valor é opcional, mas recomendado para resultados mais precisos.
+            O valor é opcional, mas recomendado para resultados mais precisos.
 
     Retorna:
         Dicionário com os dados estruturados detectados pela biblioteca ``extruct``.
         As chaves mais comuns são ``json-ld``, ``microdata`` e ``opengraph``.
+        Em caso de erro de parsing, retorna um dicionário vazio para permitir que a estratégia realize o fallback adequado
     """
     base_url = get_base_url(html, url)
-    return extruct.extract(
-        html,
-        base_url=base_url,
-        syntaxes=["json-ld", "microdata", "opengraph"],
-        uniform=True,
-    )
+    try:
+        return extruct.extract(
+            html,
+            base_url=base_url,
+            syntaxes=["json-ld", "microdata", "opengraph"],
+            uniform=True,
+        )
+    except (JSONDecodeError, ValueError):
+        #Retorna um dicionário com listas vazias para sinalizar ausência de dados válidos sem interromper o fluxo das estratégias
+        return {"json-ld": [], "microdata": [], "opengraph": []}

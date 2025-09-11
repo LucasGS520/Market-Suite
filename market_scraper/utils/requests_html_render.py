@@ -16,7 +16,7 @@ def fetch_rendered_html(url: str, timeout: int = 20, sleep: int = 1) -> str:
         sleep: Intervalo adicional após a renderização para aguardar scripts.
 
     Returns:
-        O HTML final da página em segundos para cada etapa da requisição.
+        O HTML final da página renderizada.
     """
     session = HTMLSession()
     try:
