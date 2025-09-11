@@ -4,8 +4,10 @@ from .json_endpoint import cache_manager
 
 """ Estratégias para HTML estático
 
-Prioriza Parsel/lxml para extrair nome e preço via JSON-LD e meta-tags;
-BeautifulSoup(lxml) é utilizado apenas como fallback. """
+Utilizam inicialmente extruct para extrair dados estruturados (JSON-LD, 
+Microdata e Open Graph) em seguida prioriza Parsel/lxml para extrair 
+nome e preço via JSON-LD e meta-tags; BeautifulSoup(lxml) é utilizado apenas como fallback. 
+"""
 
 import json
 import re
@@ -26,14 +28,10 @@ from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.http_utils import extract_hostname
-from market_scraper.utils.http_cache import (
-    get_cache_headers,
-    store_cache_headers,
-    ContentSignature,
-    NOT_MODIFIED,
-)
+from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.throttle_manager import ThrottleManager
+from market_scraper.utils.extract_structured_data import extract_structured_data
 
 
 #Logger estruturado para acompanhar eventos de scraping
@@ -127,6 +125,57 @@ class HtmlStaticStrategy(ScrapingStrategy):
         symbol = "R$" if not currency or (currency or "").upper() in {"BRL", "R$"} else (currency or "")
         formatted = f"{amount:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
         return f"{symbol} {formatted}".strip()
+
+    def _extract_from_structured_data(self, data: Dict[str, Any], url: str) -> dict:
+        """ Tenta obter ``name`` e ``current_price`` a partir de dados estruturados 
+        
+        A função percorre os blocos extraídos pelo ``extruct``, caso encontre um 
+        produto válido, retorna as informações formatas, se não devolve um dicionário
+        vazio para permitir fallbacks posteriores
+        """
+        #JSON-LD
+        for item in data.get("json-ld", []):
+            if isinstance(item, dict) and item.get("@type") == "Product":
+                offers = item.get("offers") or {}
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else {}
+                price = (
+                    offers.get("price")
+                    or offers.get("priceSpecification", {}).get("price")
+                    or offers.get("lowPrice")
+                    or offers.get("highPrice")
+                )
+                currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
+                name = item.get("name") or item.get("description") or item.get("sku")
+                return {"name": name, "url": url, "current_price": self._format_price(price, currency)}
+            
+        #Microdata
+        for item in data.get("microdata", []):
+            types = item.get("type", [])
+            if any("Product" in t for t in types):
+                props = item.get("properties", {})
+                name = props.get("name") or props.get("description") or props.get("sku")
+                offers = props.get("offers") or {}
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else {}
+                price = (
+                    offers.get("price")
+                    or offers.get("priceSpecification", {}).get("price")
+                    or offers.get("lowPrice")
+                    or offers.get("highPrice")
+                )
+                currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
+                return {"name": name, "url": url, "current_price": self._format_price(price, currency)}
+            
+        #Open Graph
+        og = data.get("opengraph") or {}
+        if og.get("og:type") == "product":
+            name = og.get("og:title")
+            price = og.get("product:price:amount") or og.get("og:price:amount")
+            currency = og.get("product:price:currency") or og.get("og:price:currency")
+            return {"name": name, "url": url, "current_price": self._format_price(price, currency)}
+        
+        return {}
 
     def _extract_from_json_ld_parsel(self, sel: Selector, url: str) -> dict:
         """ Extrai JSON-LD (prioritário) com suporte a ``@graph``/listas e campos de preço comuns """
@@ -263,16 +312,22 @@ class HtmlStaticStrategy(ScrapingStrategy):
         }
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Orquestra a extração priorizando Parsel/lxml com fallback para BeautifulSoup(lxml) """
+        """ Orquestra a extração inicia tentando extrair dados estruturados com extruct priorizando Parsel/lxml com fallback para BeautifulSoup(lxml) """
+        structured = extract_structured_data(html, url)
+        data = self._extract_from_structured_data(structured, url)
+        if data.get("name") and data.get("current_price"):
+            return data
+
         sel = Selector(text=html)
         data = self._extract_from_json_ld_parsel(sel, url)
-        if not data or not data.get("name"):
+        if not data.get("name") or not data.get("current_price"):
             data = self._extract_from_meta_tags_parsel(sel, url)
-        if data:
+        if data.get("name") or not data.get("current_price"):
             return data
+        
         soup = BeautifulSoup(html, "lxml")
         data = self._extract_from_json_ld(soup, url)
-        if not data or not data.get("name"):
+        if not data.get("name") or not data.get("current_price"):
             data = self._extract_from_meta_tags(soup, url)
         return data
 
@@ -374,13 +429,18 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
 
     def _parse_html(self, html: str, url: str) -> dict:
         """ Extrai nome/preço via JSON-LD/meta e fallbacks específicos do Mercado Livre """
-        # Prioriza Parsel/lxml
+        structured = extract_structured_data(html, url)
+        data = self._extract_from_structured_data(structured, url)
+        if data.get("name") and data.get("current_price"):
+            return data
+        
+        #Prioriza Parsel/lxml
         sel = Selector(text=html)
         data = self._extract_from_json_ld_parsel(sel, url)
         if not data.get("name") or not data.get("current_price"):
             data = self._extract_from_meta_tags_parsel(sel, url)
 
-        # Fallback para BeautifulSoup(lxml) apenas se necessário
+        #Fallback para BeautifulSoup(lxml) apenas se necessário
         soup = BeautifulSoup(html, "lxml")
         if not data.get("name") or not data.get("current_price"):
             data_bs = self._extract_from_json_ld(soup, url)
@@ -389,7 +449,6 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
             if data_bs.get("name") and data_bs.get("current_price"):
                 return data_bs
 
-        #Se já houver nome e preço válidos, retorna imediatamente
         if data.get("name") and data.get("current_price"):
             return data
 
@@ -451,17 +510,20 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
 
     def _parse_html(self, html: str, url: str) -> dict:
         """ Extrai nome/preço (JSON-LD/meta) com fallbacks específicos da Amazon """
+        structured = extract_structured_data(html, url)
+        data = self._extract_from_structured_data(structured, url)
+        if data.get("name") and data.get("current_price"):
+            return data
 
-        # Parsel first: tenta JSON-LD/meta
+        #Parsel first: tenta JSON-LD/meta
         sel = Selector(text=html)
         data = self._extract_from_json_ld_parsel(sel, url)
         if not data.get("name") or not data.get("current_price"):
             data = self._extract_from_meta_tags_parsel(sel, url)
-
         if data.get("name") and data.get("current_price"):
             return data
 
-        # Fallback para BeautifulSoup(lxml)
+        #Fallback para BeautifulSoup(lxml)
         soup = BeautifulSoup(html, "lxml")
 
         #Primeiro tenta os extratores genéricos da classe base
@@ -469,7 +531,6 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
         if not data.get("name") or not data.get("current_price"):
             data = self._extract_from_meta_tags(soup, url)
 
-        #Caso já tenha obtido nome e preço, retorna imediatamente
         if data.get("name") and data.get("current_price"):
             return data
 
@@ -537,8 +598,12 @@ class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
 
     def _parse_html(self, html: str, url: str) -> dict:
         """ Extrai nome/preço (JSON-LD/meta) e usa fallbacks comuns do Magalu """
+        structured = extract_structured_data(html, url)
+        data = self._extract_from_structured_data(structured, url)
+        if data.get("name") and data.get("current_price"):
+            return data
 
-        # Parsel first: tenta JSON-LD/meta
+        #Parsel first: tenta JSON-LD/meta
         sel = Selector(text=html)
         data = self._extract_from_json_ld_parsel(sel, url)
         if data.get("name") and data.get("current_price"):
@@ -547,7 +612,7 @@ class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
         if data.get("name") and data.get("current_price"):
             return data
 
-        # Fallback para BeautifulSoup(lxml)
+        #Fallback para BeautifulSoup(lxml)
         soup = BeautifulSoup(html, "lxml")
 
         #Tenta extrair via bloco JSON-LD específico de produto
