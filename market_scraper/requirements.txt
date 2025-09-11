@@ -4,6 +4,7 @@ cloudscraper==1.2.71
 extruct==0.15.0
 fastapi==0.115.12
 httpx==0.28.1
+lxml==4.9.4
 parsel==1.9.1
 playwright==1.52.0
 playwright-stealth==2.0.0
@@ -15,7 +16,7 @@ pytest-asyncio==0.26.0
 python-dotenv==1.1.0
 pyparsing==3.2.3
 PyYAML==6.0.2
-lxml==6.0.1
+selectorlib==0.16.0
 redis==6.1.0
 requests==2.32.3
 streamlit==1.45.1

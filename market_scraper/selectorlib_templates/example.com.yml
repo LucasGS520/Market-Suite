@@ -1,0 +1,7 @@
+name:
+  css: h1
+  type: Text
+current_price:
+  css: span.price
+  type: Text
+  

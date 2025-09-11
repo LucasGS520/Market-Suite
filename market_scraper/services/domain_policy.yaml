@@ -5,6 +5,7 @@ strategies:
   HTML_ML: MercadoLivreHtmlStaticStrategy
   HTML_AMAZON: AmazonHtmlStaticStrategy
   HTML_MAGALU: MagaluHtmlStaticStrategy
+  SELECTOR_GENERIC: SelectorLibStrategy
 policies:
   mercadolivre.com.br:
     - JSON_ML
@@ -15,3 +16,5 @@ policies:
   magazineluiza.com.br:
     - JSON_MAGALU
     - HTML_MAGALU
+  example.com:
+    - SELECTOR_GENERIC

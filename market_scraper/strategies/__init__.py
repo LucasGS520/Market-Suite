@@ -13,6 +13,7 @@ from .json_endpoint import (
     AmazonJsonStrategy,
     MagaluJsonStrategy,
 )
+from .selectorlib_strategy import SelectorLibStrategy
 
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "MercadoLivreJsonStrategy",
     "AmazonJsonStrategy",
     "MagaluJsonStrategy",
+    "SelectorLibStrategy",
 ]

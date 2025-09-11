@@ -27,6 +27,9 @@ As estratégias herdadas de `HtmlStaticStrategy` agora priorizam Parsel (lxml) p
 
 Quando essas fontes falham, aplicamos regras específicas por domínio (Mercado Livre, Amazon e Magalu). BeautifulSoup permanece como fallback usando backend `lxml` para compatibilidade.
 
+### SelectorLib
+Para páginas com layout instável, utilizamos a biblioteca **SelectorLib** com templates YAML verisonados em `selectorlib_templates`. A estratégia `SelectorLibStrategy` carrega o template correspondente ao domínio e extrai diretamente os campos `name` e `current_price`.
+
 ## Serviços Utilitários
 - **IntelligentCacheManager** - armazena resultados de produtos por domínio e URL para reduzir requisições repetidas.
 - **DataQualityValidator** - garante que `name` e `current_price` estejam presentes e que o preço seja válido.
