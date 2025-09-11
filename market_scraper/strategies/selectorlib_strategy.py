@@ -42,11 +42,14 @@ class SelectorLibStrategy(ScrapingStrategy):
         domain = extract_hostname(url)
         return (self.template_dir / f"{domain}.yml").exists()
     
-    async def _fetch_html(self, url: str) -> str:
+    async def _fetch_html(self, url: str, cookies: Optional[Dict[str, str]] = None) -> str:
         """ Faz requisição HTTP simples retornando o corpo da página """
         headers = {**STEALTH_HEADERS, "User-Agent": self._ua_manager.get_user_agent("selectorlib")}
         async with httpx.AsyncClient(
-            headers=headers, cookies=GENERIC_COOKIES, timeout=10, follow_redirects=True
+            headers=headers, 
+            cookies=cookies or GENERIC_COOKIES, 
+            timeout=10, 
+            follow_redirects=True,
         ) as client:
             resp = await client.get(url)
         resp.raise_for_status()
@@ -67,7 +70,10 @@ class SelectorLibStrategy(ScrapingStrategy):
         if throttle:
             await throttle.wait_async(urlparse(url).netloc, url)
 
-        html = await self._fetch_html(url)
+        if "cookies" in kwargs:
+            html = await self._fetch_html(url, cookies=kwargs.get("cookies"))
+        else:
+            html = await self._fetch_html(url)
         domain = extract_hostname(url)
         extractor = self._get_extractor(domain)
         data = extractor.extract(html)

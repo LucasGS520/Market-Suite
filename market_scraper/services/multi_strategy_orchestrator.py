@@ -62,14 +62,17 @@ class MultiStrategyScraperOrchestrator:
         rate_limiter: RateLimiter | None = None,
         circuit_breaker: CircuitBreaker | None = None,
         recovery_manager: BlockRecoveryManager | None = None,
+        **kwargs,
     ) -> dict:
         """ Executa as estratégias de scraping até obter um resultado válido
 
         As estratégias são recuperadas via :func:`strategies_for` e
         executadas em sequência. Cada execução é limitada por
-        ``strategy_timeout`` através de ``asyncio.wait_for``. Ao
-        final de cada tentativa a métrica ``SCRAPER_STRATEGY_TOTAL``
-        registra estratégia utilizada e o status obtido.
+        ``strategy_timeout`` através de ``asyncio.wait_for``. Parâmetros
+        adicionais recebidos em ``kwargs`` são repassados diretamente para as
+        estratégias, permitindo definir cookies ou ajustes de login quando
+        necessário. Ao final de cada tentativa a métrica ``SCRAPER_STRATEGY_TOTAL``
+        registra a estratégia utilizada e o status obtido.
         """
         strategies = self._strategy_selector(url)
         if not strategies:
@@ -95,6 +98,7 @@ class MultiStrategyScraperOrchestrator:
                         circuit_breaker=circuit_breaker,
                         recovery_manager=recovery_manager,
                         throttle_manager=self._throttle_manager,
+                        **kwargs,
                     ),
                     timeout=self._strategy_timeout,
                 )

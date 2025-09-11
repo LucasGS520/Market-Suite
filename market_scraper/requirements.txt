@@ -5,6 +5,7 @@ extruct==0.15.0
 fastapi==0.115.12
 httpx==0.28.1
 lxml==4.9.4
+mechanicalsoup==1.4.0
 parsel==1.9.1
 playwright==1.52.0
 playwright-stealth==2.0.0

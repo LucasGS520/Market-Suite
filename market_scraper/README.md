@@ -30,6 +30,17 @@ Quando essas fontes falham, aplicamos regras específicas por domínio (Mercado 
 ### SelectorLib
 Para páginas com layout instável, utilizamos a biblioteca **SelectorLib** com templates YAML verisonados em `selectorlib_templates`. A estratégia `SelectorLibStrategy` carrega o template correspondente ao domínio e extrai diretamente os campos `name` e `current_price`.
 
+## MechanicalSoup para FLuxos Simples
+Quando o fluxo exige apenas interações leves, como preencher um formulário de login ou navegar por filtros básicos, o uso de um navegador completo é desnecessário.
+Nesses cenários adotamos **MechanicalSoup**, que combina `requests` e `BeautifulSoup` para simular um navegador de forma rápida e sem grande consumo de recursos.
+
+Situações em que o MechanicalSoup é mais eficiente do que o Playwright:
+- Autenticação por formulário simples com poucos campos.
+- Paginação ou aplicação de filtros via POST/GET sem JavaScript complexo.
+- Coletas em que a página principal é estática e requer apenas cookies obtidos após o login.
+
+O Playwright permanece indicando para casos em que a página depende fortemente de JavaScript, possui elementos dinâmicos ou requer interação avançada que não é atendida por um parser tradicional.
+
 ## Serviços Utilitários
 - **IntelligentCacheManager** - armazena resultados de produtos por domínio e URL para reduzir requisições repetidas.
 - **DataQualityValidator** - garante que `name` e `current_price` estejam presentes e que o preço seja válido.

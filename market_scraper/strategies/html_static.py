@@ -62,7 +62,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
         netloc = urlparse(url).netloc
         return netloc.endswith(self.domain)
 
-    async def _fetch_html(self, url: str) -> httpx.Response:
+    async def _fetch_html(self, url: str, cookies: Optional[Dict[str, str]] = None) -> httpx.Response:
         """ Faz GET com headers realistas e cache condicional
 
         Aplica User-Agent/Referer e cookies; envia ``If-None-Match`` e
@@ -94,7 +94,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
 
         async with httpx.AsyncClient(
             headers=headers,
-            cookies=GENERIC_COOKIES,
+            cookies=cookies or GENERIC_COOKIES,
             timeout=10,
             follow_redirects=True,
         ) as client:
@@ -169,6 +169,8 @@ class HtmlStaticStrategy(ScrapingStrategy):
             
         #Open Graph
         og = data.get("opengraph") or {}
+        if isinstance(og, list):
+            og = og[0] if og else {}
         if og.get("og:type") == "product":
             name = og.get("og:title")
             price = og.get("product:price:amount") or og.get("og:price:amount")
@@ -360,7 +362,10 @@ class HtmlStaticStrategy(ScrapingStrategy):
 
         try:
             #Realiza o download da página alvo
-            resp = await self._fetch_html(url)
+            if "cookies" in kwargs:
+                resp = await self._fetch_html(url, cookies=kwargs.get("cookies"))
+            else:
+                resp = await self._fetch_html(url)
             #Suporte a testes que retornam apenas string em ``_fetch_html``
             if not isinstance(resp, httpx.Response):
                 resp = httpx.Response(200, text=str(resp))

@@ -28,6 +28,7 @@ from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.data_quality_validator import DataQualityValidator
+from market_scraper.utils.mechanicalsoup_login import login_and_get_cookies
 
 from shared.enums import BlockResult
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
@@ -57,6 +58,8 @@ async def scrape_product_common_async(
     rate_limiter:RateLimiter | None = None,
     circuit_breaker: CircuitBreaker | None = None,
     recovery_manager: BlockRecoveryManager | None = None,
+    mechanicalsoup_config: dict | None = None,
+    **extra_kwargs,
 ) -> dict:
     """ Seleciona e executa a estratégia adequada para a URL
 
@@ -74,10 +77,24 @@ async def scrape_product_common_async(
     ``DataQualityValidator``. Em casos de erro o retorno sempre inclui o
     campo ``detail`` explicando o motivo de falha. Quando o servidor
     responde com ``NOT_MODIFIED`` o status é repassado diretamente e os
-    dados do cache são anexados quando existentes.
+    dados do cache são anexados quando existentes. Quando ``mechanicalsoup_config``
+    é informado, um login leve é realizado previamente com MechanicalSoup para obter
+    cookies de sessão e permitir navegação por formulários sem a necessiade do Playwright.
     """
     #Registra o início do fluxo de scraping
     logger.info("start_scraping", url=url, product_type=product_type)
+
+    cookies = None
+    if mechanicalsoup_config:
+        logger.info(
+            "mechanicalsoup_login", url=mechanicalsoup_config.get("url")
+        )
+        try:
+            cookies = await login_and_get_cookies(mechanicalsoup_config)
+        except Exception as err:
+            logger.warning("mechanicalsoup_login_failed", erro=str(err))
+        else:
+            extra_kwargs.setdefault("cookies", cookies)
 
     #Mantém a URL original, sem normalização para mobile
     normalized_url = url
@@ -128,6 +145,7 @@ async def scrape_product_common_async(
             rate_limiter=rate_limiter,
             circuit_breaker=circuit_breaker,
             recovery_manager=recovery_manager,
+            **extra_kwargs,
         )
     except Exception as err:
         logger.exception("orchestrator_exception", url=normalized_url, error=str(err))
@@ -181,15 +199,17 @@ async def scrape_product_common_async(
     return {"status": "error", "detail": message}
 
 def scrape_product_common(
-        url: str,
-        user_id: UUID,
-        payload,
-        product_type: Literal["monitored", "competitor"],
-        rate_limiter: RateLimiter | None = None,
-        circuit_breaker: CircuitBreaker | None = None,
-        recovery_manager: BlockRecoveryManager | None = None
+    url: str, 
+    user_id: UUID, 
+    payload, 
+    product_type: Literal["monitored", "competitor"], 
+    rate_limiter: RateLimiter | None = None, 
+    circuit_breaker: CircuitBreaker | None = None, 
+    recovery_manager: BlockRecoveryManager | None = None,
+    mechanicalsoup_config: dict | None = None, 
+    **extra_kwargs,
 ) -> dict:
-    """ Executa ``scrape_product_common_async`` em contexto síncrono """
+    """ Executa ``scrape_product_common_async`` de maneira síncrono """
     logger.info("start_scraping_sync", url=url, product_type=product_type)
     return asyncio.run(
         scrape_product_common_async(
@@ -199,6 +219,8 @@ def scrape_product_common(
             product_type=product_type,
             rate_limiter=rate_limiter,
             circuit_breaker=circuit_breaker,
-            recovery_manager=recovery_manager
+            recovery_manager=recovery_manager,
+            mechanicalsoup_config=mechanicalsoup_config,
+            **extra_kwargs,
         )
     )
