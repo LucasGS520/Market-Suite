@@ -41,6 +41,21 @@ Situações em que o MechanicalSoup é mais eficiente do que o Playwright:
 
 O Playwright permanece indicando para casos em que a página depende fortemente de JavaScript, possui elementos dinâmicos ou requer interação avançada que não é atendida por um parser tradicional.
 
+## Requests-HTML para Páginas Dinâmicas Leves
+Para cenários em que o conteúdo é exibido somente após a execução de JavaScript simples, utilizamos **Requests-HTML**. A biblioteca combina `requests` com um renderizador interno, permitindo obter o HTML pós-renderização sem a complexidade de um navegador completo.
+
+Situações em que o Requests-HTML é indicado:
+- Conteúdo carregado dinamicamente logo após a requisição inicial.
+- Páginas que não exigem interações complexas como cliques ou rolagem.
+
+Limitações conhecidas:
+- Depende de `pyppeteer` e pode falhar em sites com proteção rígida.
+- Não realiza ações avançadas de navegação ou formulários complexos.
+- Maior consumo de recursos que uma requisição estática.
+- Pode gerar conflitos de dependência com o Playwright (`pyee`).
+
+Prefira o Requests-HTML como alternativa intermediária antes de recorrer ao Playwright.
+
 ## Serviços Utilitários
 - **IntelligentCacheManager** - armazena resultados de produtos por domínio e URL para reduzir requisições repetidas.
 - **DataQualityValidator** - garante que `name` e `current_price` estejam presentes e que o preço seja válido.

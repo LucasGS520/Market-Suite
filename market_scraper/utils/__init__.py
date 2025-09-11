@@ -5,6 +5,7 @@ Para rotinas compartilhadas utilize ``shared.utils`` diretamente
 """
 
 from .block_recovery import recover_html_if_blocked
+from .requests_html_render import fetch_rendered_html
 
 
-__all__ = ["recover_html_if_blocked"]
+__all__ = ["recover_html_if_blocked", "fetch_rendered_html"]
