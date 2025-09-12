@@ -59,33 +59,34 @@ class MultiStrategyScraperOrchestrator:
         user_id: UUID,
         payload,
         product_type: Literal["monitored", "competitor"],
+        strategies: list[ScrapingStrategy] | None = None,
+        execution_mode: Literal["sequential", "parallel", "conditional"] = "sequential",
+        shared_context: dict | None = None,
         rate_limiter: RateLimiter | None = None,
         circuit_breaker: CircuitBreaker | None = None,
         recovery_manager: BlockRecoveryManager | None = None,
         **kwargs,
     ) -> dict:
-        """ Executa as estratégias de scraping até obter um resultado válido
+        """ Executa as estratégias de scraping conforme o modo definido
 
-        As estratégias são recuperadas via :func:`strategies_for` e
-        executadas em sequência. Cada execução é limitada por
-        ``strategy_timeout`` através de ``asyncio.wait_for``. Parâmetros
-        adicionais recebidos em ``kwargs`` são repassados diretamente para as
-        estratégias, permitindo definir cookies ou ajustes de login quando
-        necessário. Ao final de cada tentativa a métrica ``SCRAPER_STRATEGY_TOTAL``
-        registra a estratégia utilizada e o status obtido.
+        ``strategies`` permite receber um pipeline personalizado de estratégias,
+        tornando o orquestrador configurável em tempo de execução. ``execution_mode``
+        define como o pipeline será processado: ``sequential`` (padrão), ``parallel``
+        ou ``conditional``. ``shared_context`` é um dicionário mutável usado para 
+        compartilhar dados intermediários entre estratégias (como cookies ou HTML
+        pré-renderizado). Os parâmetros extras em ``kawargs`` são repassados para cada estratégia.
         """
-        strategies = self._strategy_selector(url)
+        strategies = strategies or self._strategy_selector(url)
         if not strategies:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="URL não suportada",
             )
 
-        result: dict = {"status": "error"}
-        for idx, strategy in enumerate(strategies):
-            if not strategy.supports_url(url):
-                continue
+        shared_context = shared_context or {}
 
+        async def _run_strategy(strategy: ScrapingStrategy) -> tuple[ScrapingStrategy, dict, str]:
+            """ Executa uma estratégia individual com tratamento de erros """
             try:
                 result = await asyncio.wait_for(
                     strategy.get_data(
@@ -98,6 +99,7 @@ class MultiStrategyScraperOrchestrator:
                         circuit_breaker=circuit_breaker,
                         recovery_manager=recovery_manager,
                         throttle_manager=self._throttle_manager,
+                        shared_context=shared_context,
                         **kwargs,
                     ),
                     timeout=self._strategy_timeout,
@@ -114,23 +116,75 @@ class MultiStrategyScraperOrchestrator:
                 #Qualquer exceção marca a execução como erro
                 result = {"status": "error"}
                 status_label = "exception"
+            return strategy, result, status_label
+        
+        result: dict = {"status": "error"}
 
-            details = result.get("details")
+        #Execução paralela das estratégias
+        if execution_mode == "parallel":
+            tasks = [_run_strategy(s) for s in strategies if s.supports_url(url)]
+            responses = await asyncio.gather(*tasks)
+
+            result_found = False
+            fallback_counted = False
+
+            for idx, (strategy, resp, status_label) in enumerate(responses):
+                details = resp.get("details")
+                if details is not None:
+                    try:
+                        self._validator.validate(details)
+                    except ValueError:
+                        status_label = "invalid"
+                        resp = {"status": "error"}
+
+                SCRAPER_STRATEGY_TOTAL.labels(
+                    strategy.__class__.__name__, status_label
+                ).inc()
+
+                if not result_found and status_label in ("success", "NOT_MODIFIED"):
+                    result = resp
+                    result_found = True
+                elif not fallback_counted:
+                    SCRAPER_FALLBACK_TOTAL.inc()
+                    fallback_counted = True
+
+                ctx_update = resp.get("shared_context")
+                if isinstance(ctx_update, dict):
+                    shared_context.update(ctx_update)
+
+            return result
+        
+        #Execução sequencial ou condicional
+        for idx, strategy in enumerate(strategies):
+            if not strategy.supports_url(url):
+                continue
+
+            if execution_mode == "conditional" and hasattr(strategy, "should_run"):
+                if not strategy.should_run(shared_context):
+                    continue
+
+            strategy_obj, resp, status_label = await _run_strategy(strategy)
+            details = resp.get("details")
             if details is not None:
                 try:
                     #Valida dados essenciais mesmo quando o dicionário está vazio, antes de aceitar o resultado
                     self._validator.validate(details)
                 except ValueError:
-                    #Dados inválidos: registra status e prepara fallback
                     status_label = "invalid"
-                    result = {"status": "error"}
+                    resp = {"status": "error"}
 
             #Registra a execução da estratégia com o status obtido
             SCRAPER_STRATEGY_TOTAL.labels(
-                strategy.__class__.__name__, status_label
+                strategy_obj.__class__.__name__, status_label
             ).inc()
 
+            ctx_update = resp.get("shared_context")
+            if isinstance(ctx_update, dict):
+                shared_context.update(ctx_update)
+
             if status_label in ("success", "NOT_MODIFIED"):
+                result = resp
+                result["extraction_method"] = strategy_obj.__class__.__name__
                 break
 
             #Caso o resultado não seja aproveitável, registra fallback
