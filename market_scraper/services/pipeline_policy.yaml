@@ -1,0 +1,4 @@
+#Mapeia nomes de etapas para classes disponíveis
+steps: {}
+#Define, por domínio, quais etapas compõem o pipeline
+pipelines: {}
