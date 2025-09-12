@@ -1,11 +1,15 @@
 """ Testes unitários para a estratégia de HTML estático """
-
+import http.client
 import logging
+from idlelib.colorizer import matched_named_groups
 
 import pytest
 import httpx
 
+import market_scraper.strategies.html_static as html_static_module
 from market_scraper.strategies.html_static import HtmlStaticStrategy
+from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.http_utils import extract_hostname
 
 
 @pytest.fixture
@@ -84,8 +88,8 @@ def html_invalido() -> str:
 @pytest.mark.asyncio
 async def test_extrai_dados_de_json_ld(strategy: HtmlStaticStrategy, html_json_ld: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Verifica extração de dados quando há JSON-LD válido """
-    async def fake_fetch(self, url: str) -> str:
-        return html_json_ld
+    async def fake_fetch(self, url: str) -> httpx.Response:
+        return httpx.Response(200, text=html_json_ld)
 
     #Ignora validações rígidas para focar apenas na extração
     monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
@@ -114,8 +118,8 @@ async def test_extrai_dados_de_meta_tags(strategy: HtmlStaticStrategy, html_meta
 @pytest.mark.asyncio
 async def test_extrai_de_meta_tags_og(strategy: HtmlStaticStrategy, html_og_meta_tags: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante extração quando apenas tags ``og:price:*`` estão disponíveis """
-    async def fake_fetch(self, url: str) -> str:
-        return html_og_meta_tags
+    async def fake_fetch(self, url: str) -> httpx.Response:
+        return httpx.Response(200, text=html_og_meta_tags)
 
     #Ignora validações rígidas para focar apenas na extração
     monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
@@ -129,8 +133,8 @@ async def test_extrai_de_meta_tags_og(strategy: HtmlStaticStrategy, html_og_meta
 @pytest.mark.asyncio
 async def test_extrai_moeda_de_price_specification(strategy: HtmlStaticStrategy, html_json_ld_price_spec: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Verifica extração da moeda dentro de ``priceSpecification`` """
-    async def fake_fetch(self, url: str) -> str:
-        return html_json_ld_price_spec
+    async def fake_fetch(self, url: str) -> httpx.Response:
+        return httpx.Response(200, text=html_json_ld_price_spec)
 
     #Ignora validação para testar apenas a extração
     monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
@@ -144,8 +148,8 @@ async def test_extrai_moeda_de_price_specification(strategy: HtmlStaticStrategy,
 @pytest.mark.asyncio
 async def test_extrai_de_ofertas_agrupadas(strategy: HtmlStaticStrategy, html_json_ld_offers_list: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante extração quando ``offers`` possui lista interna """
-    async def fake_fetch(self, url: str) -> str:
-        return html_json_ld_offers_list
+    async def fake_fetch(self, url: str) -> httpx.Response:
+        return httpx.Response(200, text=html_json_ld_offers_list)
 
     monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
     monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
@@ -158,8 +162,8 @@ async def test_extrai_de_ofertas_agrupadas(strategy: HtmlStaticStrategy, html_js
 @pytest.mark.asyncio
 async def test_extrai_low_price_quando_price_ausente(strategy: HtmlStaticStrategy, html_json_ld_low_price: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Utiliza ``lowPrice`` como preço quando ``price`` não existe """
-    async def fake_fetch(self, url: str) -> str:
-        return html_json_ld_low_price
+    async def fake_fetch(self, url: str) -> httpx.Response:
+        return httpx.Response(200, text=html_json_ld_low_price)
 
     monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", lambda self, data: None)
     monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
@@ -172,8 +176,8 @@ async def test_extrai_low_price_quando_price_ausente(strategy: HtmlStaticStrateg
 @pytest.mark.asyncio
 async def test_retorna_erro_quando_html_invalido(strategy: HtmlStaticStrategy, html_invalido: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante retorno de erro detalhado quando a validação falha """
-    async def fake_fetch(self, url: str) -> str:
-        return html_invalido
+    async def fake_fetch(self, url: str) -> httpx.Response:
+        return httpx.Response(200, text=html_invalido)
 
     #Força o validador a lançar um ``ValueError`` conhecido
     def fake_validate(self, data: dict) -> None:
@@ -197,12 +201,55 @@ async def test_retorna_erro_quando_html_invalido(strategy: HtmlStaticStrategy, h
 @pytest.mark.asyncio
 async def test_retorna_erro_quando_fetch_falha(strategy: HtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
     """ Retorna erro caso ocorra ``HTTPError`` ao baixar a página """
-    async def fake_fetch(self, url: str) -> str:
+    async def fake_fetch(self, url: str) -> httpx.Response:
         raise httpx.HTTPError("falha simulada")
 
     monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
     resultado = await strategy.get_data("http://exemplo.com/produto")
     assert resultado == {"status": "error"}
+
+@pytest.mark.asyncio
+async def test_retorna_not_modified_quando_resposta_304(strategy: HtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante que ``get_data`` retorne ``NOT_MODIFIED`` diante de resposta 304 """
+    async def fake_fetch(self, url: str) -> httpx.Response:
+        return httpx.Response(304)
+
+    monkeypatch.setattr(HtmlStaticStrategy, "_fetch_html", fake_fetch)
+    resultado = await strategy.get_data("http://exemplo.com/produto")
+    assert resultado == {"status": "NOT_MODIFIED"}
+
+@pytest.mark.asyncio
+async def test_fetch_html_usa_cache_para_pular_requisicao(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Retorna 304 e não realiza chamada HTTP quando há conteúdo no cache """
+    url = "https://exemplo.com/produto"
+    monkeypatch.setattr(html_static_module, "cache_manager", IntelligentCacheManager())
+    marketplace = extract_hostname(url)
+    html_static_module.cache_manager.set(
+        marketplace=marketplace,
+        url=url,
+        value={"data": {"current_price": "1"}, "headers": {"etag": "abc"}},
+    )
+
+    class DummyClient:
+        chamado = False
+
+        def __init__(self, *a, **k):
+            DummyClient.chamado = True
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def get(self, url: str):
+            return httpx.Response(200, text="")
+
+    monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
+    estrategia = HtmlStaticStrategy()
+    resp = await estrategia._fetch_html(url)
+    assert resp.status_code == 304
+    assert DummyClient.chamado is False
 
 @pytest.mark.asyncio
 async def test_define_referer_dinamico(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,13 +268,8 @@ async def test_define_referer_dinamico(monkeypatch: pytest.MonkeyPatch) -> None:
             pass
 
         async def get(self, url: str):
-            class Resp:
-                text = ""
-
-                def raise_for_status(self) -> None:
-                    pass
-
-            return Resp()
+            request = httpx.Request("GET", url)
+            return httpx.Response(200, request=request, text="")
 
     monkeypatch.setattr(httpx, "AsyncClient", DummyClient)
     estrategia = HtmlStaticStrategy()
@@ -242,11 +284,11 @@ async def test_segue_redirecionamento(strategy: HtmlStaticStrategy, monkeypatch:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/produto":
             #Simula resposta 302 apontando para a URL final
-            return httpx.Response(302, headers={"Location": "http://teste.com/produto-final"})
+            return httpx.Response(302, headers={"Location": "http://teste.com/produto-final"}, request=request)
         if request.url.path == "/produto-final":
             #Retorna o HTML final após seguir o redirecionamento
-            return httpx.Response(200, text=conteudo_final)
-        return httpx.Response(404)
+            return httpx.Response(200, text=conteudo_final, request=request)
+        return httpx.Response(404, request=request)
 
     transporte = httpx.MockTransport(handler)
 
@@ -258,8 +300,8 @@ async def test_segue_redirecionamento(strategy: HtmlStaticStrategy, monkeypatch:
 
     monkeypatch.setattr(httpx, "AsyncClient", client_factory)
 
-    html = await strategy._fetch_html("http://teste.com/produto")
-    assert html == conteudo_final
+    resp = await strategy._fetch_html("http://teste.com/produto")
+    assert resp.text == conteudo_final
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [302, 404])
@@ -267,7 +309,7 @@ async def test_log_inclui_location_quando_http_error(strategy: HtmlStaticStrateg
     """ Simula erros HTTP e verifica se o cabeçalho ``Location`` é registrado no log """
     location = f"https://erro.com/{status}"
 
-    async def fake_fetch(self, url: str) -> str:
+    async def fake_fetch(self, url: str) -> httpx.Response:
         request = httpx.Request("GET", url)
         response = httpx.Response(
             status_code=status,

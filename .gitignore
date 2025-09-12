@@ -34,6 +34,9 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Github Chatmodes
+.github/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
@@ -123,5 +126,6 @@ cython_debug/
 
 # Integration test logs
 tests/integration/services/logs/
+
 # Docker environment
 infra/.env

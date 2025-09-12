@@ -8,13 +8,21 @@ para o domínio mobile.
 
 from typing import Tuple, Union, Dict
 from urllib.parse import urlparse, urlunparse
+from pathlib import Path
 import random
+
 from market_scraper.core.config_scraper import settings
 from shared.utils.ml_url import PRODUCT_HOSTS
 
 
 # ---------- LISTA DE USER AGENTS (DESKTOP E MOBILE) ----------
-USER_AGENTS = [
+""" A lista completa é carregada dinamicamente de ``shared/resources/user_agents.txt``.
+Mantém uma lista embutida como fallback para cenários em que o arquivo externo não
+esteja disponível, garantindo funcionamento em ambientes empacotados ou durante
+testes isolados. 
+"""
+
+FALLBACK_USER_AGENTS = [
     #Desktop
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15",
@@ -30,6 +38,20 @@ USER_AGENTS = [
     "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
     "Mozilla/5.0 (compatible; Bingbot/2.0; +http://www.bing.com/bingbot.htm)",
 ]
+
+def _user_agents_file() -> Path:
+    """ Retorna o caminho do arquivo de user-agents externo """
+    return Path(__file__).resolve().parents[2] / "shared" / "resources" / "user_agents.txt"
+
+def _load_user_agents() -> list[str]:
+    """ Carrega a lista de User-Agent de arquivo, com fallback local """
+    try:
+        with _user_agents_file().open("r", encoding="utf-8") as fh:
+            return [line.strip() for line in fh if line.strip()]
+    except FileNotFoundError:
+        return FALLBACK_USER_AGENTS
+
+USER_AGENTS = _load_user_agents()
 
 # ---------- STEALTH HEADERS PADRÃO ----------
 STEALTH_HEADERS: Dict[str, str] = {

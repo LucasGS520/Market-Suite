@@ -74,7 +74,7 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
 
     #Impedindo delays e leituras de robots.txt
-    async def fake_fetch_robots(self):
+    async def fake_fetch_robots(self, user_agent: str):
         return ""
 
     monkeypatch.setattr("market_scraper.utils.robots_txt.RobotsTxtParser._fetch_robots", fake_fetch_robots)
@@ -87,7 +87,11 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_throttle_wait(self, circuit_key: str, identifier: str | None = None) -> None:
         return None
 
+    async def fake_throttle_wait_async(self, circuit_key: str, identifier: str | None = None) -> None:
+        return None
+
     monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait", fake_throttle_wait)
+    monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait_async", fake_throttle_wait_async)
 
     async def fake_fetch_html_static(self, url: str) -> str:
         return HTML_EXEMPLO

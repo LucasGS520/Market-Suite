@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from .json_endpoint import cache_manager
 
-""" Estratégia baseadas em HTML estático """
+""" Estratégias para HTML estático
+
+Utilizam inicialmente extruct para extrair dados estruturados (JSON-LD, 
+Microdata e Open Graph) em seguida prioriza Parsel/lxml para extrair 
+nome e preço via JSON-LD e meta-tags; BeautifulSoup(lxml) é utilizado apenas como fallback. 
+"""
 
 import json
 import re
@@ -9,30 +15,44 @@ from decimal import Decimal
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
+import asyncio
 import httpx
 import structlog
 from bs4 import BeautifulSoup
+from parsel import Selector
+import logging
+from time import perf_counter
+
+from shared.metrics.metrics_parser import PARSER_FAILURE_TOTAL, PARSER_SUCCESS_TOTAL, PARSER_DURATION_SECONDS
 
 from .base import ScrapingStrategy
 from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
+from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.http_utils import extract_hostname
+from market_scraper.utils.http_cache import get_cache_headers, store_cache_headers, ContentSignature, NOT_MODIFIED
+from market_scraper.utils.robots_txt import RobotsTxtParser
+from market_scraper.utils.throttle_manager import ThrottleManager
+from market_scraper.utils.extract_structured_data import extract_structured_data
 
 
 #Logger estruturado para acompanhar eventos de scraping
 logger = structlog.get_logger(__name__)
 
-class HtmlStaticStrategy(ScrapingStrategy):
-    """ Estratégia genérica que realiza scraping em HTML estático
+#Logger padrão para capturar mensagens em ambientes de teste
+py_logger = logging.getLogger(__name__)
 
-    A classe efetua uma requisição HTTP simples utilizando ``httpx`` com
-    cabeçalhos de navegação realistas e cookies padrão definidos em
-    ``STEALTH_HEADERS`` e ``GENERIC_COOKIES``. Em seguida tenta obter o
-    nome e o preço do produto a partir de blocos ``JSON-LD`` (quando ``@type``
-    é ``Product``). Caso esses dados não estejam presentes, é realizado um fallback
-    para meta tags e seletores simples. Os campos resultantes são validados pelo
-    ``DataQualityValidator``.
-    """
+#Instância compartilhada do cache inteligente para leitura de headers e conteúdos
+cache_manager = IntelligentCacheManager()
+
+
+class HtmlStaticStrategy(ScrapingStrategy):
+    """ Estratégia base para páginas HTML estáticas
+
+    Faz GET com cabeçalhos realistas, extrai nome/preço via JSON-LD
+    (``@type=Product``) e faz fallback em meta-tags. Valida com
+    ``DataQualityValidator``. """
 
     priority = 10
     domain: str = ""
@@ -45,24 +65,57 @@ class HtmlStaticStrategy(ScrapingStrategy):
         netloc = urlparse(url).netloc
         return netloc.endswith(self.domain)
 
-    async def _fetch_html(self, url: str) -> str:
-        """ Baixa o HTML utilizando ``httpx`` com cabeçalhos stealth e ``Referer`` dinâmico
+    async def _fetch_html(self, url: str, cookies: Optional[Dict[str, str]] = None) -> httpx.Response:
+        """ Faz GET com headers realistas e cache condicional
 
-        O método também rotaciona o ``User-Agent`` para reduzir bloqueios,
-        garantindo que cada requisição pareça vir de um navegador distinto.
-        Segue automaticamente redirecionamentos HTTP (como respostas ``302``)
-        para retornar o HTML final.
-        """
+        Aplica User-Agent/Referer e cookies; envia ``If-None-Match`` e
+        ``If-Modified-Since`` quando disponíveis, salvando ETag/Last-Modified
+        no retorno. Retorna: ``httpx.Response``. Levanta ``httpx.HTTPError``
+        via ``raise_for_status``. """
         parsed = urlparse(url)
         base_domain = f"{parsed.scheme}://{parsed.netloc}/"
         headers = {**STEALTH_HEADERS, "Referer": base_domain}
-        #Rotaciona o User-Agent a cada chamada para imitar diferentes navegadores
-        headers["User-Agent"] = self._ua_manager.get_user_agent("html_static")
+        #Utiliza o User-Agent previamente selecionado ou gera um novo
+        headers["User-Agent"] = getattr(
+            self,
+            "_pending_ua",
+            self._ua_manager.get_user_agent("html_static"),
+        )
 
-        async with httpx.AsyncClient(headers=headers, cookies=GENERIC_COOKIES, timeout=10, follow_redirects=True) as client:
+        marketplace = extract_hostname(url)
+        cached = cache_manager.get(marketplace=marketplace, url=url)
+        if cached and cached.get("data"):
+            #Conteúdo já disponível no cache inteligente; evita nova requisição
+            return httpx.Response(304)
+
+        #Recupera valores de ETag/Last-Modified do cache combinado
+        cache_headers = cached.get("headers") if cached else get_cache_headers(url)
+        if cache_headers.get("etag"):
+            headers["If-None-Match"] = cache_headers["etag"]
+        if cache_headers.get("last_modified"):
+            headers["If-Modified-Since"] = cache_headers["last_modified"]
+
+        async with httpx.AsyncClient(
+            headers=headers,
+            cookies=cookies or GENERIC_COOKIES,
+            timeout=10,
+            follow_redirects=True,
+        ) as client:
             resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.text
+
+        #Limpa o User-Agent armazenado para a próxima chamada
+        if hasattr(self, "_pending_ua"):
+            delattr(self, "_pending_ua")
+
+        #Armazena cabeçalhos de cache para futuras requisições
+        store_cache_headers(
+            url,
+            etag=resp.headers.get("ETag"),
+            last_modified=resp.headers.get("Last-Modified"),
+        )
+
+        resp.raise_for_status()
+        return resp
 
     def _format_price(self, value: Any, currency: Optional[str]) -> str:
         """ Formata um valor numérico para o padrão monetário brasileiro """
@@ -76,27 +129,166 @@ class HtmlStaticStrategy(ScrapingStrategy):
         formatted = f"{amount:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
         return f"{symbol} {formatted}".strip()
 
+    def _extract_from_structured_data(self, data: Dict[str, Any], url: str) -> dict:
+        """ Tenta obter ``name`` e ``current_price`` a partir de dados estruturados 
+        
+        A função percorre os blocos extraídos pelo ``extruct``, caso encontre um 
+        produto válido, retorna as informações formatas, se não devolve um dicionário
+        vazio para permitir fallbacks posteriores
+        """
+        #JSON-LD
+        for item in data.get("json-ld", []):
+            if isinstance(item, dict) and item.get("@type") == "Product":
+                offers = item.get("offers") or {}
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else {}
+                price = (
+                    offers.get("price")
+                    or offers.get("priceSpecification", {}).get("price")
+                    or offers.get("lowPrice")
+                    or offers.get("highPrice")
+                )
+                currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
+                name = item.get("name") or item.get("description") or item.get("sku")
+                return {"name": name, "url": url, "current_price": self._format_price(price, currency)}
+            
+        #Microdata
+        for item in data.get("microdata", []):
+            types = item.get("type", [])
+            if any("Product" in t for t in types):
+                props = item.get("properties", {})
+                name = props.get("name") or props.get("description") or props.get("sku")
+                offers = props.get("offers") or {}
+                if isinstance(offers, list):
+                    offers = offers[0] if offers else {}
+                price = (
+                    offers.get("price")
+                    or offers.get("priceSpecification", {}).get("price")
+                    or offers.get("lowPrice")
+                    or offers.get("highPrice")
+                )
+                currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
+                return {"name": name, "url": url, "current_price": self._format_price(price, currency)}
+            
+        #Open Graph
+        og = data.get("opengraph") or {}
+        if isinstance(og, list):
+            og = og[0] if og else {}
+        if og.get("og:type") == "product":
+            name = og.get("og:title")
+            price = og.get("product:price:amount") or og.get("og:price:amount")
+            currency = og.get("product:price:currency") or og.get("og:price:currency")
+            return {"name": name, "url": url, "current_price": self._format_price(price, currency)}
+        
+        return {}
+
+    def _extract_from_json_ld_parsel(self, sel: Selector, url: str) -> dict:
+        """ Extrai JSON-LD (prioritário) com suporte a ``@graph``/listas """
+        home = perf_counter()
+        try:
+            scripts = sel.xapth('//script[@type="application/ld+josn"]/text()').getall()
+            for raw in scripts:
+                try:
+                    content = json.loads(raw or "{}")
+                except json.JSONDecodeError as exc:
+                    logger.debug("JSON inválido em script JSON-LD", url=url, erro=str(exc))
+                    continue
+                items: list[Any]
+                if isinstance(content, dict):
+                    items = content.get("@graph", []) if "@graph" in content else [content]
+                elif isinstance(content, list):
+                    items = content
+                else:
+                    items = []
+                for item in items:
+                    if isinstance(item, dict) and item.get("@type") == "Product":
+                        name = item.get("name") or item.get("description") or item.get("sku")
+                        offers = item.get("offers") or {}
+                        if isinstance(offers, list):
+                            offers = offers[0] if offers else {}
+                        elif isinstance(offers, dict) and isinstance(offers.get("offers"), list):
+                            offers = offers["offers"][0] if offers["offers"] else {}
+
+                        price = (
+                            offers.get("price")
+                            or offers.get("priceSpecification", {}).get("price")
+                            or offers.get("lowPrice")
+                            or offers.get("highPrice")
+                        )
+                        currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
+                        PARSER_SUCCESS_TOTAL.labels(library="parsel").inc()
+                        return {
+                            "name": name,
+                            "url": url,
+                            "current_price": self._format_price(price, currency),
+                        }
+            PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
+            return {}
+        except Exception as exc:
+            PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
+            logger.exception("Erro ao extrair JSON-LD com Parsel", url=url, erro=str(exc))
+            return {}
+        finally:
+            PARSER_DURATION_SECONDS.labels(library="parsel").observe(
+                perf_counter() - home
+            )
+
+    def _extract_from_meta_tags_parsel(self, sel: Selector, url: str) -> dict:
+        """ Extrai ``name`` e ``current_price`` de meta-tags (Parsel) """
+        home = perf_counter()
+        try:
+            name_value = (
+                sel.css('meta[property="og:title"]::attr(content)').get()
+                or sel.css("title::text").get()
+            )
+            price_value = (
+                sel.css('meta[itemprop="price"]::attr(content)').get()
+                or sel.css('meta[property="og:price:amount"]::attr(content)').get()
+                or sel.css('meta[property="product:price:amount"]::attr(content)').get()
+            )
+            currency_value = (
+                sel.css('meta[itemprop="priceCurrency"]::attr(content)').get()
+                or sel.css('meta[property="og:price:currency"]::attr(content)').get()
+                or sel.css('meta[property="product:price:currency"]::attr(content)').get()
+            )
+            data = {
+                "name": name_value,
+                "url": url,
+                "current_price": self._format_price(price_value, currency_value),
+            }
+            if data.get("name") and data.get("current_price"):
+                PARSER_SUCCESS_TOTAL.labels(library="parsel").inc()
+            else:
+                PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
+            return data
+        except Exception as exc:
+            PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
+            logger.exception("Erro ao extrair meta-tags com Parsel", url=url, erro=str(exc))
+            return {}
+        finally:
+            PARSER_DURATION_SECONDS.labels(library="parsel").observe(
+                perf_counter() - home
+            )
+        
 
     def _extract_from_json_ld(self, soup: BeautifulSoup, url: str) -> dict:
-        """ Procura blocos JSON-LD de produto e extrai informações principais
-
-        A função também trata estruturas onde ``offers`` contém outra lista
-        ``offers`` (caso comum em ``AggregateOffer``) e utiliza os campos
-        ``lowPrice`` ou ``highPrice`` quando ``price`` estiver ausente.
-        """
-        for tag in soup.find_all("script", type="application/ld+json"):
-            try:
-                content = json.loads(tag.string or "{}")
-            except json.JSONDecodeError:
-                continue
-            itens: list[Any]
+        """ Procura JSON-LD (Product) com BeautifulSoup """
+        home = perf_counter()
+        try:
+            for tag in soup.find_all("script", type="application/ld+json"):
+                try:
+                    content = json.loads(tag.string or "{}")
+                except json.JSONDecodeError as exc:
+                    logger.debug("JSON inválido em script JSON-LD (bs4)", url=url, erro=str(exc))
+                    continue
+            items: list[Any]
             if isinstance(content, dict):
-                itens = content.get("@graph", []) if "@graph" in content else [content]
+                items = content.get("@graph", []) if "@graph" in content else [content]
             elif isinstance(content, list):
-                itens = content
+                items = content
             else:
-                itens = []
-            for item in itens:
+                items = []
+            for item in items:
                 if isinstance(item, dict) and item.get("@type") == "Product":
                     name = item.get("name") or item.get("description") or item.get("sku")
                     offers = item.get("offers") or {}
@@ -116,73 +308,150 @@ class HtmlStaticStrategy(ScrapingStrategy):
                     )
                     #Busca a moeda diretamente ou dentro de ``priceSpecification``
                     currency = offers.get("priceCurrency") or offers.get("priceSpecification", {}).get("priceCurrency")
+                    PARSER_SUCCESS_TOTAL.labels(library="beautifulsoup").inc()
                     return {
                         "name": name,
                         "url": url,
                         "current_price": self._format_price(price, currency),
                     }
-        return {}
+            PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
+            return {}
+        except Exception as exc:
+            PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
+            logger.exception("Erro ao extrair JSON-LD com BeautifulSoup", url=url, erro=str(exc))
+            return {}
+        finally:
+            PARSER_DURATION_SECONDS.labels(library="beautifulsoup").observe(
+                perf_counter() - home
+            )
 
     def _extract_from_meta_tags(self, soup: BeautifulSoup, url: str) -> dict:
-        """ Extrai dados de meta-tags como alternativa ao JSON-LD """
-        name = soup.find("meta", property="og:title") or soup.find("title")
-        price = (
+        """ Extrai dados de meta-tags (alternativa ao JSON-LD) usando BeautifulSoup """
+        home = perf_counter()
+        try:
+            name = soup.find("meta", property="og:title") or soup.find("title")
+            price = (
                 soup.find("meta", itemprop="price")
                 or soup.find("meta", property="og:price:amount")
                 or soup.find("meta", property="product:price:amount")
-        )
-        currency = (
+            )
+            currency = (
                 soup.find("meta", itemprop="priceCurrency")
                 or soup.find("meta", property="og:price:currency")
                 or soup.find("meta", property="product:price:currency")
-        )
-
-        #Determina o valor do nome considerando meta-tags e a tag <title>
-        name_value: Optional[str] = None
-        if name:
-            if name.name == "meta":
-                #Em meta-tags o nome é definido pelo atributo ``content``
-                name_value = name.get("content")
-            else:
-                #Para a tag <title> utilizamos o texto interno
-                name_value = name.text
-
-        return {
-            "name": name_value,
-            "url": url,
-            "current_price": self._format_price(
-                price.get("content") if price else None,
-                currency.get("content") if currency else None,
             )
-        }
+
+            #Determina o valor do nome considerando meta-tags e a tag <title>
+            name_value: Optional[str] = None
+            if name:
+                if name.name == "meta":
+                    #Em meta-tags o nome é definido pelo atributo ``content``
+                    name_value = name.get("content")
+                else:
+                    #Para a tag <title> utilizamos o texto interno
+                    name_value = name.text
+
+            data = {
+                "name": name_value,
+                "url": url,
+                "current_price": self._format_price(
+                    price.get("content") if price else None,
+                    currency.get("content") if currency else None,
+                ),
+            }
+            if data.get("name") and data.get("current_price"):
+                PARSER_SUCCESS_TOTAL.labels(library="beautifulsoup").inc()
+            else:
+                PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
+            return data
+        except Exception as exc:
+            PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
+            logger.exception(
+                "Erro ao extrair meta-tags com BeautifulSoup", url=url, erro=str(exc)
+            )
+            return {}
+        finally:
+            PARSER_DURATION_SECONDS.labels(library="beautifulsoup").observe(
+                perf_counter() - home
+            )
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Orquestra a extração dos dados do HTML informado """
-        soup = BeautifulSoup(html, "html.parser")
+        """ Orquestra a extração inicia tentando extrair dados estruturados com extruct priorizando Parsel/lxml com fallback para BeautifulSoup(lxml) """
+        structured = extract_structured_data(html, url)
+        data = self._extract_from_structured_data(structured, url)
+        if data.get("name") and data.get("current_price"):
+            return data
+
+        sel = Selector(text=html)
+        data = self._extract_from_json_ld_parsel(sel, url)
+        if not data.get("name") or not data.get("current_price"):
+            data = self._extract_from_meta_tags_parsel(sel, url)
+        if data.get("name") or not data.get("current_price"):
+            return data
+        
+        soup = BeautifulSoup(html, "lxml")
         data = self._extract_from_json_ld(soup, url)
-        if not data or not data.get("name"):
+        if not data.get("name") or not data.get("current_price"):
             data = self._extract_from_meta_tags(soup, url)
         return data
 
     async def get_data(self, url: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any) -> dict:
-        """ Executa o scraping e trata falhas de validação dos dados
+        """ Executa scraping com robots.txt, throttle, cache e validação
 
-        Em caso de falha na requisição, o método registra o status HTTP,
-        o cabeçalho ``Location`` (quando presente) e um trecho do corpo
-        da resposta. Além disso, quando o domíno alvo retorna **HTTP 403**
-        o bloqueio é registrado no ``recovery_manager`` e o status
-        ``blocked`` é informado ao chamador. A mensagem de detalhe inclui
-        o domínio de origem para auxiliar a identificação do bloqueio.
-        """
+        Fluxo: respeita robots.txt (allow/delay), aplica throttle, baixa HTML,
+        verifica assinatura/ETag, extrai e valida ``name``/``current_price``.
+        Retorna: ``{"status": success|error|blocked|NOT_MODIFIED, ...}``.
+        Em 403, registra bloqueio no ``recovery_manager`` quando informado. """
+        #Define o User-Agent que será utilizado tanto para o robots.txt quanto para a requisição
+        ua = self._ua_manager.get_user_agent("html_static")
+        parser = RobotsTxtParser(base_url=url)
+        path = urlparse(url).path or "/"
+
+        #Interrompe caso o caminho seja proibido pelo robots.txt
+        if not await parser.is_allowed(path, ua):
+            return {"status": "blocked", "detail": "Bloqueado pelo robots.txt"}
+        #Aguarda o tempo recomendado antes de continuar
+        delay = await parser.get_crawl_delay(ua)
+        if delay:
+            await asyncio.sleep(delay)
+        #Armazena o User-Agent para uso na requisição HTTP
+        self._pending_ua = ua
+
+        #Aguarda o sinal do ``ThrottleManager`` quando disponível
+        throttle: ThrottleManager | None = kwargs.get("throttle_manager")
+        if throttle:
+            await throttle.wait_async(urlparse(url).netloc, url)
+
         try:
-            #Realiza o download do HTML da página alvo
-            html = await self._fetch_html(url)
+            #Realiza o download da página alvo
+            if "cookies" in kwargs:
+                resp = await self._fetch_html(url, cookies=kwargs.get("cookies"))
+            else:
+                resp = await self._fetch_html(url)
+            #Suporte a testes que retornam apenas string em ``_fetch_html``
+            if not isinstance(resp, httpx.Response):
+                resp = httpx.Response(200, text=str(resp))
         except httpx.HTTPError as exc:
             #Registra detalhes da resposta para facilitar depuração
             resp = getattr(exc, "response", None)
             location = resp.headers.get("location") if resp else None
             body = resp.text[:200] if resp and resp.text else None
-            logger.exception("Falha na requisição HTML", url=url, status=getattr(resp, "status_code", None), location=location, body=body)
+            #Registra também no logger padrão para que testes possam capturar a mensagem
+            py_logger.exception(
+                "Falha na requisição HTML url=%s status=%s location=%s body=%s",
+                url,
+                getattr(resp, "status_code", None),
+                location,
+                body,
+            )
+            logger.exception(
+                "Falha na requisição HTML",
+                url=url,
+                status=getattr(resp, "status_code", None),
+                location=location,
+                body=body,
+            )
+
             #Caso o domínio responda com 403, registra o bloqueio
             if resp and resp.status_code == 403:
                 recovery_manager = kwargs.get("recovery_manager")
@@ -196,6 +465,17 @@ class HtmlStaticStrategy(ScrapingStrategy):
                 }
             #Se ocorrer erro de rede ou status inválido, sinaliza falha genérica
             return {"status": "error"}
+
+        if resp.status_code == 304:
+            #Quando o servidor indica que o conteúdo não mudou, repassa o status
+            return {"status": "NOT_MODIFIED"}
+
+        html = resp.text
+
+        #Verifica a assinatura do conteúdo para detectar mudanças de forma independente
+        signature = ContentSignature(url).check_or_update(html)
+        if signature is NOT_MODIFIED:
+            return {"status": "NOT_MODIFIED"}
 
         data = self._parse_html(html, url)
         try:
@@ -215,65 +495,61 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
     domain = "mercadolivre.com.br"
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Extrai nome e preço de páginas do Mercado Livre
-
-        A função inicia tentando os métodos genéricos de extração
-        (JSON-LD e meta tags). Caso não obtenha os dados essenciais,
-        realiza um fallback utilizando seletores específicos do site.
-        """
-        soup = BeautifulSoup(html, "html.parser")
-
-        #Primeiro tenta reutilizar os extratores da estratégia base
-        data = self._extract_from_json_ld(soup, url)
+        """ Extrai nome/preço via JSON-LD/meta e fallbacks específicos do Mercado Livre """
+        structured = extract_structured_data(html, url)
+        data = self._extract_from_structured_data(structured, url)
+        if data.get("name") and data.get("current_price"):
+            return data
+        
+        #Prioriza Parsel/lxml
+        sel = Selector(text=html)
+        data = self._extract_from_json_ld_parsel(sel, url)
         if not data.get("name") or not data.get("current_price"):
-            data = self._extract_from_meta_tags(soup, url)
+            data = self._extract_from_meta_tags_parsel(sel, url)
 
-        #Se já houver nome e preço válidos, retorna imediatamente
+        #Fallback para BeautifulSoup(lxml) apenas se necessário
+        soup = BeautifulSoup(html, "lxml")
+        if not data.get("name") or not data.get("current_price"):
+            data_bs = self._extract_from_json_ld(soup, url)
+            if not data_bs.get("name") or not data_bs.get("current_price"):
+                data_bs = self._extract_from_meta_tags(soup, url)
+            if data_bs.get("name") and data_bs.get("current_price"):
+                return data_bs
+
         if data.get("name") and data.get("current_price"):
             return data
 
-        # --- FALLBACK PARA SELETORES ESPECÍFICOS DO MERCADO LIVRE ---
-
-        #Título do produto em h1.ui-pdp-title ou meta[name="title"]
-        #Como último recurso utiliza ``soup.find(`h1`)`` caso as alternativas específicas não estejam presentes
-        title_tag = soup.select_one("h1.ui-pdp-title")
-        meta_title = soup.find("meta", attrs={"name": "title"})
-        generic_h1 = soup.find("h1") if not title_tag and not meta_title else None
-        title: Optional[str] = None
-        if title_tag:
-            title = title_tag.get_text(strip=True)
-        elif meta_title:
-            title = meta_title.get("content")
-
-        elif generic_h1:
-            title = generic_h1.get_text(strip=True)
+        # --- FALLBACK PARA SELETORES ESPECÍFICOS DO MERCADO LIVRE (PARSEL) ---
+        title = (
+            sel.css("h1.ui-pdp-title::text").get()
+            or sel.css('meta[name="title"]::attr(content)').get()
+            or sel.css("h1::text").get()
+        )
 
         #Preço pode estar em diversas combinações de classes
-        fraction = (
-            soup.select_one(".andes-money-amount__fraction")
-            or soup.select_one(".price-tag-fraction")
-            or soup.find("span", {"class": "price-tag-fraction"})
+        fraction_text = (
+            sel.css(".andes-money-amount__fraction::text").get()
+            or sel.css(".price-tag-fraction::text").get()
         )
-        cents = (
-            soup.select_one(".andes-money-amount__cents")
-            or soup.select_one(".price-tag-decimal")
+        cents_text = (
+            sel.css(".andes-money-amount__cents::text").get()
+            or sel.css(".price-tag-decimal::text").get()
         )
 
         value: Optional[str] = None
-        if fraction:
-            #Remove separadores de milhar e outros caracteres da parte inteira
-            whole_part = re.sub(r"\D", "", fraction.get_text())
+        if fraction_text:
+            whole_part = re.sub(r"\D", "", fraction_text)
             value = whole_part
-            if cents:
-                decimal_part = re.sub(r"\D", "", cents.get_text())
-                #Concatena parte inteira e decimal para formar o valor
+            if cents_text:
+                decimal_part = re.sub(r"\D", "", cents_text)
                 value = f"{value}.{decimal_part}"
-
         else:
-            #Fallback para ``span[itemprop=`price`]`` caso não exista estrutura de fração/centavos
-            itemprop_price = soup.find("span", itemprop="price")
-            if itemprop_price:
-                raw_price = itemprop_price.get("content") or itemprop_price.get_text(strip=True)
+            #Fallback para ``span[itemprop=`price`]``
+            raw_price = (
+                sel.css('span[itemprop="price"]::attr(content)').get()
+                or sel.css('span[itemprop="price"]::text').get()
+            )
+            if raw_price:
                 cleaned = re.sub(r"[^\d.,]", "", raw_price)
                 if "," in cleaned and "." in cleaned:
                     cleaned = cleaned.replace(".", "").replace(",", ".")
@@ -281,13 +557,11 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
                     cleaned = cleaned.replace(",", ".")
                 value = cleaned or None
 
-        #Busca a moeda em meta tags específicas caso esteja disponível
-        currency_tag = (
-            soup.find("meta", itemprop="priceCurrency")
-            or soup.find("meta", property="product:price:currency")
-            or soup.find("meta", property="og:price:currency")
+        currency_value = (
+            sel.css('meta[itemprop="priceCurrency"]::attr(content)').get()
+            or sel.css('meta[property="product:price:currency"]::attr(content)').get()
+            or sel.css('meta[property="og:price:currency"]::attr(content)').get()
         )
-        currency_value = currency_tag.get("content") if currency_tag else None
 
         return {
             "name": title,
@@ -302,72 +576,65 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
     domain = "amazon.com.br"
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Extrai nome e preço das páginas de produto da Amazon
+        """ Extrai nome/preço (JSON-LD/meta) com fallbacks específicos da Amazon """
+        structured = extract_structured_data(html, url)
+        data = self._extract_from_structured_data(structured, url)
+        if data.get("name") and data.get("current_price"):
+            return data
 
-        O processo reutiliza os extratores genéricos de JSON-LD e meta
-        tags. Quando esses não fornecerem ``name`` ou ``current_price``,
-        realiza um fallback com seletores específicos da Amazon,
-        considerando variações comuns de estrutura.
-        """
+        #Parsel first: tenta JSON-LD/meta
+        sel = Selector(text=html)
+        data = self._extract_from_json_ld_parsel(sel, url)
+        if not data.get("name") or not data.get("current_price"):
+            data = self._extract_from_meta_tags_parsel(sel, url)
+        if data.get("name") and data.get("current_price"):
+            return data
 
-        soup = BeautifulSoup(html, "html.parser")
+        #Fallback para BeautifulSoup(lxml)
+        soup = BeautifulSoup(html, "lxml")
 
         #Primeiro tenta os extratores genéricos da classe base
         data = self._extract_from_json_ld(soup, url)
         if not data.get("name") or not data.get("current_price"):
             data = self._extract_from_meta_tags(soup, url)
 
-        #Caso já tenha obtido nome e preço, retorna imediatamente
         if data.get("name") and data.get("current_price"):
             return data
 
-        # ---------- FALLBACK PARA SELETORES ESPECÍFICOS DA AMAZON ----------
-        #Título pode estar em ``#productTitle``, ``span[id*=`productTitle`]`` ou ``#title``
-        #Prioriza ``#productTitle`` > ``#title`` > ``<meta property="og:title">``
-        title_tag = (
-            soup.find(id=re.compile("^productTitle$", re.I))
-            or soup.find("span", id=re.compile("productTitle", re.I))
-            or soup.find(id=re.compile("^title$", re.I))
-            or soup.find("meta", property="og:title")
+        # ---------- FALLBACK PARA SELETORES ESPECÍFICOS DA AMAZON (PARSEL) ----------
+        #Título pode estar em ``#productTitle``, variações de ``id`` contendo "productTitle" (ignorando maiúsculas/minúsculas) ou em ``#title``; Os seletores XPath utilizam ``translate`` para normalizar o ``id``. 
+        name = (
+            sel.css("#productTitle::text").get()
+            or sel.xpath("//span[contains(translate(@id, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'producttitle')]/text()").get()
+            or sel.xpath("//*[translate(@id, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='title']/text()").get()
+            or sel.css('meta[property="og:title"]::attr(content)').get()
         )
-        name: Optional[str] = None
-        if title_tag:
-            #Meta tags guardam o conteúdo no atributo ``content``
-            name = (
-                title_tag.get("content")
-                if title_tag.name == "meta"
-                else title_tag.get_text(strip=True)
-            )
 
         #Preço pode aparecer em diversos locais dependendo do layout da página
-        price_tag = (
-            soup.select_one("#corePriceDisplay_desktop_feature_div span.a-offscreen")
-            or soup.select_one(".apexPriceToPay span.a-offscreen")
-            #Fallback para outros seletores conhecidos apenas se o principal falhar
-            or soup.find(id="priceblock_ourprice")
-            or soup.find(id="priceblock_dealprice")
-            or soup.find(id="priceblock_saleprice")
-            or soup.find(id="price_inside_buybox")
-            or soup.select_one("#apex_desktop span.a-price > span.a-offscreen")
+        raw_price = (
+            sel.css("#corePriceDisplay_desktop_feature_div span.a-offscreen::text").get()
+            or sel.css(".apexPriceToPay span.a-offscreen::text").get()
+            or sel.css("#priceblock_ourprice::text").get()
+            or sel.css("#priceblock_dealprice::text").get()
+            or sel.css("#priceblock_saleprice::text").get()
+            or sel.css("#price_inside_buybox::text").get()
+            or sel.css("#apex_desktop span.a-price > span.a-offscreen::text").get()
         )
-        raw_price = price_tag.get_text(strip=True) if price_tag else None
 
         #Moeda pode estar em meta tags ou ser inserida do símbolo exibido
-        currency_tag = soup.find("meta", property="og:price:currency")
-        currency: Optional[str] = currency_tag.get("content") if currency_tag else None
+        currency: Optional[str] = sel.css('meta[property="og:price:currency"]::attr(content)').get()
 
         #Fallback para estruturas que dividem o valor em parte inteira e decimal
         if not raw_price:
-            whole = soup.select_one("span.a-price-whole")
-            fraction = soup.select_one("span.a-price-fraction")
+            whole = sel.css("span.a-price-whole::text").get()
+            fraction = sel.css("span.a-price-fraction::text").get()
             if whole:
-                #Remove caracteres não numéricos e combina as partes
-                whole_part = re.sub(r"\D", "", whole.get_text())
-                fraction_part = re.sub(r"\D", "", fraction.get_text()) if fraction else "00"
+                whole_part = re.sub(r"\D", "", whole)
+                fraction_part = re.sub(r"\D", "", fraction) if fraction else "00"
                 raw_price = f"{whole_part}.{fraction_part}"
                 if not currency:
-                    symbol = soup.select_one("span.a-price-symbol")
-                    currency = symbol.get_text(strip=True) if symbol else None
+                    symbol = sel.css("span.a-price-symbol::text").get()
+                    currency = symbol.strip() if symbol else None
 
         if not currency and raw_price:
             #Extrai símbolos não numéricos do início do preço (ex.: R$)
@@ -390,110 +657,30 @@ class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
             #Normaliza o valor monetário utilizando a função da classe base
             "current_price": self._format_price(numeric_price, currency),
         }
-
-
-class ShopeeHtmlStaticStrategy(HtmlStaticStrategy):
-    """ Estratégia para páginas estáticas da Shopee """
-    domain = "shopee.com.br"
-
-    def _parse_html(self, html: str, url: str) -> dict:
-        """ Extrai dados de nome e preço específicos da Shopee
-
-        A rotina procura inicialmente pelo script ``<script id="__NEXT_DATA__">``
-        que contém um JSON com o estado completo da página. A partir desse JSON é
-        feita uma busca recursiva dentro de ``props.pageProps`` para localizar
-        campos de nome e preço do produto. Se qualquer etapa falhar, os métodos
-        genéricos de extração da classe base são utilizados como fallback
-        """
-
-        soup = BeautifulSoup(html, "html.parser")
-
-        #Primeiro tenta JSON embutido em __NEXT_DATA__
-        script_tag = soup.find("script", id="__NEXT_DATA__")
-        if script_tag and script_tag.string:
-            try:
-                data = json.loads(script_tag.string)
-                page_props = data.get("props", {}).get("pageProps", {})
-
-                #Busca recursiva por chaves relevantes dentro de ``pageProps``
-                def _deep_search(obj: Any, keys: set[str]):
-                    if isinstance(obj, dict):
-                        for k, v in obj.items():
-                            lk = k.lower()
-                            if lk in keys and not isinstance(v, (dict, list)):
-                                return {lk: v}
-                            found = _deep_search(v, keys)
-                            if found:
-                                return found
-                    elif isinstance(obj, list):
-                        for item in obj:
-                            found = _deep_search(item, keys)
-                            if found:
-                                return found
-                    return {}
-
-                name_dict = _deep_search(page_props, {"name", "title"})
-                #Inclui chaves alternativas utilizadas pela shopee para representar preços
-                price_dict = _deep_search(
-                    page_props,
-                    {
-                        "price",
-                        "pricedisplay",
-                        "amount",
-                        "price_min",
-                        "price_before_discount",
-                        "price_min_before_discount",
-                    },
-                )
-                currency_dict = _deep_search(page_props, {"currency", "currencysymbol"})
-
-                name = next(iter(name_dict.values())) if name_dict else None
-                price = next(iter(price_dict.values())) if price_dict else None
-                currency = next(iter(currency_dict.values())) if currency_dict else None
-
-                #Normaliza o preço encontrado para facilitar a conversão monetária
-                if isinstance(price, str):
-                    cleaned = re.sub(r"[^\d.,]", "", price)
-                    if "," in cleaned and "." in cleaned:
-                        cleaned = cleaned.replace(".", "").replace(",", ".")
-                    else:
-                        cleaned = cleaned.replace(",", ".")
-                    price = cleaned or None
-
-                elif isinstance(price, int):
-                    #Valores inteiros costumam representar o preço multiplicado por 100000
-                    price = Decimal(price) / Decimal("100000")
-
-                if name and price is not None:
-                    return {
-                        "name": name,
-                        "url": url,
-                        "current_price": self._format_price(price, currency),
-                    }
-            except json.JSONDecodeError:
-                pass
-
-        # ---------- FALLBACK UTILIZA EXTRATORES GENÉRICOS DE CLASSE BASE ----------
-        data = self._extract_from_json_ld(soup, url)
-        if not data.get("name") or not data.get("current_price"):
-            data = self._extract_from_meta_tags(soup, url)
-        return data
-
+    
 
 class MagaluHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas do Magazine Luiza """
     domain = "magazineluiza.com.br"
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Extrai nome e preço das páginas do Magazine Luiza
+        """ Extrai nome/preço (JSON-LD/meta) e usa fallbacks comuns do Magalu """
+        structured = extract_structured_data(html, url)
+        data = self._extract_from_structured_data(structured, url)
+        if data.get("name") and data.get("current_price"):
+            return data
 
-        Retorna sempre um dicionário contendo ``name`` e ``current_price``.
-        Caso algum valor não seja localizado, o campo correspondente será
-        ``None`` ou vazio, permitindo que ``DataQualityValidator`` da classe
-        sinalize inconsistência.
-        """
+        #Parsel first: tenta JSON-LD/meta
+        sel = Selector(text=html)
+        data = self._extract_from_json_ld_parsel(sel, url)
+        if data.get("name") and data.get("current_price"):
+            return data
+        data = self._extract_from_meta_tags_parsel(sel, url)
+        if data.get("name") and data.get("current_price"):
+            return data
 
-        soup = BeautifulSoup(html, "html.parser")
+        #Fallback para BeautifulSoup(lxml)
+        soup = BeautifulSoup(html, "lxml")
 
         #Tenta extrair via bloco JSON-LD específico de produto
         data = self._extract_from_json_ld(soup, url)
@@ -560,6 +747,5 @@ __all__ = [
     "HtmlStaticStrategy",
     "MercadoLivreHtmlStaticStrategy",
     "AmazonHtmlStaticStrategy",
-    "ShopeeHtmlStaticStrategy",
     "MagaluHtmlStaticStrategy",
 ]

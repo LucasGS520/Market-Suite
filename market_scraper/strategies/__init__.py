@@ -5,16 +5,15 @@ from .html_static import (
     HtmlStaticStrategy,
     MercadoLivreHtmlStaticStrategy,
     AmazonHtmlStaticStrategy,
-    ShopeeHtmlStaticStrategy,
     MagaluHtmlStaticStrategy,
 )
 from .json_endpoint import (
     JsonEndpointStrategy,
     MercadoLivreJsonStrategy,
     AmazonJsonStrategy,
-    ShopeeJsonStrategy,
     MagaluJsonStrategy,
 )
+from .selectorlib_strategy import SelectorLibStrategy
 
 
 __all__ = [
@@ -22,11 +21,10 @@ __all__ = [
     "HtmlStaticStrategy",
     "MercadoLivreHtmlStaticStrategy",
     "AmazonHtmlStaticStrategy",
-    "ShopeeHtmlStaticStrategy",
     "MagaluHtmlStaticStrategy",
     "JsonEndpointStrategy",
     "MercadoLivreJsonStrategy",
     "AmazonJsonStrategy",
-    "ShopeeJsonStrategy",
     "MagaluJsonStrategy",
+    "SelectorLibStrategy",
 ]
