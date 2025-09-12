@@ -69,7 +69,7 @@ class EstrategiaUsaContexto:
         # Corrige para retornar sucesso e usar o valor do contexto
         return {
             "status": "success",
-            "details": {"name": ctx.get("token", ""), "current_price": ""}
+            "details": {"name": ctx.get("token", ""), "current_price": "1"}
         }
 
 class EstrategiaErroSimples:
@@ -79,6 +79,27 @@ class EstrategiaErroSimples:
     
     async def get_data(self, **k):
         return {"status": "error"}
+    
+class EstrategiaRaquerLogin:
+    """ Estratégia que depende da etapa de Login """
+    dependencies = {"login"}
+
+    def supports_url(self, url: str) -> bool:
+        return True
+    
+    async def get_data(self, **k):
+        ctx = k.get("shared_context", {})
+        return {
+            "status": "success",
+            "details": {"name": ctx.get("usuario", ""), "current_price": "1"},
+        }
+    
+async def resolver_login(**k):
+    """" Simula etapa de login e atualiza o contexto compartilhado """
+    ctx = k.get("shared_context")
+    ctx["login"] = True
+    ctx["usuario"] = "logado"
+    return ctx
 
 @pytest.mark.asyncio
 async def test_contadores_de_fallback_e_estrategia():
@@ -131,6 +152,54 @@ async def test_fallback_quando_timeout():
     assert (
         SCRAPER_STRATEGY_TOTAL.labels("EstrategiaSucesso", "success")._value.get() == 1
     )
+    assert SCRAPER_FALLBACK_TOTAL._value.get() == 1
+
+@pytest.mark.asyncio
+async def test_resolucao_de_dependencias():
+    """ Deve resolver dependências declaradas antes da execução """
+    SCRAPER_STRATEGY_TOTAL._metrics.clear()
+    SCRAPER_FALLBACK_TOTAL._value.set(0)
+
+    orchestrator = MultiStrategyScraperOrchestrator(
+        strategy_selector=lambda url: [],
+        dependency_resolvers={"login": resolver_login},
+    )
+
+    resultado = await orchestrator.scrape(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=SimpleNamespace(),
+        product_type="monitored",
+        strategies=[EstrategiaRaquerLogin()],
+        shared_context={},
+    )
+
+    assert resultado["status"] == "success"
+    assert resultado["details"]["name"] == "logado"
+    assert SCRAPER_FALLBACK_TOTAL._value.get() == 0
+
+@pytest.mark.asyncio
+async def test_fallback_quando_dependencia_ausente():
+    """ Deve pular estratégia sem resolver dependência e acionar fallback """
+    SCRAPER_STRATEGY_TOTAL._metrics.clear()
+    SCRAPER_FALLBACK_TOTAL._value.set(0)
+
+    orchestrator = MultiStrategyScraperOrchestrator(
+        strategy_selector=lambda url: [],
+    )
+
+    resultado = await orchestrator.scrape(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=SimpleNamespace(),
+        product_type="monitored",
+        strategies=[EstrategiaRaquerLogin(), EstrategiaSucesso()],
+        shared_context={},
+    )
+
+    assert resultado["status"] == "success"
+    assert resultado["details"]["name"] == "Produto"
+    #Fallback foi acionado pois a primeira estratégia foi pulada
     assert SCRAPER_FALLBACK_TOTAL._value.get() == 1
 
 @pytest.mark.asyncio
@@ -188,8 +257,8 @@ async def test_compartilhamento_de_contexto():
 
     assert resultado["status"] == "success"
     assert resultado["details"]["name"] == "xyz"
-    # O fallback não é incrementado nesse cenário
-    assert SCRAPER_FALLBACK_TOTAL._value.get() == 0
+    #Houve fallback pois a primeira estratégia não retornou sucesso
+    assert SCRAPER_FALLBACK_TOTAL._value.get() == 1
 
 @pytest.mark.asyncio
 async def test_execucao_em_paralelo():

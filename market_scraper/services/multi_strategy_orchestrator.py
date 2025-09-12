@@ -7,7 +7,7 @@ para uma determinada URL. A cada tentativa bem sucedida de coleta os dados
 são validados e métricas de observabilidade são atualizadas.
 """
 
-from typing import Callable, Literal
+from typing import Callable, Literal, Awaitable, Any
 from uuid import UUID
 
 import asyncio
@@ -37,6 +37,7 @@ class MultiStrategyScraperOrchestrator:
         validator: DataQualityValidator | None = None,
         strategy_timeout: float | None = None,
         throttle_manager: ThrottleManager | None = None,
+        dependency_resolvers: dict[str, Callable[..., Awaitable[dict | None]]] | None = None,
     ) -> None:
         """ Define dependências opcionais para o orquestrador
 
@@ -45,12 +46,15 @@ class MultiStrategyScraperOrchestrator:
         utilizado para conferir a qualidade dos dados retornados.
         ``strategy_timeout`` define o tempo máximo para execução de cada
         estratégia. ``throttle_manager`` controla o ritmo das requisições
-        HTML, evitando excesso de chamadas ao mesmo domínio.
+        HTML, evitando excesso de chamadas ao mesmo domínio. ``dependency_resolvers``
+        contém funções assíncronas que resolvem dependências declaradas pelas
+        estratégias antes da execução.
         """
         self._strategy_selector = strategy_selector or strategies_for
         self._validator = validator or DataQualityValidator()
         self._strategy_timeout = strategy_timeout
         self._throttle_manager = throttle_manager or ThrottleManager(rate=1.0, capacity=1)
+        self._dependency_resolvers = dependency_resolvers or {}
 
     async def scrape(
         self,
@@ -74,7 +78,9 @@ class MultiStrategyScraperOrchestrator:
         define como o pipeline será processado: ``sequential`` (padrão), ``parallel``
         ou ``conditional``. ``shared_context`` é um dicionário mutável usado para 
         compartilhar dados intermediários entre estratégias (como cookies ou HTML
-        pré-renderizado). Os parâmetros extras em ``kawargs`` são repassados para cada estratégia.
+        pré-renderizado). Antes de cada etapa, as dependências declaradas são
+        resolvidas via ``dependency_resolvers``. Os parâmetros extras em ``kwargs``
+        são repassados para cada estratégia.
         """
         strategies = strategies or self._strategy_selector(url)
         if not strategies:
@@ -84,6 +90,27 @@ class MultiStrategyScraperOrchestrator:
             )
 
         shared_context = shared_context or {}
+
+        async def _resolve_dependency(name: str) -> None:
+            """ Garante que a dependência esteja presente no contexto """
+            if name in shared_context:
+                return
+            resolver = self._dependency_resolvers.get(name)
+            if resolver is None:
+                logger.warning("dependency_resolver_missing", dependency=name)
+                return
+            try:
+                ctx_update = await resolver(
+                    shared_context=shared_context,
+                    url=url,
+                    user_id=user_id,
+                    payload=payload,
+                    **kwargs,
+                )
+                if isinstance(ctx_update, dict):
+                    shared_context.update(ctx_update)
+            except Exception as err:
+                logger.warning("dependency_resolver_error", dependency=name, erro=err)
 
         async def _run_strategy(strategy: ScrapingStrategy) -> tuple[ScrapingStrategy, dict, str]:
             """ Executa uma estratégia individual com tratamento de erros """
@@ -122,7 +149,24 @@ class MultiStrategyScraperOrchestrator:
 
         #Execução paralela das estratégias
         if execution_mode == "parallel":
-            tasks = [_run_strategy(s) for s in strategies if s.supports_url(url)]
+            deps: set[str] = set()
+            for s in strategies:
+                if s.supports_url(url):
+                    deps.update(getattr(s, "dependencies", set()))
+            for dep in deps:
+                await _resolve_dependency(dep)
+
+            tasks = []
+            skipped = 0
+            for s in strategies:
+                if not s.supports_url(url):
+                    continue
+                dep_set = getattr(s, "dependencies", set())
+                if any(d not in shared_context for d in dep_set):
+                    skipped += 1
+                    continue
+                tasks.append(_run_strategy(s))
+
             responses = await asyncio.gather(*tasks)
 
             result_found = False
@@ -152,6 +196,9 @@ class MultiStrategyScraperOrchestrator:
                 if isinstance(ctx_update, dict):
                     shared_context.update(ctx_update)
 
+            for _ in range(skipped):
+                SCRAPER_FALLBACK_TOTAL.inc()
+
             return result
         
         #Execução sequencial ou condicional
@@ -159,6 +206,14 @@ class MultiStrategyScraperOrchestrator:
             if not strategy.supports_url(url):
                 continue
 
+            deps = getattr(strategy, "dependencies", set())
+            for dep in deps:
+                await _resolve_dependency(dep)
+            if any(d not in shared_context for d in deps):
+                if idx < len(strategies) - 1:
+                    SCRAPER_FALLBACK_TOTAL.inc()
+                continue
+ 
             if execution_mode == "conditional" and hasattr(strategy, "should_run"):
                 if not strategy.should_run(shared_context):
                     continue
