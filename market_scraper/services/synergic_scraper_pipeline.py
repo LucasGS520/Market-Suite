@@ -3,9 +3,9 @@ from __future__ import annotations
 """ Orquestrador de etapas de scraping baseadas em ``PipelineStep``
 
 Esta classe utiliza as etapas definidas em ``pipeline_steps`` e a
-configuração de ``pipeline_policy`` para executar um pipeline
-configurável por domínio. Após cada etapa os dados são validados
-e em caso de falha, a próxima etapa é acionada automaicamente.
+configuração centralizada em ``domain_policy.yaml`` para executar um
+pipeline configurável por domínio. Após cada etapa os dados são
+validados e, em caso de falha, a próxima etapa é acionada automaticamente.
 """
 
 from typing import Any, Iterable, Literal
@@ -13,7 +13,7 @@ import asyncio
 
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from .synergic_pipeline import PipelineStep
-from .pipeline_policy import steps_for
+from .domain_policy import pipeline_steps_for
 
 
 class SynergicScraperPipeline:
@@ -39,7 +39,7 @@ class SynergicScraperPipeline:
         """
         shared_context = shared_context or {}
         shared_context.setdefault("url", url)
-        steps = list(steps) if steps is not None else steps_for(url, page_type)
+        steps = list(steps) if steps is not None else pipeline_steps_for(url, context=page_type)
 
         if execution_mode == "parallel":
             tasks = [s.run(shared_context) for s in steps if s.should_run(shared_context)]
