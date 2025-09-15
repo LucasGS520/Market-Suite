@@ -11,6 +11,15 @@ forma coordenada, mantendo o código modular e extensível.
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 import asyncio
+from time import perf_counter
+
+import structlog
+
+from shared.metrics.metrics_scraper import (
+    SCRAPER_STRATEGY_TOTAL,
+    SCRAPER_FALLBACK_TOTAL,
+    SCRAPING_LATENCY_SECONDS,
+)
 
 
 class PipelineStep(ABC):
@@ -29,6 +38,9 @@ class PipelineStep(ABC):
         """ Determina se a etapa deve ser executada no modo condicional """
         return True
     
+logger = structlog.get_logger("synergic_pipeline")
+
+
 class SynergicPipeline:
     """ Orquestra a execução das etapas definidas """
     def __init__(
@@ -51,21 +63,51 @@ class SynergicPipeline:
         shared_context = shared_context or {}
         results: list[dict[str, Any]] = []
 
-        async def _run_step(step: PipelineStep) -> dict[str, Any]:
-            result = await step.run(shared_context)
+        async def _run_step(step: PipelineStep) -> tuple[str, dict[str, Any], str]:
+            """ Executa uma etapa registrando métricas e logs """
+            step_name = step.__class__.__name__
+            home = perf_counter()
+            try:
+                result = await step.run(shared_context)
+            except Exception as err:
+                logger.exception("pipeline_step_error", step=step_name, error=str(err))
+                result = {"status": "error"}
+            duration = perf_counter() - home
+            
+            status = result.get("status", "error")
             ctx = result.get("shared_context")
             if isinstance(ctx, dict):
                 shared_context.update(ctx)
-            return result
+
+            SCRAPER_STRATEGY_TOTAL.labels(step_name, status).inc()
+            SCRAPING_LATENCY_SECONDS.labels(step_name).observe(duration)
+
+            logger.info("step_completed", step=step_name, status=status, execution_time=duration, details=result.get("details"))
+            return step_name, result, status
         
+        success_status = {"success", "ok", "NOT_MODIFIED"}
+
         if self.execution_mode == "parallel":
             execs = [_run_step(step) for step in self.steps]
-            results = await asyncio.gather(*execs)
+            responses = await asyncio.gather(*execs)
+            for step_name, resp, status in responses:
+                results.append(resp)
+                if status not in success_status:
+                    SCRAPER_FALLBACK_TOTAL.inc()
+                    logger.info("fallback_triggered", step=step_name)
+
         else:
-            for step in self.steps:
+            for idx, step in enumerate(self.steps):
                 if self.execution_mode == "conditional" and not step.should_run(shared_context):
+                    SCRAPER_FALLBACK_TOTAL.inc()
+                    logger.info("step_skipped", step=step.__class__.__name__)
                     continue
-                results.append(await _run_step(step))
+
+                step_name, resp, status = await _run_step(step)
+                results.append(resp)
+                if status not in success_status and idx < len(self.steps) - 1:
+                    SCRAPER_FALLBACK_TOTAL.inc()
+                    logger.info("fallback_triggered", step=step_name)
 
         return {"results": results, "shared_context": shared_context}
 

@@ -142,6 +142,9 @@ class HtmlStaticStrategy(ScrapingStrategy):
                 offers = item.get("offers") or {}
                 if isinstance(offers, list):
                     offers = offers[0] if offers else {}
+                #Alguns sites usam ``AggregateOffer`` e aninham outra lista em ``offers``
+                elif isinstance(offers, dict) and isinstance(offers.get("offers"), list):
+                    offers = offers["offers"][0] if offers["offers"] else {}
                 price = (
                     offers.get("price")
                     or offers.get("priceSpecification", {}).get("price")
