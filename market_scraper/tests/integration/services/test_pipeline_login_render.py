@@ -4,7 +4,7 @@ import pytest
 import mechanicalsoup
 
 from market_scraper.services import (
-    SynergicScraperPipeline,
+    SynergicPipeline,
     MechanicalSoupLoginStep,
     RequestsHTMLRenderStep,
     BeautifulSoupExtractionStep,
@@ -52,13 +52,13 @@ async def test_pipeline_com_login_e_renderização(monkeypatch: pytest.MonkeyPat
         
     monkeypatch.setattr("market_scraper.services.pipeline_steps.HTMLSession", SessaoFalsa)
 
-    pipeline = SynergicScraperPipeline()
+    pipeline = SynergicPipeline(steps=passos)
     passos = [
         MechanicalSoupLoginStep(login_url="https://exemplo.com/login", username="user", password="pass"),
         RequestsHTMLRenderStep(),
         BeautifulSoupExtractionStep(),
     ]
-    resultado = await pipeline.run(url="https://exemplo.com/produto", steps=passos)
+    resultado = await pipeline.run(shared_context={"url": "https://exemplo.com/produto"})
 
     assert resultado["status"] == "success"
     assert resultado["details"]["name"] == "Produto Logado"

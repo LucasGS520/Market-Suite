@@ -3,7 +3,7 @@
 import pytest
 
 from market_scraper.services import (
-    SynergicScraperPipeline,
+    SynergicPipeline,
     ExtructExtractionStep,
     ParselExtractionStep,
     BeautifulSoupExtractionStep,
@@ -29,48 +29,31 @@ HTML_SIMPLE = """
 @pytest.mark.asyncio
 async def test_pipeline_prioriza_extruct():
     """ Quando JSON-LD está presente, Extruct deve ser usado """
-    pipeline = SynergicScraperPipeline()
-    result = await pipeline.run(
-        url="https://exemplo.com",
-        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()],
-        shared_context={"html": HTML_JSON_LD},
-    )
+    pipeline = SynergicPipeline(steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()])
+    result = await pipeline.run(shared_context={"url": "https://exemplo.com", "html": HTML_JSON_LD})
     assert result["details"]["name"] == "Produto X"
     assert result["extraction_method"] == "ExtructExtractionStep"
 
 @pytest.mark.asyncio
 async def test_pipeline_fallback_parsel():
     """ Deve usar Parsel quando Extruct não encontrar dados """
-    pipeline = SynergicScraperPipeline()
-    result = await pipeline.run(
-        url="https://exemplo.com",
-        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()],
-        shared_context={"html": HTML_ONLY_META},
-    )
+    pipeline = SynergicPipeline(steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()])
+    result = await pipeline.run(shared_context={"url": "https://exemplo.com", "html": HTML_ONLY_META})
     assert result["details"]["name"] == "Produto Y"
     assert result["extraction_method"] == "ParselExtractionStep"
 
 @pytest.mark.asyncio
 async def test_pipeline_fallback_beautifulsoup():
     """ Se Parsel falhar,  deve usar BeautifulSoup """
-    pipeline = SynergicScraperPipeline()
-    result = await pipeline.run(
-        url="https://exemplo.com",
-        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()],
-        shared_context={"html": HTML_SIMPLE},
-    )
+    pipeline = SynergicPipeline(steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()])
+    result = await pipeline.run(shared_context={"url": "https://exemplo.com", "html": HTML_SIMPLE})
     assert result["details"]["name"] == "Produto Z"
     assert result["extraction_method"] == "BeautifulSoupExtractionStep"
 
 @pytest.mark.asyncio
 async def test_pipeline_parallel_usa_primeiro_valido():
     """ Deve retornar o primeiro resultado válido no modo paralelo """
-    pipeline = SynergicScraperPipeline()
-    result = await pipeline.run(
-        url="https://exemplo.com",
-        steps=[ParselExtractionStep(), BeautifulSoupExtractionStep()],
-        shared_context={"html": HTML_SIMPLE},
-        execution_mode="parallel",
-    )
+    pipeline = SynergicPipeline(steps=[ParselExtractionStep(), BeautifulSoupExtractionStep()])
+    result = await pipeline.run(shared_context={"url": "https://exemplo.com", "html": HTML_SIMPLE}, execution_mode="parallel")
     assert result["details"]["name"] == "Produto Z"
     assert result["extraction_method"] == "BeautifulSoupExtractionStep"
