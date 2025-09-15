@@ -49,7 +49,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - Função: agenda execuções periódicas (rechecagem de produtos, coleta/limpeza de métricas e caches).
 - Tarefas agendadas comuns: `collect_celery_metrics`, `cleanup_cache`, `recheck_monitored_products`, `recheck_competitor_products`.
 - Comunicação: publica jobs nas filas do Celery (broker Redis).
-- Novo Módulo `SynergicPipeline` (`market_scraper/services/synergic_pipeline.py`) permite montar pipelines de etapas compartilhando contexto, configuráveis por domínio em `pipeline_policy.yaml`.
+- Novo Módulo `SynergicPipeline` (`market_scraper/services/synergic_pipeline.py`) permite montar pipelines de etapas compartilhando contexto, configuráveis por domínio em `domain_policy.yaml` (chaves `pipeline_steps` e `pipeline_policies`).
 -  Para agentes: ajuste cron/intervalos nas configurações do Celery; evite criar rotinas paralelas conflitantes.
 
 ### Serviço de Scraping — `market_scraper`

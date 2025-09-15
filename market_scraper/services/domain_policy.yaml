@@ -18,3 +18,22 @@ policies:
     - HTML_MAGALU
   example.com:
     - SELECTOR_GENERIC
+
+#Mapeia as etapas disponíveis para o ``SynergicPipeline``.
+pipeline_steps:
+  mechanical_soup_login: MechanicalSoupLoginStep
+  extruct: ExtructExtractionStep
+  parsel: ParselExtractionStep
+  beautifulsoup: BeautifulSoupExtractionStep
+  selectorlib: SelectorLibExtractionStep
+
+#Define, por domínio, a sequência de etapas a ser utilizada
+pipeline_policies:
+  mercadolivre.com.br:
+    default:
+      - mechanical_soup_login
+      - extruct
+      - parsel
+      - beautifulsoup
+      - selectorlib
+      
