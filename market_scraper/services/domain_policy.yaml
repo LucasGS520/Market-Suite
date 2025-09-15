@@ -31,9 +31,32 @@ pipeline_steps:
 pipeline_policies:
   mercadolivre.com.br:
     default:
-      - mechanical_soup_login
       - extruct
       - parsel
       - beautifulsoup
       - selectorlib
-      
+      - mechanical_soup_login
+
+  amazon.com.br:
+    default:
+      - extruct
+      - parsel
+      - beautifulsoup
+      - selectorlib
+      - mechanical_soup_login
+
+  magazineluiza.com.br:
+    default:
+      - extruct
+      - parsel
+      - beautifulsoup
+      - selectorlib
+      - mechanical_soup_login
+
+  example.com:
+    default:
+      - selectorlib
+      - parsel
+      - beautifulsoup
+      - extruct
+      - mechanical_soup_login
