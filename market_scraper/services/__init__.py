@@ -10,7 +10,7 @@ from .pipeline_steps import (
     MechanicalSoupLoginStep,
     ExtructExtractionStep,
     ParselExtractionStep,
-    BeautifulSoupFallbackStep,
+    BeautifulSoupExtractionStep,
     RequestsHTMLRenderStep,
     SelectorLibExtractionStep,
 )
@@ -23,7 +23,7 @@ __all__ = [
     "MechanicalSoupLoginStep",
     "ExtructExtractionStep",
     "ParselExtractionStep",
-    "BeautifulSoupFallbackStep",
+    "BeautifulSoupExtractionStep",
     "RequestsHTMLRenderStep",
     "SelectorLibExtractionStep",
     "SynergicScraperPipeline",

@@ -15,7 +15,9 @@ import os
 import yaml
 
 import market_scraper.strategies as strategies_module
+import market_scraper.services.pipeline_steps as pipeline_steps_module
 from market_scraper.strategies import ScrapingStrategy
+from market_scraper.services.synergic_pipeline import PipelineStep
 from market_scraper.utils.http_utils import extract_hostname
 
 
@@ -25,6 +27,8 @@ CONFIG_PATH = Path(os.getenv("DOMAIN_POLICY_FILE", Path(__file__).with_name("dom
 #Estruturas carregadas a partir do arquivo de configuração
 STRATEGY_REGISTRY: Dict[str, Type[ScrapingStrategy]] = {}
 DOMAIN_POLICIES: Dict[str, List[str]] = {}
+PIPELINE_STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {}
+PIPELINE_POLICIES: Dict[str, Dict[str, List[str]]] = {}
 
 #Controle interno de hot-reload
 _HOT_RELOAD = bool(os.getenv("DOMAIN_POLICY_HOT_RELOAD"))
@@ -32,11 +36,13 @@ _CONFIG_MTIME = 0.0
 
 def load_config() -> None:
     """ Carrega as estratégias e políticas do arquivo configurado """
-    global STRATEGY_REGISTRY, DOMAIN_POLICIES, _CONFIG_MTIME
+    global STRATEGY_REGISTRY, DOMAIN_POLICIES, PIPELINE_STEP_REGISTRY, PIPELINE_POLICIES, _CONFIG_MTIME
 
     if not CONFIG_PATH.exists():
         STRATEGY_REGISTRY = {}
         DOMAIN_POLICIES = {}
+        PIPELINE_STEP_REGISTRY = {}
+        PIPELINE_POLICIES = {}
         _CONFIG_MTIME = 0.0
         return
 
@@ -52,6 +58,16 @@ def load_config() -> None:
 
     STRATEGY_REGISTRY = registry
     DOMAIN_POLICIES = data.get("policies") or {}
+
+    #Mapeia etapas do pipeline sinérgico
+    step_registry: Dict[str, Type[PipelineStep]] = {}
+    for name, class_name in (data.get("pipeline_steps") or {}).items():
+        step_cls = getattr(pipeline_steps_module, class_name, None)
+        if step_cls:
+            step_registry[name] = step_cls
+
+    PIPELINE_STEP_REGISTRY = step_registry
+    PIPELINE_POLICIES = data.get("pipeline_policies") or {}
     _CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
 
 def enable_hot_reload() -> None:
@@ -95,6 +111,33 @@ def strategies_for(url: str) -> List[ScrapingStrategy]:
             ]
 
     #Quando domínio não é reconhecido, nenhuma estratégia é retornada
+    return []
+
+def pipeline_steps_for(url: str, *, context: str = "default") -> List[PipelineStep]:
+    """ Retorna intâncias de etapas de pipeline para o domínio
+    
+    ``context`` permite selecionar variações de pipeline definidas para o 
+    domínio. Caso o contexto não exista, é utilizada a chave ``default``.
+    Etapas desconhecidas são ignoradas e, se o domínio não estiver 
+    configurado, é retornada uma lista vazia.
+    """
+    _reload_if_needed()
+
+    host = extract_hostname(url)
+
+    def _corresponds_domain(host: str, domain: str) -> bool:
+        """ Verifica se o host pertence exatamente ao domínio informado """
+        return host == domain or host.endswith("." + domain)
+    
+    for domain, contexts in PIPELINE_POLICIES.items():
+        if _corresponds_domain(host, domain):
+            step_names = contexts.get(context) or contexts.get("default") or []
+            return [
+                PIPELINE_STEP_REGISTRY[name]()
+                for name in step_names
+                if name in PIPELINE_STEP_REGISTRY
+            ]
+        
     return []
 
 #Carrega a configuração na importação do módulo

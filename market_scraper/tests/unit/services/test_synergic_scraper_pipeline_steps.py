@@ -6,7 +6,7 @@ from market_scraper.services import (
     SynergicScraperPipeline,
     ExtructExtractionStep,
     ParselExtractionStep,
-    BeautifulSoupFallbackStep,
+    BeautifulSoupExtractionStep,
 )
 
 HTML_JSON_LD = """
@@ -32,7 +32,7 @@ async def test_pipeline_prioriza_extruct():
     pipeline = SynergicScraperPipeline()
     result = await pipeline.run(
         url="https://exemplo.com",
-        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupFallbackStep()],
+        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()],
         shared_context={"html": HTML_JSON_LD},
     )
     assert result["details"]["name"] == "Produto X"
@@ -44,7 +44,7 @@ async def test_pipeline_fallback_parsel():
     pipeline = SynergicScraperPipeline()
     result = await pipeline.run(
         url="https://exemplo.com",
-        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupFallbackStep()],
+        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()],
         shared_context={"html": HTML_ONLY_META},
     )
     assert result["details"]["name"] == "Produto Y"
@@ -56,8 +56,8 @@ async def test_pipeline_fallback_beautifulsoup():
     pipeline = SynergicScraperPipeline()
     result = await pipeline.run(
         url="https://exemplo.com",
-        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupFallbackStep()],
+        steps=[ExtructExtractionStep(), ParselExtractionStep(), BeautifulSoupExtractionStep()],
         shared_context={"html": HTML_SIMPLE},
     )
     assert result["details"]["name"] == "Produto Z"
-    assert result["extraction_method"] == "BeautifulSoupFallbackStep"
+    assert result["extraction_method"] == "BeautifulSoupExtractionStep"

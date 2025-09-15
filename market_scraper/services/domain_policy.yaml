@@ -25,36 +25,38 @@ pipeline_steps:
   extruct: ExtructExtractionStep
   parsel: ParselExtractionStep
   beautifulsoup: BeautifulSoupExtractionStep
+  requestshtml: RequestsHTMLExtractionStep
   selectorlib: SelectorLibExtractionStep
+  
 
 #Define, por domínio, a sequência de etapas a ser utilizada
 pipeline_policies:
   mercadolivre.com.br:
     default:
+      - mechanical_soup_login
       - extruct
       - parsel
       - beautifulsoup
       - requestshtml
       - selectorlib
-      - mechanical_soup_login
 
   amazon.com.br:
     default:
+      - mechanical_soup_login
       - extruct
       - parsel
       - beautifulsoup
       - requestshtml
       - selectorlib
-      - mechanical_soup_login
 
   magazineluiza.com.br:
     default:
+      - mechanical_soup_login
       - extruct
       - parsel
       - beautifulsoup
       - requestshtml
       - selectorlib
-      - mechanical_soup_login
 
   example.com:
     default:

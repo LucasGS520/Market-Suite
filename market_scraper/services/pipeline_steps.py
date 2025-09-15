@@ -162,8 +162,8 @@ class ParselExtractionStep(PipelineStep):
             "extraction_method": self.__class__.__name__,
         }
     
-class BeautifulSoupFallbackStep(PipelineStep):
-    """ Fallback usando ``BeautifulSoup`` """
+class BeautifulSoupExtractionStep(PipelineStep):
+    """ Realiza extração simples com ``BeautifulSoup`` """
     def __init__(self, *, validator: DataQualityValidator | None = None) -> None:
         self.validator = validator or DataQualityValidator()
 
@@ -172,9 +172,13 @@ class BeautifulSoupFallbackStep(PipelineStep):
         if not html:
             return {"status": "error"}
         soup = BeautifulSoup(html, "lxml")
-        name_el = soup.select_one("meta[property='og:title]") or soup.select_one("title")
+        name_el = soup.select_one("meta[property='og:title']") or soup.select_one("title")
         price_el = soup.select_one("#price") or soup.select_one(".price")
-        name = name_el["content"] if name_el and name_el.has_attr("content") else name_el.get_text(strip=True) if name_el else None
+        name = (
+            name_el["content"] 
+            if name_el and name_el.has_attr("content") 
+            else name_el.get_text(strip=True) if name_el else None
+        )
         price = price_el.get_text(strip=True) if price_el else None
         details = {"name": name, "current_price": price}
         try:
@@ -209,15 +213,16 @@ class RequestsHTMLRenderStep(PipelineStep):
     
 class SelectorLibExtractionStep(PipelineStep):
     """ Aplica ``selectorlib`` para páginas customizadas """
-    def __init__(self, *, template_path: str, validator: DataQualityValidator | None = None) -> None:
+    def __init__(self, *, template_path: str | None = None, validator: DataQualityValidator | None = None) -> None:
         self.template_path = template_path
         self.validator = validator or DataQualityValidator()
 
     async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
         html = shared_context.get("html")
-        if not html:
+        template = self.template_path or shared_context.get("selectorlib_template")
+        if not html or not template:
             return {"status": "error"}
-        extractor = Extractor.from_yaml_file(self.template_path)
+        extractor = Extractor.from_yaml_file(template)
         data = await asyncio.to_thread(extractor.extract, html)
         details = {
             "name": data.get("name"),
@@ -237,7 +242,7 @@ __all__ = [
     "MechanicalSoupLoginStep",
     "ExtructExtractionStep",
     "ParselExtractionStep",
-    "BeautifulSoupFallbackStep",
+    "BeautifulSoupExtractionStep",
     "RequestsHTMLRenderStep",
     "SelectorLibExtractionStep",
 ]
