@@ -61,3 +61,16 @@ async def test_pipeline_fallback_beautifulsoup():
     )
     assert result["details"]["name"] == "Produto Z"
     assert result["extraction_method"] == "BeautifulSoupExtractionStep"
+
+@pytest.mark.asyncio
+async def test_pipeline_parallel_usa_primeiro_valido():
+    """ Deve retornar o primeiro resultado válido no modo paralelo """
+    pipeline = SynergicScraperPipeline()
+    result = await pipeline.run(
+        url="https://exemplo.com",
+        steps=[ParselExtractionStep(), BeautifulSoupExtractionStep()],
+        shared_context={"html": HTML_SIMPLE},
+        execution_mode="parallel",
+    )
+    assert result["details"]["name"] == "Produto Z"
+    assert result["extraction_method"] == "BeautifulSoupExtractionStep"
