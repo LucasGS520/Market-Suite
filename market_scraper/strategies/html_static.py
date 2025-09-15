@@ -186,7 +186,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
         """ Extrai JSON-LD (prioritário) com suporte a ``@graph``/listas """
         home = perf_counter()
         try:
-            scripts = sel.xapth('//script[@type="application/ld+josn"]/text()').getall()
+            scripts = sel.xpath('//script[@type="application/ld+josn"]/text()').getall()
             for raw in scripts:
                 try:
                     content = json.loads(raw or "{}")

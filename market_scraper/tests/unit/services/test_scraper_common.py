@@ -222,6 +222,7 @@ async def test_scrape_product_common_async_orquestrador_exception(monkeypatch):
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
     class StrategyNotModified:
+        """ Estratégia que simula retorno ``NOT_MODIFIED`` """
         def supports_url(self, url):
             return True
 
@@ -237,10 +238,12 @@ async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
             circuit_breaker,
             recovery_manager,
             throttle_manager,
+            **kwargs,
         ):
             return {"status": "NOT_MODIFIED"}
 
     class StrategyShouldNotRun:
+        """ Estratégia que não deve ser executada após ``NOT_MODIFIED`` """
         called = False
 
         def supports_url(self, url):
@@ -258,6 +261,7 @@ async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
             circuit_breaker,
             recovery_manager,
             throttle_manager,
+            **kwargs,
         ):
             StrategyShouldNotRun.called = True
             return {"status": "success", "details": {"ok": True}}
