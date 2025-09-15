@@ -240,17 +240,20 @@ PLAYWRIGHT_TIMEOUT=30000
 ```
 
 ## Pipeline de Scraping
-1. A API recebe uma URL de produto para monitoramento ou comparação.
-2. Uma tarefa Celery é disparada para o `market_scraper` coletar os dados.
-3. O `market_scraper` utiliza Playwright e diversos gerenciadores (User-Agent, cookies, delays, etc) para simular a navegação humana e extrair as informações do anúncio (**Temporariamente Desativado**)
-4. Os dados coletados são retornados para a API, que atualiza o banco e decide se um alerta deve ser enviado.
+O fluxo completo integra API, Celery e ``SynergicPipeline``:
 
-### Proteções ativas por etapa
-1. **RateLimiter** - aplicado logo na entrada das requisições para garantir que a cota de acessos por janela não seja excedida. Exemplo de erro: ``429 Rate limit excedido``.
-2. **CircuitBreaker** - após sucessivos retornos 403/429, o circuito é aberto e novas tentativas são bloqueadas temporariamente. Exemplo de erro: ``403 Circuit breaker aberto``.
-3. **HumanizedDelayManager** e **ThrottleManager** - inserem atrasos aleatórios e controlam a cadência das chamadas para simular comportamento humano. Exemplo de erro: ``429 Too Many Requests`` quando o ritmo é ultrapassado.
-4. **BlockRecoveryManager** - identifica CAPTCHAs ou bloqueios e tenta recuperar o acesso. Exemplo de erro: ``BlockedByCaptchaError`` caso o desbloqueio falhe.
-5. **AdaptiveRecheckManager** e **IntelligentCacheManager** - após uma coleta bem-sucedida, definem o próximo agendamento e armazenam o resultado. Exemplo de erro: ``CacheInvalidoError`` se o cache não puder ser salvo.
+1. A API agenda a coleta e envia a URL para o ``markeT_scraper``.
+2. O serviço consulta o ``IntelligentCacheManager`` para decidir se uma resposta 304 pode ser retornada sem nova coleta.
+3. O ``domain_policy.yaml`` define quais estratégias e etapas devem ser executadas para o domínio/contexto solicitado.
+4. O ``SynergicPipeline`` executa as etapas registradas, compartilhando contexto e aplicando fallbacks automático até encontrar um resultado válido ou esgotar as alternativas.
+5. O resultado validado é armazenado em cache, métricas são registradas e a resposta estruturada é devolvida à API para persistência ou comparação.
+
+### Proteções ativas por camada
+1. **RateLimiter** - aplicado logo na entrada das requisições para garantir que a cota de acessos por janela não seja excedida (respostas ``429`` quando o limite é atingido).
+2. **CircuitBreaker** - monitora falhas consecutivas (403/429/timeouts) e abre o circuito para o domínio afetado, evitando insistir em endpoints indisponíveis.
+3. **HumanizedDelayManager** e **ThrottleManager** - adicionam jitter e controlam a cadência das chamadas para simular comportamento humano e respeitar limites contratuais.
+4. **BlockRecoverymanager** - identifica CAPTCHAs ou padrões de bloqueio; quando não há recuperação possível o evento é registrado em métricas e logs estruturados.
+5. **AdaptiveRecheckManager** e **InteligentCacheManager** - ajustam os intervalos de rechecagem com base em históricos de mudanças e mantêm os dados em cache com TTL, ETag e assinatura para reduzir acessos redundates.
 
 ## Execução
 Para levantar todo o ambiente com banco de dados, Redis e serviços auxiliares utilize:

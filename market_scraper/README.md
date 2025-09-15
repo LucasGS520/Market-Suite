@@ -56,6 +56,111 @@ Limitações conhecidas:
 
 Prefira o Requests-HTML como alternativa intermediária antes de recorrer ao Playwright.
 
+### Configuração centralizada (`domain_policy.yaml`)
+O arquivo ``services/domain_policy.yaml`` centraliza todas as decisões de orquestração do scraper;
+Ele define:
+- **`strategies`** - mapeia nomes amigáveis para classes de estratégia registradas no código.
+- **`policies`** - ordena as estratégias por domínio, garantindo que as alternativas mais leves sejam executadas primeiro.
+- **`pipeline_steps`** - cataloga as etapas do ``SynergicPipeline`` capazes de compartilhar contexto.
+- **`pipeline_policies`** - descreve, por domínios e por contexto (`default` ou variações como `competitor`), a ordem das etapas.
+
+```yaml
+#Trechos ilustrativos do arquivo domain_policy.yaml
+strategies:
+    JSON_ML: MercadoLivreJsonStrategy
+    HTML_ML: MercadoLivreStaticStrategy
+    SELECTOR_GENERIC: SelectorLibStrategy
+
+policies:
+    mercadolivre.com.br:
+        - JSON_ML
+        - HTML_ML
+
+pipeline_steps:
+    extruct: ExtructExtractionStep
+    parsel: ParselExtractionStep
+    requestshtml: RequestsHTMLRenderStep
+
+pipeline_policies:
+    mercadolivre.com.br:
+        default:
+            - extruct
+            - parsel
+            - requestshtml
+```
+
+> Variáveis de ambiente permitem customizar a configuração sem alterar o código
+> - ``DOMAIN_POLICY_FILE`` aponta para outro arquivo YAML.
+> - ``DOMAIN_POLICY_HOT_RELOAD=1`` ativa recarga automática quando o arquivo é alterado
+
+#### Fluxo operacional e fallback do pipeline
+O ``SynergicPipeline`` garante que estratégias e etapas sigam uma ordem previsível, reutilizando intermediários e registrando métricas de latência e fallback.
+
+```mermaid
+flowchart LR
+    A[Requisição /scrape/parse] ---> B{Cache válido?}
+    B -- Sim --> C[Retorno imediato (304 ou cache hit)]
+    B -- Não --> D[Carregar domain_policy.yaml]
+    D --> E[Selecionar estratégias e etapas por domínio/contexto]
+    E --> F[Executar SynergicPipeline]
+    F --> G{Etapa bem-sucedida?}
+    G -- Sim --> H[Validação e DataQuality]
+    H --> I[Armazenar no IntelligentCacheManager]
+    I --> J[Responder API]
+    G -- Não --> K[Incrementar métricas de fallback]
+    K --> F
+```
+
+Durante a execução:
+
+1. O cache inteligente é consultado antes de iniciar etapas custosas.
+2. A ordem de fallback é definida no ``domain_policy.yaml`` e percorre as alternativas até encontrar um resultado válido.
+3. Cada etapa registra métricas estruturadas (tempo, status e fallback) para análise posterior no Prometheus.
+4. O processamento pode ser **sequencial**, **paralelo** ou **condicional**, conforme o parâmetro ``execution_mode`` do ``SynergicPipeline``.
+
+#### Contexto compartilhado, cache e métricas
+As etapas compartilham informações pelo ``shared_context``. Isso reduz requisições redundantes (por exemplo, reaproveitando HTML pré-processado) e facilita instrumentação.
+
+```mermaid
+flowchart TD
+    subgraph Pipeline
+        S1[Etapa 1] -->|shared_context| S2[Etapa 2]
+        S2 -->|shared_context| S3[Etapa 3]
+    end 
+    S1 -.->|Resultados intermediários| Cache[IntelligentCacheManager]
+    Cache -->|TTL, ETag, Sig| S3
+    Pipeline --> Metrics[[Prometheus / Logs estruturados]]
+    Metrics --> Observabilidade[(Grafana / Alertmanager / Loki)]
+```
+
+- **Cache inteligente**: ``IntelligentCacheManager`` usa TTL, ETag e assinatura de conteúdo para evitar coletas redundantes.
+- **Contexto compartilhado**: etapas podem inserir dados em ``shared_context`` (cookies, HTML bruto, headers) para as próximas etapas.
+- **Métricas**: o módulo ``shared.metrics`` expõe contadores e histogramas específicos do pipeline.
+
+| Métrica Prometheus | Descrição |
+| ------------------ | --------- |
+| ``SCRAPER_STRATEGY_TOTAL`` | Contador por etapa (classe) e status: ``success``, ``NOT_MODIFIED`` ou falha. |
+| ``SCRAPER_FALLBACK_TOTAL`` | Contabiliza quantas vezes um fallback foi acionado entre etapas ou estratégias. |
+| ``SCRAPING_LATENCY_SECONDS`` | Histograma de latência individual por etapa. |
+
+Essas métricas complementam as métricas HTTP padrão e devem ser acompanhadas com alertas (ex.: aumento de ``fallback_total``) para reagir a bloqueios ou mudanças nos marketplaces.
+
+#### Como adicionar novas estratégias ou etapas
+1. **Criar a classe** em ``market_scraper/strategies`` (ou ``services/pipeline_steps``) herdando das bases existentes e garantindo validação com ``DataQualityValidator``.
+2. **Registrar a classe** no ``domain_policy.yaml`` em ``strategies`` ou ``pipeline_steps``.
+3. **Definir a ordem** em ``policies`` ou ``pipeline_policies`` para domínio/ contexto desejado.
+4. **Adicionar testes** cobrindo seleção e execução (``tests/unit/services/test_domain_policy.py`` e ``tests/integration/routes/test_strategy_selection.py`` contêm exemplos).
+5. **Monitorar métricas** após o deploy para ajustar TTL de cache, paralelismo ou limites.
+
+#### Segurança, compliance e limites de scraping
+- Respeitar ``robots.txt`` consultando ``utils/robots.txt`` antes de liberar novas rotas.
+- Utilizar ``ThrottleManager`` e ``RateLimiter`` para manter intervalos e janelas alinhados com os termos de uso.
+- Sanitizar logs com os utilitários de mascaramento de dados do diretório ``shared``; não registrar dados pessoais ou tokens.
+- Configurar limites e comportamentos específicos por domínio no YAML, evitando que etapas pesadas sejam aplicadas indiscriminadamente.
+- Seguir o princípio de minimização de dados (LGPD/GDPR), coletando apenas os campos essenciais (nome, preço, etc...).
+- Documentar e revisar periodicamente exceções de compliance em conjunto com a equipe jurídica antes de ativar novas estratégias.
+
+
 ## Serviços Utilitários
 - **IntelligentCacheManager** - armazena resultados de produtos por domínio e URL para reduzir requisições repetidas.
 - **DataQualityValidator** - garante que `name` e `current_price` estejam presentes e que o preço seja válido.
