@@ -34,6 +34,7 @@ pipeline_policies:
       - extruct
       - parsel
       - beautifulsoup
+      - requestshtml
       - selectorlib
       - mechanical_soup_login
 
@@ -42,6 +43,7 @@ pipeline_policies:
       - extruct
       - parsel
       - beautifulsoup
+      - requestshtml
       - selectorlib
       - mechanical_soup_login
 
@@ -50,6 +52,7 @@ pipeline_policies:
       - extruct
       - parsel
       - beautifulsoup
+      - requestshtml
       - selectorlib
       - mechanical_soup_login
 
@@ -58,5 +61,6 @@ pipeline_policies:
       - selectorlib
       - parsel
       - beautifulsoup
+      - requestshtml
       - extruct
       - mechanical_soup_login
