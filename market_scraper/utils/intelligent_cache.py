@@ -15,6 +15,7 @@ import time
 import structlog
 
 from shared.utils.redis_client import get_redis_client
+from market_scraper.core.config_scraper import settings
 
 
 #Logger configurado com structlog
@@ -22,18 +23,10 @@ logger = structlog.get_logger(__name__)
 
 class IntelligentCacheManager:
     """ Cache simples com isolamento por marketplace """
-    def __init__(self, prefix: str = "scraper:product:", ttl: int = 300) -> None:
-        """ Inicializa o gerenciador de cache
-
-        Paramêtros
-        ----------
-        prefix:
-            Prefixo utilizado nas chaves do Redis.
-        ttl:
-            Tempo de expiração padrão em segundos.
-        """
+    def __init__(self, prefix: str = "scraper:product:", ttl: Optional[int] = None) -> None:
+        """ Inicializa o gerenciador de cache """
         self.prefix = prefix
-        self.ttl = ttl
+        self.ttl = ttl or settings.CACHE_BASE_TTL
         self._local_cache: Dict[str, Dict[str, Any]] = {}
 
     def _hash_content(self, marketplace: str, url: str) -> str:
@@ -65,7 +58,9 @@ class IntelligentCacheManager:
         entry = self._local_cache.get(key)
         if not entry:
             return None
-        if time.time() - entry["timestamp"] > self.ttl:
+        ttl_entry = entry.get("ttl", self.ttl)
+        if time.time() - entry["timestamp"] > ttl_entry:
+            self._local_cache.pop(key, None)
             return None
         return entry["value"]
 
@@ -85,4 +80,29 @@ class IntelligentCacheManager:
             except Exception as err:
                 logger.warning("falha_cache_redis", erro=str(err))
 
-        self._local_cache[key] = {"value": value, "timestamp": time.time()}
+        now = time.time()
+        entry = self._local_cache.get(key)
+        if entry and entry.get("value") == value:
+            entry["timestamp"] = now
+            entry["ttl"] = ttl
+            return
+        
+        self._local_cache[key] = {"value": value, "timestamp": now, "ttl": ttl}
+
+    def touch(self, *, marketplace: str, url: str, ttl: Optional[int] = None) -> None:
+        """ Renova o TTL da chave após um acesso bem-sucedido """
+        key = self._build_key(marketplace, url)
+        ttl = ttl or self.ttl
+        client = get_redis_client()
+
+        if client is not None:
+            try:
+                client.expire(key, ttl)
+            except Exception as err:
+                logger.warning("falha_cache_touch", erro=str(err))
+
+        entry = self._local_cache.get(key)
+        if entry:
+            entry["timestamp"] = time.time()
+            entry["ttl"] = ttl
+            

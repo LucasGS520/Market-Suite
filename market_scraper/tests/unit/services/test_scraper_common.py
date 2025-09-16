@@ -5,6 +5,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from market_scraper.services import services_scraper_common as common
+from market_scraper.services.synergic_pipeline import PipelineStep
 from shared.enums import BlockResult
 
 
@@ -34,8 +35,11 @@ async def test_scrape_product_common_async_cached(monkeypatch):
             OrquestradorRegistro.scrape_chamado = True
             return {"status": "error"}
 
+    tocado = {"valor": False}
+
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: entrada_cache)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "touch", lambda *a, **k: tocado.__setitem__("valor", True))
     monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", OrquestradorRegistro)
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
@@ -50,6 +54,7 @@ async def test_scrape_product_common_async_cached(monkeypatch):
     assert resultado["details"] == dados_cache
     assert OrquestradorRegistro.instanciado is False
     assert OrquestradorRegistro.scrape_chamado is False
+    assert tocado["valor"] is True
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_cache_incompleto(monkeypatch):
@@ -357,3 +362,83 @@ async def test_scrape_product_common_async_not_modified_com_cache(monkeypatch):
 
     assert resultado["status"] == "NOT_MODIFIED"
     assert resultado["details"] == entrada_cache
+
+class EtapaRetornoRapido(PipelineStep):
+    """ Etapa fictícia que devolve dados válidos imediatamente """
+    async def run (self, shared_context):
+        return {
+            "status": "success",
+            "details": {"name": "Pipeline", "current_price": "99"},
+            "extraction_method": "EtapaRetornoRapido",
+        }
+    
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_pipeline_curto(monkeypatch):
+    """ Pipeline retorna sucesso e evita chamada do orquestrador """
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    chamado = {"valor": False}
+
+    class OrquestradorNaoChamado:
+        def __init__(self, *a, **k):
+            chamado["valor"] = True
+        
+        async def scrape(self, **k):
+            return {"status": "error"}
+        
+    capturado: dict = {}
+
+    monkeypatch.setattr(common, "pipeline_steps_for", lambda *a, **k: [EtapaRetornoRapido()])
+    monkeypatch.setattr(common, "pipeline_execution_mode_for", lambda *a, **k: "sequential")
+    monkeypatch.setattr(common.cache_manager, "set", lambda *, marketplace, url, value: capturado.update(value=value))
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {})
+    monkeypatch.setattr(common.cache_manager, "touch", lambda *a, **k: None)
+    monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", OrquestradorNaoChamado)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "success"
+    assert resultado["details"]["name"] == "Pipeline"
+    assert chamado["valor"] is False
+    assert capturado["value"]["data"]["current_price"] == "99"
+    assert capturado["value"].get("metada", {}).get("extraction_method") == "EtapaRetornoRapido"
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_pipeline_not_modified(monkeypatch):
+    """ Pipeline em NOT_MODIFIED utiliza cache e renova TTL """
+    cached = {"data": {"name": "Cache", "current_price": "42"}}
+    contador = {"vezes": 0}
+
+    def _get_cache(*a, **k):
+        contador["vezes"] += 1
+        return cached if contador["vezes"] > 1 else None
+
+    monkeypatch.setattr(common.cache_manager, "get", _get_cache)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    tocado = {"valor": False}
+    monkeypatch.setattr(common.cache_manager, "touch", lambda *a, **k: tocado.__setitem__("valor", True))
+
+    class EtapaNotModified(PipelineStep):
+        async def run(self, shared_context):
+            return {"status": "NOT_MODIFIED"}
+        
+    monkeypatch.setattr(common, "pipeline_steps_for", lambda *a, **k: [EtapaNotModified()])
+    monkeypatch.setattr(common, "pipeline_execution_mode_for", lambda *a, **k: "sequential")
+    monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", lambda *a, **k: None)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado == {"status": "NOT_MODIFIED", "details": cached}
+    assert tocado["valor"] is True
+    

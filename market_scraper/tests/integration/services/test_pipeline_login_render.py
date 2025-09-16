@@ -52,12 +52,12 @@ async def test_pipeline_com_login_e_renderização(monkeypatch: pytest.MonkeyPat
         
     monkeypatch.setattr("market_scraper.services.pipeline_steps.HTMLSession", SessaoFalsa)
 
-    pipeline = SynergicPipeline(steps=passos)
     passos = [
         MechanicalSoupLoginStep(login_url="https://exemplo.com/login", username="user", password="pass"),
         RequestsHTMLRenderStep(),
         BeautifulSoupExtractionStep(),
     ]
+    pipeline = SynergicPipeline(steps=passos)
     resultado = await pipeline.run(shared_context={"url": "https://exemplo.com/produto"})
 
     assert resultado["status"] == "success"

@@ -4,7 +4,7 @@ import pytest
 import time
 
 import market_scraper.services.domain_policy as domain_policy
-from market_scraper.services.domain_policy import strategies_for
+from market_scraper.services.domain_policy import strategies_for, strategy_execution_mode_for, pipeline_execution_mode_for
 from market_scraper.strategies import (
     MercadoLivreJsonStrategy,
     MercadoLivreHtmlStaticStrategy,
@@ -89,3 +89,14 @@ def test_hot_reload(monkeypatch, tmp_path):
 
     estrategias = domain_policy.strategies_for(url)
     assert isinstance(estrategias[0], AmazonJsonStrategy)
+
+def test_strategy_execution_mode():
+    """ Valida o modo configurado para estratégias por domínio """
+    assert strategy_execution_mode_for("https://www.amazon.com.br/item") == "parallel"
+    assert strategy_execution_mode_for("https://domnio-nao-mapeado.com") == "sequential"
+
+def test_pipeline_execution_mode():
+    """ Confere o modo do pipeline para domínio/contexto """
+    assert pipeline_execution_mode_for("https://www.amazon.com.br/item") == "parallel"
+    assert pipeline_execution_mode_for("https://mercadolivre.com.br/item", context="competitor") == "conditional"
+    

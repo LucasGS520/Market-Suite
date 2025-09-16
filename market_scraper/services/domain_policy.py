@@ -9,7 +9,7 @@ que ele for modificado.
 """
 
 from pathlib import Path
-from typing import Dict, List, Type
+from typing import Dict, List, Type, Literal, cast
 import os
 
 import yaml
@@ -29,6 +29,9 @@ STRATEGY_REGISTRY: Dict[str, Type[ScrapingStrategy]] = {}
 DOMAIN_POLICIES: Dict[str, List[str]] = {}
 PIPELINE_STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {}
 PIPELINE_POLICIES: Dict[str, Dict[str, List[str]]] = {}
+STRATEGY_EXECUTION: Dict[str, str] = {}
+PIPELINE_EXECUTION: Dict[str, Dict[str, str] | str] = {}
+
 
 #Controle interno de hot-reload
 _HOT_RELOAD = bool(os.getenv("DOMAIN_POLICY_HOT_RELOAD"))
@@ -36,13 +39,16 @@ _CONFIG_MTIME = 0.0
 
 def load_config() -> None:
     """ Carrega as estratégias e políticas do arquivo configurado """
-    global STRATEGY_REGISTRY, DOMAIN_POLICIES, PIPELINE_STEP_REGISTRY, PIPELINE_POLICIES, _CONFIG_MTIME
+    global STRATEGY_REGISTRY, DOMAIN_POLICIES, PIPELINE_STEP_REGISTRY
+    global PIPELINE_POLICIES, STRATEGY_EXECUTION, PIPELINE_EXECUTION, _CONFIG_MTIME
 
     if not CONFIG_PATH.exists():
         STRATEGY_REGISTRY = {}
         DOMAIN_POLICIES = {}
         PIPELINE_STEP_REGISTRY = {}
         PIPELINE_POLICIES = {}
+        STRATEGY_EXECUTION = {}
+        PIPELINE_EXECUTION = {}
         _CONFIG_MTIME = 0.0
         return
 
@@ -68,7 +74,18 @@ def load_config() -> None:
 
     PIPELINE_STEP_REGISTRY = step_registry
     PIPELINE_POLICIES = data.get("pipeline_policies") or {}
+    STRATEGY_EXECUTION = data.get("strategy_execution") or {}
+    PIPELINE_EXECUTION = data.get("pipeline_execution") or {}
     _CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
+
+def _normalize_execution_mode(value: str | None) -> Literal["sequential", "parallel", "conditional"]:
+    """ Normaliza o modo de execução aceitando apenas valores suportados """
+    if not value:
+        return "sequential"
+    mode = value.lower()
+    if mode in {"parallel", "conditional", "sequential"}:
+        return cast(Literal["sequential", "parallel", "conditional"], mode)
+    return "sequential"
 
 def enable_hot_reload() -> None:
     """ Habilita o recarregamento automático do arquivo de configuração """
@@ -113,6 +130,25 @@ def strategies_for(url: str) -> List[ScrapingStrategy]:
     #Quando domínio não é reconhecido, nenhuma estratégia é retornada
     return []
 
+def strategy_execution_mode_for(url: str) -> Literal["sequential", "parallel", "conditional"]:
+    """ Obtém o modo de execução das estratégias configurado para o domínio """
+    _reload_if_needed()
+
+    host = extract_hostname(url)
+    default_mode = _normalize_execution_mode(STRATEGY_EXECUTION.get("default"))
+
+    def _corresponds_domain(host: str, domain: str) -> bool:
+        """ Verifica se o host pertence exatamente ao domínio informado """
+        return host == domain or host.endswith("." + domain)
+    
+    for domain, mode in STRATEGY_EXECUTION.items():
+        if domain == "default":
+            continue
+        if _corresponds_domain(host, domain):
+            return _normalize_execution_mode(mode)
+        
+    return default_mode
+
 def pipeline_steps_for(url: str, *, context: str = "default") -> List[PipelineStep]:
     """ Retorna intâncias de etapas de pipeline para o domínio
     
@@ -139,6 +175,48 @@ def pipeline_steps_for(url: str, *, context: str = "default") -> List[PipelineSt
             ]
         
     return []
+
+def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Literal["sequential", "parallel", "conditional"]:
+    """ Retorna o modo de execução do pipeline para o domínio/contexto informado """
+    _reload_if_needed()
+
+    host = extract_hostname(url)
+    default_contexts = PIPELINE_EXECUTION.get("default")
+
+    def _resolve_context_modes(raw: Dict[str, str] | str | None) -> Dict[str, str]:
+        """ Normaliza estruturas aceitando tanto ``str`` quanto ``dict`` """
+        if isinstance(raw, str):
+            return {"default": raw}
+        return raw or {}
+    
+    default_modes = {
+            k: _normalize_execution_mode(v)
+            for k, v in _resolve_context_modes(default_contexts).items()
+    }
+
+    def _corresponds_domain(host: str, domain: str) -> bool:
+        """ Verifica se o host pertence exatamente ao domínio informado """
+        return host == domain or host.endswith("." + domain)
+    
+    for domain, contexts in PIPELINE_EXECUTION.items():
+        if domain == "default":
+            continue
+        if _corresponds_domain(host, domain):
+            normalized = {
+                key: _normalize_execution_mode(value)
+                for key, value in _resolve_context_modes(contexts).items()
+            }
+            return (
+                normalized.get(context)
+                or normalized.get("default")
+                or default_modes.get(context)
+                or default_modes.get("default", "sequential")
+            )
+        
+    return (
+        default_modes.get(context)
+        or default_modes.get("default", "sequential")
+    )
 
 #Carrega a configuração na importação do módulo
 load_config()

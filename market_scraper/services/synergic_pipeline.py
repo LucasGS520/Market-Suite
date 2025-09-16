@@ -58,10 +58,15 @@ class SynergicPipeline:
         self.steps = steps
         self.execution_mode = execution_mode
 
-    async def run(self, shared_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def run(
+            self, 
+            shared_context: dict[str, Any] | None = None,
+            execution_mode: Literal["sequential", "parallel", "conditional"] | None = None,    
+        ) -> dict[str, Any]:
         """ Executa o pipeline retornando os resultados e o contexto final """
         shared_context = shared_context or {}
         results: list[dict[str, Any]] = []
+        mode = execution_mode or self.execution_mode
 
         async def _run_step(step: PipelineStep) -> tuple[str, dict[str, Any], str]:
             """ Executa uma etapa registrando métricas e logs """
@@ -87,7 +92,7 @@ class SynergicPipeline:
         
         success_status = {"success", "ok", "NOT_MODIFIED"}
 
-        if self.execution_mode == "parallel":
+        if mode == "parallel":
             execs = [_run_step(step) for step in self.steps]
             responses = await asyncio.gather(*execs)
             for step_name, resp, status in responses:
@@ -98,7 +103,7 @@ class SynergicPipeline:
 
         else:
             for idx, step in enumerate(self.steps):
-                if self.execution_mode == "conditional" and not step.should_run(shared_context):
+                if mode == "conditional" and not step.should_run(shared_context):
                     SCRAPER_FALLBACK_TOTAL.inc()
                     logger.info("step_skipped", step=step.__class__.__name__)
                     continue
@@ -109,7 +114,37 @@ class SynergicPipeline:
                     SCRAPER_FALLBACK_TOTAL.inc()
                     logger.info("fallback_triggered", step=step_name)
 
-        return {"results": results, "shared_context": shared_context}
+        primary_with_details = next(
+            (
+                item
+                for item in results
+                if item.get("status") in success_status and item.get("details")
+            ),
+            None,
+        )
+        primary = primary_with_details or next(
+            (
+                item
+                for item in results
+                if item.get("status") in success_status
+            ),
+            None,
+        )
+
+        outcome: dict[str, Any] = {
+            "results": results,
+            "shared_context": shared_context,
+            "status": primary.get("status") if primary else "error",
+        }
+
+        if primary_with_details:
+            details = primary_with_details.get("details")
+            if details is not None:
+                outcome["details"] = details
+            if primary_with_details.get("extraction_method"):
+                outcome["extraction_method"] = primary_with_details.get("extraction_method")
+
+        return outcome
 
   
 __all__ = ["PipelineStep", "SynergicPipeline"]

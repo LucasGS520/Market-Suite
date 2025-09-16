@@ -14,7 +14,7 @@ from .pipeline_steps import (
     RequestsHTMLRenderStep,
     SelectorLibExtractionStep,
 )
-
+from .synergic_pipeline import SynergicPipeline
 
 
 __all__ = [
@@ -26,5 +26,5 @@ __all__ = [
     "BeautifulSoupExtractionStep",
     "RequestsHTMLRenderStep",
     "SelectorLibExtractionStep",
-
+    "SynergicPipeline",
 ]

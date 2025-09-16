@@ -9,7 +9,7 @@ especiais (bloqueios e ``NOT_MODIFIED``) e integração com cache.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Any
 from uuid import UUID
 
 import asyncio
@@ -33,8 +33,9 @@ from market_scraper.utils.mechanicalsoup_login import login_and_get_cookies
 from shared.enums import BlockResult
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 
-from market_scraper.services.domain_policy import strategies_for
+from market_scraper.services.domain_policy import strategies_for, pipeline_steps_for, pipeline_execution_mode_for, strategy_execution_mode_for
 from market_scraper.services.multi_strategy_orchestrator import MultiStrategyScraperOrchestrator
+from market_scraper.services.synergic_pipeline import SynergicPipelineScraper
 
 
 #Logger estruturado para registrar o fluxo do scraping
@@ -55,40 +56,27 @@ async def scrape_product_common_async(
     user_id: UUID,
     payload: MonitoredProductCreateScraping | CompetitorProductCreateScraping,
     product_type: Literal["monitored", "competitor"],
-    rate_limiter:RateLimiter | None = None,
+    rate_limiter: RateLimiter | None = None,
     circuit_breaker: CircuitBreaker | None = None,
     recovery_manager: BlockRecoveryManager | None = None,
     mechanicalsoup_config: dict | None = None,
     **extra_kwargs,
 ) -> dict:
-    """ Seleciona e executa a estratégia adequada para a URL
+    """ Orquestra o fluxo de scraping com cache, pipeline e estratégias
 
-    A URL é normalizada para um formato canônico (mobile) antes de
-    consultar o cache e disparar as estratégias. A função delega a
-    lógica de seleção e execução para o :class:`MultiStrategyScraperOrchestrator`
-    que também valida os dados obtidos e registra métricas de fallback
-    entre estratégias. Após o scraping, os campos essenciais são
-    verificados novamente para garantir consistência. Quando o scraping
-    é bem-sucedido, os dados são armazenados no ``IntelligentCacheManager``
-    e, quando disponíveis, os cabeçalhos ``ETag``/``Last-Modified`` do
-    ``http_cache`` também são salvos para evitar requisições desnecessárias
-    no futuro. O cache é reaproveitado apenas quando contém os campos
-    essenciais ``name`` e ``current_price`` e passa pela validação do
-    ``DataQualityValidator``. Em casos de erro o retorno sempre inclui o
-    campo ``detail`` explicando o motivo de falha. Quando o servidor
-    responde com ``NOT_MODIFIED`` o status é repassado diretamente e os
-    dados do cache são anexados quando existentes. Quando ``mechanicalsoup_config``
-    é informado, um login leve é realizado previamente com MechanicalSoup para obter
-    cookies de sessão e permitir navegação por formulários sem a necessiade do Playwright.
+    A rotina verifica o cache inteligente, executa o ``SynergicPipeline`` definido
+    para o domínio/contexto e, quando necessário, aciona o orquestrador de
+    estratégias. Cada etapa registra logs estruturados, persiste metadados
+    seguros e renova TTL do cache quando um resultado existente é reutilizado.
+    O compartilhamento de contexto garante que etapas subsequentes aproveitem
+    cookies, HTML renderizado e outras dependências resolvidas previamente.
     """
     #Registra o início do fluxo de scraping
     logger.info("start_scraping", url=url, product_type=product_type)
 
     cookies = None
     if mechanicalsoup_config:
-        logger.info(
-            "mechanicalsoup_login", url=mechanicalsoup_config.get("url")
-        )
+        logger.info("mechanicalsoup_login", url=mechanicalsoup_config.get("url"))
         try:
             cookies = await login_and_get_cookies(mechanicalsoup_config)
         except Exception as err:
@@ -129,10 +117,77 @@ async def scrape_product_common_async(
         except ValueError as err:
             logger.info("cache_invalid", url=normalized_url, reason=str(err))
         else:
+            cache_manager.touch(marketplace=marketplace, url=normalized_url)
             logger.info("cache_used", url=normalized_url)
             return {"status": "success", "details": details}
     else:
         logger.info("cache_not_found", url=normalized_url)
+
+
+    shared_context: dict[str, Any] = {"url": normalized_url, "product_type": product_type}
+    if cookies:
+        shared_context["cookies"] = cookies
+
+    def _persist_success(details: dict[str, Any], *, extraction_method: str | None = None) -> None:
+        """ Armazena dados válidos no cache inteligente com metadados """
+
+        headers_cache = get_cache_headers(normalized_url)
+        cache_value: dict[str, Any] = {"data": details}
+        if headers_cache.get("etag") or headers_cache.get("last_modified"):
+            cache_value["headers"] = headers_cache
+
+        metadata: dict[str, Any] = {}
+        if extraction_method:
+            metadata["extraction_method"] = extraction_method
+
+        safe_context_keys = {"content_signature", "selectorlib_template"}
+        safe_context = {
+            key: shared_context[key]
+            for key in safe_context_keys
+            if key in shared_context
+        }
+        if safe_context:
+            metadata["context"] = safe_context
+
+        if metadata:
+            cache_value["metadata"] = metadata
+
+        cache_manager.set(
+            marketplace=marketplace,
+            url=normalized_url,
+            value=cache_value,
+        )
+        logger.info("stored_cache", url=normalized_url, metadata_keys=list(metadata.keys()))
+
+    pipeline_context = "competitor" if product_type == "competitor" else "default"
+    steps = pipeline_steps_for(normalized_url, context=pipeline_context)
+    if steps:
+        execution_mode = pipeline_execution_mode_for(normalized_url, context=pipeline_context)
+        logger.info("running_pipeline", url=normalized_url, context=pipeline_context, execution_mode=execution_mode, steps=len(steps))
+        pipeline = SynergicPipelineScraper(steps=steps, execution_mode=execution_mode)
+        pipeline_result = await pipeline.run(shared_context)
+        shared_context.update(pipeline_result.get("shared_context", {}))
+
+        for entry in pipeline_result.get("results", []):
+            status_step = entry.get("status")
+            if status_step == "success" and entry.get("details"):
+                pipeline_details = entry["details"]
+                try:
+                    validator.validate(pipeline_details)
+                except ValueError as err:
+                    logger.info("pipeline_invalid_data", erro=str(err))
+                    continue
+                method = entry.get("extraction_method")
+                _persist_success(pipeline_details, extraction_method=method)
+                logger.info("pipeline_short_circuit", url=normalized_url, step=method)
+                return {"status": "success", "details": pipeline_details}
+            
+            if status_step == "NOT_MODIFIED":
+                cached_pipeline = cache_manager.get(marketplace=marketplace, url=normalized_url)
+                if cached_pipeline:
+                    cache_manager.touch(marketplace=marketplace, url=normalized_url)
+                    logger.info("pipeline_not_modified", url=normalized_url)
+                    return {"status": "NOT_MODIFIED", "details": cached_pipeline}
 
     orchestrator = MultiStrategyScraperOrchestrator(strategy_selector=strategies_for)
     logger.info("running_orchestrator", url=normalized_url)
@@ -142,6 +197,8 @@ async def scrape_product_common_async(
             user_id=user_id,
             payload=payload,
             product_type=product_type,
+            execution_mode=strategy_execution_mode_for(normalized_url),
+            shared_context=shared_context,
             rate_limiter=rate_limiter,
             circuit_breaker=circuit_breaker,
             recovery_manager=recovery_manager,
@@ -150,9 +207,11 @@ async def scrape_product_common_async(
     except Exception as err:
         logger.exception("orchestrator_exception", url=normalized_url, error=str(err))
         return {"status": "error", "detail": f"Erro interno no scraping: {err}"}
+    
     status_result = result.get("status")
     details = result.get("details")
     logger.info("return_orchestrator", status=status_result)
+    
     if status_result == "success":
         if not details:
             logger.error("missing_details", url=normalized_url)
@@ -165,17 +224,11 @@ async def scrape_product_common_async(
             logger.error("validation_failed", erro=str(err), url=normalized_url)
             return {"status": "error", "detail": str(err)}
  
-        #Inclui cabeçalhos de ETag/Last-Modified para requisições condicionais futuras apenas se houverem valores válidos
-        headers_cache = get_cache_headers(normalized_url)
-        cache_value = {"data": details}
-        if headers_cache.get("etag") or headers_cache.get("last_modified"):
-            cache_value["headers"] = headers_cache
-        cache_manager.set(
-            marketplace=marketplace,
-            url=normalized_url,
-            value=cache_value,
-        )
-        logger.info("stored_cache", url=normalized_url)
+        final_context = result.get("shared_context")
+        if isinstance(final_context, dict):
+            shared_context.update(final_context)
+
+        _persist_success(details, extraction_method=result.get("extraction_method"))
         logger.info("scraping_success", url=normalized_url)
         return {"status": "success", "details": details}
     
@@ -184,6 +237,7 @@ async def scrape_product_common_async(
         logger.info("content_not_modified", url=normalized_url)
         cached = cache_manager.get(marketplace=marketplace, url=normalized_url)
         if cached:
+            cache_manager.touch(marketplace=marketplace, url=normalized_url)
             logger.info("content_not_modified", url=normalized_url)
             return {"status": "NOT_MODIFIED", "details": cached}
         return {"status": "NOT_MODIFIED"}

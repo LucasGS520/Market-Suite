@@ -24,6 +24,14 @@ policies:
   example.com:
     - SELECTOR_GENERIC
 
+#Define o modo de execução das estratégias por domínio; Quando não especificado o modo ``sequential`` é utilizado
+strategy_execution:
+  default: sequential
+  mercadolivre.com.br: conditional
+  amazon.com.br: parallel
+  magazineluiza.com.br: sequential
+  example.com: conditional
+
 #Mapeia as etapas disponíveis para o ``SynergicPipeline``.
 pipeline_steps:
   mechanical_soup_login: MechanicalSoupLoginStep
@@ -71,3 +79,17 @@ pipeline_policies:
       - requestshtml
       - extruct
       - mechanical_soup_login
+
+#Define o modo de execução do pipeline sinégico por domínio; Domínios não listados utilizam ``sequential`` como padrão
+pipeline_execution:
+  default:
+    default: sequential
+  mercadolivre.com.br:
+    default: sequential
+    competitor: conditional
+  amazon.com.br:
+    default: parallel
+  magazineluiza.com.br:
+    default: conditional
+  example.com:
+    default: parallel

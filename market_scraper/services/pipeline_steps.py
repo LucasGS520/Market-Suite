@@ -24,6 +24,7 @@ import mechanicalsoup
 
 from .synergic_pipeline import PipelineStep
 from market_scraper.utils.data_quality_validator import DataQualityValidator
+from market_scraper.utils.http_cache import ContentSignature, NOT_MODIFIED
 
 
 class MechanicalSoupLoginStep(PipelineStep):
@@ -44,6 +45,15 @@ class MechanicalSoupLoginStep(PipelineStep):
         self.form_selector = form_selector
         self.username_field = username_field
         self.password_field = password_field
+
+    def should_run(self, shared_context: dict[str, Any]) -> bool:
+        """ Executa apenas quando não existem cookies válidos no contexto """
+        if shared_context.get("cookies"):
+            return False
+        url = self.login_url or shared_context.get("login_url")
+        user = self.username or shared_context.get("username")
+        pwd = self.password or shared_context.get("password")
+        return bool(url and user and pwd)
 
     async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
         url = self.login_url or shared_context.get("login_url")
@@ -124,6 +134,10 @@ class ParselExtractionStep(PipelineStep):
     def __init__(self, *, validator: DataQualityValidator | None = None) -> None:
         self.validator = validator or DataQualityValidator()
 
+    def should_run(self, shared_context: dict[str, Any]) -> bool:
+        """ Evita execução quando não há HTML disponível """
+        return bool(shared_context.get("html"))
+
     async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
         html = shared_context.get("html")
         if not html:
@@ -167,6 +181,10 @@ class BeautifulSoupExtractionStep(PipelineStep):
     def __init__(self, *, validator: DataQualityValidator | None = None) -> None:
         self.validator = validator or DataQualityValidator()
 
+    def should_run(self, shared_context: dict[str, Any]) -> bool:
+        """ Executa apenas quando o HTML já foi carregado no contexto """
+        return bool(shared_context.get("html"))
+
     async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
         html = shared_context.get("html")
         if not html:
@@ -196,6 +214,10 @@ class RequestsHTMLRenderStep(PipelineStep):
     def __init__(self, *, timeout: int = 8) -> None:
         self.timeout = timeout
 
+    def should_run(self, shared_context: dict[str, Any]) -> bool:
+        """ Evita renderização quando o HTML já está presente """
+        return not shared_context.get("html")
+
     async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
         url = shared_context.get("url")
         if not url:
@@ -209,6 +231,15 @@ class RequestsHTMLRenderStep(PipelineStep):
         
         html = await asyncio.to_thread(_render)
         shared_context["html"] = html
+        signature = ContentSignature(url).check_or_update(html)
+        if signature is NOT_MODIFIED:
+            return {"status": "NOT_MODIFIED"}
+        if isinstance(signature, str):
+            shared_context["content_signature"] = signature
+            return {
+                "status": "success",
+                "shared_context": {"html": html, "content_signature": signature},
+            }
         return {"status": "success", "shared_context": {"html": html}}
     
 class SelectorLibExtractionStep(PipelineStep):
@@ -216,6 +247,10 @@ class SelectorLibExtractionStep(PipelineStep):
     def __init__(self, *, template_path: str | None = None, validator: DataQualityValidator | None = None) -> None:
         self.template_path = template_path
         self.validator = validator or DataQualityValidator()
+
+    def should_run(self, shared_context: dict[str, Any]) -> bool:
+        """ Executa somente quando há HTML e template definido """
+        return bool(shared_context.get("html") and (self.template_path or shared_context.get("selectorlib_template")))
 
     async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
         html = shared_context.get("html")
