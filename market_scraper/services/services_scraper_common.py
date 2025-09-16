@@ -35,7 +35,7 @@ from shared.schemas.schemas_products import MonitoredProductCreateScraping, Comp
 
 from market_scraper.services.domain_policy import strategies_for, pipeline_steps_for, pipeline_execution_mode_for, strategy_execution_mode_for
 from market_scraper.services.multi_strategy_orchestrator import MultiStrategyScraperOrchestrator
-from market_scraper.services.synergic_pipeline import SynergicPipelineScraper
+from market_scraper.services.synergic_pipeline import SynergicPipeline
 
 
 #Logger estruturado para registrar o fluxo do scraping
@@ -164,7 +164,7 @@ async def scrape_product_common_async(
     if steps:
         execution_mode = pipeline_execution_mode_for(normalized_url, context=pipeline_context)
         logger.info("running_pipeline", url=normalized_url, context=pipeline_context, execution_mode=execution_mode, steps=len(steps))
-        pipeline = SynergicPipelineScraper(steps=steps, execution_mode=execution_mode)
+        pipeline = SynergicPipeline(steps=steps, execution_mode=execution_mode)
         pipeline_result = await pipeline.run(shared_context)
         shared_context.update(pipeline_result.get("shared_context", {}))
 

@@ -406,7 +406,7 @@ async def test_scrape_product_common_async_pipeline_curto(monkeypatch):
     assert resultado["details"]["name"] == "Pipeline"
     assert chamado["valor"] is False
     assert capturado["value"]["data"]["current_price"] == "99"
-    assert capturado["value"].get("metada", {}).get("extraction_method") == "EtapaRetornoRapido"
+    assert capturado["value"].get("metadata", {}).get("extraction_method") == "EtapaRetornoRapido"
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_pipeline_not_modified(monkeypatch):
