@@ -193,10 +193,16 @@ async def test_retorna_erro_quando_html_invalido(strategy: HtmlStaticStrategy, h
     monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", fake_validate)
     monkeypatch.setattr("market_scraper.strategies.html_static.logger.warning", fake_warning)
 
-    resultado = await strategy.get_data("http://exemplo.com/produto")
+    url = "http://exemplo.com/produto?token=secreto123"
+    resultado = await strategy.get_data(url)
     assert resultado == {"status": "error", "detail": "campos obrigatórios ausentes"}
     #Verifica se a mensagem detalhada foi registrada no logger estruturado
     assert capturado.get("erro") == "campos obrigatórios ausentes"
+    #Garante que dados potencialmente sensíveis foram mascarados
+    assert (
+        capturado.get("url") == "http://exemplo.com/produto?token=%5BREDACTED%5D"
+    )
+
 
 @pytest.mark.asyncio
 async def test_retorna_erro_quando_fetch_falha(strategy: HtmlStaticStrategy, monkeypatch: pytest.MonkeyPatch) -> None:

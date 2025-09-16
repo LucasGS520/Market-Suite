@@ -24,6 +24,7 @@ import logging
 from time import perf_counter
 
 from shared.metrics.metrics_parser import PARSER_FAILURE_TOTAL, PARSER_SUCCESS_TOTAL, PARSER_DURATION_SECONDS
+from shared.utils.logging_utils import sanitize_log_data
 
 from .base import ScrapingStrategy
 from market_scraper.utils.constants import STEALTH_HEADERS, GENERIC_COOKIES
@@ -194,7 +195,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
                 try:
                     content = json.loads(raw or "{}")
                 except json.JSONDecodeError as exc:
-                    logger.debug("JSON inválido em script JSON-LD", url=url, erro=str(exc))
+                    logger.debug("JSON inválido em script JSON-LD", url=sanitize_log_data(url), erro=sanitize_log_data(str(exc)))
                     continue
                 items: list[Any]
                 if isinstance(content, dict):
@@ -229,7 +230,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
             return {}
         except Exception as exc:
             PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
-            logger.exception("Erro ao extrair JSON-LD com Parsel", url=url, erro=str(exc))
+            logger.exception("Erro ao extrair JSON-LD com Parsel", url=sanitize_log_data(url), erro=sanitize_log_data(str(exc)))
             return {}
         finally:
             PARSER_DURATION_SECONDS.labels(library="parsel").observe(
@@ -266,7 +267,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
             return data
         except Exception as exc:
             PARSER_FAILURE_TOTAL.labels(library="parsel").inc()
-            logger.exception("Erro ao extrair meta-tags com Parsel", url=url, erro=str(exc))
+            logger.exception("Erro ao extrair meta-tags com Parsel", url=sanitize_log_data(url), erro=sanitize_log_data(str(exc)))
             return {}
         finally:
             PARSER_DURATION_SECONDS.labels(library="parsel").observe(
@@ -282,7 +283,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
                 try:
                     content = json.loads(tag.string or "{}")
                 except json.JSONDecodeError as exc:
-                    logger.debug("JSON inválido em script JSON-LD (bs4)", url=url, erro=str(exc))
+                    logger.debug("JSON inválido em script JSON-LD (bs4)", url=sanitize_log_data(url), erro=sanitize_log_data(str(exc)))
                     continue
             items: list[Any]
             if isinstance(content, dict):
@@ -321,7 +322,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
             return {}
         except Exception as exc:
             PARSER_FAILURE_TOTAL.labels(library="beautifulsoup").inc()
-            logger.exception("Erro ao extrair JSON-LD com BeautifulSoup", url=url, erro=str(exc))
+            logger.exception("Erro ao extrair JSON-LD com BeautifulSoup", url=sanitize_log_data(url), erro=sanitize_log_data(str(exc)))
             return {}
         finally:
             PARSER_DURATION_SECONDS.labels(library="beautifulsoup").observe(
@@ -440,20 +441,17 @@ class HtmlStaticStrategy(ScrapingStrategy):
             location = resp.headers.get("location") if resp else None
             body = resp.text[:200] if resp and resp.text else None
             #Registra também no logger padrão para que testes possam capturar a mensagem
+            safe_url = sanitize_log_data(url)
+            safe_location = sanitize_log_data(location) if location else None
+            safe_body = sanitize_log_data(body) if body else None
             py_logger.exception(
                 "Falha na requisição HTML url=%s status=%s location=%s body=%s",
-                url,
+                safe_url,
                 getattr(resp, "status_code", None),
-                location,
-                body,
+                safe_location,
+                safe_body,
             )
-            logger.exception(
-                "Falha na requisição HTML",
-                url=url,
-                status=getattr(resp, "status_code", None),
-                location=location,
-                body=body,
-            )
+            logger.exception("Falha na requisição HTML", url=sanitize_log_data(url), status=getattr(resp, "status_code", None), location=sanitize_log_data(location) if location else None, body=safe_body)
 
             #Caso o domínio responda com 403, registra o bloqueio
             if resp and resp.status_code == 403:
@@ -486,7 +484,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
             DataQualityValidator(["name", "current_price"]).validate(data)
         except ValueError as exc:
             #Registra a falha de validação com o detalhe da exceção para que possamos rastrear rapidamente o motivo do erro
-            logger.warning("Falha na validação dos dados", url=url, erro=str(exc))
+            logger.warning("Falha na validação dos dados", url=sanitize_log_data(url), erro=sanitize_log_data(str(exc)))
             #Propaga o motivo da falha de volta para o endpoint chamador e permitindo que a API informe ao cliente qual campo foi rejeitado
             return {"status": "error", "detail": str(exc)}
         return {"status": "success", "details": data}

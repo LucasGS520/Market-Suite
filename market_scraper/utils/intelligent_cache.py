@@ -15,7 +15,9 @@ import time
 import structlog
 
 from shared.utils.redis_client import get_redis_client
+from shared.utils.logging_utils import sanitize_log_data
 from market_scraper.core.config_scraper import settings
+
 
 
 #Logger configurado com structlog
@@ -53,7 +55,7 @@ class IntelligentCacheManager:
                 if data:
                     return json.loads(data)
             except Exception as err:
-                logger.warning("falha_cache_redis", erro=str(err))
+                logger.warning("falha_cache_redis", erro=sanitize_log_data(str(err)))
 
         entry = self._local_cache.get(key)
         if not entry:
@@ -78,7 +80,7 @@ class IntelligentCacheManager:
             try:
                 client.setex(key, ttl, json.dumps(value))
             except Exception as err:
-                logger.warning("falha_cache_redis", erro=str(err))
+                logger.warning("falha_cache_redis", erro=sanitize_log_data(str(err)))
 
         now = time.time()
         entry = self._local_cache.get(key)
@@ -99,7 +101,7 @@ class IntelligentCacheManager:
             try:
                 client.expire(key, ttl)
             except Exception as err:
-                logger.warning("falha_cache_touch", erro=str(err))
+                logger.warning("falha_cache_touch", erro=sanitize_log_data(str(err)))
 
         entry = self._local_cache.get(key)
         if entry:

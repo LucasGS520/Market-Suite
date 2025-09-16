@@ -16,6 +16,7 @@ from time import perf_counter
 import structlog
 
 from shared.metrics.metrics_parser import PARSER_FAILURE_TOTAL, PARSER_SUCCESS_TOTAL, PARSER_DURATION_SECONDS
+from shared.utils.logging_utils import sanitize_log_data
 
 #Logger extruturado para capturar erros de parsing com extruct
 logger = structlog.get_logger(__name__)
@@ -47,7 +48,7 @@ def extract_structured_data(html: str, url: Optional[str] = None) -> Dict[str, A
         return result
     except (JSONDecodeError, ValueError) as exc:
         PARSER_FAILURE_TOTAL.labels(library="extruct").inc()
-        logger.exception("Erro ao extrair dados estruturados com Extruct", erro=str(exc))
+        logger.exception("Erro ao extrair dados estruturados com Extruct", erro=sanitize_log_data(str(exc)))
         #Retorna um dicionário com listas vazias para sinalizar ausência de dados válidos sem interromper o fluxo das estratégias
         return {"json-ld": [], "microdata": [], "opengraph": []}
     finally:

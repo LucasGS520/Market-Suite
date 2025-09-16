@@ -144,6 +144,11 @@ async def test_falha_validacao(strategy: MagaluHtmlStaticStrategy, monkeypatch: 
     monkeypatch.setattr("market_scraper.strategies.html_static.DataQualityValidator.validate", fake_validate)
     monkeypatch.setattr("market_scraper.strategies.html_static.logger.warning", fake_warning)
 
-    resultado = await strategy.get_data("http://exemplo.com/produto")
+    url = "http://exemplo.com/produto?token=magalu123"
+    resultado = await strategy.get_data(url)
     assert resultado == {"status": "error", "detail": "dados incompletos"}
     assert capturado.get("erro") == "dados incompletos"
+    #Confere se a URL sensível foi mascarada pelo sanitizador
+    assert (
+        capturado.get("url") == "http://exemplo.com/produto?token=%5BREDACTED%5D"
+    )

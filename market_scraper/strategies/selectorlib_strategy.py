@@ -21,6 +21,7 @@ from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.throttle_manager import ThrottleManager
 from market_scraper.utils.http_utils import extract_hostname
+from shared.utils.logging_utils import sanitize_log_data
 
 logger = structlog.get_logger(__name__)
 
@@ -86,7 +87,7 @@ class SelectorLibStrategy(ScrapingStrategy):
         try:
             DataQualityValidator(["name", "current_price"]).validate(details)
         except ValueError as exc:
-            logger.warning("Falha na validação dos dados", url=url, erro=str(exc))
+            logger.warning("Falha na validação dos dados", url=sanitize_log_data(url), erro=sanitize_log_data(str(exc)))
             return {"status": "error", "detail": str(exc)}
         return {"status": "success", "details": details}
     
