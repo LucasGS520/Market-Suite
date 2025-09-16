@@ -20,6 +20,7 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_FALLBACK_TOTAL,
     SCRAPING_LATENCY_SECONDS,
 )
+from shared.utils.logging_utils import sanitize_log_data
 
 
 class PipelineStep(ABC):
@@ -75,7 +76,7 @@ class SynergicPipeline:
             try:
                 result = await step.run(shared_context)
             except Exception as err:
-                logger.exception("pipeline_step_error", step=step_name, error=str(err))
+                logger.exception("pipeline_step_error", step=step_name, error=sanitize_log_data(str(err)))
                 result = {"status": "error"}
             duration = perf_counter() - home
             
@@ -87,7 +88,7 @@ class SynergicPipeline:
             SCRAPER_STRATEGY_TOTAL.labels(step_name, status).inc()
             SCRAPING_LATENCY_SECONDS.labels(step_name).observe(duration)
 
-            logger.info("step_completed", step=step_name, status=status, execution_time=duration, details=result.get("details"))
+            logger.info("step_completed", step=step_name, status=status, execution_time=duration, details=sanitize_log_data(result.get("details")))
             return step_name, result, status
         
         success_status = {"success", "ok", "NOT_MODIFIED"}

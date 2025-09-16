@@ -2,7 +2,9 @@
 
 from dataclasses import dataclass
 from typing import List, Optional
+from urllib.parse import urlparse
 
+import asyncio
 import structlog
 import httpx
 
@@ -14,6 +16,7 @@ from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.cookie_manager import CookieManager
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.http_utils import extract_hostname
+from market_scraper.utils.robots_txt import RobotsTxtManager
 
 
 logger = structlog.get_logger("block_recovery")
@@ -63,6 +66,8 @@ class BlockRecoveryManager:
         self.cookie_manager.reset(session_id)
         self.delay_manager.prolong()
 
+        session_key = session_id or "block_recovery"
+
         recovered_html: Optional[str] = None
 
         idx = min(self._severity - 1, len(self.suspension_steps) - 1)
@@ -72,10 +77,20 @@ class BlockRecoveryManager:
 
         result_log = "falha"
         if url:
-            headers = {}
+            parser = RobotsTxtManager(base_url=url)
+            user_agent = self.ua_manager.get_user_agent(session_key)
+            path = urlparse(url).path or "/"
+            if not await parser.is_allowed(path, user_agent):
+                logger.warning("blocking_robots_recovery", domain=extract_hostname(url), user_agent=user_agent)
+                return None
+            
+            delay = await parser.get_crawl_delay(user_agent)
+            if delay:
+                await asyncio.sleep(delay)
+
+            headers = {"User-Agent": user_agent}
             cookies = None
             if session_id:
-                headers["User-Agent"] = self.ua_manager.get_user_agent(session_id)
                 cookies = self.cookie_manager.get_cookies(session_id)
             try:
                 async with httpx.AsyncClient(headers=headers, cookies=cookies, timeout=10) as client:

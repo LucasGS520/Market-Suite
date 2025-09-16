@@ -6,7 +6,7 @@ import random
 import threading
 from typing import Optional
 
-from shared.metrics.metrics_scraper import SCRAPER_JITTER_SECONDS, SCRAPER_BACKOFF_FACTOR
+from shared.metrics.metrics_scraper import SCRAPER_JITTER_SECONDS, SCRAPER_BACKOFF_FACTOR, SCRAPER_HTTP_BLOCKED_TOTAL
 
 from fastapi import HTTPException, status
 
@@ -47,6 +47,7 @@ class ThrottleManager:
     def wait(self, circuit_key: str, identifier: Optional[str] = None):
         """ Aguarda token bucket + aplica jitter, verifica global rate limiter se configurado """
         if self.rate_limiter and not self.rate_limiter.allow_request(identifier):
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
             self.circuit_breaker.record_failure(circuit_key)
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
 
@@ -82,6 +83,7 @@ class ThrottleManager:
     async def wait_async(self, circuit_key: str, identifier: Optional[str] = None):
         """ Versão assíncrona de ``wait`` utilizando ``asyncio.sleep`` """
         if self.rate_limiter and not self.rate_limiter.allow_request(identifier):
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
             self.circuit_breaker.record_failure(circuit_key)
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
 

@@ -4,7 +4,7 @@ import pytest
 import time
 
 import market_scraper.services.domain_policy as domain_policy
-from market_scraper.services.domain_policy import strategies_for, strategy_execution_mode_for, pipeline_execution_mode_for
+from market_scraper.services.domain_policy import strategies_for, strategy_execution_mode_for, pipeline_execution_mode_for, rate_limit_policy_for
 from market_scraper.strategies import (
     MercadoLivreJsonStrategy,
     MercadoLivreHtmlStaticStrategy,
@@ -99,4 +99,17 @@ def test_pipeline_execution_mode():
     """ Confere o modo do pipeline para domínio/contexto """
     assert pipeline_execution_mode_for("https://www.amazon.com.br/item") == "parallel"
     assert pipeline_execution_mode_for("https://mercadolivre.com.br/item", context="competitor") == "conditional"
+    
+def test_rate_limit_policy_for_domain():
+    """ Deve retornar configuração específica de rate limit por domínio """
+    policy = rate_limit_policy_for("https://www.amazon.com.br/produto")
+    assert policy is not None
+    assert policy["max_requests"] > 0
+    assert policy["window"] > 0
+
+def test_rate_limit_policy_default():
+    """ Domínios não mapeados utilizam configuração padrão quando disponível """
+    default = rate_limit_policy_for("https://domnio-nao-mapeado.com/item")
+    assert default is not None
+    assert default["max_requests"] > 0
     

@@ -31,6 +31,7 @@ PIPELINE_STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {}
 PIPELINE_POLICIES: Dict[str, Dict[str, List[str]]] = {}
 STRATEGY_EXECUTION: Dict[str, str] = {}
 PIPELINE_EXECUTION: Dict[str, Dict[str, str] | str] = {}
+RATE_LIMIT_POLICIES: Dict[str, Dict[str, int]] = {}
 
 
 #Controle interno de hot-reload
@@ -40,7 +41,7 @@ _CONFIG_MTIME = 0.0
 def load_config() -> None:
     """ Carrega as estratégias e políticas do arquivo configurado """
     global STRATEGY_REGISTRY, DOMAIN_POLICIES, PIPELINE_STEP_REGISTRY
-    global PIPELINE_POLICIES, STRATEGY_EXECUTION, PIPELINE_EXECUTION, _CONFIG_MTIME
+    global PIPELINE_POLICIES, STRATEGY_EXECUTION, PIPELINE_EXECUTION, RATE_LIMIT_POLICIES, _CONFIG_MTIME
 
     if not CONFIG_PATH.exists():
         STRATEGY_REGISTRY = {}
@@ -49,6 +50,7 @@ def load_config() -> None:
         PIPELINE_POLICIES = {}
         STRATEGY_EXECUTION = {}
         PIPELINE_EXECUTION = {}
+        RATE_LIMIT_POLICIES = {}
         _CONFIG_MTIME = 0.0
         return
 
@@ -76,6 +78,24 @@ def load_config() -> None:
     PIPELINE_POLICIES = data.get("pipeline_policies") or {}
     STRATEGY_EXECUTION = data.get("strategy_execution") or {}
     PIPELINE_EXECUTION = data.get("pipeline_execution") or {}
+
+    raw_limits = data.get("rate_limits") or {}
+    limits: Dict[str, Dict[str, int]] = {}
+    for domain, config in raw_limits.items():
+        if not isinstance(config, dict):
+            continue
+        max_requests = config.get("max_requests")
+        window = config.get("window")
+        try:
+            max_requests_int = int(max_requests)
+            window_int = int(window)
+        except (TypeError, ValueError):
+            continue
+        if max_requests_int <= 0 or window_int <= 0:
+            continue
+        limits[domain] = {"max_requests": max_requests_int, "window": window_int}
+
+    RATE_LIMIT_POLICIES = limits
     _CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
 
 def _normalize_execution_mode(value: str | None) -> Literal["sequential", "parallel", "conditional"]:
@@ -218,5 +238,24 @@ def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Litera
         or default_modes.get("default", "sequential")
     )
 
+def rate_limit_policy_for(url: str) -> Dict[str, int] | None:
+    """ Retorna a política de rate limit configurada para o domínio """
+    _reload_if_needed()
+
+    host = extract_hostname(url)
+    default_policy = RATE_LIMIT_POLICIES.get("default")
+
+    def _corresponds_domain(host: str, domain: str) -> bool:
+        """ Verifica se o host pertemce exatamente ao domínio informado """
+        return host == domain or host.endswith("." + domain)
+    
+    for domain, policy in RATE_LIMIT_POLICIES.iems():
+        if domain == "default":
+            continue
+        if _corresponds_domain(host, domain):
+            return policy
+        
+    return default_policy
+ 
 #Carrega a configuração na importação do módulo
 load_config()

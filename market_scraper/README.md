@@ -153,10 +153,10 @@ Essas métricas complementam as métricas HTTP padrão e devem ser acompanhadas 
 5. **Monitorar métricas** após o deploy para ajustar TTL de cache, paralelismo ou limites.
 
 #### Segurança, compliance e limites de scraping
-- Respeitar ``robots.txt`` consultando ``utils/robots.txt`` antes de liberar novas rotas.
-- Utilizar ``ThrottleManager`` e ``RateLimiter`` para manter intervalos e janelas alinhados com os termos de uso.
-- Sanitizar logs com os utilitários de mascaramento de dados do diretório ``shared``; não registrar dados pessoais ou tokens.
-- Configurar limites e comportamentos específicos por domínio no YAML, evitando que etapas pesadas sejam aplicadas indiscriminadamente.
+- Respeitar ``robots.txt`` consultando ``utils/robots.txt`` antes de liberar novas rotas e durante tentativas de recuperação (`BlockRecoverymanager`, aborta quano o domínio proíbe o caminho).
+- Utilizar ``ThrottleManager`` e ``RateLimiter`` para manter intervalos e janelas alinhados com os termos de uso; o contador `SCRAPER_HTTP_BLOCKED_TOTAL` é incrementado automaticamente quando o rate limit é atingido.
+- Sanitizar logs com os utilitários de mascaramento de dados do diretório ``shared``; o serviço aplica `sanitize_log_data` para remover tokens, cookies e parâmetros sensíveis de URLs antes de registrar eventos.
+- Configurar limites e comportamentos específicos por domínio no YAML, evitando que etapas pesadas sejam aplicadas indiscriminadamente. O bloco ``rate_limits`` define ``max_requests`` e ``window`` por host, refletidos em métricas no ``SCRAPER_URL_STATUS_TOTAL``.
 - Seguir o princípio de minimização de dados (LGPD/GDPR), coletando apenas os campos essenciais (nome, preço, etc...).
 - Documentar e revisar periodicamente exceções de compliance em conjunto com a equipe jurídica antes de ativar novas estratégias.
 

@@ -22,6 +22,7 @@ from market_scraper.utils.rate_limiter import RateLimiter
 from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_scraper.utils.throttle_manager import ThrottleManager
 from shared.metrics.metrics_scraper import SCRAPER_STRATEGY_TOTAL, SCRAPER_FALLBACK_TOTAL
+from shared.utils.logging_utils import sanitize_log_data
 
 
 #Logger configurado para este módulo
@@ -110,7 +111,7 @@ class MultiStrategyScraperOrchestrator:
                 if isinstance(ctx_update, dict):
                     shared_context.update(ctx_update)
             except Exception as err:
-                logger.warning("dependency_resolver_error", dependency=name, erro=err)
+                logger.warning("dependency_resolver_error", dependency=name, erro=sanitize_log_data(str(err))),
 
         async def _run_strategy(strategy: ScrapingStrategy) -> tuple[ScrapingStrategy, dict, str]:
             """ Executa uma estratégia individual com tratamento de erros """
@@ -139,7 +140,7 @@ class MultiStrategyScraperOrchestrator:
                 status_label = "timeout"
             except Exception as err:
                 #Registra o erro para facilitar diagnóstico no scraping
-                logger.exception("unexpected_error_strategy", erro=(err))
+                logger.exception("unexpected_error_strategy", erro=sanitize_log_data(str(err)))
                 #Qualquer exceção marca a execução como erro
                 result = {"status": "error"}
                 status_label = "exception"
