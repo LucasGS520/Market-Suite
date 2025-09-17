@@ -128,3 +128,33 @@ rate_limits:
     max_requests: 80
     window: 60
     
+#Controla progressivamente o rollout de funcionalidades críticas
+feature_flags:
+  synergic_pipeline:
+    default:
+      default:
+        enabled: true
+        rollout_percentage: 100
+      competitor:
+        enabled: true
+        rollout_percentage: 100
+    mercadolivre.com.br:
+      default:
+        enabled: true
+        rollout_percentage: 100
+      competitor:
+        enabled: true
+        rollout_percentage: 100
+    amazon.com.br:
+      default:
+        enabled: true
+        rollout_percentage: 100
+    magazineluiza.com.br:
+      default:
+        enabled: true
+        rollout_percentage: 100
+    example.com:
+      default:
+        enabled: true
+        rollout_percentage: 100
+        

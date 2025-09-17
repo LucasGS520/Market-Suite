@@ -4,7 +4,15 @@ import pytest
 import time
 
 import market_scraper.services.domain_policy as domain_policy
-from market_scraper.services.domain_policy import strategies_for, strategy_execution_mode_for, pipeline_execution_mode_for, rate_limit_policy_for
+from market_scraper.services.domain_policy import (
+    strategies_for, 
+    strategy_execution_mode_for, 
+    pipeline_execution_mode_for, 
+    rate_limit_policy_for,
+    evaluate_feature_flag,
+    is_feature_enabled,
+    FeatureFlagConfig,
+)
 from market_scraper.strategies import (
     MercadoLivreJsonStrategy,
     MercadoLivreHtmlStaticStrategy,
@@ -122,4 +130,82 @@ def test_rate_limit_policy_default():
     default = rate_limit_policy_for("https://domnio-nao-mapeado.com/item")
     assert default is not None
     assert default["max_requests"] > 0
+    
+def test_feature_flag_default_enabled(monkeypatch):
+    """ Quando a feature flag não está configurada deve respeitar o valor padrão """
+    monkeypatch.setattr(domain_policy, "_reload_if_needed", lambda: None)
+    monkeypatch.setattr(domain_policy, "FEATURE_FLAGS", {})
+
+    decision = evaluate_feature_flag(
+        "synergic_pipeline",
+        "https://site-novo.com/produto",
+        identifier="usuario-1",
+    )
+
+    assert decision.enabled is True
+    assert decision.configured is False
+    assert decision.rollout_percentage == 100.0
+
+def test_feature_flag_rollout_percentage(monkeypatch):
+    """ Deve respeitar rollout percentual e produzir decisão determinística """
+    monkeypatch.setattr(domain_policy, "_reload_if_needed", lambda: None)
+    monkeypatch.setattr(
+        domain_policy,
+        "FEATURE_FLAGS",
+        {
+            "synergic_pipeline": {
+                "mercadolivre.com.br": {
+                    "default": FeatureFlagConfig(enabled=True, rollout_percentage=30.0)
+                },
+                "default": {
+                    "default": FeatureFlagConfig(enabled=True, rollout_percentage=50.0)
+                },
+            }
+        },
+    )
+
+    monkeypatch.setattr(domain_policy, "_compute_rollout_bucket", lambda identifier: 25.0)
+
+    decision = evaluate_feature_flag(
+        "synergic_pipeline",
+        "https://www.mercadolivre.com.br/produto",
+        identifier="usuario-canario",
+    )
+
+    assert decision.enabled is True
+    assert decision.bucket_value == 25.0
+    assert decision.rollout_percentage == 30.0
+
+    monkeypatch.setattr(domain_policy, "_compute_rollout_bucket", lambda identifier: 80.0)
+    decision_negado = evaluate_feature_flag(
+        "synergic_pipeline",
+        "https://www.mercadolivre.com.br/produto",
+        identifier="usuario-canario",
+    )
+
+    assert decision_negado.enabled is False
+    assert decision_negado.rollout_percentage == 30.0
+
+def test_feature_flag_disabled(monkeypatch):
+    """ Configurações com enabled=False devem bloquear a funcionaliade """
+    monkeypatch.setattr(domain_policy, "_reload_if_needed", lambda: None)
+    monkeypatch.setattr(
+        domain_policy,
+        "FEATURE_FLAGS",
+        {
+            "synergic_pipeline": {
+                "example.com": {
+                    "default": FeatureFlagConfig(enabled=False, rollout_percentage=100.0)
+                }
+            }
+        },
+    )
+
+    ativo = is_feature_enabled(
+        "synergic_pipeline",
+        "https://sub.example.com/produto",
+        identifier="usuario",
+    )
+
+    assert ativo is False
     

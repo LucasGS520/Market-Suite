@@ -29,7 +29,7 @@ class ContadorComRotulo(ContadorSemRotulo):
         if rotulos_nomeados:
             self.rotulos.append(tuple(rotulos_nomeados.items()))
         else:
-            self.rotulos.append(tuple(rotulos_nomeados.items()))
+            self.rotulos.append(rotulos)
         return self
 
 def _configura_orquestrador(monkeypatch, retorno: dict) -> None:
@@ -557,6 +557,55 @@ async def test_scrape_product_common_async_pipeline_contexto_seguro(monkeypatch)
     }
     assert "token_sensivel" not in capturado["value"]["metadata"]["context"]
     assert OrquestradorSentinela.instanciado is False
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_pipeline_desabilitado(monkeypatch):
+    """ Feature flag desabilitada deve pular o pipeline e acionar o orquestrador """
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "touch", lambda *a, **k: None)
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {})
+
+    class EtapaNuncaExecutada(PipelineStep):
+        async def run(self, shared_context):
+            raise AssertionError("Pipeline não deveria executar quando desabilitado")
+        
+    monkeypatch.setattr(common, "pipeline_steps_for", lambda *a, **k: [EtapaNuncaExecutada()])
+    monkeypatch.setattr(common, "pipeline_execution_mode_for", lambda *a, **k: "sequential")
+
+    contador_flags = ContadorComRotulo()
+    monkeypatch.setattr(common, "SCRAPER_FEATURE_FLAG_TOTAL", contador_flags)
+
+    monkeypatch.setattr(common, "evaluate_feature_flag", 
+        lambda *a, **k: SimpleNamespace(
+            enabled=False,
+            rollout_percentage=0.0,
+            source="teste",
+            bucket_value=None,
+        ),
+    )
+
+    class OrquestradorMarcador:
+        instanciado = False
+
+        def __init__(self, *a, **k):
+            OrquestradorMarcador.instanciado = True
+
+        async def scrape(self, **k):
+            return {"status": "error"}
+
+    monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", OrquestradorMarcador)
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "error"
+    assert OrquestradorMarcador.instanciado is True
+    assert ("synergic_pipeline", "disabled") in contador_flags.rotulos
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_respeita_crawl_delay(monkeypatch):

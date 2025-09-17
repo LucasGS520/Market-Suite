@@ -183,6 +183,59 @@ Suponha que seja necessário utilizar uma biblioteca ``PlaywrightRenderStrategy`
 
 Esse fluxo garante que novas bibliotecas possam ser adicionadas de forma modular, habilitadas apenas quando configuradas via YAML e acompanhadas por métricas específicas.
 
+#### Feature flags e rollout controlado
+O arquivo ``domain_policy.yaml`` possui a seção ``feature_flags`` que controla funcionalidades sensíveis. Cada feature pode possuir valores por domínio e contexto, aceitando ``enabled`` (``true``/``false``) e ``rollout_percentage`` (0-100).
+O valor final é determinado de forma determinística utilizando ``user_id`` e URL, permitindo liberar funcionalidades gradualmente sem inconsistências entre chamadas do mesmo usuário.
+
+```yaml
+feature_flags:
+  synergic_pipeline:
+    mercadolivre.com.br:
+      default:
+        enabled: true
+        rollout_percentage: 40 #Ativa o pipeline para 40% das requisições
+      competitor:
+        enabled: false #mantém o comportamento anterior
+```
+* Valores ausentes herdam do bloco ``default``.
+* ``rollout_percentage`` controla o canário: ``10`` significa que apenas 10% das requisições utilizarão a funcionalidade.
+* Defina ``enabled: false`` (ou ``rollou_percentage: 0``) para realizar rollback imediato sem necessidade de deploy.
+
+Ative ``DOMAIN_POLICY_HOT_RELOAD=1`` em desenvolvimento para testar novos percentuais sem reiniciar o serviço
+
+#### Observabilidade do rollout
+Três sinais principais acompanham a saúde do rollout:
+
+1. **Métrica Prometheus ``scraper_feature_flag_total``**
+  - Labels ``feature`` e ``state`` (`enabled`, `disabled`, `no_steps`).
+  - Permite criar alertas (ex.: queda brusca na razão `enabled`/`disabled`).
+2. **Logs estruturados**
+  - `running_pipeline` inclui ``rollout`` e ``bucket_value`` indicando o percentual configurado e o valor sorteado para a requisição.
+  - `pipeline_feature_disabled` e ``pipeline_skipped_no_steps`` sinalizam quando o pipeline não é executado por configuração.
+3. **Métricas de latência e fallback**
+  - ``SCRAPING_LATENCY_SECONDS`` e ``SCRAPER_FALLBACK_TOTAL`` ajudam a comparar o comportamento antes/depois do rollout.
+
+Após alterações em ``feature_flags`` monitore:
+- Grafana: dashboard do scraper (latência, taxa de sucesso, contadores ``scraper_feature_flag_total``).
+- Loki: buscar eventos `pipeline_feature_disabled` para confirmar se o rollback foi aplicado.
+
+#### Plano de rollout e rollback
+1. **Preparação**
+  - Ajuste o percentual inicial (ex.: 10%) no YAML e habilite hot reload em ambientes de teste.
+  - Valide com testes automatizados (`pytest`) e smoke tests manuais.
+2. **Rollout canário**
+  - Publicar o YAML atualizado via pipeline de configuração.
+  - Acompanhar ``scraper_feature_flag_total{state="enabled"}`` vs ``scraper_feature_flag_total{state="disabled"}``.
+  - Observar histogramas de latência e logs de erro nos primeiros minutos.
+3. **Escalonamento**
+  - Se não houver regressões, aumentar gradualmente o ``rollout_parcentage`` (40% -> 70% -> 100%).
+  - Documentar cada incremento no changelog interno.
+4. **Rollback**
+  - Em caso de falha, ajustar ``enabled: false`` ou ``rollout_percentage: 0`` e forçar recarga do YAML (hot reload ou restart leve).
+  - Confirmar no Grafana que o contador `state="disabled"` voltou a subir e que não há novas execuções da feature.
+
+Esses passos mantêm o serviço aderente às boas práticas de segurança (LGPD/GDPR), possibilitam auditoria das decisões e evitam instabilidade em produção.
+
 #### Segurança, compliance e limites de scraping
 - Respeitar ``robots.txt`` consultando ``utils/robots.txt`` antes de liberar novas rotas e durante tentativas de recuperação (`BlockRecoverymanager`, aborta quano o domínio proíbe o caminho).
 - Utilizar ``ThrottleManager`` e ``RateLimiter`` para manter intervalos e janelas alinhados com os termos de uso; o contador `SCRAPER_HTTP_BLOCKED_TOTAL` é incrementado automaticamente quando o rate limit é atingido.
