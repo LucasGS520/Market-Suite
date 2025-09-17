@@ -2,12 +2,35 @@ import pytest
 from types import SimpleNamespace
 from uuid import uuid4
 
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 
 from market_scraper.services import services_scraper_common as common
 from market_scraper.services.synergic_pipeline import PipelineStep
 from shared.enums import BlockResult
 
+
+class ContadorSemRotulo:
+    """ Implementa apenas incremento para uso em métricas sem rótulo """
+    def __init__(self) -> None:
+        self.total = 0
+
+    def inc(self, valor: int = 1) -> None:
+        """ Incrementa o contador interno pelo valor especificado """
+        self.total += valor
+
+class ContadorComRotulo(ContadorSemRotulo):
+    """ Contador que registra combinações de rótulos utilizados """
+    def __init__(self) -> None:
+        super().__init__()
+        self.rotulos: list[tuple] = []
+
+    def labels(self, *rotulos: str, **rotulos_nomeados: str):
+        """ Retém os rótulos fornecidos antes do incremento """
+        if rotulos_nomeados:
+            self.rotulos.append(tuple(rotulos_nomeados.items()))
+        else:
+            self.rotulos.append(tuple(rotulos_nomeados.items()))
+        return self
 
 def _configura_orquestrador(monkeypatch, retorno: dict) -> None:
     class OrquestradorFalso:
@@ -17,6 +40,43 @@ def _configura_orquestrador(monkeypatch, retorno: dict) -> None:
     monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", lambda *a, **k: OrquestradorFalso())
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_respeita_robots(monkeypatch):
+    """ Ao receber bloqueio no robots.txt deve abortar e registrar métricas """
+    contador_bloqueio = ContadorSemRotulo()
+    contador_status = ContadorComRotulo()
+
+    class ParserNegado:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        async def is_allowed(self, path: str, user_agent: str) -> bool:
+            return False
+        
+        async def get_crawl_delay(self, user_agent: str) -> int | None:
+            return None
+
+    monkeypatch.setattr(common, "SCRAPER_HTTP_BLOCKED_TOTAL", contador_bloqueio)
+    monkeypatch.setattr(common, "SCRAPER_URL_STATUS_TOTAL", contador_status)
+    monkeypatch.setattr(common, "RobotsTxtParser", lambda base_url: ParserNegado(base_url))
+    monkeypatch.setattr(common.ua_manager, "get_user_agent", lambda _: "AgenteTeste")
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+
+    with pytest.raises(HTTPException) as exc:
+        await common.scrape_product_common_async(
+            url="https://exemplo.com/item",
+            user_id=uuid4(),
+            payload=payload,
+            product_type="monitored",
+        )
+
+    assert exc.value.status_code == status.HTTP_403_FORBIDDEN
+    assert contador_bloqueio.total == 1
+    assert contador_status.total == 1
+    assert dict(contador_status.rotulos[0]) == {"url_host": "exemplo.com", "status": "robots_blocked"}
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_cached(monkeypatch):
@@ -442,3 +502,106 @@ async def test_scrape_product_common_async_pipeline_not_modified(monkeypatch):
     assert resultado == {"status": "NOT_MODIFIED", "details": cached}
     assert tocado["valor"] is True
     
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_pipeline_contexto_seguro(monkeypatch):
+    """ Armazena apenas chaves de contexto seguro no cache """
+    class EtapaContextoSeguro(PipelineStep):
+        async def run(self, shared_context):
+            shared_context["content_signature"] = "sig-123"
+            shared_context["selectorlib_template"] = "produto.tpl"
+            shared_context["token_sensivel"] = "nao deve aparecer"
+            return {
+                "status": "success",
+                "details": {"name": "Pipeline", "current_price": "77"},
+                "extraction_method": "EtapaContextoSeguro",
+            }
+    
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common, "pipeline_steps_for", lambda *a, **k: [EtapaContextoSeguro()])
+    monkeypatch.setattr(common, "pipeline_execution_mode_for", lambda *a, **k: "sequential")
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {})
+
+    capturado: dict = {}
+
+    def _set_cache(*, marketplace, url, value, ttl=None):
+        capturado["value"] = value
+
+    monkeypatch.setattr(common.cache_manager, "set", _set_cache)
+    monkeypatch.setattr(common.cache_manager, "touch", lambda *a, **k: None)
+
+    class OrquestradorSentinela:
+        instanciado = False
+
+        def __init__(self, *a, **k):
+            OrquestradorSentinela.instanciado = True
+
+        async def scrape(self, **k):
+            return {"status": "error"}
+        
+    monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", OrquestradorSentinela)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "success"
+    assert capturado["value"]["data"]["name"] == "Pipeline"
+    assert capturado["value"]["metadata"]["extraction_method"] == "EtapaContextoSeguro"
+    assert capturado["value"]["metadata"]["context"] == {
+        "content_signature": "sig-123",
+        "selectorlib_template": "produto.tpl",
+    }
+    assert "token_sensivel" not in capturado["value"]["metadata"]["context"]
+    assert OrquestradorSentinela.instanciado is False
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_respeita_crawl_delay(monkeypatch):
+    """ Respeita o crawl delay antes de avançar para o pipeline """
+    class ParserComDelay:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        async def is_allowed(self, path: str, user_agent: str) -> bool:
+            return True
+        
+        async def get_crawl_delay(self, user_agent: str) -> int | None:
+            return 2  #Segundos
+    
+
+    class EtapaBasica(PipelineStep):
+        async def run(self, shared_context):
+            return {
+                "status": "success",
+                "details": {"name": "Delay", "current_price": "11"},
+            }
+        
+    sleep_registro = {"valor": 0}
+
+    async def _fake_sleep(valor: int) -> None:
+        sleep_registro["valor"] = valor
+
+    monkeypatch.setattr(common, "RobotsTxtParser", lambda base_url: ParserComDelay(base_url))
+    monkeypatch.setattr(common.ua_manager, "get_user_agent", lambda _: "AgenteTeste")
+    monkeypatch.setattr(common.asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    monkeypatch.setattr(common, "pipeline_steps_for", lambda *a, **k: [EtapaBasica()])
+    monkeypatch.setattr(common, "pipeline_execution_mode_for", lambda *a, **k: "sequential")
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {})
+    monkeypatch.setattr(common.cache_manager, "touch", lambda *a, **k: None)
+    monkeypatch.setattr(common, "MultiStrategyScraperOrchestrator", lambda *a, **k: None)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "success"
+    assert sleep_registro["valor"] == 2
