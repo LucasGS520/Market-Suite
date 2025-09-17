@@ -1,60 +1,103 @@
 # Arquitetura de Scraping Leve
-Este documento descreve o fluxo de coleta de dados do serviço `market_scraper` utilizando abordagens de baixo custo baseadas em **JSON** e **HTML estático**.
-O objetivo é extrair apenas os campos essenciais `name` e `current_price` de maneira discreta, evitando o uso de navegadores controlados pelo Playwright nesta fase do projeto.
+Este documento descreve o fluxo de coleta de dados do serviço `market_scraper` utilizando abordagens de baixo custo baseadas em **JSON**, **HTML estático** e pipeline sinérgico configurável.
+O objetivo é extrair apenas os campos essenciais `name` e `current_price` de maneira discreta, com observabilidade, compliance e rollout controlado, evitando o uso de navegadores controlados pelo Playwright nesta fase do projeto.
 
 ## Visão Geral do Fluxo
 1. A rota `/parse` recebe a URL do produto.
-2. A função `scrape_product_common_async` normaliza o endereço para a versão mobile, consulta o cache e aciona o orquestrador.
-3. O `MultiStrategyScraperOrchestrator` seleciona as estratégias definidas pela política de domínio e executa cada uma em sequência com limite de tempo configurável via `asyncio.wait_for`.
-4. Após cada tentativa os dados são validados pelo `DataQualityValidator`; timeouts ou falhas acionam fallback para a próxima estratégia.
-5. Quando o resultado é válido ele é armazenado no `IntelligentCacheManager` e retornado ao solicitante.
+2. A função `scrape_product_common_async` normaliza o endereço, consulta o cache inteligente e aciona o pipeline ou orquestrador conforme feature flag e contexto.
+3. O `MultiStrategyScraperOrchestrator` e/ou `SynergicPipeline` selecionam estratégias e etapas conforme configuração centralizada (`domain_policy.yaml`).
+4. Cada tentativa é validada pelo `DataQualityValidator`; timeouts ou falhas acionam fallback para a próxima estratégia ou etapa.
+5. Resultados válidos são armazenados no `IntelligentCacheManager` e retornados ao solicitante, respeitando TTL, ETag e políticas de domínio.
+6. Métricas e logs estruturados são registrados para observabilidade e compliance.
 
-## Políticas de Domínio
-O módulo `domain_policy` mapeia cada marketplace para uma ordem de execução:
-- Primeiro são tentadas estratégias leves que consomem **endpoints JSON** públicos.
-- Caso não retornem dados, o orquestrador realiza fallback para estratégias de **HTML estático**.
+## Políticas de Domínio e Configuração Centralizada
+O módulo `domain_policy` mapeia cada marketplace para uma ordem de execução, contexto e modo de processamento:
+- Estratégias leves (JSON) são priorizadas, seguidas por HTML estático e outras técnicas.
+- O arquivo `domain_policy.yaml` centraliza estratégias, etapas de pipeline, modos de execução (`sequential`, `parallel`, `conditional`), limites de requisições e feature flags.
+- Contextos (ex: `default`, `competitor`) permitem granularidade por tipo de página ou cenário.
+- Novas estratégias, etapas ou domínios podem ser adicionados facilmente via YAML, sem alterar o core do código.
 
-Essa política facilita a inclusão de novos marketplaces e novas técnicas de extração. Basta registrar a classe no `STRATEGY_REGISTRY` e definir a ordem em `DOMAIN_POLICES`.
-
-## Estratégias de Coleta
+## Estratégias de Coleta e Pipeline
 ### JSON Endpoint
-As classes derivadas de `JsonEndpointStrategy` executam chamadas HTTP a APIs públicas quando disponíveis. No momento, mantemos stubs e priorizamos HTML estático para Mercado Livre, Amazon e Magalu. Resultados válidos podem ser armazenados em cache para reutilização.
+Classes derivadas de `JsonEndpointStrategy` executam chamadas HTTP a APIs públicas. Resultados válidos são cacheados para reutilização.
 
 ### HTML Estático
-As estratégias herdadas de `HtmlStaticStrategy` agora priorizam Parsel (lxml) para parsing de HTML:
-- Extração de `JSON-LD` via XPath: `//script[@type="application/ld+json"]/text()`
-- Meta-tags via CSS: `meta[property="og:title"]::attr(content)`
-
-Quando essas fontes falham, aplicamos regras específicas por domínio (Mercado Livre, Amazon e Magalu). BeautifulSoup permanece como fallback usando backend `lxml` para compatibilidade.
+Estratégias herdadas de `HtmlStaticStrategy` priorizam Parsel (lxml), extraindo `JSON-LD` e meta-tags. BeautifulSoup é fallback para compatibilidade.
 
 ### SelectorLib
-Para páginas com layout instável, utilizamos a biblioteca **SelectorLib** com templates YAML verisonados em `selectorlib_templates`. A estratégia `SelectorLibStrategy` carrega o template correspondente ao domínio e extrai diretamente os campos `name` e `current_price`.
+Para páginas instáveis, usamos **SelectorLib** com templates YAML em `selectorlib_templates`.
 
-## MechanicalSoup para FLuxos Simples
-Quando o fluxo exige apenas interações leves, como preencher um formulário de login ou navegar por filtros básicos, o uso de um navegador completo é desnecessário.
-Nesses cenários adotamos **MechanicalSoup**, que combina `requests` e `BeautifulSoup` para simular um navegador de forma rápida e sem grande consumo de recursos.
+### Pipeline Sinérgico
+O `SynergicPipeline` executa etapas configuráveis por domínio/contexto, compartilhando dados via `shared_context` e registrando métricas de latência, fallback e sucesso/falha.
 
-Situações em que o MechanicalSoup é mais eficiente do que o Playwright:
-- Autenticação por formulário simples com poucos campos.
-- Paginação ou aplicação de filtros via POST/GET sem JavaScript complexo.
-- Coletas em que a página principal é estática e requer apenas cookies obtidos após o login.
-
-O Playwright permanece indicando para casos em que a página depende fortemente de JavaScript, possui elementos dinâmicos ou requer interação avançada que não é atendida por um parser tradicional.
+## MechanicalSoup para Fluxos Simples
+Utilizado para interações leves (login, filtros simples), combinando `requests` e `BeautifulSoup` sem overhead de navegador completo. Playwright é reservado para cenários avançados e não está ativo por padrão.
 
 ## Requests-HTML para Páginas Dinâmicas Leves
-Para cenários em que o conteúdo é exibido somente após a execução de JavaScript simples, utilizamos **Requests-HTML**. A biblioteca combina `requests` com um renderizador interno, permitindo obter o HTML pós-renderização sem a complexidade de um navegador completo.
+Utilizado para páginas que exigem renderização simples de JavaScript. Prefira Requests-HTML antes de recorrer ao Playwright. Limitações: depende de `pyppeteer`, não realiza navegação avançada, pode consumir mais recursos.
 
-Situações em que o Requests-HTML é indicado:
-- Conteúdo carregado dinamicamente logo após a requisição inicial.
-- Páginas que não exigem interações complexas como cliques ou rolagem.
+## Rollout, Feature Flags e Observabilidade
+O rollout de funcionalidades críticas (ex: pipeline sinérgico) é controlado por feature flags no `domain_policy.yaml`, permitindo ativação gradual por domínio/contexto e rollback imediato.
+- Métricas Prometheus (`SCRAPER_FEATURE_FLAG_TOTAL`, `SCRAPER_STRATEGY_TOTAL`, `SCRAPER_FALLBACK_TOTAL`, `SCRAPING_LATENCY_SECONDS`) monitoram decisões, latência e fallback.
+- Logs estruturados registram decisões de rollout, execuções e bloqueios.
+- O plano de rollout e rollback está documentado e testado, garantindo governança e rastreabilidade.
 
-Limitações conhecidas:
-- Depende de `pyppeteer` e pode falhar em sites com proteção rígida.
-- Não realiza ações avançadas de navegação ou formulários complexos.
-- Maior consumo de recursos que uma requisição estática.
-- Pode gerar conflitos de dependência com o Playwright (`pyee`).
+## Segurança, Compliance e Limites
+- Respeito ao `robots.txt` antes de qualquer coleta.
+- Limites de requisições por domínio configurados no YAML e aplicados via `RateLimiter` e `ThrottleManager`.
+- Logs passam por sanitização (`sanitize_log_data`), evitando registro de dados sensíveis (cookies, tokens, credenciais).
+- Coleta apenas dos campos essenciais, conforme LGPD/GDPR.
 
-Prefira o Requests-HTML como alternativa intermediária antes de recorrer ao Playwright.
+## Extensibilidade e Exemplos Práticos
+Para adicionar novas estratégias, etapas ou domínios:
+1. Implemente a classe derivando das bases existentes.
+2. Registre no `domain_policy.yaml` em `strategies` ou `pipeline_steps`.
+3. Defina a ordem e contexto em `policies` ou `pipeline_policies`.
+4. Ajuste `strategy_execution` e `pipeline_execution` conforme necessidade.
+5. Adicione testes unitários/integrados.
+6. Monitore métricas após deploy para ajustes finos.
+
+Exemplo de rollout:
+```yaml
+feature_flags:
+  synergic_pipeline:
+    mercadolivre.com.br:
+      default:
+        enabled: true
+        rollout_percentage: 40
+      competitor:
+        enabled: false
+```
+Permite ativar o pipeline para 40% das requisições, com rollback imediato via YAML.
+
+## Métricas e Monitoramento
+Principais métricas Prometheus:
+| Métrica | Descrição |
+| ------- | --------- |
+| `SCRAPER_STRATEGY_TOTAL` | Contador por etapa e status |
+| `SCRAPER_FALLBACK_TOTAL` | Fallbacks acionados |
+| `SCRAPING_LATENCY_SECONDS` | Latência por etapa |
+| `SCRAPER_FEATURE_FLAG_TOTAL` | Decisões de rollout |
+| `SCRAPER_HTTP_BLOCKED_TOTAL` | Bloqueios por rate limit ou robots.txt |
+| `SCRAPER_URL_STATUS_TOTAL` | Status por domínio |
+
+Dashboards Grafana e alertas Prometheus/Loki acompanham rollout, latência, taxa de sucesso e compliance.
+
+## Resultado Esperado
+Para cada URL, o serviço retorna um dicionário com `name` e `current_price`. Se o conteúdo não mudou, responde **304 Not Modified**. Bloqueios sucessivos podem suspender temporariamente o scraping.
+
+## Checklist de Extensão e Compliance
+- [x] Configuração centralizada no YAML
+- [x] Código modular e extensível
+- [x] Documentação e exemplos completos
+- [x] Testes aprovados e cobertura validada
+- [x] Observabilidade e compliance garantidos
+
+## Referências Rápidas
+- `AGENTS.md`: guia operacional para agentes e automações
+- `market_scraper/services/domain_policy.yaml`: configuração centralizada
+- `shared/metrics/metrics_scraper.py`: métricas e observabilidade
+- `tests/unit/services/test_domain_policy.py`: exemplos de testes de seleção/contexto
 
 ### Configuração centralizada (`domain_policy.yaml`)
 O arquivo ``services/domain_policy.yaml`` centraliza todas as decisões de orquestração do scraper;
