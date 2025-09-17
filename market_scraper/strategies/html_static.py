@@ -190,7 +190,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
         """ Extrai JSON-LD (prioritário) com suporte a ``@graph``/listas """
         home = perf_counter()
         try:
-            scripts = sel.xpath('//script[@type="application/ld+josn"]/text()').getall()
+            scripts = sel.xpath('//script[@type="application/ld+json"]/text()').getall()
             for raw in scripts:
                 try:
                     content = json.loads(raw or "{}")
@@ -390,7 +390,7 @@ class HtmlStaticStrategy(ScrapingStrategy):
         data = self._extract_from_json_ld_parsel(sel, url)
         if not data.get("name") or not data.get("current_price"):
             data = self._extract_from_meta_tags_parsel(sel, url)
-        if data.get("name") or not data.get("current_price"):
+        if data.get("name") and data.get("current_price"):
             return data
         
         soup = BeautifulSoup(html, "lxml")
