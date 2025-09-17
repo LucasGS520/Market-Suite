@@ -13,24 +13,43 @@ strategies:
 #Para cada domínio, lista as estratégias na ordem de prioridade
 policies:
   mercadolivre.com.br:
-    - JSON_ML
-    - HTML_ML
+    default:
+      - JSON_ML
+      - HTML_ML
+    competitor:
+      - HTML_ML
   amazon.com.br:
-    - JSON_AMAZON
-    - HTML_AMAZON
+    default:
+      - JSON_AMAZON
+      - HTML_AMAZON
+    competitor:
+      - HTML_AMAZON
   magazineluiza.com.br:
-    - JSON_MAGALU
-    - HTML_MAGALU
+    default:
+      - JSON_MAGALU
+      - HTML_MAGALU
+    competitor:
+      - HTML_MAGALU
   example.com:
-    - SELECTOR_GENERIC
+    default:
+      - SELECTOR_GENERIC
 
 #Define o modo de execução das estratégias por domínio; Quando não especificado o modo ``sequential`` é utilizado
 strategy_execution:
-  default: sequential
-  mercadolivre.com.br: conditional
-  amazon.com.br: parallel
-  magazineluiza.com.br: sequential
-  example.com: conditional
+  default:
+    default: sequential
+    competitor: sequential
+  mercadolivre.com.br:
+    default: conditional
+    competitor: sequential
+  amazon.com.br:
+    default: parallel
+    competitor: parallel
+  magazineluiza.com.br:
+    default: sequential
+    competitor: conditional
+  example.com:
+    default: conditional
 
 #Mapeia as etapas disponíveis para o ``SynergicPipeline``.
 pipeline_steps:

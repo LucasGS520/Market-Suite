@@ -21,6 +21,7 @@ def _preparar_ambiente(monkeypatch) -> None:
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
 
     #Impede acesso real a Redis e leitura de robots.txt
+    monkeypatch.setattr(common, "rate_limit_policy_for", lambda *a, **k: None)
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: None)
 
     async def fake_fetch_robots(self, user_agent: str):
@@ -89,7 +90,7 @@ def test_seleciona_estrategia_mercado_livre(monkeypatch) -> None:
     monkeypatch.setattr(
         domain_policy,
         "DOMAIN_POLICIES",
-        {"mercadolivre.com.br": ["FAKE"]},
+        {"mercadolivre.com.br": {"default": ["FAKE"]}},
     )
 
     client = TestClient(app)
@@ -106,8 +107,8 @@ def test_seleciona_estrategia_amazon(monkeypatch) -> None:
     escolhido: dict[str, Any] = {}
     original = common.strategies_for
 
-    def capturar(url: str):
-        resultado = original(url)
+    def capturar(url: str, *, context: str = "default"):
+        resultado = original(url, context=context)
         #Armazena a sequência de estratégias escolhidas para verificação
         escolhido["estrategias"] = resultado
         return resultado
@@ -129,8 +130,8 @@ def test_seleciona_estrategia_magalu(monkeypatch) -> None:
     escolhido: dict[str, Any] = {}
     original = common.strategies_for
 
-    def capturar(url: str):
-        resultado = original(url)
+    def capturar(url: str, *, context: str = "default"):
+        resultado = original(url, context=context)
         escolhido["estrategias"] = resultado
         return resultado
 

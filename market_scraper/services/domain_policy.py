@@ -5,11 +5,13 @@ from __future__ import annotations
 As estratégias e políticas são carregadas de um arquivo ``YAML`` em tempo
 de inicialização, permitindo alterar o mapeamento sem nova publicação. Um
 ``hot-reload`` opcional pode ser ativado para recarregar o arquivo sempre
-que ele for modificado. 
+que ele for modificado. As políticas podem ser definidas por domínio e por
+contexto (como tipo de página ou perfil de usuário), facilitando ajustes
+granulares sem alteração de código.
 """
 
 from pathlib import Path
-from typing import Dict, List, Type, Literal, cast
+from typing import Any, Dict, List, Type, Literal, cast
 import os
 
 import yaml
@@ -26,10 +28,10 @@ CONFIG_PATH = Path(os.getenv("DOMAIN_POLICY_FILE", Path(__file__).with_name("dom
 
 #Estruturas carregadas a partir do arquivo de configuração
 STRATEGY_REGISTRY: Dict[str, Type[ScrapingStrategy]] = {}
-DOMAIN_POLICIES: Dict[str, List[str]] = {}
+DOMAIN_POLICIES: Dict[str, Dict[str, List[str]]] = {}
 PIPELINE_STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {}
 PIPELINE_POLICIES: Dict[str, Dict[str, List[str]]] = {}
-STRATEGY_EXECUTION: Dict[str, str] = {}
+STRATEGY_EXECUTION: Dict[str, Dict[str, str] | str] = {}
 PIPELINE_EXECUTION: Dict[str, Dict[str, str] | str] = {}
 RATE_LIMIT_POLICIES: Dict[str, Dict[str, int]] = {}
 
@@ -37,6 +39,21 @@ RATE_LIMIT_POLICIES: Dict[str, Dict[str, int]] = {}
 #Controle interno de hot-reload
 _HOT_RELOAD = bool(os.getenv("DOMAIN_POLICY_HOT_RELOAD"))
 _CONFIG_MTIME = 0.0
+
+def _normalize_policy_structure(raw: Dict[str, Any]) -> Dict[str, Dict[str, List[str]]]:
+    """ Normaliza estruturas de políticas aceitando listas simples ou blocos por contexto """
+    normalized: Dict[str, Dict[str, List[str]]] = {}
+    for domain, entry in (raw or {}).items():
+        contexts: Dict[str, List[str]] = {}
+        if isinstance(entry, dict):
+            for context_name, names in entry.items():
+                if isinstance(names, list):
+                    contexts[context_name] = list(names)
+        elif isinstance(entry, list):
+            contexts["default"] = list(entry)
+        if contexts:
+            normalized[domain] = contexts
+    return normalized
 
 def load_config() -> None:
     """ Carrega as estratégias e políticas do arquivo configurado """
@@ -65,8 +82,8 @@ def load_config() -> None:
             registry[name] = strategy_cls
 
     STRATEGY_REGISTRY = registry
-    DOMAIN_POLICIES = data.get("policies") or {}
-
+    DOMAIN_POLICIES = _normalize_policy_structure(data.get("policies") or {})
+    
     #Mapeia etapas do pipeline sinérgico
     step_registry: Dict[str, Type[PipelineStep]] = {}
     for name, class_name in (data.get("pipeline_steps") or {}).items():
@@ -75,7 +92,7 @@ def load_config() -> None:
             step_registry[name] = step_cls
 
     PIPELINE_STEP_REGISTRY = step_registry
-    PIPELINE_POLICIES = data.get("pipeline_policies") or {}
+    PIPELINE_POLICIES = _normalize_policy_structure(data.get("pipeline_policies") or {})
     STRATEGY_EXECUTION = data.get("strategy_execution") or {}
     PIPELINE_EXECUTION = data.get("pipeline_execution") or {}
 
@@ -122,15 +139,14 @@ def _reload_if_needed() -> None:
     if current_mtime != _CONFIG_MTIME:
         load_config()
 
-def strategies_for(url: str) -> List[ScrapingStrategy]:
-    """ Retorna instâncias de estratégias ordenadas para o domínio
+def _select_names_for_context(names: Dict[str, List[str]] | List[str], context: str) -> List[str]:
+    """ Retorna a lista de nomes respeitando o contexto informado """
+    if isinstance(names, list):
+        return list(names) if context == "default" else []
+    return list(names.get(context) or names.get("default") or [])
 
-    A resolução utiliza :func:`extract_hostname` para identificar o host da
-    URL e então monta uma lista **sequencial** de instâncias conforme
-    ``DOMAIN_POLICIES``. Estratégias desconhecidas são ignoradas e, caso o
-    domínio não possua configuração específica, nenhuma estratégia pesada
-    é aplicada nesse momento (Se necessário Playwright add em etapas futuras)
-    """
+def strategies_for(url: str, *, context: str = "default") -> List[ScrapingStrategy]:
+    """ Retorna instâncias de estratégias ordenadas para o domínio/contexto """
     _reload_if_needed()
 
     host = extract_hostname(url)
@@ -139,35 +155,64 @@ def strategies_for(url: str) -> List[ScrapingStrategy]:
         """ Verifica se o host pertence exatamente ao domínio informado """
         return host == domain or host.endswith("." + domain)
 
+    selected_names: List[str] = []
     for domain, names in DOMAIN_POLICIES.items():
+        if domain == "default":
+            continue
         if _corresponds_domain(host, domain):
-            return [
-                STRATEGY_REGISTRY[name]()
-                for name in names
-                if name in STRATEGY_REGISTRY
-            ]
+            selected_names = _select_names_for_context(names, context)
+            break
 
-    #Quando domínio não é reconhecido, nenhuma estratégia é retornada
-    return []
+    if not selected_names and "default" in DOMAIN_POLICIES:
+        selected_names = _select_names_for_context(DOMAIN_POLICIES["default"], context)
 
-def strategy_execution_mode_for(url: str) -> Literal["sequential", "parallel", "conditional"]:
-    """ Obtém o modo de execução das estratégias configurado para o domínio """
+    return [
+        STRATEGY_REGISTRY[name]()
+        for name in selected_names
+        if name in STRATEGY_REGISTRY
+    ]
+
+def strategy_execution_mode_for(url: str, *, context: str = "default") -> Literal["sequential", "parallel", "conditional"]:
+    """ Obtém o modo de execução das estratégias configurado para o domínio/contexto """
     _reload_if_needed()
 
     host = extract_hostname(url)
-    default_mode = _normalize_execution_mode(STRATEGY_EXECUTION.get("default"))
+    default_contexts = STRATEGY_EXECUTION.get("default")
+
+    def _resolve_context_modes(raw: Dict[str, str] | str | None) -> Dict[str, str]:
+        """ Normaliza estruturas aceitando tanto ``str`` quanto ``dict`` """
+        if isinstance(raw, str):
+            return {"default": raw}
+        return raw or {}
+    
+    default_modes = {
+        key: _normalize_execution_mode(value)
+        for key, value in _resolve_context_modes(default_contexts).items()
+    }
 
     def _corresponds_domain(host: str, domain: str) -> bool:
         """ Verifica se o host pertence exatamente ao domínio informado """
         return host == domain or host.endswith("." + domain)
     
-    for domain, mode in STRATEGY_EXECUTION.items():
+    for domain, raw_modes in STRATEGY_EXECUTION.items():
         if domain == "default":
             continue
         if _corresponds_domain(host, domain):
-            return _normalize_execution_mode(mode)
+            normalized = {
+                key: _normalize_execution_mode(value)
+                for key, value in _resolve_context_modes(raw_modes).items()
+            }
+            return (
+                normalized.get(context)
+                or normalized.get("default")
+                or default_modes.get(context)
+                or default_modes.get("default", "sequential")
+            )
         
-    return default_mode
+    return (
+        default_modes.get(context)
+        or default_modes.get("default", "sequential")
+    )
 
 def pipeline_steps_for(url: str, *, context: str = "default") -> List[PipelineStep]:
     """ Retorna intâncias de etapas de pipeline para o domínio
@@ -185,16 +230,22 @@ def pipeline_steps_for(url: str, *, context: str = "default") -> List[PipelineSt
         """ Verifica se o host pertence exatamente ao domínio informado """
         return host == domain or host.endswith("." + domain)
     
+    selected_steps: List[str] = []
     for domain, contexts in PIPELINE_POLICIES.items():
+        if domain == "default":
+            continue
         if _corresponds_domain(host, domain):
-            step_names = contexts.get(context) or contexts.get("default") or []
-            return [
-                PIPELINE_STEP_REGISTRY[name]()
-                for name in step_names
-                if name in PIPELINE_STEP_REGISTRY
-            ]
-        
-    return []
+            selected_steps = _select_names_for_context(contexts, context)
+            break
+
+    if not selected_steps and "default" in PIPELINE_POLICIES:
+        selected_steps = _select_names_for_context(PIPELINE_POLICIES["default"], context)
+
+    return [
+        PIPELINE_STEP_REGISTRY[name]()
+        for name in selected_steps
+        if name in PIPELINE_STEP_REGISTRY
+    ]
 
 def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Literal["sequential", "parallel", "conditional"]:
     """ Retorna o modo de execução do pipeline para o domínio/contexto informado """
@@ -210,8 +261,8 @@ def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Litera
         return raw or {}
     
     default_modes = {
-            k: _normalize_execution_mode(v)
-            for k, v in _resolve_context_modes(default_contexts).items()
+        k: _normalize_execution_mode(v)
+        for k, v in _resolve_context_modes(default_contexts).items()
     }
 
     def _corresponds_domain(host: str, domain: str) -> bool:
@@ -246,10 +297,10 @@ def rate_limit_policy_for(url: str) -> Dict[str, int] | None:
     default_policy = RATE_LIMIT_POLICIES.get("default")
 
     def _corresponds_domain(host: str, domain: str) -> bool:
-        """ Verifica se o host pertemce exatamente ao domínio informado """
+        """ Verifica se o host pertence exatamente ao domínio informado """
         return host == domain or host.endswith("." + domain)
     
-    for domain, policy in RATE_LIMIT_POLICIES.iems():
+    for domain, policy in RATE_LIMIT_POLICIES.items():
         if domain == "default":
             continue
         if _corresponds_domain(host, domain):

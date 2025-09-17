@@ -210,7 +210,10 @@ async def scrape_product_common_async(
         )
         logger.info("stored_cache", url=normalized_url, metadata_keys=list(metadata.keys()))
 
-    pipeline_context = "competitor" if product_type == "competitor" else "default"
+    #Determina o contexto a partir do tipo de produto, permitindo políticas granulares
+    strategy_context = "competitor" if product_type == "competitor" else "default"
+    pipeline_context = strategy_context
+
     steps = pipeline_steps_for(normalized_url, context=pipeline_context)
     if steps:
         execution_mode = pipeline_execution_mode_for(normalized_url, context=pipeline_context)
@@ -242,19 +245,24 @@ async def scrape_product_common_async(
                     _record_status("not_modified")
                     return {"status": "NOT_MODIFIED", "details": cached_pipeline}
 
-    orchestrator = MultiStrategyScraperOrchestrator(strategy_selector=strategies_for, throttle_manager=throttle_manager)
-    logger.info("running_orchestrator", url=safe_log_url)
+    selected_strategies = strategies_for(normalized_url, context=strategy_context)
+    orchestrator = MultiStrategyScraperOrchestrator(
+        strategy_selector=lambda target_url: strategies_for(target_url, context=strategy_context),
+        throttle_manager=throttle_manager,
+    )
+    logger.info("running_orchestrator", url=safe_log_url, strategy_context=strategy_context, strategies=len(selected_strategies))
     try:
         result = await orchestrator.scrape(
             url=normalized_url,
             user_id=user_id,
             payload=payload,
             product_type=product_type,
-            execution_mode=strategy_execution_mode_for(normalized_url),
+            execution_mode=strategy_execution_mode_for(normalized_url, context=strategy_context),
             shared_context=shared_context,
             rate_limiter=rate_limiter,
             circuit_breaker=circuit_breaker,
             recovery_manager=recovery_manager,
+            strategies=selected_strategies or None,
             **extra_kwargs,
         )
     except Exception as err:

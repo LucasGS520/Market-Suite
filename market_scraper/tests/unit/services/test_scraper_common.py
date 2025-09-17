@@ -274,7 +274,7 @@ async def test_scrape_product_common_async_not_modified_breaks(monkeypatch):
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
 
-    monkeypatch.setattr(common, "strategies_for", lambda url: [StrategyNotModified(), StrategyShouldNotRun()])
+    monkeypatch.setattr(common, "strategies_for", lambda url, *, context="default": [StrategyNotModified(), StrategyShouldNotRun()])
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
     resultado = await common.scrape_product_common_async(

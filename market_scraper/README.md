@@ -60,34 +60,52 @@ Prefira o Requests-HTML como alternativa intermediária antes de recorrer ao Pla
 O arquivo ``services/domain_policy.yaml`` centraliza todas as decisões de orquestração do scraper;
 Ele define:
 - **`strategies`** - mapeia nomes amigáveis para classes de estratégia registradas no código.
-- **`policies`** - ordena as estratégias por domínio, garantindo que as alternativas mais leves sejam executadas primeiro.
+- **`policies`** - ordena as estratégias por domínio e por contexto (ex.: `deault`, `competitor`) garantindo que as alternativas mais leves sejam executadas primeiro.
 - **`pipeline_steps`** - cataloga as etapas do ``SynergicPipeline`` capazes de compartilhar contexto.
-- **`pipeline_policies`** - descreve, por domínios e por contexto (`default` ou variações como `competitor`), a ordem das etapas.
+- **`pipeline_policies`** - descreve, por domínios e por contexto, a ordem das etapas executadas pelo pipeline.
 
 ```yaml
 #Trechos ilustrativos do arquivo domain_policy.yaml
 strategies:
-    JSON_ML: MercadoLivreJsonStrategy
-    HTML_ML: MercadoLivreStaticStrategy
-    SELECTOR_GENERIC: SelectorLibStrategy
+   JSON_ML: MercadoLivreJsonStrategy
+   HTML_ML: MercadoLivreStaticStrategy
+   SELECTOR_GENERIC: SelectorLibStrategy
 
 policies:
-    mercadolivre.com.br:
-        - JSON_ML
-        - HTML_ML
+  mercadolivre.com.br:
+    default:
+      - JSON_ML
+      - HTML_ML
+    competitor:
+      - HTML_ML
 
 pipeline_steps:
-    extruct: ExtructExtractionStep
-    parsel: ParselExtractionStep
-    requestshtml: RequestsHTMLRenderStep
+  extruct: ExtructExtractionStep
+  parsel: ParselExtractionStep
+  requestshtml: RequestsHTMLRenderStep
 
 pipeline_policies:
-    mercadolivre.com.br:
-        default:
-            - extruct
-            - parsel
-            - requestshtml
+  mercadolivre.com.br:
+    default:
+      - extruct
+      - parsel
+      - requestshtml
+    competitor:
+      - requestshtml
+      - parsel
+
+strategy_execution:
+  default:
+    default: sequential
+    competitor: sequential
+  mercadolivre.com.br:
+    default: conditional
+    competitor: sequential
 ```
+
+Cada contexto representa um cenário configurável (por exemplo, `product_type=competitor`).
+Caso um contexto não seja encontrado para o domínio, o bloco `default` é utilizado automaticamente.
+Isso permite priorizar estratégias mais leves para páginas monitoradas e reservar opções mais robustas apenas quando o usuário solicita comparações de concorrentes.
 
 > Variáveis de ambiente permitem customizar a configuração sem alterar o código
 > - ``DOMAIN_POLICY_FILE`` aponta para outro arquivo YAML.
@@ -148,9 +166,22 @@ Essas métricas complementam as métricas HTTP padrão e devem ser acompanhadas 
 #### Como adicionar novas estratégias ou etapas
 1. **Criar a classe** em ``market_scraper/strategies`` (ou ``services/pipeline_steps``) herdando das bases existentes e garantindo validação com ``DataQualityValidator``.
 2. **Registrar a classe** no ``domain_policy.yaml`` em ``strategies`` ou ``pipeline_steps``.
-3. **Definir a ordem** em ``policies`` ou ``pipeline_policies`` para domínio/ contexto desejado.
-4. **Adicionar testes** cobrindo seleção e execução (``tests/unit/services/test_domain_policy.py`` e ``tests/integration/routes/test_strategy_selection.py`` contêm exemplos).
-5. **Monitorar métricas** após o deploy para ajustar TTL de cache, paralelismo ou limites.
+3. **Definir a ordem** em ``policies`` ou ``pipeline_policies`` para domínio e contexto desejado (ex.: `default`, `competitor`, `logged_user`).
+4. **Ajustar os blocos `strategy_execution` e `pipeline_execution`** para indicar como cada contexto será executado (`sequential`, `parallel` ou `conditional`).
+5. **Adicionar testes** cobrindo seleção e execução (``tests/unit/services/test_domain_policy.py`` e ``tests/integration/routes/test_strategy_selection.py`` contêm exemplos.)
+6. **Monitorar métricas** após o deploy para ajustar TTL de cache, paralelismo ou limites.
+
+#### Exemplo prático de extensão com nova biblioteca
+Suponha que seja necessário utilizar uma biblioteca ``PlaywrightRenderStrategy`` apenas para páginas de concorrentes de um novo marketplace:
+
+1. **Instale a dependência** e crie ``market_scraper/strategies/playwright_render.py`` implementando ``get_data`` com validação e uso de ``shared_context``.
+2. **Registre a classe** em ``domain_policy.yaml`` dentro de ``strategies`` (ex.: ``PLAYWRIGHT_RENDER: PlaywrightRenderStrategy``).
+3. **Atualize `policies`** para o domínio desejado definido o contexto ``competitor`` com a nova estratégia como último fallback. O contexto ``default`` pode continuar priorizando estratégias leves.
+4. **Ajuste `strategy_execution`** para executar o contexto ``competitor`` em modo ``conditional`` (evitando que a etapa pesada rode quando o HTML já está disponível).
+5. **Caso necessário**, inclua etapas adicionais em ``pipeline_steps`` / ``pipeline_policies`` para pré-carregar dados (por exemplo, uma etapa que capture cookies antes de chamar o Playwright).
+6. **Crie Testes** unitários/integrados garantindo que o contexto ``competitor`` seleciona a nova estratégia e que o comportamento antigo permanece intacto para o contexto ``default``.
+
+Esse fluxo garante que novas bibliotecas possam ser adicionadas de forma modular, habilitadas apenas quando configuradas via YAML e acompanhadas por métricas específicas.
 
 #### Segurança, compliance e limites de scraping
 - Respeitar ``robots.txt`` consultando ``utils/robots.txt`` antes de liberar novas rotas e durante tentativas de recuperação (`BlockRecoverymanager`, aborta quano o domínio proíbe o caminho).

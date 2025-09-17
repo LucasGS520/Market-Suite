@@ -91,15 +91,25 @@ def test_hot_reload(monkeypatch, tmp_path):
     assert isinstance(estrategias[0], AmazonJsonStrategy)
 
 def test_strategy_execution_mode():
-    """ Valida o modo configurado para estratégias por domínio """
+    """ Valida o modo configurado para estratégias por domínio/contexto """
     assert strategy_execution_mode_for("https://www.amazon.com.br/item") == "parallel"
-    assert strategy_execution_mode_for("https://domnio-nao-mapeado.com") == "sequential"
+    assert strategy_execution_mode_for("https://www.mercadolivre.com.br/item", context="competitor") == "sequential"
+    assert strategy_execution_mode_for("https://dominio-nao-mapeado.com", context="competitor") == "sequential"
 
 def test_pipeline_execution_mode():
     """ Confere o modo do pipeline para domínio/contexto """
     assert pipeline_execution_mode_for("https://www.amazon.com.br/item") == "parallel"
     assert pipeline_execution_mode_for("https://mercadolivre.com.br/item", context="competitor") == "conditional"
     
+def test_contexto_competitor_prioriza_html():
+    """ Contextos específicos podem alterar a lista de estratégias """
+    url = "https://www.mercadolivre.com.br/produto"
+    padrao = strategies_for(url)
+    competitor = strategies_for(url, context="competitor")
+
+    assert any(isinstance(e, MercadoLivreJsonStrategy) for e in padrao)
+    assert all(not isinstance(e, MercadoLivreJsonStrategy) for e in competitor)
+
 def test_rate_limit_policy_for_domain():
     """ Deve retornar configuração específica de rate limit por domínio """
     policy = rate_limit_policy_for("https://www.amazon.com.br/produto")
