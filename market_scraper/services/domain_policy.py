@@ -187,7 +187,7 @@ def load_config() -> None:
     FEATURE_FLAGS = flags
     _CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
 
-def _compute_rolllout_bucket(identifier: str) -> float:
+def _compute_rollout_bucket(identifier: str) -> float:
     """ Calcula um valor de 0 a 100 a partir de um identificador estável """
     digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
     value = int(digest[:8], 16)
@@ -256,7 +256,7 @@ def evaluate_feature_flag(feature: str, url: str, *, context: str = "default", i
 
     if config_enabled and rollout_percentage < 100.0:
         base_identifier = identifier_value or url
-        bucket = _compute_rolllout_bucket(base_identifier)
+        bucket = _compute_rollout_bucket(base_identifier)
         enabled = bucket < rollout_percentage
     elif not config_enabled:
         rollout_percentage = 0.0
