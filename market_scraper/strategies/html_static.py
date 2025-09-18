@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from .json_endpoint import cache_manager
-
 """ Estratégias para HTML estático
 
 Utilizam inicialmente extruct para extrair dados estruturados (JSON-LD, 
@@ -572,33 +570,34 @@ class MercadoLivreHtmlStaticStrategy(HtmlStaticStrategy):
         }
 
 
+__all__ = [
+    "HtmlStaticStrategy",
+]
+
 class AmazonHtmlStaticStrategy(HtmlStaticStrategy):
     """ Estratégia para páginas estáticas da Amazon Brasil """
     domain = "amazon.com.br"
 
     def _parse_html(self, html: str, url: str) -> dict:
-        """ Extrai nome/preço (JSON-LD/meta) com fallbacks específicos da Amazon """
+        """ Extrai nome/preço via JSON-LD/meta e fallbacks específicos da Amazon """
         structured = extract_structured_data(html, url)
         data = self._extract_from_structured_data(structured, url)
         if data.get("name") and data.get("current_price"):
             return data
 
-        #Parsel first: tenta JSON-LD/meta
         sel = Selector(text=html)
         data = self._extract_from_json_ld_parsel(sel, url)
-        if not data.get("name") or not data.get("current_price"):
-            data = self._extract_from_meta_tags_parsel(sel, url)
+        if data.get("name") and data.get("current_price"):
+            return data
+        data = self._extract_from_meta_tags_parsel(sel, url)
         if data.get("name") and data.get("current_price"):
             return data
 
-        #Fallback para BeautifulSoup(lxml)
         soup = BeautifulSoup(html, "lxml")
-
-        #Primeiro tenta os extratores genéricos da classe base
         data = self._extract_from_json_ld(soup, url)
-        if not data.get("name") or not data.get("current_price"):
-            data = self._extract_from_meta_tags(soup, url)
-
+        if data.get("name") and data.get("current_price"):
+            return data
+        data = self._extract_from_meta_tags(soup, url)
         if data.get("name") and data.get("current_price"):
             return data
 
