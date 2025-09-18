@@ -355,7 +355,7 @@ def parse_generic_html(html: str, url: str) -> dict:
     if data.get("name") and data.get("current_price"):
         return data
     data = _extract_from_meta_tags(soup, url)
-
+    return data
 
 def parse_meli_html(html: str, url: str) -> dict:
     """ Extrai dados de páginas do Mercado Livre.
