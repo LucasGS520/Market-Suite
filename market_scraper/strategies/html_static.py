@@ -51,7 +51,13 @@ def _format_price(value: Any, currency: Optional[str]) -> str:
     return f"{symbol} {formatted}".strip()
 
 def _extract_from_structured_data(data: Dict[str, Any], url: str) -> dict:
-    """ Obtém ``name`` e ``current_price`` a partir de blocos estruturados """
+    """ Obtém campos a partir de dados estruturados extraídos
+    
+    A função recebe o resultado gerado por :func:`extract_structured_data`
+    (JSON-LD, microdata e metadados OpenGraph) e tenta localizar um bloco
+    do tipo ``Product``. Quando o bloco é encontrado, o nome e o preço são
+    normalizados para o formato esperado pelo pipeline.
+    """
     for item in data.get("json-ld", []):
         if isinstance(item, dict) and item.get("@type") == "Product":
             offers = item.get("offers") or {}
@@ -117,7 +123,12 @@ def _extract_from_structured_data(data: Dict[str, Any], url: str) -> dict:
 
         
 def _extract_from_json_ld_parsel(sel: Selector, url: str) -> dict:
-    """ Extrai JSON-LD (prioritário) com suporte a ``@graph``/listas """
+    """ Extrai informações de JSON-LD utilizando Parsel.
+    
+    O procedimento dá prioridade a nós ``Product`` e lida com variações
+    como ``@graph`` ou listas. Métricas de sucesso ou falha são
+    registradas para monitoramento do parser. 
+    """
     home = perf_counter()
     try:
         scripts = sel.xpath('//script[@type="application/ld+json"]/text()').getall()
@@ -178,7 +189,13 @@ def _extract_from_json_ld_parsel(sel: Selector, url: str) -> dict:
 
 
 def _extract_from_meta_tags_parsel(sel: Selector, url: str) -> dict:
-    """ Extrai ``name`` e ``current_price`` de meta-tags utilizando Parsel """
+    """ Extrai ``name`` e ``current_price`` de meta-tags com Parsel.
+
+    A estratégia é utilizada como fallback quando o JSON-LD não está
+    disponível. Os dados coletados são normalizados para manter
+    consistência com os demais parsers e as métricas de sucesso/falha são
+    atualizadas para observabilidade
+    """
     home = perf_counter()
     try:
         name_value = (
@@ -219,7 +236,13 @@ def _extract_from_meta_tags_parsel(sel: Selector, url: str) -> dict:
 
 
 def _extract_from_json_ld(soup: BeautifulSoup, url: str) -> dict:
-    """ Procura JSON-LD (Product) utilizando BeautifulSoup """
+    """ Procura blocos JSON-LD do tipo ``Product`` utilizando BeautifulSoup.
+
+    A função replica a lógica empregada com Parsel utilizando BeautifulSoup
+    para cobrir cenários em que a árvore DOM gerada pela biblioteca facilita
+    a navegação. As métricas globais do parser são atualizadas conforme o
+    sucesso ou fracasso da extração.
+    """
     home = perf_counter()
     try:
         for tag in soup.find_all("script", type="application/ld+json"):
@@ -283,7 +306,12 @@ def _extract_from_json_ld(soup: BeautifulSoup, url: str) -> dict:
 
  
 def _extract_from_meta_tags(soup: BeautifulSoup, url: str) -> dict:
-    """ Extrai dados de meta-tags (fallback) com BeautifulSoup """
+    """ Extrai dados de meta-tags como fallback utilizando BeautifulSoup.
+
+    A estratégia coleta título e preço a partir de meta-tags padrão (Open
+    Graph e atributos ``itemprop``), garantindo que marketplaces simples ou
+    páginas com HTML legado ainda retornem informações básicas.
+    """
     home = perf_counter()
     try:
         name_tag = soup.find("meta", property="og:title") or soup.find("title")
@@ -331,11 +359,16 @@ def _extract_from_meta_tags(soup: BeautifulSoup, url: str) -> dict:
 
 
 def parse_generic_html(html: str, url: str) -> dict:
-    """ Extrai informações usando apenas seletores genéricos.
+    """ Extrai informações usando somente seletores genéricos.
     
     A função combina extração de dados estruturados com Parsel e
     BeautifulSoup para lidar com páginas que não exigem regras
     específicas. O retorno sempre inclui a URL recebida.
+
+    Exemplo
+    -------
+    >>> parse_generic_html('<meta property="og:title" content="Notebook"/>', 'https://exemplo.com')
+    {'name': 'Notebook', 'current_price': '', 'url': 'https://exemplo.com'}
     """
     structured = extract_structured_data(html, url)
     data = _extract_from_structured_data(structured, url)
@@ -360,17 +393,10 @@ def parse_generic_html(html: str, url: str) -> dict:
 def parse_meli_html(html: str, url: str) -> dict:
     """ Extrai dados de páginas do Mercado Livre.
     
-    Parâmetros
-    ----------
-    html: str
-        Conteúdo HTML completo da página de produto.
-    url: str
-        Endereço original utilizando para o scraping.
-
-    Retorna
+    Exemplo
     -------
-    dict
-        Dicionário com os campos ``name``, ``current_price`` e ``url``.
+    >>> parse_meli_html('<h1 class="ui-pdp-title">Produto</h1>', 'https://www.mercadolivre.com.br/MLB-0000')
+    {'name': 'Produto', 'current_price': '', 'url': 'https://www.mercadolivre.com.br/MLB-0000'}
     """
     data = parse_generic_html(html, url)
     if data.get("name") and data.get("current_price"):
@@ -425,7 +451,13 @@ def parse_meli_html(html: str, url: str) -> dict:
     }
 
 def parse_amazon_html(html: str, url: str) -> dict:
-    """ Extrai informações de produtos na Amazon Brasil """
+    """ Extrai informações de produtos na Amazon Brasil 
+    
+    Exemplo
+    -------
+    >>> parse_amazon_html('<span id="productTitle">Livro</span>', 'https://www.amazon.com.br/dp/B000000')
+    {'name': 'Livro', 'current_price': '', 'url': 'https://www.amazon.com.br/dp/B000000'}
+    """
     data = parse_generic_html(html, url)
     if data.get("name") and data.get("current_price"):
         return data
@@ -484,7 +516,13 @@ def parse_amazon_html(html: str, url: str) -> dict:
     }
 
 def parse_magalu_html(html: str, url: str) -> dict:
-    """ Coleta de dados das páginas de produtos de Magazine Luiza """
+    """ Coleta de dados das páginas de produtos de Magazine Luiza 
+    
+    Exemplo
+    -------
+    >>> parse_magalu_html('<meta property="og:title" content="Geladeira"/>', 'https://www.magazineluiza.com.br/produto/0000')
+    {'name': 'Geladeira', 'current_price': '', 'url': 'https://www.magazineluiza.com.br/produto/0000'}
+    """
     data = parse_generic_html(html, url)
     if data.get("name") and data.get("current_price"):
         return data
@@ -538,9 +576,9 @@ def parse_magalu_html(html: str, url: str) -> dict:
     }
 
 
-__all__ = [
+__all__ = (
     "parse_generic_html",
     "parse_meli_html",
     "parse_amazon_html",
     "parse_magalu_html",
-]
+)
