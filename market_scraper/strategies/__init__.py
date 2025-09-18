@@ -16,9 +16,5 @@ __all__ = [
     "parse_meli_html",
     "parse_amazon_html",
     "parse_magalu_html",
-    "HtmlStaticStrategy",
-    "MercadoLivreHtmlStaticStrategy",
-    "AmazonHtmlStaticStrategy",
-    "MagaluHtmlStaticStrategy",
     "SelectorLibStrategy",
 ]

@@ -5,7 +5,7 @@ from __future__ import annotations
 O módulo concentra toda a lógica de parsing utilizada pelos marketplaces
 que expõem conteúdo estático. Cada função pública recebe o HTML bruto e a
 URL original, devolvendo um dicionário com os campos essenciais
-(``name`` e ``current_price``) par uso no pipeline de scraping.
+(``name`` e ``current_price``) para uso no pipeline de scraping.
 """
 
 import json
@@ -333,7 +333,7 @@ def _extract_from_meta_tags(soup: BeautifulSoup, url: str) -> dict:
 def parse_generic_html(html: str, url: str) -> dict:
     """ Extrai informações usando apenas seletores genéricos.
     
-    A função combina extração de dados esruturados com Parsel e
+    A função combina extração de dados estruturados com Parsel e
     BeautifulSoup para lidar com páginas que não exigem regras
     específicas. O retorno sempre inclui a URL recebida.
     """
@@ -360,7 +360,7 @@ def parse_generic_html(html: str, url: str) -> dict:
 def parse_meli_html(html: str, url: str) -> dict:
     """ Extrai dados de páginas do Mercado Livre.
     
-    Parametros
+    Parâmetros
     ----------
     html: str
         Conteúdo HTML completo da página de produto.
@@ -413,7 +413,7 @@ def parse_meli_html(html: str, url: str) -> dict:
                 cleaned = cleaned.replace(",", ".")
             value = cleaned or None
 
-    curerncy_value = (
+    currency_value = (
         sel.css('meta[itemprop="priceCurrency"]::attr(content)').get()
         or sel.css('meta[property="product:price:currency"]::attr(content)').get()
         or sel.css('meta[property="og:price:currency"]::attr(content)').get()
@@ -421,7 +421,7 @@ def parse_meli_html(html: str, url: str) -> dict:
     return {
         "name": title,
         "url": url,
-        "current_price": _format_price(value, curerncy_value),
+        "current_price": _format_price(value, currency_value),
     }
 
 def parse_amazon_html(html: str, url: str) -> dict:
@@ -505,10 +505,12 @@ def parse_magalu_html(html: str, url: str) -> dict:
                 state = json.loads(match.group(1))
 
                 def _deep_search(obj: Any, keys: set[str]):
+                    """ Procura recursivamente por chaves relevantes no estado inicial """
+                    normalized_keys = {key.lower() for key in keys}
                     if isinstance(obj, dict):
                         for k, v in obj.items():
                             lk = k.lower()
-                            if lk in keys and not isinstance(v, (dict, list)):
+                            if lk in normalized_keys and not isinstance(v, (dict, list)):
                                 return {lk: v}
                             found = _deep_search(v, keys)
                             if found:
@@ -521,7 +523,7 @@ def parse_magalu_html(html: str, url: str) -> dict:
                     return {}
                 
                 name_dict = _deep_search(state, {"name", "title"})
-                price_dict = _deep_search(state, {"price", "priceValue", "bestprice"})
+                price_dict = _deep_search(state, {"price", "pricevalue", "bestprice"})
                 if name_dict:
                     name = next(iter(name_dict.values()))
                 if price_dict:

@@ -22,7 +22,7 @@ O módulo `domain_policy` mapeia cada marketplace para uma ordem de execução, 
 Classes derivadas de `JsonEndpointStrategy` executam chamadas HTTP a APIs públicas. Resultados válidos são cacheados para reutilização.
 
 ### HTML Estático
-Estratégias herdadas de `HtmlStaticStrategy` priorizam Parsel (lxml), extraindo `JSON-LD` e meta-tags. BeautifulSoup é fallback para compatibilidade.
+O módulo utilitário `market_scraper/strategies/html_static.py` concentra funções puras de parsing para cada marketplace suportado. Cada função recebe apenas o HTML bruto e a URL original, retornando um dicionário com `name` e `current_price`. A extração prioriza o parsel (`lxml`) e JSON-LD; Beuatifulsoup atua como fallback para lidar com variações estruturais
 
 ### SelectorLib
 Para páginas instáveis, usamos **SelectorLib** com templates YAML em `selectorlib_templates`.
