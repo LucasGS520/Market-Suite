@@ -5,7 +5,8 @@ from __future__ import annotations
 O módulo oferece utilitários focados em coletar nome e preço a partir
 de HTML estático utilizando apenas BeautifulSoup com o parser ``lxml``.
 Todas as funções expõem a mesma interface, retornando um dicionário com 
-``name```, ``current_price`` e ``url``.
+``name```, ``current_price`` e ``url``. Não existem fallbacks, tentativas
+múltiplas ou consultas estruturadas adicionais.
 """
 
 import re
@@ -63,7 +64,18 @@ def _assemble_result(name: str, price: str, currency: str, url: str) -> dict[str
     }
 
 def parse_generic_html(html: str, url: str) -> dict[str, str]:
-    """ Realiza uma extração genérica de nome e preço a partir da página """
+    """ Realiza uma extração genérica de nome e preço a partir da página 
+    
+    A extração utiliza exclusivamente seletores CSS via BeautifulSoup com o
+    parser ``lxml``
+    Exemplo:
+        >>> parse_generic_html(
+        ...     "<html><head><meta property='og:title' content='Produto' />"
+        ...     "<meta itemprop='price' content='199.90' /></head></html>",
+        ...     "https://exemplo.com/produto",
+        ... )
+        {'name': 'Produto', 'current_price': 'R$ 199,90', 'url': 'https://exemplo.com/produto'}
+    """
     soup = BeautifulSoup(html, "lxml")
     name = ""
     for selector in [
@@ -90,7 +102,7 @@ def parse_generic_html(html: str, url: str) -> dict[str, str]:
             break
 
     if not price:
-        price = _extract_text(soup, ".price", atribute=None)
+        price = _extract_text(soup, ".price", attribute=None)
 
     currency = ""
     for selector in [
@@ -106,7 +118,20 @@ def parse_generic_html(html: str, url: str) -> dict[str, str]:
     return _assemble_result(name, price, currency, url)
 
 def parse_meli_html(html: str, url: str) -> dict[str, str]:
-    """ Extrai informações básicas das páginas do Mercado Livre """
+    """ Extrai informações básicas das páginas do Mercado Livre 
+    
+    A leitura do HTML utiliza apenas BeautifulSoup com o parser ``lxml`` e 
+    busca diretamente pelos seletores conhecidos do marketplace.
+    Exemplo:
+        >>> parse_meli_html(
+        ...     "<html><body><h1 class='ui-pdp-title'>Notebook</h1>"
+        ...     "<span class='andes-money-amount__fraction'>3.499</span>"
+        ...     "<span class='andes-money-amount__cents'>99</span>"
+        ...     "</body></html>",
+        ...     "https://www.mercadolivre.com.br/produto",
+        ... )
+        {'name': 'Notebook', 'current_price': 'R$ 3.499,99', 'url': 'https://www.mercadolivre.com.br/produto'}
+    """
     soup = BeautifulSoup(html, "lxml")
     name = ""
     for selector in [
@@ -142,7 +167,18 @@ def parse_meli_html(html: str, url: str) -> dict[str, str]:
     return _assemble_result(name, price, currency, url)
 
 def parse_amazon_html(html: str, url: str) -> dict[str, str]:
-    """ Captura nome e preço em páginas da Amazon Brasil """
+    """ Captura nome e preço em páginas da Amazon Brasil 
+    
+    Nenhuma etapa adicional é executada além da análise do HTML por meio de
+    BeautifulSoup com o parser ``lxml``.
+    Exemplo:
+        >>> parse_amazon_html(
+        ...     "<html><body><span id='productTitle'>Cafeteira</span>"
+        ...     "<span class='a-offscreen'>R$ 299,00</span></body></html>",
+        ...     "https://www.amazon.com.br/dp/123",
+        ... )
+        {'name': 'Cafeteira', 'current_price': 'R$ 299,00', 'url': 'https://www.amazon.com.br/dp/123'}
+    """
     soup = BeautifulSoup(html, "lxml")
     name = ""
     for selector in [
@@ -170,7 +206,18 @@ def parse_amazon_html(html: str, url: str) -> dict[str, str]:
     return _assemble_result(name, whole, currency, url)
 
 def parse_magalu_html(html: str, url: str) -> dict[str, str]:
-    """ Extrai dados essenciais das páginas do Magazine Luiza """
+    """ Extrai dados essenciais das páginas do Magazine Luiza 
+    
+    O parser faz uso exclusivo do BeautifulSoup configurado com ``lxml`` para
+    navegar pelos elementos relevantes.
+    Exemplo:
+        >>> parse_magalu_html(
+        ...     "<html><head><meta property='og:title' content='Geladeira' />"
+        ...     "<meta itemprop='price' content='2599.0' /></head></html>",
+        ...     "https://www.magazineluiza.com.br/produto",
+        ... )
+        {'name': 'Geladeira', 'current_price': 'R$ 2.599,00', 'url': 'https://www.magazineluiza.com.br/produto'}
+    """
     soup = BeautifulSoup(html, "lxml")
     name = ""
     for selector in [
