@@ -12,19 +12,20 @@ contrário, devolve ``status`` ``error`` para que o pipeline acione o fallback s
 
 from typing import Any
 import asyncio
-import json
 
-from bs4 import BeautifulSoup
-from parsel import Selector
 from requests_html import HTMLSession
-from selectorlib import Extractor
 import requests
-import extruct
 import mechanicalsoup
 
 from .synergic_pipeline import PipelineStep
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.http_cache import ContentSignature, NOT_MODIFIED
+from market_scraper.strategies.html_static import parse_generic_html, parse_meli_html, parse_amazon_html, parse_magalu_html
+from market_scraper.strategies.extruct_parser import parse_with_extruct
+from market_scraper.strategies.parsel_parser import parse_with_parsel
+from market_scraper.strategies.beautifulsoup_html import parse_with_beautifulsoup
+from market_scraper.strategies.requests_html import parse_with_requests_html
+from market_scraper.strategies.selectorlib_strategy import parse_with_selectorlib
 
 
 class MechanicalSoupLoginStep(PipelineStep):
@@ -99,25 +100,7 @@ class ExtructExtractionStep(PipelineStep):
             html = await asyncio.to_thread(_get)
             shared_context["html"] = html
 
-        data = extruct.extract(html, syntaxes=["json-ld", "microdata", "opengraph"], uniform=True, errors="ignore")
-
-        name = None
-        price = None
-        for item in data.get("json-ld", []):
-            if isinstance(item, dict) and item.get("@type") in {"Product", "Offer"}:
-                name = item.get("name")
-                offers = item.get("offers") or {}
-                if isinstance(offers, dict):
-                    price = offers.get("price") or offers.get("lowPrice")
-                price = price or item.get("price")
-                break
-
-        if not name and data.get("opengraph"):
-            og = {d.get("property"): d.get("content") for d in data["opengraph"]}
-            name = name or og.get("og:title")
-            price = price or og.get("product:price:amount")
-
-        details = {"name": name, "current_price": price}
+        details = parse_with_extruct(html, shared_context.get("url"))
         try:
             self.validator.validate(details)
         except ValueError:
@@ -142,29 +125,7 @@ class ParselExtractionStep(PipelineStep):
         html = shared_context.get("html")
         if not html:
             return {"status": "error"}
-        sel = Selector(text=html)
-
-        name = None
-        price = None
-
-        json_ld = sel.xpath('string(//script[@type="application/ld+json"][1])').get()
-        if json_ld:
-            try:
-                data = json.loads(json_ld)
-                name = data.get("name")
-                offers = data.get("offers") or {}
-                if isinstance(offers, dict):
-                    price = offers.get("price") or offers.get("lowPrice")
-                price = price or data.get("price")
-            except Exception:
-                pass
-
-        if not name:
-            name = sel.xpath('//meta[@property="og:title"]/@content').get()
-        if not price:
-            price = sel.xpath('//span[@id="price"]/text()').get()
-
-        details = {"name": name, "current_price": price}
+        details = parse_with_parsel(html, shared_context.get("url"))
         try:
             self.validator.validate(details)
         except ValueError:
@@ -189,16 +150,7 @@ class BeautifulSoupExtractionStep(PipelineStep):
         html = shared_context.get("html")
         if not html:
             return {"status": "error"}
-        soup = BeautifulSoup(html, "lxml")
-        name_el = soup.select_one("meta[property='og:title']") or soup.select_one("title")
-        price_el = soup.select_one("#price") or soup.select_one(".price")
-        name = (
-            name_el["content"] 
-            if name_el and name_el.has_attr("content") 
-            else name_el.get_text(strip=True) if name_el else None
-        )
-        price = price_el.get_text(strip=True) if price_el else None
-        details = {"name": name, "current_price": price}
+        details = parse_with_beautifulsoup(html, shared_context.get("url"))
         try:
             self.validator.validate(details)
         except ValueError:
@@ -211,8 +163,9 @@ class BeautifulSoupExtractionStep(PipelineStep):
     
 class RequestsHTMLRenderStep(PipelineStep):
     """ Renderiza JavaScript leve com ``requests-html`` """
-    def __init__(self, *, timeout: int = 8) -> None:
+    def __init__(self, *, timeout: int = 8, validator: DataQualityValidator | None = None) -> None:
         self.timeout = timeout
+        self.validator = validator or DataQualityValidator()
 
     def should_run(self, shared_context: dict[str, Any]) -> bool:
         """ Evita renderização quando o HTML já está presente """
@@ -232,15 +185,27 @@ class RequestsHTMLRenderStep(PipelineStep):
         html = await asyncio.to_thread(_render)
         shared_context["html"] = html
         signature = ContentSignature(url).check_or_update(html)
+        shared_updates: dict[str, Any] = {"html": html}
+        
         if signature is NOT_MODIFIED:
-            return {"status": "NOT_MODIFIED"}
+            return {"status": "NOT_MODIFIED", "shared_context": shared_updates}
+        
         if isinstance(signature, str):
             shared_context["content_signature"] = signature
-            return {
-                "status": "success",
-                "shared_context": {"html": html, "content_signature": signature},
-            }
-        return {"status": "success", "shared_context": {"html": html}}
+            shared_updates["content_signature"] = signature
+
+        details = parse_with_requests_html(html, shared_context.get("url"))
+        try:
+            self.validator.validate(details)
+        except ValueError:
+            return {"status": "error", "shared_context": shared_updates}
+        
+        return {
+            "status": "success",
+            "details": details,
+            "shared_context": shared_updates,
+            "extraction_method": self.__class__.__name__,
+        }
     
 class SelectorLibExtractionStep(PipelineStep):
     """ Aplica ``selectorlib`` para páginas customizadas """
@@ -257,12 +222,17 @@ class SelectorLibExtractionStep(PipelineStep):
         template = self.template_path or shared_context.get("selectorlib_template")
         if not html or not template:
             return {"status": "error"}
-        extractor = Extractor.from_yaml_file(template)
-        data = await asyncio.to_thread(extractor.extract, html)
-        details = {
-            "name": data.get("name"),
-            "current_price": data.get("current_price") or data.get("price"),
-        }
+        
+        try:
+            details = await asyncio.to_thread(
+                parse_with_selectorlib,
+                html,
+                shared_context.get("url"),
+                template_path=template,
+            )
+        except ValueError:
+            return {"status": "error"}
+        
         try:
             self.validator.validate(details)
         except ValueError:

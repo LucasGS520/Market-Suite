@@ -46,7 +46,10 @@ async def test_requests_html_render_step(monkeypatch: pytest.MonkeyPatch) -> Non
             self.html = ""
 
         def render(self, timeout: int, reload: bool) -> None:
-            self.html = "<html><body><span id='price'>R$ 10</span></body></html>"
+            self.html = (
+                "<html><head><title>Produto Dinâmico</title></head>"
+                "<body><span id='price'>R$ 10</span></body></html>"
+            )
 
     class RespostaFalsa:
         def __init__(self) -> None:
@@ -63,6 +66,8 @@ async def test_requests_html_render_step(monkeypatch: pytest.MonkeyPatch) -> Non
     resultado = await passo.run(contexto)
 
     assert resultado["status"] == "success"
+    assert resultado["details"]["name"] == "Produto Dinâmico"
+    assert resultado["details"]["current_price"] == "R$ 10" 
     assert "<span id='price'" in contexto["html"]
     assert capturado["cookies"] == {"sess": "abc"}
 
@@ -73,7 +78,7 @@ async def test_selectorlib_extraction_step(monkeypatch: pytest.MonkeyPatch) -> N
         def extract(self, html: str) -> dict:
             return {"name": "Produto Teste", "price": "R$ 50"}
         
-    monkeypatch.setattr("market_scraper.services.pipeline_steps.Extractor.from_yaml_file", lambda path: ExtratorFalso())
+    monkeypatch.setattr("market_scraper.strategies.selectorlib_strategy.load_selectorlib_extractor", lambda path: ExtratorFalso())
     passo = SelectorLibExtractionStep(template_path="qualquer_caminho.yaml")
     contexto = {"html": "<html></html>"}
     resultado = await passo.run(contexto)

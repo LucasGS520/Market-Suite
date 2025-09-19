@@ -112,7 +112,6 @@ Ele define:
 strategies:
    JSON_ML: MercadoLivreJsonStrategy
    HTML_ML: MercadoLivreStaticStrategy
-   SELECTOR_GENERIC: SelectorLibStrategy
 
 policies:
   mercadolivre.com.br:
@@ -126,6 +125,7 @@ pipeline_steps:
   extruct: ExtructExtractionStep
   parsel: ParselExtractionStep
   requestshtml: RequestsHTMLRenderStep
+  selectorlib: SelectorLibExtractionStep
 
 pipeline_policies:
   mercadolivre.com.br:
@@ -133,8 +133,10 @@ pipeline_policies:
       - extruct
       - parsel
       - requestshtml
+      - selectorlib
     competitor:
       - requestshtml
+      - selectorlib
       - parsel
 
 strategy_execution:

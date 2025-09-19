@@ -8,7 +8,6 @@ strategies:
   HTML_ML: MercadoLivreHtmlStaticStrategy
   HTML_AMAZON: AmazonHtmlStaticStrategy
   HTML_MAGALU: MagaluHtmlStaticStrategy
-  SELECTOR_GENERIC: SelectorLibStrategy
 
 #Para cada domínio, lista as estratégias na ordem de prioridade
 policies:
@@ -30,9 +29,6 @@ policies:
       - HTML_MAGALU
     competitor:
       - HTML_MAGALU
-  example.com:
-    default:
-      - SELECTOR_GENERIC
 
 #Define o modo de execução das estratégias por domínio; Quando não especificado o modo ``sequential`` é utilizado
 strategy_execution:
@@ -48,8 +44,6 @@ strategy_execution:
   magazineluiza.com.br:
     default: sequential
     competitor: conditional
-  example.com:
-    default: conditional
 
 #Mapeia as etapas disponíveis para o ``SynergicPipeline``.
 pipeline_steps:
