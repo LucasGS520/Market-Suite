@@ -2,12 +2,12 @@ from __future__ import annotations
 
 """ Etapas específicas para o ``SynergicPipeline`` de scraping
 
-Este módulo concentra implementações de ``PIpelineStep`` que utilizam
-bibliotecas populares de scraping para extrair dados de forma progressiva.
+Este módulo concentra implementações de ``PipelineStep`` que utilizam
+bibliotecas populares de scraping e parsing para extrair dados progressivamente.
 Cada etapa tenta obter ``name`` e ``current_price`` do HTML disponível no
 ``shared_context``. Quando bem-sucedida, a etapa retorna um dicionário com
-``status`` igual a ``success`` e os dados extraídos em ``details``. Caso
-contrário, devolve ``status`` ``error`` para que o pipeline acione o fallback subsequente.
+``status`` igual a ``success`` e os dados extraídos em ``details``. A
+validação do conteúdo e o controle de fallback ficam a cargo do ``SynergicPipeline``.
 """
 
 from typing import Any
@@ -18,7 +18,6 @@ import requests
 import mechanicalsoup
 
 from .synergic_pipeline import PipelineStep
-from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.http_cache import ContentSignature, NOT_MODIFIED
 from market_scraper.strategies.html_static import parse_generic_html, parse_meli_html, parse_amazon_html, parse_magalu_html
 from market_scraper.strategies.extruct_parser import parse_with_extruct
@@ -78,13 +77,13 @@ class MechanicalSoupLoginStep(PipelineStep):
         
         browser = await asyncio.to_thread(_login)
         shared_context["cookies"] = browser.get_cookiejar()
-        return {"status": "success", "shared_context": {"cookies": shared_context["cookies"]}}
+        return {
+            "status": "success", 
+            "shared_context": {"cookies": shared_context["cookies"]}
+        }
     
 class ExtructExtractionStep(PipelineStep):
     """ Extrai dados estruturados com ``extruct`` """
-    def __init__(self, *, validator: DataQualityValidator | None = None) -> None:
-        self.validator = validator or DataQualityValidator()
-
     async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
         html = shared_context.get("html")
         if html is None:
@@ -101,11 +100,6 @@ class ExtructExtractionStep(PipelineStep):
             shared_context["html"] = html
 
         details = parse_with_extruct(html, shared_context.get("url"))
-        try:
-            self.validator.validate(details)
-        except ValueError:
-            return {"status": "error"}
-        
         return {
             "status": "success",
             "details": details,
@@ -114,9 +108,6 @@ class ExtructExtractionStep(PipelineStep):
     
 class ParselExtractionStep(PipelineStep):
     """ Coleta usando ``Parsel`` / ``lxml`` """
-    def __init__(self, *, validator: DataQualityValidator | None = None) -> None:
-        self.validator = validator or DataQualityValidator()
-
     def should_run(self, shared_context: dict[str, Any]) -> bool:
         """ Evita execução quando não há HTML disponível """
         return bool(shared_context.get("html"))
@@ -126,11 +117,6 @@ class ParselExtractionStep(PipelineStep):
         if not html:
             return {"status": "error"}
         details = parse_with_parsel(html, shared_context.get("url"))
-        try:
-            self.validator.validate(details)
-        except ValueError:
-            return {"status": "error"}
-        
         return {
             "status": "success",
             "details": details,
@@ -139,9 +125,6 @@ class ParselExtractionStep(PipelineStep):
     
 class BeautifulSoupExtractionStep(PipelineStep):
     """ Realiza extração simples com ``BeautifulSoup`` """
-    def __init__(self, *, validator: DataQualityValidator | None = None) -> None:
-        self.validator = validator or DataQualityValidator()
-
     def should_run(self, shared_context: dict[str, Any]) -> bool:
         """ Executa apenas quando o HTML já foi carregado no contexto """
         return bool(shared_context.get("html"))
@@ -151,10 +134,6 @@ class BeautifulSoupExtractionStep(PipelineStep):
         if not html:
             return {"status": "error"}
         details = parse_with_beautifulsoup(html, shared_context.get("url"))
-        try:
-            self.validator.validate(details)
-        except ValueError:
-            return {"status": "error"}
         return {
             "status": "success",
             "details": details,
@@ -163,9 +142,8 @@ class BeautifulSoupExtractionStep(PipelineStep):
     
 class RequestsHTMLRenderStep(PipelineStep):
     """ Renderiza JavaScript leve com ``requests-html`` """
-    def __init__(self, *, timeout: int = 8, validator: DataQualityValidator | None = None) -> None:
+    def __init__(self, *, timeout: int = 8) -> None:
         self.timeout = timeout
-        self.validator = validator or DataQualityValidator()
 
     def should_run(self, shared_context: dict[str, Any]) -> bool:
         """ Evita renderização quando o HTML já está presente """
@@ -195,11 +173,6 @@ class RequestsHTMLRenderStep(PipelineStep):
             shared_updates["content_signature"] = signature
 
         details = parse_with_requests_html(html, shared_context.get("url"))
-        try:
-            self.validator.validate(details)
-        except ValueError:
-            return {"status": "error", "shared_context": shared_updates}
-        
         return {
             "status": "success",
             "details": details,
@@ -209,9 +182,8 @@ class RequestsHTMLRenderStep(PipelineStep):
     
 class SelectorLibExtractionStep(PipelineStep):
     """ Aplica ``selectorlib`` para páginas customizadas """
-    def __init__(self, *, template_path: str | None = None, validator: DataQualityValidator | None = None) -> None:
+    def __init__(self, *, template_path: str | None = None) -> None:
         self.template_path = template_path
-        self.validator = validator or DataQualityValidator()
 
     def should_run(self, shared_context: dict[str, Any]) -> bool:
         """ Executa somente quando há HTML e template definido """
@@ -233,10 +205,6 @@ class SelectorLibExtractionStep(PipelineStep):
         except ValueError:
             return {"status": "error"}
         
-        try:
-            self.validator.validate(details)
-        except ValueError:
-            return {"status": "error"}
         return {
             "status": "success",
             "details": details,
