@@ -8,7 +8,7 @@ import pytest
 from market_scraper.services.services_scraper_common import scrape_product_common_async
 from market_scraper.tests.unit.conftest import fake_redis
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
-from market_scraper.strategies.html_static import MercadoLivreHtmlStaticStrategy
+from market_scraper.parsers.html_static import MercadoLivreHtmlStaticStrategy
 
 
 #HTML de exemplo representando uma página válida de produto no Mercado Livre

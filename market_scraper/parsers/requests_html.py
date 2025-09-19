@@ -71,4 +71,5 @@ def parse_with_requests_html(html: str, url: str | None = None) -> dict[str, str
         "url": url or "",
     }
 
+
 __all__ = ["parse_with_requests_html"]

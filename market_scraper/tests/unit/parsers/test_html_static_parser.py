@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from market_scraper.strategies.html_static import (
+from market_scraper.parsers.html_static import (
     parse_generic_html,
     parse_meli_html,
     parse_amazon_html,

@@ -102,4 +102,5 @@ def parse_with_extruct(html: str, url: str | None = None) -> dict[str, str]:
         "url": url or "",
     }
 
+
 __all__ = ["parse_with_extruct"]

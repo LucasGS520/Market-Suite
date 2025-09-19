@@ -1,5 +1,5 @@
 #Arquivo central de configurações de scraping
-#Define tanto as estratégias quanto as etapas de pipeline por domínio
+#Os parsers puros ficam em ``market_scraper/parsers`` e são orquestrados pelas classes abaixo
 
 strategies:
   JSON_ML: MercadoLivreJsonStrategy

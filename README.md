@@ -84,6 +84,8 @@ Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML
 - **utils/** - reúne auxiliares como rotação de *user agent*, gerenciamento de cookies, delays humanizados, leitura de ``robots.txt`` e funções de preço.
 - **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço.
 
+Os parsers de HTML e dados estruturados residem em `market_scraper/parsers`, cada módulo responsável apenas por transformar o HTML bruto em um dicionário padronizado. As classes de estratégia (`structured_data_strategy.py`, `html_static_strategy.py`) e o `SynergicPipeline` apenas orquestram o uso dessas funções puras, coordenado fallback, validação e combinação de resultados.
+
 ### Papel na arquitetura
 - Recebe requisições HTTP do ``market_alert`` ou de outros consumidores.
 - Realiza scraping apenas durante a chamada, sem persistir dados.

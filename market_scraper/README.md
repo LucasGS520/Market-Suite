@@ -21,8 +21,17 @@ O módulo `domain_policy` mapeia cada marketplace para uma ordem de execução, 
 ### JSON Endpoint
 Classes derivadas de `JsonEndpointStrategy` executam chamadas HTTP a APIs públicas. Resultados válidos são cacheados para reutilização.
 
+### Parsers especializados
+Cada biblioteca de parsing possui um módulo dedicado em `market_scraper/parsers`:
+- `html_static.py` mantém funções puras para parsing por BeautifulSoup
+- `extruct.py`, `parsel.py`, `requests_html.py` e `selectorlib.py` seguem a mesma interface (`html`, `url` -> `dict`)
+- As estratégias (`structured_data_startegy.py`, `html_static_strategy.py`) apenas orquestram os parsers acima.
+
+Todos os módulos retornam sempre o dicionário padronizado com `name`, `current_price` e `url`, simplificando a integração com o `SynergicPipeline` e com o `MultiStrategyScraperOrchestrator`.
+
 ### HTML Estático
-O módulo utilitário `market_scraper/strategies/html_static.py` concentra funções puras de parsing para cada marketplace suportado. Cada função recebe apenas o HTML bruto e a URL original, retornando um dicionário com `name` e `current_price`. A extração prioriza o parsel (`lxml`) e JSON-LD; Beuatifulsoup atua como fallback para lidar com variações estruturais
+O módulo utilitário `market_scraper/parsers/html_static.py` concentra funções puras de parsing para cada marketplace suportado. Cada função recebe apenas o HTML bruto e a URL original, retornando um dicionário com `name` e `current_price`. 
+A extração prioriza seletores simples via BeautifulSoup, enquanto as classes em `html_static_strategy.py` apenas orquestram a chamada dos parsers.
 
 ### SelectorLib
 Para páginas instáveis, usamos **SelectorLib** com templates YAML em `selectorlib_templates`.
@@ -56,6 +65,12 @@ Para adicionar novas estratégias, etapas ou domínios:
 4. Ajuste `strategy_execution` e `pipeline_execution` conforme necessidade.
 5. Adicione testes unitários/integrados.
 6. Monitore métricas após deploy para ajustes finos.
+
+### Como adicionar um novo parser puro
+1. Crie um módulo em `market_scraper/parsers` seguindo a interface padrão (`html`, `url` -> `dict`).
+2. Documente o comportamento com docstrings e exemplos em português.
+3. Adicione testes unitários dedicados em `market_scraper/tests/unit/strategies`.
+4. Integre o parser a uma estratégia ou etapa de pipeline atualizando o YAML quando necessário.
 
 Exemplo de rollout:
 ```yaml

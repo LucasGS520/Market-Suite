@@ -6,7 +6,7 @@ O módulo oferece utilitários focados em coletar nome e preço a partir
 de HTML estático utilizando apenas BeautifulSoup com o parser ``lxml``.
 Todas as funções expõem a mesma interface, retornando um dicionário com 
 ``name```, ``current_price`` e ``url``. Não existem fallbacks, tentativas
-múltiplas ou consultas estruturadas adicionais.
+qualquer lógica de fallback ou orquestração.
 """
 
 import re
@@ -44,13 +44,13 @@ def _format_price(value: Optional[str], currency: Optional[str]) -> str:
     whole = whole.replace(",", ".")
     return f"{symbol} {whole},{fraction}"
 
-def _extract_text(soup: BeautifulSoup, selector: str, atribute: str | None = None) -> str:
+def _extract_text(soup: BeautifulSoup, selector: str, attribute: str | None = None) -> str:
     """ Retorna texto limpo ou atributo ``content`` do primeiro elemento encontrado """
     element = soup.select_one(selector)
     if not element:
         return ""
-    if atribute:
-        return (element.get(atribute) or "").strip()
+    if attribute:
+        return (element.get(attribute) or "").strip()
     if element.name == "meta":
         return (element.get("content") or "").strip()
     return element.get_text(strip=True)

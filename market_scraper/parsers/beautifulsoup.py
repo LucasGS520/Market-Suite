@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-""" Funções de parsing utilizando BeautifulSoup 
+""" Funções de parsing utilizando BeautifulSoup
 
 O objetivo do módulo é oferecer um ponto único para extração simples 
 de nome e preço a partir de HTML estático. Ele funcionna como complemento
@@ -83,5 +83,6 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
         "current_price": price,
         "url": url or "",
     }
+
 
 __all__ = ["parse_with_beautifulsoup"]

@@ -77,8 +77,8 @@ async def test_selectorlib_extraction_step(monkeypatch: pytest.MonkeyPatch) -> N
     class ExtratorFalso:
         def extract(self, html: str) -> dict:
             return {"name": "Produto Teste", "price": "R$ 50"}
-        
-    monkeypatch.setattr("market_scraper.strategies.selectorlib_strategy.load_selectorlib_extractor", lambda path: ExtratorFalso())
+
+    monkeypatch.setattr("market_scraper.parsers.selectorlib.load_selectorlib_extractor", lambda path: ExtratorFalso())
     passo = SelectorLibExtractionStep(template_path="qualquer_caminho.yaml")
     contexto = {"html": "<html></html>"}
     resultado = await passo.run(contexto)

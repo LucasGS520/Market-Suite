@@ -23,7 +23,7 @@ HTML_ONLY_META = """
 
 HTML_SIMPLE = """
 <html><head><title>Produto Z</title></head>
-<body><span class="price">R$ 30</span></body></html>
+<body><div class="price">R$ 30</div></body></html>
 """
 
 @pytest.mark.asyncio

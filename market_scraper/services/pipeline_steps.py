@@ -19,13 +19,13 @@ import mechanicalsoup
 
 from .synergic_pipeline import PipelineStep
 from market_scraper.utils.http_cache import ContentSignature, NOT_MODIFIED
-from market_scraper.strategies.html_static import parse_generic_html, parse_meli_html, parse_amazon_html, parse_magalu_html
-from market_scraper.strategies.extruct_parser import parse_with_extruct
-from market_scraper.strategies.parsel_parser import parse_with_parsel
-from market_scraper.strategies.beautifulsoup_html import parse_with_beautifulsoup
-from market_scraper.strategies.requests_html import parse_with_requests_html
-from market_scraper.strategies.selectorlib_strategy import parse_with_selectorlib
-
+from market_scraper.parsers import (
+    parse_with_extruct,
+    parse_with_parsel,
+    parse_with_beautifulsoup,
+    parse_with_requests_html,
+    parse_with_selectorlib,
+)
 
 class MechanicalSoupLoginStep(PipelineStep):
     """ Realiza login leve utilizando ``MechanicalSoup`` """

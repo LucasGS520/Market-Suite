@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-""" Utilitarios de parsing baseados em SelectorLib
+""" Utilitários de parsing baseados em SelectorLib
 
 O objetivo deste módulo é isolar a responsabilidade de carregar templates e 
 executar o parsing com SelectorLib. Isso permite que camadas superiores
@@ -33,7 +33,7 @@ def load_selectorlib_extractor(template_path: str | Path) -> Extractor:
         silenciosos posteriormente no pipeline.
     """
     path = Path(template_path)
-    if not path.existis():
+    if not path.exists():
         raise FileNotFoundError(f"Template SelectorLib não encontrado: {path}")
     return Extractor.from_yaml_file(str(path))
 
