@@ -2,64 +2,72 @@
 
 #Mapeia as etapas disponíveis para o ``SynergicPipeline``.
 pipeline_steps:
-  mechanical_soup_login: MechanicalSoupLoginStep
   extruct: ExtructExtractionStep
   parsel: ParselExtractionStep
   beautifulsoup: BeautifulSoupExtractionStep
   requestshtml: RequestsHTMLRenderStep
   selectorlib: SelectorLibExtractionStep
+  mechanical_soup_login: MechanicalSoupLoginStep
 
 #Define, por domínio, a sequência de etapas a ser utilizada
 pipeline_policies:
   mercadolivre.com.br:
-    default:
+    default: &mercadolivre_pipeline
       - extruct
       - parsel
       - beautifulsoup
       - requestshtml
       - selectorlib
       - mechanical_soup_login
+    competitor: *mercadolivre_pipeline
 
   amazon.com.br:
-    default:
+    default: &amazon_pipeline
       - extruct
       - parsel
       - beautifulsoup
       - requestshtml
       - selectorlib
       - mechanical_soup_login
+    competitor: *amazon_pipeline
 
   magazineluiza.com.br:
-    default:
+    default: &magazineluiza_pipeline
       - extruct
       - parsel
       - beautifulsoup
       - requestshtml
       - selectorlib
       - mechanical_soup_login
+    competitor: *magazineluiza_pipeline
 
   example.com:
-    default:
+    default: &example_pipeline
       - selectorlib
       - parsel
       - beautifulsoup
       - requestshtml
       - extruct
       - mechanical_soup_login
+    competitor: *example_pipeline
 
-#Define o modo de execução do pipeline sinégico por domínio; Domínios não listados utilizam ``sequential`` como padrão
+#Define o modo de execução do pipeline sinérgico por domínio; Domínios não listados utilizam ``sequential`` como padrão
 pipeline_execution:
   default:
     default: sequential
+    competitor: sequential
   mercadolivre.com.br:
     default: sequential
     competitor: conditional
   amazon.com.br:
     default: parallel
+    competitor: parallel
   magazineluiza.com.br:
     default: conditional
+    competitor: conditional
   example.com:
     default: parallel
+    competitor: sequential
 
 #Define limites de requisições por domínio (max_requests por janela)
 rate_limits:
@@ -97,12 +105,21 @@ feature_flags:
       default:
         enabled: true
         rollout_percentage: 100
+      competitor:
+        enabled: true
+        rollout_percentage: 100
     magazineluiza.com.br:
       default:
         enabled: true
         rollout_percentage: 100
+      competitor:
+        enabled: true
+        rollout_percentage: 100
     example.com:
       default:
+        enabled: true
+        rollout_percentage: 100
+      competitor:
         enabled: true
         rollout_percentage: 100
         
