@@ -28,7 +28,7 @@ def test_pipeline_steps_padrao_por_dominio():
     """ Verifica se os domínios mapeados recebem etapas na ordem configurada """
     etapas_amazon = _nomes_das_etapas(pipeline_steps_for("https://www.amazon.com.br/produto"))
     assert etapas_amazon[:3] == [
-        "ExtructExtractioStep",
+        "ExtructExtractionStep",
         "ParselExtractionStep",
         "BeautifulSoupExtractionStep",
     ]
