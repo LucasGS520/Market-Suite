@@ -76,20 +76,28 @@ O `market_scraper` é o serviço especializado em coletar dados de anúncios. El
 
 Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML estático consulte [`market_scraper/README.md`](market_scraper/README.md).
 
+### Fluxo unificado de scraping
+- Todas as requisições passam exclusivamente pelo `SynergicPipeline`, que coordena as etapas declaradas no arquivo `domain_policy.yaml`.
+- A política de domínio define **quais etapas** serão executadas, **em qual ordem** e **qual modo de execução** (`sequential`, `parallel` ou `conditional`).
+- Cada etapa atualiza o `shared_context`, um dicionário mutável utilizado para compartilhar HTML bruto, dados estruturados e metadados entre as etapas subsequentes.
+- Métricas e logs estruturados são emitidos por etapa, permitindo rastrear latência, sucessos, fallbacks e bloqueios no Prometheus e no Loki.
+
 ### Componentes principais
 - **main.py** - instancia a aplicação FastAPI e registra rotas de saúde e de scraping.
 - **routes/** - expõe as rotas ``/health/ping`` e ``/scrape/parse`` (também acessível por ``/scraper/parse``).
 - utiliza o contrato ``ScraperRequest`` e ``ScraperResponse`` definido em ``shared/schemas/schemas_scraper.py`` para padronizar requisições e respostas.
-- **services/** - executa o fluxo de scraping: controla rate limiting e circuit breaker, anteriormente recuperava o HTML com Playwright (desativado temporariamente), aplica cache e interpreta o conteúdo.
+- **services/** - executa o fluxo de scraping controlando rate limiting, circuit breaker, cache inteligente e a orquestração do `SynergiPipeline`.
+- **services/domain_policy.py** - carrega o `domain_policy.yaml`, aplica hot reload opcional e constrói as etapas do pipeline para cada domínio/contexto suportado.
+- **services/pipeline_steps.py** - catálogo de etapas reutilizáveis; cada classe herda de `PipelineStep` e implementa o método `run` recebendo e atualizando o `shared_context`.
 - **utils/** - reúne auxiliares como rotação de *user agent*, gerenciamento de cookies, delays humanizados, leitura de ``robots.txt`` e funções de preço.
-- **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço.
+- **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço, incluindo cenários que validam a seleção de etapas via YAML.
 
-Os parsers de HTML e dados estruturados residem em `market_scraper/parsers`, cada módulo responsável apenas por transformar o HTML bruto em um dicionário padronizado. As classes de estratégia (`structured_data_strategy.py`, `html_static_strategy.py`) e o `SynergicPipeline` apenas orquestram o uso dessas funções puras, coordenado fallback, validação e combinação de resultados.
+Os parsers de HTML e dados estruturados residem em `market_scraper/parsers`, cada módulo responsável apenas por transformar o HTML bruto em um dicionário padronizado. Os `SynergicPipeline` concentra toda a orquestração e fallback, evitando estratégias isoladas.
 
 ### Papel na arquitetura
 - Recebe requisições HTTP do ``market_alert`` ou de outros consumidores.
-- Realiza scraping apenas durante a chamada, sem persistir dados.
-- Em caso de bloqueios ou CAPTCHA, tenta recuperar o acesso e retorna erros claros quando necessário.
+- Executa scraping exclusivamente por meio do pipeline configurado, garantindo consistência e flexibilidade via YAML.
+- Em caso de bloqueios ou CAPTCHA, tenta recuperar o acesso e retorna error claros quando necessário, registrando métricas por etapa.
 
 ## Módulo compartilhado ``shared``
 O diretório ``shared`` concentra componentes reutilizáveis que dão suporte aos demais serviços.

@@ -4,11 +4,12 @@ O objetivo é extrair apenas os campos essenciais `name` e `current_price` de ma
 
 ## Visão Geral do Fluxo
 1. A rota `/parse` recebe a URL do produto.
-2. A função `scrape_product_common_async` normaliza o endereço, consulta o cache inteligente e aciona o `SynergicPipeline` conforme feature flag e contexto.
-3. O `SynergicPipeline` seleciona etapas conforme configuração centralizada (`domain_policy.yaml`).
-4. Cada tentativa é validada pelo `DataQualityValidator`; timeouts ou falhas acionam fallback para a próxima etapa disponível.
-5. Resultados válidos são armazenados no `IntelligentCacheManager` e retornados ao solicitante, respeitando TTL, ETag e políticas de domínio.
-6. Métricas e logs estruturados são registrados para observabilidade e compliance.
+2. A função `scrape_product_common_async` normaliza o endereço, consulta o cache inteligente e aciona o `SynergicPipeline` definido no `domain_policy.yaml`.
+3. O `SynergicPipeline` seleciona etapas conforme configuração centralizada e executa o modo configurado (`sequential`, `parallel` ou `conditional`).
+4. Cada etapa lê e atualiza o `shared_context`, garantindo reaproveitamento de resultados e eliminando consultas duplicadas.
+5. O `DataQualityvalidator` valida o retorno da etapa corrente; em caso de falha ou timeout, o pipeline aplica fallback automático para a próxima etapa disponível.
+6. Resultados válidos são armazenados no `IntelligentCacheManager` e retornados ao solicitante, respeitando TTL, ETag e políticas de domínio.
+7. Métricas e logs estruturados são registrados para observabilidade, permitindo acompanhar latência, sucessos, fallback e bloqueios por etapa.
 
 ## Políticas de Domínio e Configuração Centralizada
 O módulo `domain_policy` mapeia cada marketplace para uma ordem de execução, contexto e modo de processamento:
@@ -34,7 +35,13 @@ A extração prioriza seletores simples via BeautifulSoup, e é consumida direta
 Para páginas instáveis, usamos **SelectorLib** com templates YAML em `selectorlib_templates`.
 
 ### Pipeline Sinérgico
-O `SynergicPipeline` executa etapas configuráveis por domínio/contexto, compartilhando dados via `shared_context` e registrando métricas de latência, fallback e sucesso/falha. Todas as chamadas de scraping passam exclusivamente pelo pipeline, evitando orquestrações paralelas ou estratégias isoladas.
+O `SynergicPipeline` executa etapas configuráveis por domínio/contexto, compartilhando dados via `shared_context` e registrando métricas de latência, fallback e sucesso/falha. Todas as chamadas de scraping passam exclusivamente pelo pipeline, evitando orquestrações paralelas ou estratégias isoladas e garantindo que a política definida no YAML seja a única fonte de verdade para o fluxo de coleta.
+
+#### Uso do `shared_context`
+- Utilize chaves semânticas (`html_raw`, `json_ld`, `offers`, `cookies_rotacionados`) para registar dados acessíveis às etapas subsequentes.
+- Prefira atualizar valores existentes ao invés de sobrescrever todo o dicionário; o método `shared_context.update(...)` mantém consistência entre as etapas.
+- Remova dados sensíveis antes de finalizar a etapa, garantindo compliance com LGPD/GDPR.
+- Documente no docstring da etapa quais chaves são lidas ou atualizadas, facilitando a criação de novas etapas compatíveis
 
 ### Etapas configuráveis
 As etapas disponíveis são declaradas em `services/pipeline_steps.py` e registradas no YAML (`pipeline_steps`). Cada etapa pode:
@@ -65,10 +72,10 @@ O rollout de funcionalidades críticas (ex: pipeline sinérgico) é controlado p
 ## Extensibilidade e Exemplos Práticos
 Para adicionar novas etapas ou domínios:
 1. Implemente a classe derivando de `PipelineStep` ou reutilize parsers existentes.
-2. Registre no `domain_policy.yaml` em `pipeline_steps`.
-3. Defina a ordem e contexto em `pipeline_policies`.
-4. Ajuste `pipeline_execution` conforme necessidade.
-5. Adicione testes unitários/integrados.
+2. Garanta que a docstring da etapa descreva entradas, saídas e chaves do `shared_context` utilizadas.
+3. Registre no `domain_policy.yaml` em `pipeline_steps`
+4. Defina a ordem e contexto em `pipeline_policies` e selecione o modo em `pipeline_execution`
+5. Atualize testes unitários/integrados que validam a montagem do pipeline e as rotas que dependem do contexto.
 6. Monitore métricas após deploy para ajustes finos.
 
 ### Como adicionar um novo parser puro
@@ -308,10 +315,10 @@ Esses passos mantêm o serviço aderente às boas práticas de segurança (LGPD/
 Para cada URL o serviço retorna um dicionário com `name` e `current_price`. Se o conteúdo não mudou desde a última coleta o endpoint responde **304 Not Modified**.
 Bloqueios sucessivos podem resultar em suspensão temporária do scraping.
 
-## Extensibilidade e Próximos Passos
-Novas abordagens de coleta podem ser adicionadas ao sistema seguindo estas diretrizes:
-1. **Registrar a etapa** em `pipeline_steps` e definir sua ordem em `pipeline_policies`.
-2. **Implementar a classe** derivando de `PipelineStep` ou reutilizar parsers existentes, validando os dados com `DataQualityValidator`.
-3. **Avaliar impactos** sobre cache, métricas de fallback e políticas de domínio. Etapas mais pesadas (como renderização completa) devem ser adicionadas com cuidado para não afetar as atuais, preferindo mantê-las como último recurso.
+## Decisões de Arquitetura e Migração
+- **Descontinuação de estratégias isoladas**: versões anteriores executavam estratégias diretas (`structured_data_strategy`, `html_static_strategy`) sem o pipeline. Essas abrodagens foram removidas para reduzir divergência de comportamento entre domínios.
+- **Fonte única de configuração**: o `domain_policy.yaml` é agora a única referência para ativar etapas, modos de execução e limites. Commits futuros que criem novas etapas devem incluir ajustes nesse arquivo.
+- **Critérios para descartar etapas**: etapas que não atualizam o `shared_context`, não registram métricas ou divergem do contrato `PipelineStep` devem ser migradas ou removidas. As remoções precisam ser documentadas no YAML e acompanhadas por limpeza de métricas deprecatadas.
+- **Boas práticas de migração**: antes de eliminar uma etapa antiga, mova seu comportamento para uma classe de pipeline compátivel, atualize a política correspondente e valide em ambiente de teste utilizando `DOMAIN_POLICY_HOT_RELOAD=1` para observar métricas em tempo real.
 
-Essas práticas mantêm o scraping leve e facilitam a evolução para outros métodos ou marketplaces.
+Essas decisões consolidam o `SynergicPipeline` como ponto central de evolução do serviço, mantendo observabilidade e compliance alinhadas às políticas de domínio.
