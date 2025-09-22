@@ -18,26 +18,31 @@ O módulo `domain_policy` mapeia cada marketplace para uma ordem de execução, 
 - Novas etapas ou domínios podem ser adicionados facilmente via YAML, sem alterar o core do código.
 
 ## Estratégias de Coleta e Pipeline
-### JSON Endpoint
-Classes derivadas de `JsonEndpointStrategy` executam chamadas HTTP a APIs públicas. Resultados válidos são cacheados para reutilização.
 
 ### Parsers especializados
 Cada biblioteca de parsing possui um módulo dedicado em `market_scraper/parsers`:
 - `html_static.py` mantém funções puras para parsing por BeautifulSoup
 - `extruct.py`, `parsel.py`, `requests_html.py` e `selectorlib.py` seguem a mesma interface (`html`, `url` -> `dict`)
-- As etapas do pipeline (`pipeline_steps`) apenas coordenam o uso dos parsers acima.
+- As etapas do pipeline (`pipeline_steps`) apenas coordenam o uso dos parsers acima, respeitando o contexto compartilhado.
 
 Todos os módulos retornam sempre o dicionário padronizado com `name`, `current_price` e `url`, simplificando a integração com o `SynergicPipeline`.
 
 ### HTML Estático
-O módulo utilitário `market_scraper/parsers/html_static.py` concentra funções puras de parsing para cada marketplace suportado. Cada função recebe apenas o HTML bruto e a URL original, retornando um dicionário com `name` e `current_price`. 
-A extração prioriza seletores simples via BeautifulSoup, enquanto as classes em `html_static_strategy.py` apenas orquestram a chamada dos parsers.
-
+O módulo utilitário `market_scraper/parsers/html_static.py` concentra funções puras de parsing para cada marketplace suportado. Cada função recebe apenas o HTML bruto e a URL original, retornando um dicionário com `name` e `current_price`.
+A extração prioriza seletores simples via BeautifulSoup, e é consumida diretamente pelas etapas do pipeline configuradas via YAML.
 ### SelectorLib
 Para páginas instáveis, usamos **SelectorLib** com templates YAML em `selectorlib_templates`.
 
 ### Pipeline Sinérgico
-O `SynergicPipeline` executa etapas configuráveis por domínio/contexto, compartilhando dados via `shared_context` e registrando métricas de latência, fallback e sucesso/falha.
+O `SynergicPipeline` executa etapas configuráveis por domínio/contexto, compartilhando dados via `shared_context` e registrando métricas de latência, fallback e sucesso/falha. Todas as chamadas de scraping passam exclusivamente pelo pipeline, evitando orquestrações paralelas ou estratégias isoladas.
+
+### Etapas configuráveis
+As etapas disponíveis são declaradas em `services/pipeline_steps.py` e registradas no YAML (`pipeline_steps`). Cada etapa pode:
+- Carregar HTML de diferentes fontes (requisições estáticas, renderização leve, login mecânico);
+- Executar parsers especializados reutilizando resultados anteriores;
+- Inserir dados adicionais no `shared_context` (cookies, assinaturas de conteúdo, templates do SelectorLib).
+
+A composição final do pipeline é definida por domínio em `pipeline_policies`, permitindo rearranjar etapas ou criar sequências exclusivas para contextos como `competitor`. Essa padronização elimina duplicação de código e facilita a evolução das etapas.
 
 ## MechanicalSoup para Fluxos Simples
 Utilizado para interações leves (login, filtros simples), combinando `requests` e `BeautifulSoup` sem overhead de navegador completo. Playwright é reservado para cenários avançados e não está ativo por padrão.

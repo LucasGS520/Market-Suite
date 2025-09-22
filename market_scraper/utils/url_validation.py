@@ -12,7 +12,7 @@ import re
 from urllib.parse import urlparse
 from typing import Callable, Dict
 
-from market_scraper.services.domain_policy import DOMAIN_POLICIES
+from market_scraper.services.domain_policy import PIPELINE_POLICIES
 from market_scraper.utils.http_utils import extract_hostname
 from shared.utils.ml_url import canonicalize_ml_url
 
@@ -26,7 +26,9 @@ _PRODUCT_CHECKS: Dict[str, Callable[[str], bool]] = {
 
 def _is_supported_marketplace(host: str) -> bool:
     """ Verifica se o host pertence a algum domínio configurado """
-    for domain in DOMAIN_POLICIES.keys():
+    for domain in PIPELINE_POLICIES.keys():
+        if domain == "default":
+            continue
         if host == domain or host.endswith("." + domain):
             return True
     return False

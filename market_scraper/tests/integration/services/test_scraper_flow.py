@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from uuid import uuid4
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
 from market_scraper.services.services_scraper_common import scrape_product_common_async
-from market_scraper.tests.unit.conftest import fake_redis
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
-from market_scraper.parsers.html_static import MercadoLivreHtmlStaticStrategy
+from market_scraper.services.synergic_pipeline import PipelineStep
+from market_scraper.services.domain_policy import FeatureFlagDecision
+from market_scraper.parsers.html_static import parse_meli_html
 
 
 #HTML de exemplo representando uma página válida de produto no Mercado Livre
@@ -17,6 +19,7 @@ HTML_EXEMPLO = """
 <head>
     <meta property="og:type" content="product" />
     <meta property="og:image" content="http://example.com/thumb.jpg" />
+    <meta itemprop="priceCurrency" content="R$" /> 
     <script type="application/ld+json">
     {
         "@type": "Product",
@@ -28,6 +31,8 @@ HTML_EXEMPLO = """
 </head>
 <body>
     <h1 class="ui-pdp-title">Produto Exemplo</h1>
+    <span class="andes-money-amount__fraction">100</span>
+    <span class="andes-money-amount__cents">00</span>
     <span>Frete grátis</span>
 </body>
 </html>
@@ -66,6 +71,29 @@ class DummyCircuitBreaker:
     def record_success(self, key: str) -> None:
         pass
 
+class PipelineCarregaHtml(PipelineStep):
+    def __init__(self, html: str) -> None:
+        self.html = html
+
+    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
+        shared_context["html"] = self.html
+        return {"status": "success", "shared_context": {"html": self.html}}
+    
+class PipelineParserMeli(PipelineStep):
+    def __init__(self, tracker: dict[str, Any]) -> None:
+        self.tracker = tracker
+
+    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
+        html = shared_context.get("html", "")
+        self.tracker["html"] = html
+        self.tracker["url"] = shared_context.get("url")
+        detalhes = parse_meli_html(html, shared_context.get("url", ""))
+        return {
+            "status": "success",
+            "details": detalhes,
+            "extraction_method": self.__class__.__name__,
+        }
+
 @pytest.fixture
 def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_redis = FakeRedis()
@@ -93,13 +121,31 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait", fake_throttle_wait)
     monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait_async", fake_throttle_wait_async)
 
-    async def fake_fetch_html_static(self, url: str) -> str:
-        return HTML_EXEMPLO
-
-    monkeypatch.setattr(MercadoLivreHtmlStaticStrategy, "_fetch_html", fake_fetch_html_static)
+    def _fake_feature_flag(feature: str, url: str, *, context: str = "default", identifier: str | None = None, **kwargs) -> FeatureFlagDecision:
+        return FeatureFlagDecision(
+            feature=feature,
+            context=context,
+            enabled=True,
+            config_enabled=True,
+            rollout_percentage=100.0,
+            source="tests",
+            identifier=identifier,
+            bucket_value=0.0,
+            configured=True,
+        )
+    
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.evaluate_feature_flag", _fake_feature_flag)
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.pipeline_execution_mode_for", lambda *a, **k: "sequential")
 
 @pytest.mark.asyncio
-async def test_scrape_monitored_product_flow(setup_ambiente: None) -> None:
+async def test_scrape_monitored_product_flow(setup_ambiente: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    rastreador: dict[str, Any] = {}
+
+    def _fake_pipeline_steps(url: str, *, context: str = "default") -> list[PipelineStep]:
+        return [PipelineCarregaHtml(HTML_EXEMPLO), PipelineParserMeli(rastreador)]
+    
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.pipeline_steps_for", _fake_pipeline_steps)
+
     user_id = uuid4()
     payload = MonitoredProductCreateScraping(
         name_identification="Produto X",
@@ -115,12 +161,22 @@ async def test_scrape_monitored_product_flow(setup_ambiente: None) -> None:
         circuit_breaker=DummyCircuitBreaker(),
     )
     detalhes = resultado["details"]
+    
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Exemplo"
     assert detalhes["current_price"] == "R$ 100,00"
+    assert rastreador["html"].strip().startswith("<html>")
+    assert rastreador["url"] == str(payload.product_url)
 
 @pytest.mark.asyncio
-async def test_scrape_competitor_product_flow(setup_ambiente: None) -> None:
+async def test_scrape_competitor_product_flow(setup_ambiente: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    rastreador: dict[str, Any] = {}
+
+    def _fake_pipeline_steps(url: str, *, context: str = "default") -> list[PipelineStep]:
+        return [PipelineCarregaHtml(HTML_EXEMPLO), PipelineParserMeli(rastreador)]
+    
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.pipeline_steps_for", _fake_pipeline_steps)
+
     user_id = uuid4()
     payload = CompetitorProductCreateScraping(
         monitored_product_id=uuid4(),
@@ -138,3 +194,4 @@ async def test_scrape_competitor_product_flow(setup_ambiente: None) -> None:
     assert resultado["status"] == "success"
     assert detalhes["name"] == "Produto Exemplo"
     assert detalhes["current_price"] == "R$ 100,00"
+    assert rastreador["url"] == str(payload.product_url)
