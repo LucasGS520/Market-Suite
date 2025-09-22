@@ -30,6 +30,19 @@ class HistogramSimples(ContadorSimples):
         """ Registra o valor observado mantendo compatibilidade  """
         self.observacoes.append(valor)
 
+class LoggerSimples:
+    """ Logger mínimo para capturar eventos informados pelo pipeline """
+    def __init__(self) -> None:
+        self.eventos: list[tuple[str, dict[str, object]]] = []
+
+    def info(self, evento: str, **dados) -> None:
+        """ Registra chamadas informativas realizadas pelo pipeline """
+        self.eventos.append((evento, dados))
+
+    def exception(self, evento: str, **dados) -> None:
+        """ Registra chamadas de exceção realizadas pelo pipeline """
+        self.eventos.append((evento, dados))
+
 class EtapaDefineContexto(PipelineStep):
     """ Etapa que insere valor no ``shared_context`` """
     async def run(self, shared_context):
@@ -73,6 +86,22 @@ async def test_pipeline_condicional():
     assert res2["shared_context"]["executou"] is True
     
 @pytest.mark.asyncio
+async def test_pipeline_condicional_registra_skip(monkeypatch):
+    """ Deve registrar fallback e log estruturado ao pular etapa """
+    contador_fallback = ContadorSimples()
+    logger_falso = LoggerSimples()
+
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPER_FALLBACK_TOTAL", contador_fallback)
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.logger", logger_falso)
+
+    pipeline = SynergicPipeline([EtapaCondicional()], execution_mode="conditional")
+    resultado = await pipeline.run(shared_context={})
+
+    assert resultado["results"] == []
+    assert contador_fallback.total == 1
+    assert ("step_skipped", {"step": "EtapaCondicional"}) in logger_falso.eventos
+
+@pytest.mark.asyncio
 async def test_pipeline_paralelo_registra_fallback(monkeypatch):
     """ Em modo paralelo deve registrar fallback para etapas com erro """
     class EtapaSucesso(PipelineStep):
@@ -98,6 +127,8 @@ async def test_pipeline_paralelo_registra_fallback(monkeypatch):
     assert contador_fallback.total == 1
     assert contador_estrategia.total == 2
     assert len(histograma.observacoes) == 2
+    assert ("EtapaSucesso", "success") in contador_estrategia.rotulos
+    assert ("EtapaErro", "error") in contador_estrategia.rotulos
 
 @pytest.mark.asyncio
 async def test_pipeline_sequencial_fallback_intermediario(monkeypatch):
@@ -125,3 +156,5 @@ async def test_pipeline_sequencial_fallback_intermediario(monkeypatch):
     assert contador_fallback.total == 1
     assert contador_estrategia.total == 2
     assert len(histograma.observacoes) == 2
+    assert ("EtapaFalha", "error") in contador_estrategia.rotulos
+    assert ("EtapaSucesso", "success") in contador_estrategia.rotulos
