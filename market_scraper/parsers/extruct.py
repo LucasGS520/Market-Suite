@@ -88,11 +88,16 @@ def parse_with_extruct(html: str, url: str | None = None) -> dict[str, str]:
     if not name or not price:
         opengraph = data.get("opengraph") or []
         if isinstance(opengraph, list):
-            og_map = {
-                entry.get("property"): entry.get("content")
-                for entry in opengraph
-                if isinstance(entry, dict)
-            }
+            og_map: dict[str, Any] = {}
+            for entry in opengraph:
+                if not isinstance(entry, dict):
+                    continue
+                if "property" in entry and "content" in entry:
+                    og_map[entry.get("property")] = entry.get("content")
+                else:
+                    for key, value in entry.items():
+                        if isinstance(key, str) and value is not None:
+                            og_map.setdefault(key, value)
             name = name or _as_text(og_map.get("og:title"))
             price = price or _as_text(og_map.get("product:price:amount"))
 

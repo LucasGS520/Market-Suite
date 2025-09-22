@@ -40,8 +40,8 @@ def load_selectorlib_extractor(template_path: str | Path) -> Extractor:
 def parse_with_selectorlib(
     html: str,
     url: str | None = None,
-    *,
     extractor: Extractor | None = None,
+    *,
     template_path: str | Path | None = None,
 ) -> dict[str, str]:
     """ Extrai campos padronizados utilizando um template SelectorLib

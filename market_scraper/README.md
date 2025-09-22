@@ -4,18 +4,18 @@ O objetivo é extrair apenas os campos essenciais `name` e `current_price` de ma
 
 ## Visão Geral do Fluxo
 1. A rota `/parse` recebe a URL do produto.
-2. A função `scrape_product_common_async` normaliza o endereço, consulta o cache inteligente e aciona o pipeline ou orquestrador conforme feature flag e contexto.
-3. O `MultiStrategyScraperOrchestrator` e/ou `SynergicPipeline` selecionam estratégias e etapas conforme configuração centralizada (`domain_policy.yaml`).
-4. Cada tentativa é validada pelo `DataQualityValidator`; timeouts ou falhas acionam fallback para a próxima estratégia ou etapa.
+2. A função `scrape_product_common_async` normaliza o endereço, consulta o cache inteligente e aciona o `SynergicPipeline` conforme feature flag e contexto.
+3. O `SynergicPipeline` seleciona etapas conforme configuração centralizada (`domain_policy.yaml`).
+4. Cada tentativa é validada pelo `DataQualityValidator`; timeouts ou falhas acionam fallback para a próxima etapa disponível.
 5. Resultados válidos são armazenados no `IntelligentCacheManager` e retornados ao solicitante, respeitando TTL, ETag e políticas de domínio.
 6. Métricas e logs estruturados são registrados para observabilidade e compliance.
 
 ## Políticas de Domínio e Configuração Centralizada
 O módulo `domain_policy` mapeia cada marketplace para uma ordem de execução, contexto e modo de processamento:
-- Estratégias leves (JSON) são priorizadas, seguidas por HTML estático e outras técnicas.
-- O arquivo `domain_policy.yaml` centraliza estratégias, etapas de pipeline, modos de execução (`sequential`, `parallel`, `conditional`), limites de requisições e feature flags.
+- Etapas leves (extrações estruturadas) são priorizadas, seguidas por variações baseadas em HTML estático e renderização leve.
+- O arquivo `domain_policy.yaml` centraliza etapas de pipeline, modos de execução (`sequential`, `parallel`, `conditional`), limites de requisições e feature flags.
 - Contextos (ex: `default`, `competitor`) permitem granularidade por tipo de página ou cenário.
-- Novas estratégias, etapas ou domínios podem ser adicionados facilmente via YAML, sem alterar o core do código.
+- Novas etapas ou domínios podem ser adicionados facilmente via YAML, sem alterar o core do código.
 
 ## Estratégias de Coleta e Pipeline
 ### JSON Endpoint
@@ -25,9 +25,9 @@ Classes derivadas de `JsonEndpointStrategy` executam chamadas HTTP a APIs públi
 Cada biblioteca de parsing possui um módulo dedicado em `market_scraper/parsers`:
 - `html_static.py` mantém funções puras para parsing por BeautifulSoup
 - `extruct.py`, `parsel.py`, `requests_html.py` e `selectorlib.py` seguem a mesma interface (`html`, `url` -> `dict`)
-- As estratégias (`structured_data_startegy.py`, `html_static_strategy.py`) apenas orquestram os parsers acima.
+- As etapas do pipeline (`pipeline_steps`) apenas coordenam o uso dos parsers acima.
 
-Todos os módulos retornam sempre o dicionário padronizado com `name`, `current_price` e `url`, simplificando a integração com o `SynergicPipeline` e com o `MultiStrategyScraperOrchestrator`.
+Todos os módulos retornam sempre o dicionário padronizado com `name`, `current_price` e `url`, simplificando a integração com o `SynergicPipeline`.
 
 ### HTML Estático
 O módulo utilitário `market_scraper/parsers/html_static.py` concentra funções puras de parsing para cada marketplace suportado. Cada função recebe apenas o HTML bruto e a URL original, retornando um dicionário com `name` e `current_price`. 
@@ -58,19 +58,19 @@ O rollout de funcionalidades críticas (ex: pipeline sinérgico) é controlado p
 - Coleta apenas dos campos essenciais, conforme LGPD/GDPR.
 
 ## Extensibilidade e Exemplos Práticos
-Para adicionar novas estratégias, etapas ou domínios:
-1. Implemente a classe derivando das bases existentes.
-2. Registre no `domain_policy.yaml` em `strategies` ou `pipeline_steps`.
-3. Defina a ordem e contexto em `policies` ou `pipeline_policies`.
-4. Ajuste `strategy_execution` e `pipeline_execution` conforme necessidade.
+Para adicionar novas etapas ou domínios:
+1. Implemente a classe derivando de `PipelineStep` ou reutilize parsers existentes.
+2. Registre no `domain_policy.yaml` em `pipeline_steps`.
+3. Defina a ordem e contexto em `pipeline_policies`.
+4. Ajuste `pipeline_execution` conforme necessidade.
 5. Adicione testes unitários/integrados.
 6. Monitore métricas após deploy para ajustes finos.
 
 ### Como adicionar um novo parser puro
 1. Crie um módulo em `market_scraper/parsers` seguindo a interface padrão (`html`, `url` -> `dict`).
 2. Documente o comportamento com docstrings e exemplos em português.
-3. Adicione testes unitários dedicados em `market_scraper/tests/unit/strategies`.
-4. Integre o parser a uma estratégia ou etapa de pipeline atualizando o YAML quando necessário.
+3. Adicione testes unitários dedicados em `market_scraper/tests/unit/services`.
+4. Integre o parser a uma etapa do pipeline atualizando o YAML quando necessário.
 
 Exemplo de rollout:
 ```yaml
@@ -117,25 +117,14 @@ Para cada URL, o serviço retorna um dicionário com `name` e `current_price`. S
 ### Configuração centralizada (`domain_policy.yaml`)
 O arquivo ``services/domain_policy.yaml`` centraliza todas as decisões de orquestração do scraper;
 Ele define:
-- **`strategies`** - mapeia nomes amigáveis para classes de estratégia registradas no código.
-- **`policies`** - ordena as estratégias por domínio e por contexto (ex.: `deault`, `competitor`) garantindo que as alternativas mais leves sejam executadas primeiro.
 - **`pipeline_steps`** - cataloga as etapas do ``SynergicPipeline`` capazes de compartilhar contexto.
-- **`pipeline_policies`** - descreve, por domínios e por contexto, a ordem das etapas executadas pelo pipeline.
+- **`pipeline_policies`** - descreve, por domínio e contexto, a ordem das etapas executadas pelo pipeline.
+- **`pipeline_execution`** - especifica o modo de execução (`sequential`, `parallel`, `conditional`).
+- **`rate_limits`** - define limites de requisições por domínio.
+- **`feature_flags`** - controla o rollout de funcionalidades sensíveis.
 
 ```yaml
 #Trechos ilustrativos do arquivo domain_policy.yaml
-strategies:
-   JSON_ML: MercadoLivreJsonStrategy
-   HTML_ML: MercadoLivreStaticStrategy
-
-policies:
-  mercadolivre.com.br:
-    default:
-      - JSON_ML
-      - HTML_ML
-    competitor:
-      - HTML_ML
-
 pipeline_steps:
   extruct: ExtructExtractionStep
   parsel: ParselExtractionStep
@@ -154,32 +143,32 @@ pipeline_policies:
       - selectorlib
       - parsel
 
-strategy_execution:
+pipeline_execution:
   default:
     default: sequential
     competitor: sequential
   mercadolivre.com.br:
     default: conditional
-    competitor: sequential
+    competitor: conditional
 ```
 
 Cada contexto representa um cenário configurável (por exemplo, `product_type=competitor`).
 Caso um contexto não seja encontrado para o domínio, o bloco `default` é utilizado automaticamente.
-Isso permite priorizar estratégias mais leves para páginas monitoradas e reservar opções mais robustas apenas quando o usuário solicita comparações de concorrentes.
+Isso permite priorizar etapas mais leves para páginas monitoradas e reservar opções mais robustas apenas quando o usuário solicita comparações de concorrentes.
 
 > Variáveis de ambiente permitem customizar a configuração sem alterar o código
 > - ``DOMAIN_POLICY_FILE`` aponta para outro arquivo YAML.
 > - ``DOMAIN_POLICY_HOT_RELOAD=1`` ativa recarga automática quando o arquivo é alterado
 
 #### Fluxo operacional e fallback do pipeline
-O ``SynergicPipeline`` garante que estratégias e etapas sigam uma ordem previsível, reutilizando intermediários e registrando métricas de latência e fallback.
+O ``SynergicPipeline`` garante que as etapas sigam uma ordem previsível, reutilizando intermediários e registrando métricas de latência e fallback.
 
 ```mermaid
 flowchart LR
     A[Requisição /scrape/parse] ---> B{Cache válido?}
     B -- Sim --> C[Retorno imediato (304 ou cache hit)]
     B -- Não --> D[Carregar domain_policy.yaml]
-    D --> E[Selecionar estratégias e etapas por domínio/contexto]
+    D --> E[Selecionar etapas por domínio/contexto]
     E --> F[Executar SynergicPipeline]
     F --> G{Etapa bem-sucedida?}
     G -- Sim --> H[Validação e DataQuality]
@@ -218,28 +207,27 @@ flowchart TD
 | Métrica Prometheus | Descrição |
 | ------------------ | --------- |
 | ``SCRAPER_STRATEGY_TOTAL`` | Contador por etapa (classe) e status: ``success``, ``NOT_MODIFIED`` ou falha. |
-| ``SCRAPER_FALLBACK_TOTAL`` | Contabiliza quantas vezes um fallback foi acionado entre etapas ou estratégias. |
+| ``SCRAPER_FALLBACK_TOTAL`` | Contabiliza quantas vezes um fallback foi acionado entre etapas configuradas. |
 | ``SCRAPING_LATENCY_SECONDS`` | Histograma de latência individual por etapa. |
 
 Essas métricas complementam as métricas HTTP padrão e devem ser acompanhadas com alertas (ex.: aumento de ``fallback_total``) para reagir a bloqueios ou mudanças nos marketplaces.
 
-#### Como adicionar novas estratégias ou etapas
-1. **Criar a classe** em ``market_scraper/strategies`` (ou ``services/pipeline_steps``) herdando das bases existentes e garantindo validação com ``DataQualityValidator``.
-2. **Registrar a classe** no ``domain_policy.yaml`` em ``strategies`` ou ``pipeline_steps``.
-3. **Definir a ordem** em ``policies`` ou ``pipeline_policies`` para domínio e contexto desejado (ex.: `default`, `competitor`, `logged_user`).
-4. **Ajustar os blocos `strategy_execution` e `pipeline_execution`** para indicar como cada contexto será executado (`sequential`, `parallel` ou `conditional`).
-5. **Adicionar testes** cobrindo seleção e execução (``tests/unit/services/test_domain_policy.py`` e ``tests/integration/routes/test_strategy_selection.py`` contêm exemplos.)
+#### Como adicionar novas etapas
+1. **Criar a classe** em ``market_scraper/services/pipeline_steps.py`` herdando de `PipelineStep` e garantindo validação com `DataQualityValidator`.
+2. **Registrar a classe** no `domain_policy.yaml` em `pipeline_steps`.
+3. **Definir a ordem** em `pipeline_policies` para domínio e contexto desejado (e.: `default`, `competitor`, `logged_user`).
+4. **Ajustar o bloco `pipeline_execution`** para indicar como cada contexto será executado (`sequential`, `parallel` ou `conditional`).
+5. **Adicionar Testes** cobrindo seleção e execução (``tests/unit/services/test_domain_policy.py`` contém exemplos atualizados).
 6. **Monitorar métricas** após o deploy para ajustar TTL de cache, paralelismo ou limites.
 
 #### Exemplo prático de extensão com nova biblioteca
-Suponha que seja necessário utilizar uma biblioteca ``PlaywrightRenderStrategy`` apenas para páginas de concorrentes de um novo marketplace:
+Suponha que seja necessário utilizar uma etapa ``PlaywrightRenderStep`` apenas para páginas de concorrentes de um novo marketplace:
 
-1. **Instale a dependência** e crie ``market_scraper/strategies/playwright_render.py`` implementando ``get_data`` com validação e uso de ``shared_context``.
-2. **Registre a classe** em ``domain_policy.yaml`` dentro de ``strategies`` (ex.: ``PLAYWRIGHT_RENDER: PlaywrightRenderStrategy``).
-3. **Atualize `policies`** para o domínio desejado definido o contexto ``competitor`` com a nova estratégia como último fallback. O contexto ``default`` pode continuar priorizando estratégias leves.
-4. **Ajuste `strategy_execution`** para executar o contexto ``competitor`` em modo ``conditional`` (evitando que a etapa pesada rode quando o HTML já está disponível).
-5. **Caso necessário**, inclua etapas adicionais em ``pipeline_steps`` / ``pipeline_policies`` para pré-carregar dados (por exemplo, uma etapa que capture cookies antes de chamar o Playwright).
-6. **Crie Testes** unitários/integrados garantindo que o contexto ``competitor`` seleciona a nova estratégia e que o comportamento antigo permanece intacto para o contexto ``default``.
+1. **Instale a dependência** e crie ``market_scraper/services/pipeline_steps.py`` implementando `PlawrightRenderStep` com validação e uso de `shared_context`.
+2. **Registre a classe** em `domain_policy.yaml` dentro de ``pipeline_steps`` (ex.: `playwright_render: PlaywrightRenderStep`).
+3. **Atualize `pipeline_policies`** para o domínio desejado definindo o contexto `competitor` com a nova etapa como último fallback. O contexto `default` pode continuar priorizando etapas leves.
+4. **Ajuste `pipeline_execution`** para executar o contexto ``competitor`` em modo ``conditional`` (evitando que a etapa pesada rode quando o HTML já está disponível).
+5. **Adicione testes** unitários/integrados garantindo que o contexto ``competitor`` seleciona a nova etapa e que o comportamento antigo permanece intacto para o contexto ``default``.
 
 Esse fluxo garante que novas bibliotecas possam ser adicionadas de forma modular, habilitadas apenas quando configuradas via YAML e acompanhadas por métricas específicas.
 
@@ -302,7 +290,7 @@ Esses passos mantêm o serviço aderente às boas práticas de segurança (LGPD/
 - Sanitizar logs com os utilitários de mascaramento de dados do diretório ``shared``; o serviço aplica `sanitize_log_data` para remover tokens, cookies e parâmetros sensíveis de URLs antes de registrar eventos.
 - Configurar limites e comportamentos específicos por domínio no YAML, evitando que etapas pesadas sejam aplicadas indiscriminadamente. O bloco ``rate_limits`` define ``max_requests`` e ``window`` por host, refletidos em métricas no ``SCRAPER_URL_STATUS_TOTAL``.
 - Seguir o princípio de minimização de dados (LGPD/GDPR), coletando apenas os campos essenciais (nome, preço, etc...).
-- Documentar e revisar periodicamente exceções de compliance em conjunto com a equipe jurídica antes de ativar novas estratégias.
+- Documentar e revisar periodicamente exceções de compliance em conjunto com a equipe jurídica antes de ativar novas etapas.
 
 
 ## Serviços Utilitários
@@ -317,9 +305,8 @@ Bloqueios sucessivos podem resultar em suspensão temporária do scraping.
 
 ## Extensibilidade e Próximos Passos
 Novas abordagens de coleta podem ser adicionadas ao sistema seguindo estas diretrizes:
-1. **Registrar a estratégia** no `STRATEGY_REGISTRY` e definir sua ordem em `DOMAIN_POLICES`.
-2. **Implementar a classe** derivando de `JsonEndpointStrategy` ou `HtmlStaticStrategy`, validando os dados com `DataQualityValidator`.
-3. **Avaliar impactos** sobre cache, métricas de fallback e políticas de domínio. Estratégias mais pesadas (como uso de navegadores headless) devem ser adicionadas com cuidado para não afetar as atuais, preferindo mantê-las como último recurso.
+1. **Registrar a etapa** em `pipeline_steps` e definir sua ordem em `pipeline_policies`.
+2. **Implementar a classe** derivando de `PipelineStep` ou reutilizar parsers existentes, validando os dados com `DataQualityValidator`.
+3. **Avaliar impactos** sobre cache, métricas de fallback e políticas de domínio. Etapas mais pesadas (como renderização completa) devem ser adicionadas com cuidado para não afetar as atuais, preferindo mantê-las como último recurso.
 
 Essas práticas mantêm o scraping leve e facilitam a evolução para outros métodos ou marketplaces.
-

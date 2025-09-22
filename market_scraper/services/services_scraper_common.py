@@ -36,14 +36,11 @@ from shared.schemas.schemas_products import MonitoredProductCreateScraping, Comp
 from shared.metrics.metrics_scraper import SCRAPER_HTTP_BLOCKED_TOTAL, SCRAPER_URL_STATUS_TOTAL, SCRAPER_FEATURE_FLAG_TOTAL
 from shared.utils.logging_utils import sanitize_log_data
 
-from market_scraper.services.multi_strategy_orchestrator import MultiStrategyScraperOrchestrator
 from market_scraper.services.synergic_pipeline import SynergicPipeline
 from market_scraper.services.domain_policy import (
-    strategies_for, 
-    pipeline_steps_for, 
-    pipeline_execution_mode_for, 
-    strategy_execution_mode_for, 
-    rate_limit_policy_for, 
+    pipeline_steps_for,
+    pipeline_execution_mode_for,
+    rate_limit_policy_for,
     evaluate_feature_flag,
 )
 
@@ -106,14 +103,14 @@ async def scrape_product_common_async(
     mechanicalsoup_config: dict | None = None,
     **extra_kwargs,
 ) -> dict:
-    """ Orquestra o fluxo de scraping com cache, pipeline e estratégias
+    """ Orquestra o fluxo de scraping com cache e pipeline sinérgico
 
-    A rotina verifica o cache inteligente, executa o ``SynergicPipeline`` definido
-    para o domínio/contexto e, quando necessário, aciona o orquestrador de
-    estratégias. Cada etapa registra logs estruturados, persiste metadados
-    seguros e renova TTL do cache quando um resultado existente é reutilizado.
-    O compartilhamento de contexto garante que etapas subsequentes aproveitem
-    cookies, HTML renderizado e outras dependências resolvidas previamente.
+    A rotina verifica o cache inteligente e executa o ``SynergicPipeline``
+    definido para o domínio/contexto. Cada etapa registra logs estruturados,
+    persiste metadados seguros e renova o TTL do cache quando um resultado
+    existente é reutilizado. O compartilhamento de contexto garante que etapas
+    subsequentes aproveitem cookies, HTML renderizado ou outras dependências
+    resolvidas previamente.
     """
     #Registra o início do fluxo de scraping
     normalized_url = url
@@ -255,8 +252,7 @@ async def scrape_product_common_async(
         )
 
     #Determina o contexto a partir do tipo de produto, permitindo políticas granulares
-    strategy_context = "competitor" if product_type == "competitor" else "default"
-    pipeline_context = strategy_context
+    pipeline_context = "competitor" if product_type == "competitor" else "default"
 
     steps = pipeline_steps_for(normalized_url, context=pipeline_context)
     pipeline_decision = evaluate_feature_flag(
@@ -268,179 +264,140 @@ async def scrape_product_common_async(
 
     if not steps:
         SCRAPER_FEATURE_FLAG_TOTAL.labels("synergic_pipeline", "no_steps").inc()
-        logger.info(
-            "pipeline_skipped_no_steps", 
-            url=safe_log_url, 
-            context=pipeline_context
+        logger.error(
+            "pipeline_unavailable",
+            url=safe_log_url,
+            context=pipeline_context,
         )
-    elif pipeline_decision.enabled:
-        SCRAPER_FEATURE_FLAG_TOTAL.labels("synergic_pipeline", "enabled").inc()
-        execution_mode = pipeline_execution_mode_for(normalized_url, context=pipeline_context)
-        logger.info(
-            "running_pipeline", 
-            url=safe_log_url, 
-            context=pipeline_context, 
-            execution_mode=execution_mode, 
-            steps=len(steps), 
-            rollout=pipeline_decision.rollout_percentage, 
-            feature_source=pipeline_decision.source, 
-            bucket_value=pipeline_decision.bucket_value
-        )
-        pipeline = SynergicPipeline(steps=steps, execution_mode=execution_mode)
-        pipeline_result = await pipeline.run(shared_context)
-        shared_context.update(pipeline_result.get("shared_context", {}))
+        _record_status("error")
+        return {"status": "error", "detail": "Pipeline não configurado para o domínio"}
 
-        for entry in pipeline_result.get("results", []):
-            status_step = entry.get("status")
-            if status_step == "success" and entry.get("details"):
-                pipeline_details = entry["details"]
-                try:
-                    validator.validate(pipeline_details)
-                except ValueError as err:
-                    logger.info(
-                        "pipeline_invalid_data", 
-                        erro=sanitize_log_data(str(err))
-                    )
-                    continue
-                method = entry.get("extraction_method")
-                _persist_success(pipeline_details, extraction_method=method)
-                logger.info(
-                    "pipeline_short_circuit",
-                    url=safe_log_url, 
-                    step=method
-                )
-                _record_status("success")
-                return {"status": "success", "details": pipeline_details}
-            
-            if status_step == "NOT_MODIFIED":
-                cached_pipeline = cache_manager.get(marketplace=marketplace, url=normalized_url)
-                if cached_pipeline:
-                    cache_manager.touch(marketplace=marketplace, url=normalized_url)
-                    logger.info(
-                        "pipeline_not_modified", 
-                        url=safe_log_url
-                    )
-                    _record_status("not_modified")
-                    return {"status": "NOT_MODIFIED", "details": cached_pipeline}
-
-    else:
+    if not pipeline_decision.enabled:
         SCRAPER_FEATURE_FLAG_TOTAL.labels("synergic_pipeline", "disabled").inc()
         logger.info(
-            "pipeline_feature_disabled", 
-            url=safe_log_url, 
-            context=pipeline_context, 
+            "pipeline_feature_disabled",
+            url=safe_log_url,
+            context=pipeline_context,
             rollout=pipeline_decision.rollout_percentage,
-            feature_source=pipeline_decision.source, 
-            bucket_value=pipeline_decision.bucket_value
+            feature_source=pipeline_decision.source,
+            bucket_value=pipeline_decision.bucket_value,
         )
+        _record_status("error")
+        return {"status": "error", "detail": "Pipeline sinérgico desabilitado para o domínio"}
 
-    selected_strategies = strategies_for(normalized_url, context=strategy_context)
-    orchestrator = MultiStrategyScraperOrchestrator(
-        strategy_selector=lambda target_url: strategies_for(target_url, context=strategy_context),
-        throttle_manager=throttle_manager,
-    )
+    SCRAPER_FEATURE_FLAG_TOTAL.labels("synergic_pipeline", "enabled").inc()
+    execution_mode = pipeline_execution_mode_for(normalized_url, context=pipeline_context)
     logger.info(
-        "running_orchestrator", 
-        url=safe_log_url, 
-        strategy_context=strategy_context, 
-        strategies=len(selected_strategies)
+        "running_pipeline",
+        url=safe_log_url,
+        context=pipeline_context,
+        execution_mode=execution_mode,
+        steps=len(steps),
+        rollout=pipeline_decision.rollout_percentage,
+        feature_source=pipeline_decision.source,
+        bucket_value=pipeline_decision.bucket_value,
     )
-    try:
-        result = await orchestrator.scrape(
-            url=normalized_url,
-            user_id=user_id,
-            payload=payload,
-            product_type=product_type,
-            execution_mode=strategy_execution_mode_for(normalized_url, context=strategy_context),
-            shared_context=shared_context,
-            rate_limiter=rate_limiter,
-            circuit_breaker=circuit_breaker,
-            recovery_manager=recovery_manager,
-            strategies=selected_strategies or None,
-            **extra_kwargs,
-        )
-    except Exception as err:
-        logger.exception(
-            "orchestrator_exception", 
-            url=safe_log_url, 
-            error=sanitize_log_data(str(err))
-        )
-        return {"status": "error", "detail": f"Erro interno no scraping: {err}"}
+    pipeline = SynergicPipeline(steps=steps, execution_mode=execution_mode)
+    pipeline_result = await pipeline.run(shared_context)
+    shared_context.update(pipeline_result.get("shared_context", {}))
+
+    def _message_fail(result: dict[str, Any]) -> str:
+        """ Define mensagem amigável quando o pipeline não produz dados válidos """
+        for entry in result.get("result", []):
+            if entry.get("detail"):
+                return str(entry["detail"])
+            if entry.get("validation_error"):
+                return f"Dados inválidos na etapa: {entry['validation_error']}"
+        return "Nenhuma etapa do pipeline obteve dados válidos"
     
-    status_result = result.get("status")
-    details = result.get("details")
-    logger.info(
-        "return_orchestrator", 
-        status=status_result
-    )
-    
-    if status_result == "success":
-        if not details:
-            logger.error(
-                "missing_details", 
-                url=safe_log_url
+    for entry in pipeline_result.get("results", []):
+        status_step = entry.get("status")
+        if status_step == "success" and entry.get("details"):
+            pipeline_details = entry["details"]
+            try:
+                validator.validate(pipeline_details)
+            except ValueError as err:
+                logger.info(
+                    "pipeline_invalid_data",
+                    erro=sanitize_log_data(str(err)),
+                )
+                continue
+            method = entry.get("extraction_method")
+            _persist_success(pipeline_details, extraction_method=method)
+            logger.info(
+                "pipeline_short_circuit",
+                url=safe_log_url,
+                step=method,
             )
-            _record_status("error")
-            return {"status": "error", "detail": "Dados do produto ausentes"}
+            _record_status("success")
+            return {"status": "success", "details": pipeline_details}
+        
+        if status_step == "NOT_MODIFIED":
+            cached_pipeline = cache_manager.get(marketplace=marketplace, url=normalized_url)
+            if cached_pipeline:
+                cache_manager.touch(marketplace=marketplace, url=normalized_url)
+                logger.info(
+                    "pipeline_not_modified",
+                    url=safe_log_url,
+                )
+                _record_status("not_modified")
+                return {"status": "NOT_MODIFIED", "details": cached_pipeline}
+    
+    pipeline_status = pipeline_result.get("status") or "error"
+    pipeline_details = pipeline_result.get("details")
+
+    if pipeline_status == "success" and isinstance(pipeline_details, dict):
         try:
             #Garante que os campos essenciais estejam corretos
-            validator.validate(details)
+            validator.validate(pipeline_details)
         except ValueError as err:
-            #Retorna erro informando o campo ausente ou inválido
-            logger.error(
-                "validation_failed",
-                erro=sanitize_log_data(str(err)), 
-                url=safe_log_url
+            #Retorna informação de dado inválido
+            logger.info(
+                "pipeline_invalid_data",
+                erro=sanitize_log_data(str(err)),
             )
-            _record_status("error")
-            return {"status": "error", "detail": str(err)}
- 
-        final_context = result.get("shared_context")
-        if isinstance(final_context, dict):
-            shared_context.update(final_context)
-
-        _persist_success(details, extraction_method=result.get("extraction_method"))
-        logger.info(
-            "scraping_success", 
-            url=safe_log_url
-        )
-        _record_status("success")
-        return {"status": "success", "details": details}
-    
-    if status_result == "NOT_MODIFIED":
-        #Quando o servidor indica que o recurso não mudou, não há necessidade de processar o resultado. Caso exista um valor cacheado ele é anexado ao retorno apenas para fins informativos.
-        logger.info(
-            "content_not_modified", 
-            url=safe_log_url
-        )
-        _record_status("not_modified")
-        cached = cache_manager.get(marketplace=marketplace, url=normalized_url)
-        if cached:
+        else:
+            _persist_success(
+                pipeline_details,
+                extraction_method=pipeline_result.get("extraction_method"),
+            )
+            logger.info(
+                "pipeline_success_fallback",
+                url=safe_log_url,
+            )
+            _record_status("success")
+            return {"status": "success", "details": pipeline_details}
+        
+    if pipeline_status == "NOT_MODIFIED":
+        cached_pipeline = cache_manager.get(marketplace=marketplace, url=normalized_url)
+        if cached_pipeline:
             cache_manager.touch(marketplace=marketplace, url=normalized_url)
             logger.info(
-                "content_not_modified", 
-                url=safe_log_url
+                "pipeline_not_modified",
+                url=safe_log_url,
             )
-            return {"status": "NOT_MODIFIED", "details": cached}
+            _record_status("not_modified")
+            return {"status": "NOT_MODIFIED", "details": cached_pipeline}
+        _record_status("not_modified")
         return {"status": "NOT_MODIFIED"}
     
     special_status = {b.value for b in BlockResult}
-    if status_result in special_status:
-        #Propaga o status para que camadas superiores decidam como tratar a situação.
+    if pipeline_status in special_status:
         SCRAPER_HTTP_BLOCKED_TOTAL.inc()
-        _record_status(status_result or "blocked")
+        _record_status(pipeline_status or "blocked")
         logger.warning(
-            "special_status", 
-            status=status_result, 
-            url=safe_log_url
+            "special_status",
+            status=pipeline_status,
+            url=safe_log_url,
         )
-        return result
-    
-    message = result.get("detail") or result.get("message") or "Falha ao coletar dados do scraping"
+        return {"status": pipeline_status}
+
+    message = _message_fail(pipeline_result)
     logger.error(
-        "scraping_failed", 
-        url=safe_log_url, 
-        details=sanitize_log_data(message)
+        "pipeline_failed",
+        url=safe_log_url,
+        details=sanitize_log_data(message),
+        status=pipeline_status,
     )
     _record_status("error")
     return {"status": "error", "detail": message}

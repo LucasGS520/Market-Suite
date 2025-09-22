@@ -1,83 +1,58 @@
-""" Testes para o módulo de política de domínio """
+""" Testes para o módulo de política de domínio focado no SynergicPipeline """
+
+import time
 
 import pytest
-import time
 
 import market_scraper.services.domain_policy as domain_policy
 from market_scraper.services.domain_policy import (
-    strategies_for, 
-    strategy_execution_mode_for, 
-    pipeline_execution_mode_for, 
+    pipeline_steps_for,
+    pipeline_execution_mode_for,
     rate_limit_policy_for,
     evaluate_feature_flag,
     is_feature_enabled,
     FeatureFlagConfig,
 )
-from market_scraper.strategies import (
-    MercadoLivreJsonStrategy,
-    MercadoLivreHtmlStaticStrategy,
-    AmazonJsonStrategy,
-    AmazonHtmlStaticStrategy,
-    MagaluJsonStrategy,
-    MagaluHtmlStaticStrategy,
-)
 
-def test_dominios_semelhantes_nao_sao_correlacionados():
-    """ Domínios parecidos não devem ser tratados como equivalentes """
-    estrategias = strategies_for("https://fakeamazon.com.br/produto")
-    assert estrategias == [] or all(
-        "playwright" not in e.__class__.__module__ for e in estrategias
-    )
+def _nomes_das_etapas(etapas: list) -> list[str]:
+    """ Extrai os nomes das classes para facilitar asserções legíveis """
+    return [etapa.__class__.__name__ for etapa in etapas]
 
-@pytest.mark.parametrize(
-    "url, esperadas",
-    [
-        (
-            "https://www.mercadolivre.com.br/produto",
-            [MercadoLivreJsonStrategy(), MercadoLivreHtmlStaticStrategy()],
-        ),
-        (
-            "https://www.amazon.com.br/produto",
-            [AmazonJsonStrategy(), AmazonHtmlStaticStrategy()],
-        ),
-        (
-            "https://www.magazineluiza.com.br/produto",
-            [MagaluJsonStrategy(), MagaluHtmlStaticStrategy()],
-        ),
-    ],
-)
-def test_ordem_estrategias_json_html_sem_playwright(url, esperadas):
-    """ Verifica a ordem JSON -> HTML e ausência de Playwright para cada domínio """
-    estrategias = strategies_for(url)
+def test_dominios_semelhantes_retorna_lista_vazia():
+    """ Domínios parecidos não devem herdar políticas não intencionais """
+    etapas = pipeline_steps_for("https://fakeamazon.com.br/produto")
+    assert etapas == []
 
-    #Assegura que estratégias Playwright não estejam presentes
-    assert all("playwright" not in e.__class__.__module__ for e in estrategias)
 
-    #Confere se a sequência corresponde às classes esperadas
-    assert len(estrategias) == len(esperadas)
-    for retornada, esperada in zip(estrategias, esperadas):
-        assert isinstance(retornada, type(esperada))
+def test_pipeline_steps_padrao_por_dominio():
+    """ Verifica se os domínios mapeados recebem etapas na ordem configurada """
+    etapas_amazon = _nomes_das_etapas(pipeline_steps_for("https://www.amazon.com.br/produto"))
+    assert etapas_amazon[:3] == [
+        "ExtructExtractioStep",
+        "ParselExtractionStep",
+        "BeautifulSoupExtractionStep",
+    ]
 
-def test_hot_reload(monkeypatch, tmp_path):
+    etapas_ml = _nomes_das_etapas(pipeline_steps_for("https://www.mercadolivre.com.br/produto"))
+    assert etapas_ml[0] == "ExtructExtractionStep"
+    assert etapas_ml[-1] == "MechanicalSoupLoginStep"
+
+def test_hot_reload_pipeline(monkeypatch, tmp_path):
     """ Garante que alterações no arquivo sejam aplicadas com hot-reload """
-    #Conteúdo inicial com estratégia JSON do Mercado Livre
     inicial = (
-        "strategies:\n"
-        "  JSON_ML: MercadoLivreJsonStrategy\n"
-        "  JSON_AMAZON: AmazonJsonStrategy\n"
-        "policies:\n"
+        "pipeline_steps:\n"
+        "  base: SelectorLibExtractionStep\n"
+        "pipeline_policies:\n"
         "  mercadolivre.com.br:\n"
-        "    - JSON_ML\n"
+        "    - base\n"
     )
 
-    #Conteúdo atualizado apontando para estratégia da Amazon
     atualizado = (
-        "strategies:\n"
-        "  JSON_ML: MercadoLivreJsonStrategy\n"
-        "  JSON_AMAZON: AmazonJsonStrategy\n"
-        "policies:\n"
+        "pipeline_steps:\n"
+        "  base: ParselExtractionStep\n"
+        "pipeline_policies:\n"
         "  mercadolivre.com.br:\n"
-        "    - JSON_AMAZON\n"
+        "    - base\n"
     )
 
     cfg = tmp_path / "domain_policy.yaml"
@@ -88,35 +63,41 @@ def test_hot_reload(monkeypatch, tmp_path):
     domain_policy.enable_hot_reload()
 
     url = "https://www.mercadolivre.com.br/produto"
-    estrategias = domain_policy.strategies_for(url)
-    assert isinstance(estrategias[0], MercadoLivreJsonStrategy)
+    etapas = pipeline_steps_for(url)
+    assert _nomes_das_etapas(etapas) == ["SelectorLibExtractionStep"]
 
-    #Atualiza o arquivo para forçar recarregamento
     time.sleep(1)
     cfg.write_text(atualizado, encoding="utf-8")
 
-    estrategias = domain_policy.strategies_for(url)
-    assert isinstance(estrategias[0], AmazonJsonStrategy)
+    etapas = pipeline_steps_for(url)
+    assert _nomes_das_etapas(etapas) == ["ParselExtractionStep"]
 
-def test_strategy_execution_mode():
-    """ Valida o modo configurado para estratégias por domínio/contexto """
-    assert strategy_execution_mode_for("https://www.amazon.com.br/item") == "parallel"
-    assert strategy_execution_mode_for("https://www.mercadolivre.com.br/item", context="competitor") == "sequential"
-    assert strategy_execution_mode_for("https://dominio-nao-mapeado.com", context="competitor") == "sequential"
+def test_pipeline_steps_ignora_classes_inexistentes(monkeypatch, tmp_path):
+    """ Classes inexistentes no YAML devem ser descartadas silenciosamente """
+    config = (
+        "pipeline_steps:\n"
+        "  inexistente: ClasseQueNaoExiste\n"
+        "pipeline_policies:\n"
+        "  example.com:\n"
+        "    - inexistente\n"
+    )
+
+    cfg = tmp_path / "domain_policy.yaml"
+    cfg.write_text(config, encoding="utf-8")
+
+    monkeypatch.setattr(domain_policy, "CONFIG_PATH", cfg)
+    domain_policy.load_config()
+
+    etapas = pipeline_steps_for("https://example.com/produto")
+    assert etapas == []
 
 def test_pipeline_execution_mode():
     """ Confere o modo do pipeline para domínio/contexto """
     assert pipeline_execution_mode_for("https://www.amazon.com.br/item") == "parallel"
-    assert pipeline_execution_mode_for("https://mercadolivre.com.br/item", context="competitor") == "conditional"
-    
-def test_contexto_competitor_prioriza_html():
-    """ Contextos específicos podem alterar a lista de estratégias """
-    url = "https://www.mercadolivre.com.br/produto"
-    padrao = strategies_for(url)
-    competitor = strategies_for(url, context="competitor")
-
-    assert any(isinstance(e, MercadoLivreJsonStrategy) for e in padrao)
-    assert all(not isinstance(e, MercadoLivreJsonStrategy) for e in competitor)
+    assert (
+        pipeline_execution_mode_for("https://mercadolivre.com.br/item", context="competitor")
+        == "conditional"
+    )
 
 def test_rate_limit_policy_for_domain():
     """ Deve retornar configuração específica de rate limit por domínio """
@@ -127,7 +108,7 @@ def test_rate_limit_policy_for_domain():
 
 def test_rate_limit_policy_default():
     """ Domínios não mapeados utilizam configuração padrão quando disponível """
-    default = rate_limit_policy_for("https://domnio-nao-mapeado.com/item")
+    default = rate_limit_policy_for("https://dominio-nao-mapeado.com/item")
     assert default is not None
     assert default["max_requests"] > 0
     
