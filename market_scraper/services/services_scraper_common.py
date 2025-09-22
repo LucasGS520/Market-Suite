@@ -254,7 +254,10 @@ async def scrape_product_common_async(
     #Determina o contexto a partir do tipo de produto, permitindo políticas granulares
     pipeline_context = "competitor" if product_type == "competitor" else "default"
 
-    steps = pipeline_steps_for(normalized_url, context=pipeline_context)
+    try:
+        steps = pipeline_steps_for(normalized_url, context=pipeline_context)
+    except TypeError:
+        steps = pipeline_steps_for(normalized_url)
     pipeline_decision = evaluate_feature_flag(
         "synergic_pipeline",
         normalized_url,
@@ -303,7 +306,7 @@ async def scrape_product_common_async(
 
     def _message_fail(result: dict[str, Any]) -> str:
         """ Define mensagem amigável quando o pipeline não produz dados válidos """
-        for entry in result.get("result", []):
+        for entry in result.get("results", []):
             if entry.get("detail"):
                 return str(entry["detail"])
             if entry.get("validation_error"):
