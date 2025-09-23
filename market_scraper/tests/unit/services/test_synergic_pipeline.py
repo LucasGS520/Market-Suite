@@ -47,7 +47,7 @@ class EtapaDefineContexto(PipelineStep):
     """ Etapa que insere valor no ``shared_context`` """
     async def run(self, shared_context):
         shared_context["token"] = "abc"
-        return {"status": "ok", "shared_context": {"token": "abc"}}
+        return {"status": "processing", "shared_context": {"token": "abc"}}
     
 class EtapaUsaContexto(PipelineStep):
     """ Etapa que consome valor previamente definido """
@@ -158,3 +158,43 @@ async def test_pipeline_sequencial_fallback_intermediario(monkeypatch):
     assert len(histograma.observacoes) == 2
     assert ("EtapaFalha", "error") in contador_estrategia.rotulos
     assert ("EtapaSucesso", "success") in contador_estrategia.rotulos
+
+@pytest.mark.asyncio
+async def test_pipeline_interrompe_apos_primeiro_sucesso(monkeypatch):
+    """ Deve interromper o pipeline ao encontrar a primeira etapa com sucesso """
+    execucao: list[str] = []
+
+    class EtapaFalha(PipelineStep):
+        async def run(self, shared_context):
+            execucao.append("falha")
+            return {"status": "error"}
+        
+    class EtapaSucesso(PipelineStep):
+        async def run(self, shared_context):
+            execucao.append("sucesso")
+            shared_context["valor"] = "ok"
+            return {"status": "success", "shared_context": {"valor": "ok"}}
+        
+    class EtapaExecutada(PipelineStep):
+        async def run(self, shared_context):
+            execucao.append("nao_executada")
+            return {"status": "success"}
+        
+    contador_fallback = ContadorSimples()
+    contador_estrategia = ContadorSimples()
+    histograma = HistogramSimples()
+
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPER_FALLBACK_TOTAL", contador_fallback)
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPER_STRATEGY_TOTAL", contador_estrategia)
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPING_LATENCY_SECONDS", histograma)
+
+    pipeline = SynergicPipeline([EtapaFalha(), EtapaSucesso(), EtapaExecutada()])
+    resultado = await pipeline.run(shared_context={})
+
+    assert execucao == ["falha", "sucesso"]
+    assert resultado["status"] == "success"
+    assert resultado["shared_context"]["valor"] == "ok"
+    assert len(resultado["results"]) == 2
+    assert contador_fallback.total == 1
+    assert contador_estrategia.total == 2
+    

@@ -37,6 +37,8 @@ Para páginas instáveis, usamos **SelectorLib** com templates YAML em `selector
 ### Pipeline Sinérgico
 O `SynergicPipeline` executa etapas configuráveis por domínio/contexto, compartilhando dados via `shared_context` e registrando métricas de latência, fallback e sucesso/falha. Todas as chamadas de scraping passam exclusivamente pelo pipeline, evitando orquestrações paralelas ou estratégias isoladas e garantindo que a política definida no YAML seja a única fonte de verdade para o fluxo de coleta.
 
+Essa pipeline realiza curto-ciruito assim que uma etapa retorna status de sucesso (`success`, `ok` ou `NOT_MODIFIED`), mantendo o `shared_context` já atualizado e evitando a execução de etapas subsequentes desnecessárias. 
+
 #### Uso do `shared_context`
 - Utilize chaves semânticas (`html_raw`, `json_ld`, `offers`, `cookies_rotacionados`) para registar dados acessíveis às etapas subsequentes.
 - Prefira atualizar valores existentes ao invés de sobrescrever todo o dicionário; o método `shared_context.update(...)` mantém consistência entre as etapas.

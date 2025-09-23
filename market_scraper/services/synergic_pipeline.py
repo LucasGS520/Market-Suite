@@ -141,7 +141,18 @@ class SynergicPipeline:
 
                 step_name, resp, status = await _run_step(step)
                 results.append(resp)
-                if status not in success_status and idx < len(self.steps) - 1:
+                
+                if status in success_status:
+                    #Interrompe o pipeline imediatamente após o primeiro sucesso
+                    if idx < len(self.steps) - 1:
+                        logger.info(
+                            "pipeline_short_circuit",
+                            step=step_name,
+                            status=status,
+                        )
+                    break
+
+                if idx < len(self.steps) - 1:
                     SCRAPER_FALLBACK_TOTAL.inc()
                     logger.info("fallback_triggered", step=step_name)
 
