@@ -91,6 +91,36 @@ def test_pipeline_steps_ignora_classes_inexistentes(monkeypatch, tmp_path):
     etapas = pipeline_steps_for("https://example.com/produto")
     assert etapas == []
 
+def test_pipeline_step_options_aplica_timeout(monkeypatch, tmp_path):
+    """ Opções declaradas na política devem ajustar argumentos das etapas """
+    config = (
+        "pipeline_steps:\n"
+        "  extruct:\n"
+        "    class: ExtructExtractionStep\n"
+        "    default_options:\n"
+        "      timeout: 5\n"
+        "pipeline_policies:\n"
+        "  example.com:\n"
+        "    - extruct\n"
+        "pipeline_step_options:\n"
+        "  example.com:\n"
+        "    default:\n"
+        "      extruct:\n"
+        "        timeout: 9\n"
+    )
+
+    cfg = tmp_path / "domain_policy.yaml"
+    cfg.write_text(config, encoding="utf-8")
+
+    monkeypatch.setattr(domain_policy, "CONFIG_PATH", cfg)
+    domain_policy.load_config()
+
+    etapas = pipeline_steps_for("https://example.com/produto")
+    assert len(etapas) == 1
+    etapa = etapas[0]
+    assert etapa.__class__.__name__ == "ExtructExtractionStep"
+    assert getattr(etapa, "timeout") == 9.0
+
 def test_pipeline_execution_mode():
     """ Confere o modo do pipeline para domínio/contexto """
     assert pipeline_execution_mode_for("https://www.amazon.com.br/item") == "parallel"

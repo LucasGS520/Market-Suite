@@ -44,6 +44,7 @@ Essa pipeline realiza curto-ciruito assim que uma etapa retorna status de sucess
 - Prefira atualizar valores existentes ao invés de sobrescrever todo o dicionário; o método `shared_context.update(...)` mantém consistência entre as etapas.
 - Remova dados sensíveis antes de finalizar a etapa, garantindo compliance com LGPD/GDPR.
 - Documente no docstring da etapa quais chaves são lidas ou atualizadas, facilitando a criação de novas etapas compatíveis
+- Ajustes de timeout podem ser aplicados em tempo de execução usando `shared_context["timeouts"]` ou chaves específicas como `extruct_timeout`, sobreecrevendo a configuração do YAML para aquela execução.
 
 ### Etapas configuráveis
 As etapas disponíveis são declaradas em `services/pipeline_steps.py` e registradas no YAML (`pipeline_steps`). Cada etapa pode:
@@ -133,6 +134,7 @@ O arquivo ``services/domain_policy.yaml`` centraliza todas as decisões de orque
 Ele define:
 - **`pipeline_steps`** - cataloga as etapas do ``SynergicPipeline`` capazes de compartilhar contexto.
 - **`pipeline_policies`** - descreve, por domínio e contexto, a ordem das etapas executadas pelo pipeline.
+- **`pipeline_steps_options`** - permite ajustar parâmetros de cada etapa (como timeouts) por domínio/contexto.
 - **`pipeline_execution`** - especifica o modo de execução (`sequential`, `parallel`, `conditional`).
 - **`rate_limits`** - define limites de requisições por domínio.
 - **`feature_flags`** - controla o rollout de funcionalidades sensíveis.
@@ -144,6 +146,12 @@ pipeline_steps:
   parsel: ParselExtractionStep
   requestshtml: RequestsHTMLRenderStep
   selectorlib: SelectorLibExtractionStep
+
+pipeline_step_options:
+  default:
+    default:
+      requestshtml:
+        timeout: 8
 
 pipeline_policies:
   mercadolivre.com.br:

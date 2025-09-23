@@ -26,11 +26,18 @@ from market_scraper.utils.http_utils import extract_hostname
 CONFIG_PATH = Path(os.getenv("DOMAIN_POLICY_FILE", Path(__file__).with_name("domain_policy.yaml")))
 
 #Estruturas carregadas a partir do arquivo de configuração
-PIPELINE_STEP_REGISTRY: Dict[str, Type[PipelineStep]] = {}
+@dataclass(frozen=True)
+class StepDefinition:
+    """ Representa a classe da etapa e argumentos padrão de construção """
+    cls: Type[PipelineStep]
+    default_options: Dict[str, Any]
+
+PIPELINE_STEP_REGISTRY: Dict[str, StepDefinition] = {}
 PIPELINE_POLICIES: Dict[str, Dict[str, List[str]]] = {}
 PIPELINE_EXECUTION: Dict[str, Dict[str, str] | str] = {}
 RATE_LIMIT_POLICIES: Dict[str, Dict[str, int]] = {}
 FEATURE_FLAGS: Dict[str, Dict[str, Dict[str, "FeatureFlagConfig"]]] = {}
+PIPELINE_STEP_OPTIONS: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
 
 #Controle interno de hot-reload
 _HOT_RELOAD = bool(os.getenv("DOMAIN_POLICY_HOT_RELOAD"))
@@ -69,6 +76,55 @@ def _normalize_policy_structure(raw: Dict[str, Any]) -> Dict[str, Dict[str, List
         if contexts:
             normalized[domain] = contexts
     return normalized
+
+def _normalize_step_options_structure(raw: Dict[str, Any]) -> Dict[str, Dict[str, Dict[str, Dict[str, Any]]]]:
+    """ Normaliza configuração de argumentos padrão por contexto/etapa """
+    normalized: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
+    for domain, entry in (raw or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        contexts: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for context_name, options in entry.items():
+            if not isinstance(options, dict):
+                continue
+            step_options: Dict[str, Dict[str, Any]] = {}
+            for step_name, values in options.items():
+                if isinstance(values, dict):
+                    step_options[step_name] = dict(values)
+            if step_options:
+                contexts[context_name] = step_options
+        if contexts:
+            normalized[domain] = contexts
+    return normalized
+
+def _select_options_for_context(entries: Dict[str, Dict[str, Any]] | None, context: str) -> Dict[str, Dict[str, Any]]:
+    """ Combina opções padrão e específicas do contexto informado """
+    if not entries:
+        return {}
+    
+    combined: Dict[str, Dict[str, Any]] = {}
+    default_opts = entries.get("default")
+    if isinstance(default_opts, dict):
+        combined = {key: dict(value) for key, value in default_opts.items() if isinstance(value, dict)}
+
+    if context != "default":
+        specific = entries.get(context)
+        if isinstance(specific, dict):
+            for step_name, options in specific.items():
+                if not isinstance(options, dict):
+                    continue
+                merged = {**combined.get(step_name, {}), **options}
+                combined[step_name] = merged
+
+    return combined
+
+def _merge_step_options(base: Dict[str, Dict[str, Any]], new_options: Dict[str, Dict[str, Any]]) -> None:
+    """ Mescla opções de etapa preservando prioridades do domínio/contexto """
+    for step_name, options in (new_options or {}).items():
+        if not isinstance(options, dict):
+            continue
+        merged = {**base.get(step_name, {}), **options}
+        base[step_name] = merged
 
 def _normalize_flag_value(value: Any) -> FeatureFlagConfig | None:
     """ Converte valores diversos em ``FeatureFlagConfig`` """
@@ -113,6 +169,7 @@ def load_config() -> None:
     """ Carrega as etapas do pipeline e políticas do arquivo configurado """
     global PIPELINE_STEP_REGISTRY, PIPELINE_POLICIES
     global PIPELINE_EXECUTION, RATE_LIMIT_POLICIES, FEATURE_FLAGS, _CONFIG_MTIME
+    global PIPELINE_STEP_OPTIONS
 
     if not CONFIG_PATH.exists():
         PIPELINE_STEP_REGISTRY = {}
@@ -120,22 +177,35 @@ def load_config() -> None:
         PIPELINE_EXECUTION = {}
         RATE_LIMIT_POLICIES = {}
         FEATURE_FLAGS = {}
+        PIPELINE_STEP_OPTIONS = {}
         _CONFIG_MTIME = 0.0
         return
 
     with CONFIG_PATH.open("r", encoding="utf-8") as handler:
         data = yaml.safe_load(handler) or {}
     
-    #Mapeia etapas do pipeline sinérgico
-    step_registry: Dict[str, Type[PipelineStep]] = {}
-    for name, class_name in (data.get("pipeline_steps") or {}).items():
+    #Mapeia etapas do pipeline sinérgico com opções padrão
+    step_registry: Dict[str, StepDefinition] = {}
+    for name, entry in (data.get("pipeline_steps") or {}).items():
+        class_name: str | None = None
+        default_options: Dict[str, Any] = {}
+        if isinstance(entry, str):
+            class_name = entry
+        elif isinstance(entry, dict):
+            class_name = entry.get("class")
+            raw_options = entry.get("default_options") or entry.get("options") or {}
+            if isinstance(raw_options, dict):
+                default_options = {key: value for key, value in raw_options.items()}
+        if not class_name:
+            continue
         step_cls = getattr(pipeline_steps_module, class_name, None)
         if step_cls:
-            step_registry[name] = step_cls
+            step_registry[name] = StepDefinition(cls=step_cls, default_options=default_options)
 
     PIPELINE_STEP_REGISTRY = step_registry
     PIPELINE_POLICIES = _normalize_policy_structure(data.get("pipeline_policies") or {})
     PIPELINE_EXECUTION = data.get("pipeline_execution") or {}
+    PIPELINE_STEP_OPTIONS = _normalize_step_options_structure(data.get("pipeline_step_options") or {})
 
     raw_limits = data.get("rate_limits") or {}
     limits: Dict[str, Dict[str, int]] = {}
@@ -321,11 +391,35 @@ def pipeline_steps_for(url: str, *, context: str = "default") -> List[PipelineSt
     if not selected_steps and "default" in PIPELINE_POLICIES:
         selected_steps = _select_names_for_context(PIPELINE_POLICIES["default"], context)
 
-    return [
-        PIPELINE_STEP_REGISTRY[name]()
-        for name in selected_steps
-        if name in PIPELINE_STEP_REGISTRY
-    ]
+    step_options: Dict[str, Dict[str, Any]] = {}
+
+    default_step_options = PIPELINE_STEP_OPTIONS.get("default")
+    _merge_step_options(step_options, _select_options_for_context(default_step_options, context))
+
+    for domain, contexts in PIPELINE_STEP_OPTIONS.items():
+        if domain == "default":
+            continue
+        if _corresponds_domain(host, domain):
+            _merge_step_options(step_options, _select_options_for_context(contexts, context))
+            break
+
+    isinstance: List[PipelineStep] = []
+    for name in selected_steps:
+        definition = PIPELINE_STEP_REGISTRY.get(name)
+        if not definition:
+            continue
+        kwargs = dict(definition.default_options)
+        options = step_options.get(name)
+        if options:
+            kwargs.update(options)
+        try:
+            isinstance.append(definition.cls(**kwargs))
+        except TypeError:
+            try:
+                isinstance.append(definition.cls())
+            except TypeError:
+                continue
+    return isinstance
 
 def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Literal["sequential", "parallel", "conditional"]:
     """ Retorna o modo de execução do pipeline para o domínio/contexto informado """

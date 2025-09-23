@@ -9,6 +9,23 @@ pipeline_steps:
   selectorlib: SelectorLibExtractionStep
   mechanical_soup_login: MechanicalSoupLoginStep
 
+#Configura argumentos padrão das etapas (ex.: timeouts) por domínio e contexto
+pipeline_step_options:
+  default:
+    default:
+      requestshtml:
+        timeout: 8
+      mechanical_soup_login:
+        timeout: 10
+      extruct:
+        timeout: 8
+  example.com:
+    default:
+      requestshtml:
+        timeout: 12
+      mechanical_soup_login:
+        timeout: 15
+
 #Define, por domínio, a sequência de etapas a ser utilizada
 pipeline_policies:
   mercadolivre.com.br:

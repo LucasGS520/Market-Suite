@@ -13,7 +13,7 @@ from market_scraper.services import (
 async def test_login_step_insere_cookies(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Deve armazenar cookies obtidos via MechanicalSoup """
     class NavegadorFalso:
-        def open(self, url: str) -> None:
+        def open(self, url: str, **kwargs) -> None:
             pass
 
         def select_form(self, selector: str) -> None:
@@ -22,7 +22,7 @@ async def test_login_step_insere_cookies(monkeypatch: pytest.MonkeyPatch) -> Non
         def __setitem__(self, key: str, value: str) -> None:
             pass
 
-        def submit_selected(self) -> None:
+        def submit_selected(self, **kwargs) -> None:
             pass
 
         def get_cookiejar(self):
@@ -55,10 +55,16 @@ async def test_requests_html_render_step(monkeypatch: pytest.MonkeyPatch) -> Non
         def __init__(self) -> None:
             self.html = HTMLFalso()
 
+        def raise_for_status(self) -> None:
+            return None
+
     class SessaoFalsa:
-        def get(self, url: str, cookies=None):
+        def get(self, url: str, cookies=None, **kwargs):
             capturado["cookies"] = cookies
             return RespostaFalsa()
+        
+        def close(self) -> None:
+            pass
         
     monkeypatch.setattr("market_scraper.services.pipeline_steps.HTMLSession", SessaoFalsa)
     passo = RequestsHTMLRenderStep()
