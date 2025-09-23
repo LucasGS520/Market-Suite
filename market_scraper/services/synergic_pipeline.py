@@ -80,6 +80,16 @@ class SynergicPipeline:
             start = perf_counter()
             try:
                 result = await step.run(shared_context)
+            except asyncio.CancelledError:
+                duration = perf_counter() - start
+                SCRAPER_STRATEGY_TOTAL.labels(step_name, "cancelled").inc()
+                SCRAPING_LATENCY_SECONDS.labels(step_name).observe(duration)
+                logger.info(
+                    "step_cancelled",
+                    step=step_name,
+                    execution_time=duration,
+                )
+                raise
             except Exception as err:
                 logger.exception("pipeline_step_error", step=step_name, error=sanitize_log_data(str(err)))
                 result = {"status": "error"}
@@ -124,13 +134,54 @@ class SynergicPipeline:
         success_status = {"success", "ok", "NOT_MODIFIED"}
 
         if mode == "parallel":
-            execs = [_run_step(step) for step in self.steps]
-            responses = await asyncio.gather(*execs)
-            for step_name, resp, status in responses:
-                results.append(resp)
-                if status not in success_status:
-                    SCRAPER_FALLBACK_TOTAL.inc()
-                    logger.info("fallback_triggered", step=step_name)
+            task_to_index: dict[asyncio.Task[tuple[str, dict[str, Any], str]], int] = {}
+            results_by_index: dict[int, dict[str, Any]] = {}
+            cancelled_steps: list[str] = []
+            first_success_detected = False
+
+            for index, step in enumerate(self.steps):
+                task = asyncio.create_task(_run_step(step))
+                task_to_index[task] = index
+
+            pending_tasks: set[asyncio.Task[tuple[str, dict[str, Any], str]]] = set(task_to_index.keys())
+
+            while pending_tasks:
+                done, pending_tasks = await asyncio.wait(pending_tasks, return_when=asyncio.FIRST_COMPLETED)
+
+                for finished in done:
+                    index = task_to_index.pop(finished, None)
+                    if index is None:
+                        continue
+
+                    try:
+                        step_name, resp, status = finished.result()
+                        results_by_index[index] = resp
+
+                        if status in success_status:
+                            if not first_success_detected:
+                                first_success_detected = True
+                                logger.info(
+                                    "parallel_pipeline_first_success",
+                                    step=step_name,
+                                    status=status,
+                                )
+                                for pending in pending_tasks:
+                                    pending.cancel()
+                        else:
+                            SCRAPER_FALLBACK_TOTAL.inc()
+                            logger.info("fallback_triggered", step=step_name)
+                    except asyncio.CancelledError:
+                        cancelled_steps.append(self.steps[index].__class__.__name__)
+                        results_by_index[index] = {"status": "cancelled"}
+
+            if cancelled_steps:
+                logger.info("parallel_cancelled_steps", steps=cancelled_steps)
+
+            results = [
+                results_by_index[idx]
+                for idx in range(len(self.steps))
+                if idx in results_by_index
+            ]
 
         else:
             for idx, step in enumerate(self.steps):

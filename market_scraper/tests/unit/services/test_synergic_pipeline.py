@@ -1,4 +1,5 @@
 """ Teste para o ``SynergicPipeline`` """
+import asyncio
 
 import pytest
 
@@ -106,19 +107,23 @@ async def test_pipeline_paralelo_registra_fallback(monkeypatch):
     """ Em modo paralelo deve registrar fallback para etapas com erro """
     class EtapaSucesso(PipelineStep):
         async def run(self, shared_context):
+            await asyncio.sleep(0.01)
             return {"status": "success", "shared_context": {"ok": True}}
         
     class EtapaErro(PipelineStep):
         async def run(self, shared_context):
+            await asyncio.sleep(0.001)
             raise RuntimeError("falha intencional")
         
     contador_fallback = ContadorSimples()
     contador_estrategia = ContadorSimples()
     histograma = HistogramSimples()
+    logger_falso = LoggerSimples()
 
     monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPER_FALLBACK_TOTAL", contador_fallback)
     monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPER_STRATEGY_TOTAL", contador_estrategia)
     monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPING_LATENCY_SECONDS", histograma)
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.logger", logger_falso)
 
     pipeline = SynergicPipeline([EtapaSucesso(), EtapaErro()], execution_mode="parallel")
     resultado = await pipeline.run(shared_context={})
@@ -129,6 +134,7 @@ async def test_pipeline_paralelo_registra_fallback(monkeypatch):
     assert len(histograma.observacoes) == 2
     assert ("EtapaSucesso", "success") in contador_estrategia.rotulos
     assert ("EtapaErro", "error") in contador_estrategia.rotulos
+    assert ("parallel_first_success", {"step": "EtapaSucesso", "status": "success"}) in logger_falso.eventos
 
 @pytest.mark.asyncio
 async def test_pipeline_sequencial_fallback_intermediario(monkeypatch):
@@ -197,4 +203,41 @@ async def test_pipeline_interrompe_apos_primeiro_sucesso(monkeypatch):
     assert len(resultado["results"]) == 2
     assert contador_fallback.total == 1
     assert contador_estrategia.total == 2
+
+@pytest.mark.asyncio
+async def test_pipeline_paralelo_cancela_tarefas_pendentes(monkeypatch):
+    """ Deve cancelar etapas restantes após o primeiro sucesso paralelo """
+    class EtapaSucessoRapida(PipelineStep):
+        async def run(self, shared_context):
+            shared_context["final"] = True
+            return {"status": "success", "shared_context": {"final": True}}
+        
+    class EtapaLenta(PipelineStep):
+        async def run(self, shared_context):
+            await asyncio.sleep(0.05)
+            return {"status": "error"}
+        
+    contador_fallback = ContadorSimples()
+    contador_estrategia = ContadorSimples()
+    histograma = HistogramSimples()
+    logger_falso = LoggerSimples()
+
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPER_FALLBACK_TOTAL", contador_fallback)
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPER_STRATEGY_TOTAL", contador_estrategia)
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.SCRAPING_LATENCY_SECONDS", histograma)
+    monkeypatch.setattr("market_scraper.services.synergic_pipeline.logger", logger_falso)
+
+    pipeline = SynergicPipeline([EtapaSucessoRapida(), EtapaLenta()], execution_mode="parallel")
+    resultado = await pipeline.run(shared_context={})
+
+    assert resultado["results"][0]["status"] == "success"
+    assert resultado["results"][1]["status"] == "cancelled"
+    assert contador_fallback.total == 0
+    assert contador_estrategia.total == 2
+    assert ("EtapaSucessoRapida", "success") in contador_estrategia.rotulos
+    assert ("EtapaLenta", "cancelled") in contador_estrategia.rotulos
+    assert len(histograma.observacoes) == 2
+    assert any(evento == "step_cancelled" and dados["step"] == "EtapaLenta" for evento, dados in logger_falso.eventos)
+    assert ("parallel_cancelled_steps", {"steps": ["EtapaLenta"]}) in logger_falso.eventos
+    assert ("parallel_first_success", {"step": "EtapaSucessoRapida", "status": "success"}) in logger_falso.eventos
     
