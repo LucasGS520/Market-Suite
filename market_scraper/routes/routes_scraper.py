@@ -14,6 +14,7 @@ import structlog
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.schemas.schemas_scraper import ScraperRequest, ScraperResponse
+from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.services.services_scraper_common import scrape_product_common_async
 from market_scraper.utils.price import parse_price_str
@@ -67,7 +68,7 @@ async def parse_endpoint(payload: ScraperRequest = Body(..., example={"url": "ht
     if not details:
         #Registra o resultado retornado pelo serviço quando o scraping falha
         message = result.get("detail") or result.get("message") or "Não foi possível extrair dados do produto"
-        logger.error("scrape_failed", status=result.get("status"), detail=message, url=str(payload.url))
+        logger.error("scrape_failed", status=result.get("status"), detail=sanitize_log_data(message), url=sanitize_log_data(str(payload.url)))
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=message,

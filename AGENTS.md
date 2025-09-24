@@ -49,13 +49,82 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - Função: agenda execuções periódicas (rechecagem de produtos, coleta/limpeza de métricas e caches).
 - Tarefas agendadas comuns: `collect_celery_metrics`, `cleanup_cache`, `recheck_monitored_products`, `recheck_competitor_products`.
 - Comunicação: publica jobs nas filas do Celery (broker Redis).
-- Para agentes: ajuste cron/intervalos nas configurações do Celery; evite criar rotinas paralelas conflitantes.
+- Novo Módulo `SynergicPipeline` (`market_scraper/services/synergic_pipeline.py`) permite montar pipelines de etapas compartilhando contexto, configuráveis por domínio em `domain_policy.yaml` (chaves `pipeline_steps` e `pipeline_policies`).
+-  Para agentes: ajuste cron/intervalos nas configurações do Celery; evite criar rotinas paralelas conflitantes.
 
 ### Serviço de Scraping — `market_scraper`
-- Função: microserviço FastAPI que recebe uma URL e retorna JSON leve (ex.: `name`, `current_price`). Não persiste dados.
-- Comunicação: recebe HTTP da API/worker; respeita limites (rate limiting, circuit breaker) e retorna resultados para processamento pela API.
-- Referência: `market_scraper/README.md` (estratégias JSON e HTML estático, cache e validação de dados).
-- Para agentes: usar para coleta direta; respeitar limites de requisições e tratar bloqueios.
+- **Função:** microserviço FastAPI que recebe uma URL e retorna JSON leve (ex: `name`, `current_price`, `marketplace`).Nenhum dado é persistido localmente.
+- **Comunicação:** recebe HTTP da API/worker; aplica rate limiting, consulta cache inteligente e executa o ``SynergicPipeline`` antes de devolver a resposta.
+- **Referências essenciais:** `market_scraper/services/domain_policy.py`, `market_scraper/services/synergic_pipeline.py`, `shared/metrics/metrics_scraper.py` e `market_scraper/README.md`.
+
+#### Configurações centralizada (`domain_policy.yaml`)
+- O arquivo padrão está em `market_scraper/services/domain_policy.yaml`. Pode ser substituído via `DOMAIN_POLICY_FILE`.
+- Hot reload opcional (`DOMAIN_POLICY_HOT_RELOAD=1`) facilita ajustes em ambientes de desenvolvimento.
+
+> **Boa prática**: sempre garantir que cada item cadastrado em `strategies` ou `pipeline_steps` possua uma classe válida no código. Estratégias/etapas deconhecidas são silenciosamente ignoradas pelo loader.
+
+#### Fluxo operacional e fallback
+```mermaid
+flowchart LR
+    A[POST /scrape/parse] --> B{Cache válido?}
+    B -- Sim --> C[Retorno 304 / cache hit]
+    B -- Não --> D[Carregar domain_policy.yaml]
+    D --> E[Montar lista de estratégias e pipeline steps]
+    E --> F[Executar SynergicPipeline (sequencial/parallel/conditional)]
+    F --> G{Status OK?}
+    G -- Sim --> H[Validar com DataQualityValidator]
+    H --> I[Persistir em cache inteligente]
+    I --> J[Responder]
+    G -- Não --> K[SCRAPER_FALLBACK_TOTAL++ & logs estruturados]
+    K --> F
+```
+
+- **Prioridade:** o YAML ordena estratégias e etapas por domínio/contexto. O fallback percorre a lista até obter `success` ou `NOT_MODIFIED`.
+- **Paralelismo:** usar `execution_mode="parallel"` apenas quando a política justificar. Monitorar o histograma de latência (`SCRAPING_LATENCY_SECONDS`).
+- **Timeouts:** cada etapa deve implementar regras próprias de timeout, pois o pipeline não cancela automaticamente tarefas travadas.
+
+#### Contexto compartilhado e instrumentação
+```mermaid
+flowchart TD
+    subgraph Contexto
+        C1[shared_context]
+    end
+    Step1[Etapa leve] -->|atualiza| C1
+    Step2[Etapa pesada] -->|consulta| C1
+    C1 --> Cache[IntelligentCacheManager]
+    Step1 & Step2 --> Metrics[[Prometheus (metrics_scraper)]]
+```
+
+- **shared_context:** dicionário mutável compartilhado entre etapas. Use chaves nominais (`html_raw`, `json_ld`, `cookies_rotated`).
+- **cache:** o `IntelligentCacheManager` opera com TTL, ETag e assinatura (`SIG_CACHE_TTL`). Verificar se a chave segue o padrão `<domínio>|<url-normalizada>`.
+- **Métricas principais:**
+  - `SCRAPER_STRATEGY_TOTAL` (labels: classe, status).
+  - `SCRAPER_FALLBACK_TOTAL` (contador global de fallback).
+  - `SCRAPING_LATENCY_SECONDS` (histograma por etapa).
+  - Complementares: `SCRAPER_HTTP_BLOCKED_TOTAL`, `SCRAPER_CACHE_HIT_TOTAL` quando importados por rotas específicas.
+
+#### Checklist para novas estratégias ou etapas
+1. Criar a classe herdando de `ScrapingStrategy` ou `PipelineStep`.
+2. Registrar no YAML (`strategies` ou `pipeline_steps`) e definir a ordem desejada.
+3. Incluir testes unitários/integrados:
+  - `pytest market_scraper/tests/unit/services/test_domain_policy.py -k <nome>`.
+  - `pytest market_scraper/tests/integration/routes/test_strategy_selection.py` para validar seleção e fallback.
+4. Documentar requisitos de ambiente (cookies, headers, credenciais) no README/AGENTS.
+5. Publicar métricas adicionais se necessário (ex.: contador customizado dentro da etapa).
+
+#### Segurança, compliance e limites
+- Respeitar `robots.txt` (utilizar `market_scraper/utils/robots.txt`) antes de ativar novas políticas.
+- Preservar a minimização de dados (LGPD/GDPR): coletar somente campos necessários ao alerta e mascarar quaisquer dados sensíveis nos logs (`shared/utils/logging.py`).
+- Ajustar `ThottleManager`, `RateLimiter` e `HumanizedDelayManager` ao configurar novas etapas pesadas para evitar violações de termos.
+- Usar `CircuitBreaker` e `BlockRecoveryManager` como gatilhos obrigatórios em fluxos com autenticação ou páginação agressiva.
+- Revisar limites externos (headers `Retry-After`, quotas por API pública) antes de aumentar o paralelismo.
+- Evitar armazenar tokens/sessões em arquivos temporários; usar apenas o cache in-memory controlado.
+
+#### Observabilidade de regressões
+- Ativar dashboards específicos no Grafana acompanhando `SCRAPER_FALLBACK_TOTAL` vs. taxa de sucesso.
+- Criar alertas no Prometheus quando `SCRAPING_LATENCY_SECONDS{le="5"}` sair da meta definida no README.
+- Para diagnósticos rápidos, habilitar logs nível `debug` apenas em ambientes controlados {`structlog` com `contextvars`}.
+- Sempre registrar no PR alterações no YAML e nas métricas acompanhadas.
 
 ### Utilitários Compartilhados — `shared`
 - Principais componentes: `IntelligentUserAgentManager`, `CookieManager`, `ThrottleManager`, `RateLimiter`, `CircuitBreaker`, `BlockRecoveryManager`, `HumanizeDelayManager`, `AdaptiveRecheckManager`, `IntelligentCacheManager`, `DataQualityValidator`.

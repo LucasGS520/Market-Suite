@@ -33,6 +33,15 @@ def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
     called = []
     monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: called.append(s))
 
+    class DummyRobots:
+        async def is_allowed(self, path, user_agent):
+            return True
+        
+        async def get_crawl_delay(self, user_agent):
+            return 0
+        
+    monkeypatch.setattr("market_scraper.utils.block_recovery.RobotsTxtManager", lambda base_url: DummyRobots())
+
     class DummyClient:
         def __init__(self, *a, **k):
             pass
@@ -77,6 +86,15 @@ def test_handle_block_uses_cache_when_request_fails(monkeypatch):
     mgr = BlockRecoveryManager(ua_manager=ua, cookie_manager=cookie, delay_manager=delay)
 
     monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
+
+    class DummyRobots:
+        async def is_allowed(self, path, user_agent):
+            return True
+        
+        async def get_crawl_delay(self, user_agent):
+            return 0
+        
+    monkeypatch.setattr("market_scraper.utils.block_recovery.RobotsTxtManager", lambda base_url: DummyRobots())
 
     class FailClient:
         def __init__(self, *a, **k):

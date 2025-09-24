@@ -14,6 +14,7 @@ import asyncio
 
 from market_scraper.core.config_scraper import settings
 from shared.utils.redis_client import get_redis_client
+from shared.utils.logging_utils import sanitize_log_data
 
 
 ROBOTS_CACHE_KEY = settings.ROBOTS_CACHE_KEY
@@ -54,7 +55,7 @@ class RobotsTxtParser:
             response = await asyncio.to_thread(requests.get, url, timeout=5, headers=headers)
             content = response.text if response.status_code == 200 else ""
         except requests.exceptions.RequestException as e:
-            logger.warning("robots_fetch_failed", url=url, error=str(e))
+            logger.warning("robots_fetch_failed", url=sanitize_log_data(url), error=sanitize_log_data(str(e)))
             content = ""
 
         #Salva no Redis para próximas leituras, caso disponível
@@ -172,3 +173,8 @@ class RobotsTxtParser:
                 self.redis.set, cache_rule_key, "1" if allowed else "0", ex=ROBOTS_CACHE_TTL
             )
         return allowed
+
+class RobotsTxtManager(RobotsTxtParser):
+    """ Mantém compatibilidade com o nome legada ``RobotsTxtManager`` """
+
+__all__ = ["RobotsTxtManager", "RobotsTxtParser"]

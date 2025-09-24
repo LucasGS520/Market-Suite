@@ -76,18 +76,28 @@ O `market_scraper` é o serviço especializado em coletar dados de anúncios. El
 
 Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML estático consulte [`market_scraper/README.md`](market_scraper/README.md).
 
+### Fluxo unificado de scraping
+- Todas as requisições passam exclusivamente pelo `SynergicPipeline`, que coordena as etapas declaradas no arquivo `domain_policy.yaml`.
+- A política de domínio define **quais etapas** serão executadas, **em qual ordem** e **qual modo de execução** (`sequential`, `parallel` ou `conditional`).
+- Cada etapa atualiza o `shared_context`, um dicionário mutável utilizado para compartilhar HTML bruto, dados estruturados e metadados entre as etapas subsequentes.
+- Métricas e logs estruturados são emitidos por etapa, permitindo rastrear latência, sucessos, fallbacks e bloqueios no Prometheus e no Loki.
+
 ### Componentes principais
 - **main.py** - instancia a aplicação FastAPI e registra rotas de saúde e de scraping.
 - **routes/** - expõe as rotas ``/health/ping`` e ``/scrape/parse`` (também acessível por ``/scraper/parse``).
 - utiliza o contrato ``ScraperRequest`` e ``ScraperResponse`` definido em ``shared/schemas/schemas_scraper.py`` para padronizar requisições e respostas.
-- **services/** - executa o fluxo de scraping: controla rate limiting e circuit breaker, anteriormente recuperava o HTML com Playwright (desativado temporariamente), aplica cache e interpreta o conteúdo.
+- **services/** - executa o fluxo de scraping controlando rate limiting, circuit breaker, cache inteligente e a orquestração do `SynergiPipeline`.
+- **services/domain_policy.py** - carrega o `domain_policy.yaml`, aplica hot reload opcional e constrói as etapas do pipeline para cada domínio/contexto suportado.
+- **services/pipeline_steps.py** - catálogo de etapas reutilizáveis; cada classe herda de `PipelineStep` e implementa o método `run` recebendo e atualizando o `shared_context`.
 - **utils/** - reúne auxiliares como rotação de *user agent*, gerenciamento de cookies, delays humanizados, leitura de ``robots.txt`` e funções de preço.
-- **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço.
+- **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço, incluindo cenários que validam a seleção de etapas via YAML.
+
+Os parsers de HTML e dados estruturados residem em `market_scraper/parsers`, cada módulo responsável apenas por transformar o HTML bruto em um dicionário padronizado. Os `SynergicPipeline` concentra toda a orquestração e fallback, evitando estratégias isoladas.
 
 ### Papel na arquitetura
 - Recebe requisições HTTP do ``market_alert`` ou de outros consumidores.
-- Realiza scraping apenas durante a chamada, sem persistir dados.
-- Em caso de bloqueios ou CAPTCHA, tenta recuperar o acesso e retorna erros claros quando necessário.
+- Executa scraping exclusivamente por meio do pipeline configurado, garantindo consistência e flexibilidade via YAML.
+- Em caso de bloqueios ou CAPTCHA, tenta recuperar o acesso e retorna error claros quando necessário, registrando métricas por etapa.
 
 ## Módulo compartilhado ``shared``
 O diretório ``shared`` concentra componentes reutilizáveis que dão suporte aos demais serviços.
@@ -240,17 +250,20 @@ PLAYWRIGHT_TIMEOUT=30000
 ```
 
 ## Pipeline de Scraping
-1. A API recebe uma URL de produto para monitoramento ou comparação.
-2. Uma tarefa Celery é disparada para o `market_scraper` coletar os dados.
-3. O `market_scraper` utiliza Playwright e diversos gerenciadores (User-Agent, cookies, delays, etc) para simular a navegação humana e extrair as informações do anúncio (**Temporariamente Desativado**)
-4. Os dados coletados são retornados para a API, que atualiza o banco e decide se um alerta deve ser enviado.
+O fluxo completo integra API, Celery e ``SynergicPipeline``:
 
-### Proteções ativas por etapa
-1. **RateLimiter** - aplicado logo na entrada das requisições para garantir que a cota de acessos por janela não seja excedida. Exemplo de erro: ``429 Rate limit excedido``.
-2. **CircuitBreaker** - após sucessivos retornos 403/429, o circuito é aberto e novas tentativas são bloqueadas temporariamente. Exemplo de erro: ``403 Circuit breaker aberto``.
-3. **HumanizedDelayManager** e **ThrottleManager** - inserem atrasos aleatórios e controlam a cadência das chamadas para simular comportamento humano. Exemplo de erro: ``429 Too Many Requests`` quando o ritmo é ultrapassado.
-4. **BlockRecoveryManager** - identifica CAPTCHAs ou bloqueios e tenta recuperar o acesso. Exemplo de erro: ``BlockedByCaptchaError`` caso o desbloqueio falhe.
-5. **AdaptiveRecheckManager** e **IntelligentCacheManager** - após uma coleta bem-sucedida, definem o próximo agendamento e armazenam o resultado. Exemplo de erro: ``CacheInvalidoError`` se o cache não puder ser salvo.
+1. A API agenda a coleta e envia a URL para o ``markeT_scraper``.
+2. O serviço consulta o ``IntelligentCacheManager`` para decidir se uma resposta 304 pode ser retornada sem nova coleta.
+3. O ``domain_policy.yaml`` define quais estratégias e etapas devem ser executadas para o domínio/contexto solicitado.
+4. O ``SynergicPipeline`` executa as etapas registradas, compartilhando contexto e aplicando fallbacks automático até encontrar um resultado válido ou esgotar as alternativas.
+5. O resultado validado é armazenado em cache, métricas são registradas e a resposta estruturada é devolvida à API para persistência ou comparação.
+
+### Proteções ativas por camada
+1. **RateLimiter** - aplicado logo na entrada das requisições para garantir que a cota de acessos por janela não seja excedida (respostas ``429`` quando o limite é atingido).
+2. **CircuitBreaker** - monitora falhas consecutivas (403/429/timeouts) e abre o circuito para o domínio afetado, evitando insistir em endpoints indisponíveis.
+3. **HumanizedDelayManager** e **ThrottleManager** - adicionam jitter e controlam a cadência das chamadas para simular comportamento humano e respeitar limites contratuais.
+4. **BlockRecoverymanager** - identifica CAPTCHAs ou padrões de bloqueio; quando não há recuperação possível o evento é registrado em métricas e logs estruturados.
+5. **AdaptiveRecheckManager** e **InteligentCacheManager** - ajustam os intervalos de rechecagem com base em históricos de mudanças e mantêm os dados em cache com TTL, ETag e assinatura para reduzir acessos redundates.
 
 ## Execução
 Para levantar todo o ambiente com banco de dados, Redis e serviços auxiliares utilize:
