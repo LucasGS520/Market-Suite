@@ -22,13 +22,12 @@ from shared.enums import BlockResult
     ]
 )
 def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
-    ua = Mock()
-    ua.get_user_agent.return_value = "UA"
-    cookie = Mock()
-    cookie.get_cookies.return_value = {}
+    identity = Mock()
+    identity.get_user_agent.return_value = "UA"
+    identity.get_cookies.return_value = {}
     delay = Mock()
 
-    mgr = BlockRecoveryManager(ua_manager=ua, cookie_manager=cookie, delay_manager=delay)
+    mgr = BlockRecoveryManager(identity_manager=identity, delay_manager=delay)
 
     called = []
     monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: called.append(s))
@@ -67,11 +66,11 @@ def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
 
     html = asyncio.run(mgr.handle_block(block_type, session_id="sess", url="http://example.com"))
 
-    ua.rotate.assert_called_once_with("sess")
-    ua.get_user_agent.assert_called_once_with("sess")
-    cookie.reset.assert_called_once_with("sess")
-    cookie.get_cookies.assert_called_once_with("sess")
-    cookie.update_from_response.assert_called_once()
+    identity.rotate.assert_called_once_with("sess")
+    identity.get_user_agent.assert_called_once_with("sess")
+    identity.reset.assert_called_once_with("sess")
+    identity.get_cookies.assert_called_once_with("sess")
+    identity.update_from_response.assert_called_once()
     delay.prolong.assert_called_once_with()
     assert called == [expected]
     assert html == "<html>ok</html>"

@@ -18,8 +18,8 @@ from shared.metrics.metrics_scraper import (
 )
 
 from market_scraper.utils.circuit_breaker import CircuitBreaker
-from market_scraper.utils_controllers.configuration.pace_control import (
-    PaceControlPolicy, 
+from market_scraper.utils_controllers.configuration.pace_control_config import (
+    PaceControlPolicy,
     settings as pace_control_settings
 )
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
@@ -44,8 +44,8 @@ class DomainPaceController:
         self._token_capacity = policy.token_bucket.capacity
         self._min_rate = policy.token_bucket.min_rate
         self._decrease_factor = policy.token_bucket.decrease_factor
-        self._jitter_min = policy.jitter.min_seconds
-        self._jitter_max = policy.jitter.max_seconds
+        self._jitter_min = policy.jitter.min
+        self._jitter_max = policy.jitter.max
 
         self._lock = threading.Lock()
         self._tokens = self._token_capacity
@@ -67,6 +67,11 @@ class DomainPaceController:
                 max_requests=policy.rate_limit.max_requests,
                 window_seconds=policy.rate_limit.window,
             )
+
+    @property
+    def policy(self) -> PaceControlPolicy:
+        """ Expõe a política atualmente aplicada pelo controlador """
+        return self._policy
 
     def snapshot(self) -> PaceControlSnapshot:
         """ Retorna fotografia do estado interno para logs e diagnósticos """
@@ -137,12 +142,12 @@ class DomainPaceController:
     def reset_rate(self) -> None:
         """ Restaura a taxa original após período de estabilidade """
         with self._lock:
-            self._token_rate = self.policy.token_bucket.rate
+            self._token_rate = self._policy.token_bucket.rate
 
     def update_policy(self, policy: PaceControlPolicy) -> None:
         """ Atualiza parâmetros dinamicamente quando a política muda """
         with self._lock:
-            self.policy = policy
+            self._policy = policy
             self._token_capacity = policy.token_bucket.capacity
             self._token_rate = policy.token_bucket.rate
             self._min_rate = policy.token_bucket.min_rate

@@ -22,12 +22,12 @@ from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.http_cache import get_cache_headers
 from market_scraper.utils_controllers.block_recovery import BlockRecoveryManager
-from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.mechanicalsoup_login import login_and_get_cookies
 from market_scraper.utils.circuit_breaker import CircuitBreaker
 from market_scraper.utils_controllers.pace_control import pace_controller_registry
 from market_scraper.utils_controllers.session_identity import session_identity_manager
+from market_scraper.utils_controllers.pre_pipeline import PrePipelineOrchestrator
 
 from shared.enums import BlockResult
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
@@ -56,6 +56,14 @@ validator = DataQualityValidator()
 
 #Registro centralizado de controle de ritmo por domínio
 pace_registry = pace_controller_registry
+
+#Orquestrador centralizado para robots.txt, cache e identidade
+pre_pripeline_orchestrator = PrePipelineOrchestrator(
+    cache_manager=cache_manager,
+    identity_manager=identity_manager,
+    validator=validator,
+    pace_registry=pace_registry,
+)
 
 async def scrape_product_common_async(
     *,
@@ -104,97 +112,35 @@ async def scrape_product_common_async(
         else:
             extra_kwargs.setdefault("cookies", cookies)
 
-    marketplace = extract_hostname(normalized_url)
+    reference_text = getattr(payload, "name_identification", None) or normalized_url
+    try:
+        pre_pipeline_result = await pre_pripeline_orchestrator.run(
+            url=normalized_url,
+            user_id=user_id,
+            product_type=product_type,
+            reference_text=reference_text,
+            circuit_breaker=circuit_breaker,
+            pace_controller=pace_controller,
+            seed_cookies=cookies,
+        )
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            host_label = extract_hostname(normalized_url) or "unknown"
+            SCRAPER_URL_STATUS_TOTAL.labels(url_host=host_label, status="robots_blocked").inc()
+        raise
+    
+    marketplace = pre_pipeline_result.marketplace or extract_hostname(normalized_url)
     host_label = marketplace or "unknown"
 
     def _record_status(status_label: str) -> None:
         """ Atualiza contadores de métricas agregadas por domínio """
         SCRAPER_URL_STATUS_TOTAL.labels(url_host=host_label, status=status_label).inc()
 
-    pace_ctrl = pace_controller or pace_registry.get(host_label)
-    domain_circuit_breaker = circuit_breaker or pace_ctrl.circuit_breaker
-    session_key = f"{user_id}:{product_type}"
-    reference_text = getattr(payload, "name_identification", None) or normalized_url
-    await pace_ctrl.wait_for_turn(
-        circuit_key=host_label,
-        identifier=session_key,
-        humanized_text=reference_text,
-        reflection_text=1.0,
-    )
-
-    parser = RobotsTxtParser(base_url=normalized_url)
-    user_agent = identity_manager.get_user_agent(session_key, host=host_label)
-    path = urlparse(normalized_url).path or "/"
-    if not await parser.is_allowed(path, user_agent):
-        SCRAPER_HTTP_BLOCKED_TOTAL.inc()
-        _record_status("robots_blocked")
-        logger.warning(
-            "blocking_robots",
-            url=safe_log_url,
-            user_agent=user_agent
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Acesso bloqueado pelo robots.txt do site",
-        )
-
-    #Respeita o crawl-delay recomendado pelo site
-    delay = await parser.get_crawl_delay(user_agent)
-    if delay:
-        logger.info(
-            "waiting_crawl_delay", 
-            delay=delay
-        )
-        await asyncio.sleep(delay)
-
-    logger.info(
-        "checking_cache", 
-        url=normalized_url
-    )
-    cached = cache_manager.get(marketplace=marketplace, url=normalized_url)
-    if cached:
-        logger.info(
-            "cache_found", 
-            url=safe_log_url
-        )
-        #Quando o valor armazenado possui campos auxiliares, retorna apenas os dados
-        details = cached.get("data", cached)
-        try:
-            validator.validate(details)
-        except ValueError as err:
-            logger.info(
-                "cache_invalid", 
-                url=safe_log_url, 
-                reason=sanitize_log_data(str(err))
-            )
-        else:
-            cache_manager.touch(marketplace=marketplace, url=normalized_url)
-            logger.info(
-                "cache_used", 
-                url=safe_log_url
-            )
-            _record_status("success")
-            return {"status": "success", "details": details}
-    else:
-        logger.info(
-            "cache_not_found", 
-            url=safe_log_url
-        )
-
-    shared_context: dict[str, Any] = {
-        "url": normalized_url,
-        "product_type": product_type,
-        "pace_controller": pace_ctrl,
-        "identity": {"session_key": session_key, "host": host_label},
-        "circuit_breaker": domain_circuit_breaker,
-    }
-    if cookies:
-        identity_manager.reset_cookies(session_key, host=host_label)
-        session_jar = identity_manager.get_cookies(session_key, host=host_label)
-        session_jar.update(cookies)
-        shared_context["cookies"] = session_jar
-    else:
-        shared_context["cookies"] = identity_manager.get_cookies(session_key, host=host_label)
+    shared_context: dict[str, Any] = pre_pipeline_result.shared_context
+    
+    if pre_pipeline_result.cached_response:
+        _record_status("success")
+        return pre_pipeline_result.cached_response
 
     def _persist_success(details: dict[str, Any], *, extraction_method: str | None = None) -> None:
         """ Armazena dados válidos no cache inteligente com metadados """

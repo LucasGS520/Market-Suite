@@ -7,7 +7,7 @@ from typing import Callable
 import pytest
 
 from market_scraper.utils_controllers.session_identity import SessionIdentityManager
-from market_scraper.utils_controllers.configuration.session_identity import (
+from market_scraper.utils_controllers.configuration.session_identity_config import (
     SessionIdentityPolicy,
     UserAgentConfig,
     CookieTemplateConfig,
@@ -19,7 +19,7 @@ def configure_policy(monkeypatch: pytest.MonkeyPatch) -> Callable[..., SessionId
     def _apply(max_requests: int = 2, session_timeout: int = 10, template: dict[str, str] | None = None) -> SessionIdentityPolicy:
         policy = SessionIdentityPolicy(
             user_agent=UserAgentConfig(max_requests=max_requests, session_timeout=session_timeout),
-            cookies=CookieTemplateConfig(template=template or {}),
+            cookie_template=CookieTemplateConfig(template=template or {}),
         )
         monkeypatch.setattr("market_scraper.utils.session_identity.identity_settings.policy_for", lambda host: policy)
         return policy

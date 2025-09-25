@@ -11,7 +11,7 @@ from typing import Dict
 import httpx
 from requests import Response, cookies
 
-from market_scraper.utils_controllers.configuration.session_identity import (
+from market_scraper.utils_controllers.configuration.session_identity_config import (
     SessionIdentityPolicy,
     settings as identity_settings,
 )
@@ -53,7 +53,7 @@ class SessionIdentityManager:
         """ Retorna User-Agent associado à sessão, rotacionando quando necessário """
         policy = identity_settings.policy_for(host)
         signature = self._policy_signature(policy)
-        key = self._session_key(session_id, host)
+        key = self._session_key(session_id, host=host)
         now = time.monotonic()
 
         with self._lock:
@@ -81,19 +81,19 @@ class SessionIdentityManager:
             if session_id is None:
                 self._user_agents.clear()
             else:
-                key = self._session_key(session_id, host)
+                key = self._session_key(session_id, host=host)
                 self._user_agents.pop(key, None)
 
     def get_cookies(self, session_id: str, *, host: str | None = None) -> cookies.RequestsCookieJar:
         """ Recupera jar de cookies respeitando template configurado """
         policy = identity_settings.policy_for(host)
         signature = self._policy_signature(policy)
-        key = self._session_key(session_id, host)
+        key = self._session_key(session_id, host=host)
 
         with self._lock:
             state = self._cookies.get(key)
             if state is None or state.signature != signature:
-                jar = cookies.cookiejar_from_dict(policy.cookies.template.copy())
+                jar = cookies.cookiejar_from_dict(policy.cookie_template.template.copy())
                 state = _CookiesState(jar=jar, signature=signature)
                 self._cookies[key] = state
             return state.jar
@@ -123,7 +123,7 @@ class SessionIdentityManager:
                     for key in keys:
                         self._cookies.pop(key, None)
             else:
-                key = self._session_key(session_id, host)
+                key = self._session_key(session_id, host=host)
                 self._cookies.pop(key, None)
 
     def purge_expired(self) -> None:

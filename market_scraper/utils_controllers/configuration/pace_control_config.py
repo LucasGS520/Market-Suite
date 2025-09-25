@@ -69,7 +69,7 @@ class PaceControlPolicy:
 
     def fingerprint(self) -> tuple:
         """ Retorna assinatura imutável da política para permitir cache seguro """
-        rate_tuple = (self.rate_limit.max_requests, self.rate_limit.window)
+        rate_tuple = (0, 0)
         if self.rate_limit:
             rate_tuple = (self.rate_limit.max_requests, self.rate_limit.window)
         return (
@@ -85,7 +85,7 @@ class PaceControlPolicy:
             self.human_delay.fatigue_min,
             self.human_delay.fatigue_max,
             self.circuit_breaker.failure_threshold,
-            self.circuit_breaker.recovery_timeout,
+            self.circuit_breaker.recovery_time,
         )
     
 class PaceControlSettings:

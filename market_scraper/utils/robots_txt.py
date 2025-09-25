@@ -1,34 +1,39 @@
-""" Parser simples de robots.txt com cache em Redis
+""" Parser resiliente de ``robots.txt`` com cache em Redis
 
-Utilitário para leitura resiliente de arquivos robots.txt.
-As operações de rede e de acesso ao Redis são executadas em *thread pool*
-para evitar bloqueio de loop de eventos.
+O utilitário executa as operações de rede e de cache em *thread pool* para
+evitar bloqueio de loop assíncrono. A configuração de prefixo e TTL é 
+injetada a partir de ``market_scraper.config.robots`` permitindo ajustes
+centralizados sem modificar a implementação.
 """
+
+from __future__ import annotations
 
 import requests
 import structlog
 from urllib.parse import urljoin, urlparse
 import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 import asyncio
 
-from market_scraper.core.config_scraper import settings
 from shared.utils.redis_client import get_redis_client
 from shared.utils.logging_utils import sanitize_log_data
 
+from market_scraper.utils_controllers.configuration import robots_settings
 
-ROBOTS_CACHE_KEY = settings.ROBOTS_CACHE_KEY
-ROBOTS_CACHE_TTL = settings.ROBOTS_CACHE_TTL
+if TYPE_CHECKING: #Importação condicional para evitar dependências circulares
+    from market_scraper.utils_controllers.configuration.robots import RobotsConfig
+
 
 logger = structlog.get_logger("robots_txt")
 
 class RobotsTxtParser:
-    """ Busca e parseia o robots.txt de um domínio para extrair diretivas como Crawl-delay """
-    def __init__(self, base_url: str):
+    """ Busca e parseia o ``robots.txt`` de um domínio para extrair diretivas """
+    def __init__(self, base_url: str, config: "RobotsConfig" | None = None):
         parsed = urlparse(base_url)
         self.base = f"{parsed.scheme}://{parsed.netloc}"
+        self._config = config or robots_settings.current()
         #Prefixo de cache apenas por domínio; o user-agent será acrescido nas chaves
-        self.cache_key = f"{ROBOTS_CACHE_KEY}:{self.base}"
+        self.cache_key = f"{self._config.cache_key_prefix}:{self.base}"
         self.redis = get_redis_client()
 
     async def _fetch_robots(self, user_agent: str) -> str:
@@ -52,7 +57,12 @@ class RobotsTxtParser:
         url = urljoin(self.base, "/robots.txt")
         headers = {"User-Agent": user_agent}
         try:
-            response = await asyncio.to_thread(requests.get, url, timeout=5, headers=headers)
+            response = await asyncio.to_thread(
+                requests.get, 
+                url, 
+                timeout=self._config.request_timeout, 
+                headers=headers,
+            )
             content = response.text if response.status_code == 200 else ""
         except requests.exceptions.RequestException as e:
             logger.warning("robots_fetch_failed", url=sanitize_log_data(url), error=sanitize_log_data(str(e)))
@@ -60,7 +70,7 @@ class RobotsTxtParser:
 
         #Salva no Redis para próximas leituras, caso disponível
         if self.redis is not None:
-            await asyncio.to_thread(self.redis.set, cache_key, content, ex=ROBOTS_CACHE_TTL)
+            await asyncio.to_thread(self.redis.set, cache_key, content, ex=self._config.cache_ttl)
         return content
 
     async def get_crawl_delay(self, user_agent: str = "*") -> Optional[float]:
@@ -170,7 +180,10 @@ class RobotsTxtParser:
         #Armazena a decisão em cache somente se o Redis estiver presente
         if self.redis is not None:
             await asyncio.to_thread(
-                self.redis.set, cache_rule_key, "1" if allowed else "0", ex=ROBOTS_CACHE_TTL
+                self.redis.set,
+                cache_rule_key,
+                "1" if allowed else "0",
+                ex=self._config.cache_ttl,
             )
         return allowed
 

@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException, status
 
 from market_scraper.utils_controllers.pace_control import DomainPaceController
-from market_scraper.utils_controllers.configuration.pace_control import (
+from market_scraper.utils_controllers.configuration.pace_control_config import (
     PaceControlPolicy,
     TokenBucketConfig,
     JitterConfig,
