@@ -1,65 +1,58 @@
-""" Gerenciador de cache inteligente com suporte a Redis e fallback local
+""" Gerenciador de cache inteligente utilizado pelo Market Scraper
 
-O utilitário utiliza a configuração carregada em ``market_scraper.utils_controllers.configuration.cache``
-para definir prefixo e tempos de vida das chaves. Quando o Redis não está acessível, um armazenamento
-em memória é utilizado atomaticamente como contingência, garantindo que o pré-pipeline do scraper
-continue operando ser perda de funcionalidade.
+O módulo concentra a configuração e a implementação do cache em um único
+lugar para simplificar a manutenção. O gerenciamento prioriza o Redis
+quando disponível e mantém um dicionário local como contingência, evitando
+falhas do pré-pipeline quando a camada de cache estiver indisponível.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional
 import hashlib
 import json
 import time
 import structlog
 
-from shared.utils.redis_client import get_redis_client
+from market_scraper.core.config_scraper import settings
+
 from shared.utils.logging_utils import sanitize_log_data
+from shared.utils.redis_client import get_redis_client
 
-if TYPE_CHECKING: #Importação tardia para evitar dependências circulares
-    from market_scraper.utils_controllers.configuration.cache import CacheConfig
 
+#Valores padrão centralizados para reutilização em todo o módulo
+DEFAULT_CACHE_PREFIX = "scraper:product:"
+DEFAULT_CACHE_TTL = int(settings.CACHE_BASE_TTL)
 
 #Logger configurado com structlog
 logger = structlog.get_logger(__name__)
 
 class IntelligentCacheManager:
-    """ Cache resiliente que suporta Redis e armazenamento em memória """
+    """ Controla leitura e escrita de itens de cache com fallback local """
     def __init__(
         self,
         *,
-        config: "CacheConfig" | None = None,
         prefix: Optional[str] = None,
         ttl: Optional[int] = None,
     ) -> None:
-        """ Inicializa o gerenciador aplicando a configuração informada
-        
-        Quando ``config`` não é fornecido, o módulo consulta a instância
-        global ``cache_settings`` para obter valores padrão. Os argumentos
-        ``prefix`` e ``ttl`` permitem sobreposição pontual durante os testes
-        ou cenários específicos.
-        """
-        if config is None:
-            from market_scraper.utils_controllers.configuration import cache_settings
-            config = cache_settings.current()
-
-        self._config = config
-        self.prefix = prefix or config.prefix
-        self.ttl = int(ttl) if ttl is not None else int(config.ttl)
+        """ Configura o cache com prefixo e TTL definidos em código """
+        self.prefix = prefix or DEFAULT_CACHE_PREFIX
+        self.ttl = int(ttl) if ttl is not None else DEFAULT_CACHE_TTL
+        #Armazenamento local utilizado quando o Redis não está disponível
         self._local_cache: Dict[str, Dict[str, Any]] = {}
 
     def _hash_content(self, marketplace: str, url: str) -> str:
-        """ Gera um hash único baseado no marketplace e na URL normalizada """
+        """ Gera um hash único combinando marketplace e URL normalizada """
         raw = f"{marketplace}:{url}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def _build_key(self, marketplace: str, url: str) -> str:
-        """ Monta a chave final utilizada no cache distribuído/local """
+        """ Monta a chave final usada para armazenar dados no cache """
         return f"{self.prefix}{self._hash_content(marketplace, url)}"
 
-    def get(self, *, marketplace: str, url: str) -> Optional[Dict[str, Any]]:
-        """ Recupera um valor do cache se ainda estiver válido """
+    def get(self, *, marketplace: str | None, url: str) -> Optional[Dict[str, Any]]:
+        """ Recupera dados do cache considerando Redis e fallback local """
+        marketplace = marketplace or "unknown"
         key = self._build_key(marketplace, url)
         client = get_redis_client()
 
@@ -88,12 +81,13 @@ class IntelligentCacheManager:
     def set(
         self,
         *,
-        marketplace: str,
+        marketplace: str | None,
         url: str,
         value: Dict[str, Any],
         ttl: Optional[int] = None,
     ) -> None:
         """ Armazena um valor no cache distribuído e no fallback local """
+        marketplace = marketplace or "unknown"
         ttl = int(ttl) if ttl is not None else self.ttl
         key = self._build_key(marketplace, url)
         client = get_redis_client()
@@ -103,7 +97,7 @@ class IntelligentCacheManager:
                 client.setex(key, ttl, json.dumps(value))
             except Exception as err:
                 logger.warning(
-                    "falha_cache_redis", 
+                    "falha_cache_redis",
                     erro=sanitize_log_data(str(err)),
                     chave=key,
                 )
@@ -117,8 +111,9 @@ class IntelligentCacheManager:
         
         self._local_cache[key] = {"value": value, "timestamp": now, "ttl": ttl}
 
-    def touch(self, *, marketplace: str, url: str, ttl: Optional[int] = None) -> None:
-        """ Renova o TTL da chave após um acesso bem-sucedido """
+    def touch(self, *, marketplace: str | None, url: str, ttl: Optional[int] = None) -> None:
+        """ Renova o TTL da chave após um acesso bem-sucedido do cache """
+        marketplace = marketplace or "unknown"
         key = self._build_key(marketplace, url)
         ttl = int(ttl) if ttl is not None else self.ttl
         client = get_redis_client()
@@ -128,7 +123,7 @@ class IntelligentCacheManager:
                 client.expire(key, ttl)
             except Exception as err:
                 logger.warning(
-                    "falha_cache_touch", 
+                    "falha_cache_touch",
                     erro=sanitize_log_data(str(err)),
                     chave=key,
                 )
@@ -138,3 +133,4 @@ class IntelligentCacheManager:
             entry["timestamp"] = time.time()
             entry["ttl"] = ttl
             
+__all__ = ["IntelligentCacheManager", "DEFAULT_CACHE_PREFIX", "DEFAULT_CACHE_TTL"]
