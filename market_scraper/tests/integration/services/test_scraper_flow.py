@@ -57,10 +57,6 @@ class FakeRedis:
     def delete(self, key: str) -> None:
         self._storage.pop(key, None)
 
-class DummyRateLimiter:
-    def allow_request(self, identifier: str | None = None) -> bool:
-        return True
-
 class DummyCircuitBreaker:
     def allow_request(self, key: str) -> bool:
         return True
@@ -70,6 +66,20 @@ class DummyCircuitBreaker:
 
     def record_success(self, key: str) -> None:
         pass
+
+class DummyPaceController:
+    def __init__(self) -> None:
+        self.circuit_breaker = DummyCircuitBreaker()
+
+    async def wait_for_turn(
+        self,
+        *,
+        circuit_key: str,
+        identifier: str | None = None,
+        humanized_text: str | None = None,
+        reflection_time: float = 1.0,
+    ) -> None:
+        return None
 
 class PipelineCarregaHtml(PipelineStep):
     def __init__(self, html: str) -> None:
@@ -112,14 +122,11 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("market_scraper.utils.humanized_delay.HumanizedDelayManager.wait_async", fake_wait_async)
 
-    def fake_throttle_wait(self, circuit_key: str, identifier: str | None = None) -> None:
+    async def fake_wait_for_turn(self, *, circuit_key: str, identifier: str | None = None, humanized_text: str | None = None, reflection_time: float = 1.0) -> None:
         return None
 
-    async def fake_throttle_wait_async(self, circuit_key: str, identifier: str | None = None) -> None:
-        return None
-
-    monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait", fake_throttle_wait)
-    monkeypatch.setattr("market_scraper.utils.throttle_manager.ThrottleManager.wait_async", fake_throttle_wait_async)
+    monkeypatch.setattr("market_scraper.utils.pace_control.DomainPaceController.wait_for_turn", fake_wait_for_turn)
+    monkeypatch.setattr("market_scraper.services.services_scraper_common.pace_registry", type("DummyRegistry", (), {"get": lambda self, host: DummyPaceController()})())
 
     def _fake_feature_flag(feature: str, url: str, *, context: str = "default", identifier: str | None = None, **kwargs) -> FeatureFlagDecision:
         return FeatureFlagDecision(
@@ -157,7 +164,6 @@ async def test_scrape_monitored_product_flow(setup_ambiente: None, monkeypatch: 
         user_id=user_id,
         payload=payload,
         product_type="monitored",
-        rate_limiter=DummyRateLimiter(),
         circuit_breaker=DummyCircuitBreaker(),
     )
     detalhes = resultado["details"]
@@ -187,7 +193,6 @@ async def test_scrape_competitor_product_flow(setup_ambiente: None, monkeypatch:
         user_id=user_id,
         payload=payload,
         product_type="competitor",
-        rate_limiter=DummyRateLimiter(),
         circuit_breaker=DummyCircuitBreaker(),
     )
     detalhes = resultado["details"]

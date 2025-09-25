@@ -108,7 +108,11 @@ async def test_pipeline_paralelo_registra_fallback(monkeypatch):
     class EtapaSucesso(PipelineStep):
         async def run(self, shared_context):
             await asyncio.sleep(0.01)
-            return {"status": "success", "shared_context": {"ok": True}}
+            return {
+                "status": "success", 
+                "shared_context": {"ok": True},
+                "details": {"name": "Produto Simulado", "current_price": "R$ 10,00"},
+            }
         
     class EtapaErro(PipelineStep):
         async def run(self, shared_context):
@@ -134,7 +138,7 @@ async def test_pipeline_paralelo_registra_fallback(monkeypatch):
     assert len(histograma.observacoes) == 2
     assert ("EtapaSucesso", "success") in contador_estrategia.rotulos
     assert ("EtapaErro", "error") in contador_estrategia.rotulos
-    assert ("parallel_first_success", {"step": "EtapaSucesso", "status": "success"}) in logger_falso.eventos
+    assert ("parallel_pipeline_first_success", {"step": "EtapaSucesso", "status": "success"}) in logger_falso.eventos
 
 @pytest.mark.asyncio
 async def test_pipeline_sequencial_fallback_intermediario(monkeypatch):
@@ -179,7 +183,11 @@ async def test_pipeline_interrompe_apos_primeiro_sucesso(monkeypatch):
         async def run(self, shared_context):
             execucao.append("sucesso")
             shared_context["valor"] = "ok"
-            return {"status": "success", "shared_context": {"valor": "ok"}}
+            return {
+                "status": "success", 
+                "shared_context": {"valor": "ok"},
+                "details": {"name": "Produto Curto", "current_price": "R$ 9,90"},
+            }
         
     class EtapaExecutada(PipelineStep):
         async def run(self, shared_context):
@@ -210,7 +218,11 @@ async def test_pipeline_paralelo_cancela_tarefas_pendentes(monkeypatch):
     class EtapaSucessoRapida(PipelineStep):
         async def run(self, shared_context):
             shared_context["final"] = True
-            return {"status": "success", "shared_context": {"final": True}}
+            return {
+                "status": "success", 
+                "shared_context": {"final": True},
+                "details": {"name": "Pipeline Paralelo", "current_price": "R$ 5,50"},
+            }
         
     class EtapaLenta(PipelineStep):
         async def run(self, shared_context):
@@ -239,5 +251,8 @@ async def test_pipeline_paralelo_cancela_tarefas_pendentes(monkeypatch):
     assert len(histograma.observacoes) == 2
     assert any(evento == "step_cancelled" and dados["step"] == "EtapaLenta" for evento, dados in logger_falso.eventos)
     assert ("parallel_cancelled_steps", {"steps": ["EtapaLenta"]}) in logger_falso.eventos
-    assert ("parallel_first_success", {"step": "EtapaSucessoRapida", "status": "success"}) in logger_falso.eventos
+    assert (
+        "parallel_first_success", 
+        {"step": "EtapaSucessoRapida", "status": "success"},
+    ) in logger_falso.eventos
     

@@ -85,21 +85,6 @@ pipeline_execution:
   example.com:
     default: parallel
     competitor: sequential
-
-#Define limites de requisições por domínio (max_requests por janela)
-rate_limits:
-  default:
-    max_requests: 60
-    window: 60
-  mercadolivre.com.br:
-    max_requests: 120
-    window: 60
-  amazon.com.br:
-    max_requests: 90
-    window: 60
-  magazineluiza.com.br:
-    max_requests: 80
-    window: 60
     
 #Controla progressivamente o rollout de funcionalidades críticas
 feature_flags:

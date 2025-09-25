@@ -259,11 +259,11 @@ O fluxo completo integra API, Celery e ``SynergicPipeline``:
 5. O resultado validado é armazenado em cache, métricas são registradas e a resposta estruturada é devolvida à API para persistência ou comparação.
 
 ### Proteções ativas por camada
-1. **RateLimiter** - aplicado logo na entrada das requisições para garantir que a cota de acessos por janela não seja excedida (respostas ``429`` quando o limite é atingido).
-2. **CircuitBreaker** - monitora falhas consecutivas (403/429/timeouts) e abre o circuito para o domínio afetado, evitando insistir em endpoints indisponíveis.
-3. **HumanizedDelayManager** e **ThrottleManager** - adicionam jitter e controlam a cadência das chamadas para simular comportamento humano e respeitar limites contratuais.
-4. **BlockRecoverymanager** - identifica CAPTCHAs ou padrões de bloqueio; quando não há recuperação possível o evento é registrado em métricas e logs estruturados.
-5. **AdaptiveRecheckManager** e **InteligentCacheManager** - ajustam os intervalos de rechecagem com base em históricos de mudanças e mantêm os dados em cache com TTL, ETag e assinatura para reduzir acessos redundates.
+1. **DomainPaceController** - combina rate limit dinâmico, token bucket e atrasos humanizados para garantir ritmo previsível entre requisições.
+2. **SessionIdentityManager** - controla User-Agent e cookies por domínio/sessão reduzindo bloqueios por fingerprinting.
+3. **CircuitBreaker** - monitora falhas consecutivas (403/429/timeouts) e abre o circuito para o domínio afetado, evitando insistir em endpoints indisponíveis.
+4. **BlockRecoveryManager** - identifica CAPTCHAs ou padrões de bloqueio; quando não há recuperação possível o evento é registrado em métricas e logs estruturados.
+5. **AdaptiveRecheckManager** e **InteligentCacheManager** - ajustam os intervalos de rechecagem com base em históricos de mudanças e mantêm os dados em cache com TTL, ETag e assinatura para reduzir acessos redundantes.
 
 ## Execução
 Para levantar todo o ambiente com banco de dados, Redis e serviços auxiliares utilize:

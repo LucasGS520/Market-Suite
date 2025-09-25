@@ -68,7 +68,7 @@ O rollout de funcionalidades críticas (ex: pipeline sinérgico) é controlado p
 
 ## Segurança, Compliance e Limites
 - Respeito ao `robots.txt` antes de qualquer coleta.
-- Limites de requisições por domínio configurados no YAML e aplicados via `RateLimiter` e `ThrottleManager`.
+- Limites de requisições por domínio configurados no YAML e aplicados via `DomainPaceController`.
 - Logs passam por sanitização (`sanitize_log_data`), evitando registro de dados sensíveis (cookies, tokens, credenciais).
 - Coleta apenas dos campos essenciais, conforme LGPD/GDPR.
 
@@ -308,9 +308,9 @@ Esses passos mantêm o serviço aderente às boas práticas de segurança (LGPD/
 
 #### Segurança, compliance e limites de scraping
 - Respeitar ``robots.txt`` consultando ``utils/robots.txt`` antes de liberar novas rotas e durante tentativas de recuperação (`BlockRecoverymanager`, aborta quano o domínio proíbe o caminho).
-- Utilizar ``ThrottleManager`` e ``RateLimiter`` para manter intervalos e janelas alinhados com os termos de uso; o contador `SCRAPER_HTTP_BLOCKED_TOTAL` é incrementado automaticamente quando o rate limit é atingido.
+- Utilizar ``DomainPaceController`` para manter intervalos e janelas alinhados com os termos de uso; o contador `SCRAPER_HTTP_BLOCKED_TOTAL` é incrementado automaticamente quando o rate limit é atingido.
 - Sanitizar logs com os utilitários de mascaramento de dados do diretório ``shared``; o serviço aplica `sanitize_log_data` para remover tokens, cookies e parâmetros sensíveis de URLs antes de registrar eventos.
-- Configurar limites e comportamentos específicos por domínio no YAML, evitando que etapas pesadas sejam aplicadas indiscriminadamente. O bloco ``rate_limits`` define ``max_requests`` e ``window`` por host, refletidos em métricas no ``SCRAPER_URL_STATUS_TOTAL``.
+- Configurar limites e comportamentos específicos por domínio no arquivo ``utils/configuration/pace_control.yaml``, evitando que etapas pesadas sejam aplicadas indiscriminadamente. As políticas do ``DomainPaceController`` definem ``max_requests`` e ``window`` por host, refletidos em métricas no ``SCRAPER_URL_STATUS_TOTAL``.
 - Seguir o princípio de minimização de dados (LGPD/GDPR), coletando apenas os campos essenciais (nome, preço, etc...).
 - Documentar e revisar periodicamente exceções de compliance em conjunto com a equipe jurídica antes de ativar novas etapas.
 
@@ -318,7 +318,7 @@ Esses passos mantêm o serviço aderente às boas práticas de segurança (LGPD/
 ## Serviços Utilitários
 - **IntelligentCacheManager** - armazena resultados de produtos por domínio e URL para reduzir requisições repetidas.
 - **DataQualityValidator** - garante que `name` e `current_price` estejam presentes e que o preço seja válido.
-- **IntelligentUserAgentManager** - rotaciona `User-Agent` para cada requisição, evitando bloqueios.
+- **SessionIdentityManager** - controla User-Agent e cookies para cada requisição, evitando bloqueios.
 - **BlockRecoveryManager** e **HumanizedDelayManager** - auxiliam na recuperação de bloqueios, rotacionam recursos e, após uma suspensão temporária, tentam nova requisição ou consultam o cache para obter o HTML, registrando o resultado em log.
 
 ## Resultado Esperado

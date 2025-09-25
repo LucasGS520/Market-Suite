@@ -63,7 +63,7 @@ async def test_scrape_product_common_async_respeita_robots(monkeypatch):
     monkeypatch.setattr(common, "SCRAPER_HTTP_BLOCKED_TOTAL", contador_bloqueio)
     monkeypatch.setattr(common, "SCRAPER_URL_STATUS_TOTAL", contador_status)
     monkeypatch.setattr(common, "RobotsTxtParser", lambda base_url: ParserNegado(base_url))
-    monkeypatch.setattr(common.ua_manager, "get_user_agent", lambda _: "AgenteTeste")
+    monkeypatch.setattr(common.identity_manager, "get_user_agent", lambda session, host=None: "AgenteTeste")
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
 
@@ -439,7 +439,7 @@ async def test_scrape_product_common_async_respeita_crawl_delay(monkeypatch):
         sleep_registro["valor"] = valor
 
     monkeypatch.setattr(common, "RobotsTxtParser", lambda base_url: ParserComDelay(base_url))
-    monkeypatch.setattr(common.ua_manager, "get_user_agent", lambda _: "AgenteTeste")
+    monkeypatch.setattr(common.identity_manager, "get_user_agent", lambda session, host=None: "AgenteTeste")
     monkeypatch.setattr(common.asyncio, "sleep", _fake_sleep)
     monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
     monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)

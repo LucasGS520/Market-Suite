@@ -17,21 +17,6 @@ try:
 except Exception:
     pytestmark = pytest.mark.skip(reason="Dependências do market_scraper indisponíveis")
 
-class DummyThrottle:
-    def __init__(self, *a, **k) -> None:
-        self.jitter_min = 0
-        self.jitter_max = 0
-
-    async def wait_async(self, *a, **k) -> None:
-        return None
-
-class DummyHumanDelay:
-    async def wait_async(self, *a, **k) -> None:
-        return None
-
-    def prolong(self, factor: float = 1.5) -> None:
-        return None
-
 class DummyCircuitBreaker:
     def allow_request(self, key: str) -> bool:
         return True
@@ -46,9 +31,19 @@ class DummyRecovery:
     async def handle_block(self, *a, **k):
         return None
 
-class DummyRateLimiter:
-    def allow_request(self, identifier: str | None = None) -> bool:
-        return True
+class DummyPaceController:
+    def __init__(self) -> None:
+        self.circuit_breaker = DummyCircuitBreaker()
+
+    async def wait_for_turn(
+        self,
+        *,
+        circuit_key: str,
+        identifier: str | None = None,
+        humanized_text: str | None = None,
+        reflection_time: float = 1.0,
+    ) -> None:
+        return None
 
 class DummyRobotsTxt:
     def __init__(self, url: str) -> None:
@@ -79,16 +74,14 @@ def test_scrape_product_common_consulta_redis_client():
         patch.object(mod, "is_scraping_suspended", wraps=rc.is_scraping_suspended) as suspended_mock, \
         patch.object(mod.cache_manager, "get", return_value=None), \
         patch.object(mod.cache_manager, "set", Mock()), \
-        patch.object(mod, "HumanizedDelayManager", DummyHumanDelay), \
-        patch.object(mod, "ThrottleManager", DummyThrottle), \
-        patch.object(mod, "RobotsTxtParser", DummyRobotsTxt):
+        patch.object(mod, "RobotsTxtParser", DummyRobotsTxt), \
+        patch.object(mod, "pace_registry", Mock(get=Mock(return_value=DummyPaceController()))):
 
         resultado = scrape_product_common(
             url=payload.product_url,
             user_id=uuid4(),
             payload=payload,
             product_type="monitored",
-            rate_limiter=DummyRateLimiter(),
             circuit_breaker=DummyCircuitBreaker(),
             recovery_manager=DummyRecovery(),
         )

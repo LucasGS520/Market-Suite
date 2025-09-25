@@ -18,18 +18,16 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, status
 import structlog
 
-from market_scraper.core.config_scraper import settings
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.http_cache import get_cache_headers
-from market_scraper.utils.rate_limiter import RateLimiter
-from market_scraper.utils.circuit_breaker import CircuitBreaker
 from market_scraper.utils.block_recovery import BlockRecoveryManager
 from market_scraper.utils.robots_txt import RobotsTxtParser
-from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.mechanicalsoup_login import login_and_get_cookies
-from market_scraper.utils.throttle_manager import ThrottleManager
+from market_scraper.utils.circuit_breaker import CircuitBreaker
+from market_scraper.utils.pace_control import pace_controller_registry
+from market_scraper.utils.session_identity import session_identity_manager
 
 from shared.enums import BlockResult
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
@@ -40,7 +38,6 @@ from market_scraper.services.synergic_pipeline import SynergicPipeline
 from market_scraper.services.domain_policy import (
     pipeline_steps_for,
     pipeline_execution_mode_for,
-    rate_limit_policy_for,
     evaluate_feature_flag,
 )
 
@@ -51,45 +48,14 @@ logger = structlog.get_logger("scraper_common")
 #Gerenciador de cache inteligente para produtos
 cache_manager = IntelligentCacheManager()
 
-#Gerenciador de user-agent para consultas ao robots.txt
-ua_manager = IntelligentUserAgentManager()
+#Gerencia identidade (User-Agent + cookies) entre requisições
+identity_manager = session_identity_manager
 
 #Validador simples de campos essenciais do scraping
 validator = DataQualityValidator()
 
-#Cache em memória para limitadores de taxa por domínio
-DOMAIN_RATE_LIMITERS: dict[str, RateLimiter] = {}
-
-#Cache em memória para instâncias de ``ThrottleManager`` por domínio
-DOMAIN_THROTTLES: dict[str, ThrottleManager] = {}
-
-
-def _get_rate_limiter_for(host: str, config: dict[str, int]) -> RateLimiter:
-    """ Recupera (ou cria) um ``RateLimiter`` configurado para o domínio informado """
-    limiter = DOMAIN_RATE_LIMITERS.get(host)
-    if limiter and limiter.limit == config["max_requests"] and limiter.window == config["window"]:
-        return limiter
-    
-    limiter = RateLimiter(
-        redis_key=f"scraper:rate:{host}",
-        max_requests=config["max_requests"],
-        window_seconds=config["window"],
-    )
-    DOMAIN_RATE_LIMITERS[host] = limiter
-    return limiter
-
-def _get_throttle_for(host: str, rate_limiter: RateLimiter | None) -> ThrottleManager:
-    """ Fornece um ``ThrottleManager`` reutilizável por domínio """
-    throttle = DOMAIN_THROTTLES.get(host)
-    if throttle is None or throttle.rate_limiter is not rate_limiter:
-        throttle = ThrottleManager(
-            rate=settings.THROTTLE_RATE,
-            capacity=settings.THROTTLE_CAPACITY,
-            jitter_range=(settings.JITTER_MIN, settings.JITTER_MAX),
-            rate_limiter=rate_limiter,
-        )
-        DOMAIN_THROTTLES[host] = throttle
-    return throttle
+#Registro centralizado de controle de ritmo por domínio
+pace_registry = pace_controller_registry
 
 async def scrape_product_common_async(
     *,
@@ -97,7 +63,7 @@ async def scrape_product_common_async(
     user_id: UUID,
     payload: MonitoredProductCreateScraping | CompetitorProductCreateScraping,
     product_type: Literal["monitored", "competitor"],
-    rate_limiter: RateLimiter | None = None,
+    pace_controller = None,
     circuit_breaker: CircuitBreaker | None = None,
     recovery_manager: BlockRecoveryManager | None = None,
     mechanicalsoup_config: dict | None = None,
@@ -145,22 +111,26 @@ async def scrape_product_common_async(
         """ Atualiza contadores de métricas agregadas por domínio """
         SCRAPER_URL_STATUS_TOTAL.labels(url_host=host_label, status=status_label).inc()
 
-    if rate_limiter is None:
-        policy = rate_limit_policy_for(normalized_url)
-        if policy:
-            rate_limiter = _get_rate_limiter_for(host_label, policy)
-
-    throttle_manager = _get_throttle_for(host_label, rate_limiter)
+    pace_ctrl = pace_controller or pace_registry.get(host_label)
+    domain_circuit_breaker = circuit_breaker or pace_ctrl.circuit_breaker
+    session_key = f"{user_id}:{product_type}"
+    reference_text = getattr(payload, "name_identification", None) or normalized_url
+    await pace_ctrl.wait_for_turn(
+        circuit_key=host_label,
+        identifier=session_key,
+        humanized_text=reference_text,
+        reflection_text=1.0,
+    )
 
     parser = RobotsTxtParser(base_url=normalized_url)
-    user_agent = ua_manager.get_user_agent(f"scraper:{host_label}")
+    user_agent = identity_manager.get_user_agent(session_key, host=host_label)
     path = urlparse(normalized_url).path or "/"
     if not await parser.is_allowed(path, user_agent):
         SCRAPER_HTTP_BLOCKED_TOTAL.inc()
         _record_status("robots_blocked")
         logger.warning(
-            "blocking_robots", 
-            url=safe_log_url, 
+            "blocking_robots",
+            url=safe_log_url,
             user_agent=user_agent
         )
         raise HTTPException(
@@ -211,10 +181,20 @@ async def scrape_product_common_async(
             url=safe_log_url
         )
 
-
-    shared_context: dict[str, Any] = {"url": normalized_url, "product_type": product_type}
+    shared_context: dict[str, Any] = {
+        "url": normalized_url,
+        "product_type": product_type,
+        "pace_controller": pace_ctrl,
+        "identity": {"session_key": session_key, "host": host_label},
+        "circuit_breaker": domain_circuit_breaker,
+    }
     if cookies:
-        shared_context["cookies"] = cookies
+        identity_manager.reset_cookies(session_key, host=host_label)
+        session_jar = identity_manager.get_cookies(session_key, host=host_label)
+        session_jar.update(cookies)
+        shared_context["cookies"] = session_jar
+    else:
+        shared_context["cookies"] = identity_manager.get_cookies(session_key, host=host_label)
 
     def _persist_success(details: dict[str, Any], *, extraction_method: str | None = None) -> None:
         """ Armazena dados válidos no cache inteligente com metadados """
@@ -410,10 +390,10 @@ def scrape_product_common(
     user_id: UUID,
     payload,
     product_type: Literal["monitored", "competitor"],
-    rate_limiter: RateLimiter | None = None, 
-    circuit_breaker: CircuitBreaker | None = None, 
+    pace_controller = None,
+    circuit_breaker: CircuitBreaker | None = None,
     recovery_manager: BlockRecoveryManager | None = None,
-    mechanicalsoup_config: dict | None = None, 
+    mechanicalsoup_config: dict | None = None,
     **extra_kwargs,
 ) -> dict:
     """ Executa ``scrape_product_common_async`` de maneira síncrono """
@@ -428,7 +408,7 @@ def scrape_product_common(
             user_id=user_id,
             payload=payload,
             product_type=product_type,
-            rate_limiter=rate_limiter,
+            pace_controller=pace_controller,
             circuit_breaker=circuit_breaker,
             recovery_manager=recovery_manager,
             mechanicalsoup_config=mechanicalsoup_config,

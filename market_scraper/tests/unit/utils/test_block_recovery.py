@@ -77,13 +77,12 @@ def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
     assert html == "<html>ok</html>"
 
 def test_handle_block_uses_cache_when_request_fails(monkeypatch):
-    ua = Mock()
-    ua.get_user_agent.return_value = "UA"
-    cookie = Mock()
-    cookie.get_cookies.return_value = {}
+    identity = Mock()
+    identity.get_user_agent.return_value = "UA"
+    identity.get_cookies.return_value = {}
     delay = Mock()
 
-    mgr = BlockRecoveryManager(ua_manager=ua, cookie_manager=cookie, delay_manager=delay)
+    mgr = BlockRecoveryManager(identity_manager=identity, delay_manager=delay)
 
     monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
 

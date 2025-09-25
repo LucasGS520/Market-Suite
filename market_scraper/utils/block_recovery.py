@@ -12,8 +12,7 @@ from shared.enums import BlockResult
 from shared.utils.redis_client import suspend_scraping
 
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
-from market_scraper.utils.user_agent_manager import IntelligentUserAgentManager
-from market_scraper.utils.cookie_manager import CookieManager
+from market_scraper.utils.session_identity import SessionIdentityManager, session_identity_manager
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.robots_txt import RobotsTxtManager
@@ -29,8 +28,7 @@ class BlockRecoveryManager:
     o delay de requisições. Ao final, ativa uma suspensão temporária no Redis
     utilizando ``suspend_scraping`` para evitar novas tentativas agressivas
     """
-    ua_manager: Optional[IntelligentUserAgentManager] = None
-    cookie_manager: Optional[CookieManager] = None
+    identity_manager: Optional[SessionIdentityManager] = None
     delay_manager: HumanizedDelayManager = HumanizedDelayManager()
 
     #Períodos de suspensão progressivos em segundos
@@ -38,8 +36,7 @@ class BlockRecoveryManager:
     _severity: int = 0
 
     def __post_init__(self) -> None:
-        self.ua_manager = self.ua_manager or IntelligentUserAgentManager()
-        self.cookie_manager = self.cookie_manager or CookieManager()
+        self.identity_manager = self.identity_manager or session_identity_manager
 
     async def handle_block(
             self,
@@ -62,8 +59,10 @@ class BlockRecoveryManager:
 
         self._severity = max(level, self._severity + 1)
 
-        self.ua_manager.rotate(session_id)
-        self.cookie_manager.reset(session_id)
+        host = extract_hostname(url) if url else None
+
+        self.identity_manager.rotate_user_agent(session_id, host=host)
+        self.identity_manager.reset_cookies(session_id, host=host)
         self.delay_manager.prolong()
 
         session_key = session_id or "block_recovery"
@@ -78,7 +77,7 @@ class BlockRecoveryManager:
         result_log = "falha"
         if url:
             parser = RobotsTxtManager(base_url=url)
-            user_agent = self.ua_manager.get_user_agent(session_key)
+            user_agent = self.identity_manager.get_user_agent(session_key, host=host)
             path = urlparse(url).path or "/"
             if not await parser.is_allowed(path, user_agent):
                 logger.warning("blocking_robots_recovery", domain=extract_hostname(url), user_agent=user_agent)
@@ -89,15 +88,13 @@ class BlockRecoveryManager:
                 await asyncio.sleep(delay)
 
             headers = {"User-Agent": user_agent}
-            cookies = None
-            if session_id:
-                cookies = self.cookie_manager.get_cookies(session_id)
+            cookies = self.identity_manager.get_cookies(session_key, host=host)
             try:
                 async with httpx.AsyncClient(headers=headers, cookies=cookies, timeout=10) as client:
                     resp = await client.get(url)
                     resp.raise_for_status()
                     recovered_html = resp.text
-                    self.cookie_manager.update_from_response(session_id or "", resp)
+                    self.identity_manager.update_cookies(session_key, resp, host=host)
                     result_log = "requisicao"
             except Exception:
                 cache = IntelligentCacheManager()

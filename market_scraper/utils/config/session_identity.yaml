@@ -1,0 +1,24 @@
+#Configurações do gerenciador de identidade de sessão (User-Agent + cookies)
+defaults:
+  user_agent:
+    max_requests: 50
+    session_timeout: 3600
+  cookies:
+    template:
+      cookieConsent: "true"
+      geoCountry: "BR"
+      webp: "1"
+
+#Exemplo de domínio com política própria (mantida igual ao padrão para referência)
+domains:
+  mercadolivre.com.br:
+    user_agent:
+      max_requests: 80
+      session_timeout: 1800
+  amazon.com.br:
+    cookies:
+      template:
+        session-id: "mock"
+        session-token: "mock"
+        webp: "1"
+  magazineluiza.com.br:

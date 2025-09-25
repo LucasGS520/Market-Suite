@@ -35,7 +35,6 @@ class StepDefinition:
 PIPELINE_STEP_REGISTRY: Dict[str, StepDefinition] = {}
 PIPELINE_POLICIES: Dict[str, Dict[str, List[str]]] = {}
 PIPELINE_EXECUTION: Dict[str, Dict[str, str] | str] = {}
-RATE_LIMIT_POLICIES: Dict[str, Dict[str, int]] = {}
 FEATURE_FLAGS: Dict[str, Dict[str, Dict[str, "FeatureFlagConfig"]]] = {}
 PIPELINE_STEP_OPTIONS: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
 
@@ -168,14 +167,13 @@ def _normalize_flag_structure(raw: Dict[str, Any]) -> Dict[str, Dict[str, Featur
 def load_config() -> None:
     """ Carrega as etapas do pipeline e políticas do arquivo configurado """
     global PIPELINE_STEP_REGISTRY, PIPELINE_POLICIES
-    global PIPELINE_EXECUTION, RATE_LIMIT_POLICIES, FEATURE_FLAGS, _CONFIG_MTIME
+    global PIPELINE_EXECUTION, FEATURE_FLAGS, _CONFIG_MTIME
     global PIPELINE_STEP_OPTIONS
 
     if not CONFIG_PATH.exists():
         PIPELINE_STEP_REGISTRY = {}
         PIPELINE_POLICIES = {}
         PIPELINE_EXECUTION = {}
-        RATE_LIMIT_POLICIES = {}
         FEATURE_FLAGS = {}
         PIPELINE_STEP_OPTIONS = {}
         _CONFIG_MTIME = 0.0
@@ -206,24 +204,6 @@ def load_config() -> None:
     PIPELINE_POLICIES = _normalize_policy_structure(data.get("pipeline_policies") or {})
     PIPELINE_EXECUTION = data.get("pipeline_execution") or {}
     PIPELINE_STEP_OPTIONS = _normalize_step_options_structure(data.get("pipeline_step_options") or {})
-
-    raw_limits = data.get("rate_limits") or {}
-    limits: Dict[str, Dict[str, int]] = {}
-    for domain, config in raw_limits.items():
-        if not isinstance(config, dict):
-            continue
-        max_requests = config.get("max_requests")
-        window = config.get("window")
-        try:
-            max_requests_int = int(max_requests)
-            window_int = int(window)
-        except (TypeError, ValueError):
-            continue
-        if max_requests_int <= 0 or window_int <= 0:
-            continue
-        limits[domain] = {"max_requests": max_requests_int, "window": window_int}
-
-    RATE_LIMIT_POLICIES = limits
     
     raw_flags = data.get("feature_flags") or {}
     flags: Dict[str, Dict[str, Dict[str, FeatureFlagConfig]]] = {}
@@ -462,25 +442,6 @@ def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Litera
         default_modes.get(context)
         or default_modes.get("default", "sequential")
     )
-
-def rate_limit_policy_for(url: str) -> Dict[str, int] | None:
-    """ Retorna a política de rate limit configurada para o domínio """
-    _reload_if_needed()
-
-    host = extract_hostname(url)
-    default_policy = RATE_LIMIT_POLICIES.get("default")
-
-    def _corresponds_domain(host: str, domain: str) -> bool:
-        """ Verifica se o host pertence exatamente ao domínio informado """
-        return host == domain or host.endswith("." + domain)
-    
-    for domain, policy in RATE_LIMIT_POLICIES.items():
-        if domain == "default":
-            continue
-        if _corresponds_domain(host, domain):
-            return policy
-        
-    return default_policy
  
 #Carrega a configuração na importação do módulo
 load_config()

@@ -8,7 +8,6 @@ import market_scraper.services.domain_policy as domain_policy
 from market_scraper.services.domain_policy import (
     pipeline_steps_for,
     pipeline_execution_mode_for,
-    rate_limit_policy_for,
     evaluate_feature_flag,
     is_feature_enabled,
     FeatureFlagConfig,
@@ -128,19 +127,6 @@ def test_pipeline_execution_mode():
         pipeline_execution_mode_for("https://mercadolivre.com.br/item", context="competitor")
         == "conditional"
     )
-
-def test_rate_limit_policy_for_domain():
-    """ Deve retornar configuração específica de rate limit por domínio """
-    policy = rate_limit_policy_for("https://www.amazon.com.br/produto")
-    assert policy is not None
-    assert policy["max_requests"] > 0
-    assert policy["window"] > 0
-
-def test_rate_limit_policy_default():
-    """ Domínios não mapeados utilizam configuração padrão quando disponível """
-    default = rate_limit_policy_for("https://dominio-nao-mapeado.com/item")
-    assert default is not None
-    assert default["max_requests"] > 0
     
 def test_feature_flag_default_enabled(monkeypatch):
     """ Quando a feature flag não está configurada deve respeitar o valor padrão """

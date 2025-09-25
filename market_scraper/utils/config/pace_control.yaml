@@ -1,0 +1,40 @@
+#Configurações de controle de ritmo (rate limit + token bucket + delays)
+#Os valores abaixo servem como padrão e podem ser sobrescritos por domínio
+defaults:
+  rate_limit:
+    max_requests: 60
+    window: 60
+  token_bucket:
+    rate: 0.2
+    capacity: 3
+    min_rate: 0.05
+    decrease_factor: 0.85
+  jitter:
+    min_delay: 2.0
+    max_delay: 7.0
+  human_delay:
+    avg_wpm: 200
+    base_delay: 1.0
+    fatigue_range: [0.5, 2.0]
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_time: 300
+
+#Regras específicas por domínio monitorado
+#Apenas os campos presentes são aplicados; demais herdam de ``defaults``
+domains:
+  mercadolivre.com.br:
+    rate_limit:
+      max_requests: 120
+      window: 60
+    token_bucket:
+      min_rate: 0.1
+  amazon.com.br:
+    rate_limit:
+      max_requests: 90
+      window: 60
+  magazineluiza.com.br:
+    rate_limit:
+      max_requests: 80
+      window: 60
+      

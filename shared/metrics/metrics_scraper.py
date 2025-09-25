@@ -38,13 +38,13 @@ SCRAPER_HTTP_BLOCKED_TOTAL = Counter(
 
 SCRAPER_JITTER_SECONDS = Histogram(
     "scraper_jitter_seconds",
-    "Distribuição dos atrasos de jitter aplicados pelo ThrottleManager (segundos)",
+    "Distribuição dos atrasos de jitter aplicados pelo controlador de ritmo (segundos)",
     buckets=[0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
 )
 
 SCRAPER_BACKOFF_FACTOR = Gauge(
     "scraper_backoff_factor",
-    "Fator de backoff/exponenciação atual usado pelo ThrottleManager",
+    "Fator de backoff/exponenciação atual usado pelo controlador de ritmo",
 )
 
 SCRAPER_CIRCUIT_OPEN = Gauge(

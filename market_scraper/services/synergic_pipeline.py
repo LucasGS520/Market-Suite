@@ -133,6 +133,15 @@ class SynergicPipeline:
         
         success_status = {"success", "ok", "NOT_MODIFIED"}
 
+        def _is_terminal_success(step_status: str, step_result: dict[str, Any]) -> bool:
+            """ Determina se a etapa representa um sucesso definitivo """
+            if step_status == "NOT_MODIFIED":
+                return True
+            if step_status not in success_status:
+                return False
+            details = step_result.get("details")
+            return details is not None
+
         if mode == "parallel":
             task_to_index: dict[asyncio.Task[tuple[str, dict[str, Any], str]], int] = {}
             results_by_index: dict[int, dict[str, Any]] = {}
@@ -157,7 +166,7 @@ class SynergicPipeline:
                         step_name, resp, status = finished.result()
                         results_by_index[index] = resp
 
-                        if status in success_status:
+                        if _is_terminal_success(status, resp):
                             if not first_success_detected:
                                 first_success_detected = True
                                 logger.info(
@@ -167,7 +176,7 @@ class SynergicPipeline:
                                 )
                                 for pending in pending_tasks:
                                     pending.cancel()
-                        else:
+                        elif status not in success_status:
                             SCRAPER_FALLBACK_TOTAL.inc()
                             logger.info("fallback_triggered", step=step_name)
                     except asyncio.CancelledError:
@@ -193,8 +202,8 @@ class SynergicPipeline:
                 step_name, resp, status = await _run_step(step)
                 results.append(resp)
                 
-                if status in success_status:
-                    #Interrompe o pipeline imediatamente após o primeiro sucesso
+                if _is_terminal_success(status, resp):
+                    #Interrompe o pipeline imediatamente após o primeiro sucesso definitivo
                     if idx < len(self.steps) - 1:
                         logger.info(
                             "pipeline_short_circuit",
@@ -203,7 +212,7 @@ class SynergicPipeline:
                         )
                     break
 
-                if idx < len(self.steps) - 1:
+                if idx < len(self.steps) - 1 and status not in success_status:
                     SCRAPER_FALLBACK_TOTAL.inc()
                     logger.info("fallback_triggered", step=step_name)
 

@@ -127,7 +127,7 @@ flowchart TD
 - Sempre registrar no PR alterações no YAML e nas métricas acompanhadas.
 
 ### Utilitários Compartilhados — `shared`
-- Principais componentes: `IntelligentUserAgentManager`, `CookieManager`, `ThrottleManager`, `RateLimiter`, `CircuitBreaker`, `BlockRecoveryManager`, `HumanizeDelayManager`, `AdaptiveRecheckManager`, `IntelligentCacheManager`, `DataQualityValidator`.
+- Principais componentes: `SessionIdentitymanager`, `DomainPaceController`,  `RateLimiter`, `CircuitBreaker`, `BlockRecoveryManager`, `HumanizeDelayManager`, `AdaptiveRecheckManager`, `IntelligentCacheManager`, `DataQualityValidator`.
 - Papel: suporte a scraping, resiliência, limitação de requisições e qualidade de dados.
 - Para agentes: reutilizar utilitários em novas tarefas/estratégias; evitar duplicar lógica existente.
 
@@ -135,9 +135,9 @@ flowchart TD
 
 | Gerenciador | Função/Descrição |
 |---|---|
-| `IntelligentUserAgentManager` | Seleciona/rotaciona User-Agent de forma inteligente (por domínio/estado), reduzindo bloqueios e fingerprinting previsível. |
-| `CookieManager` | Gerencia cookies por domínio/sessão; persiste e reaproveita quando saudável; reinicia/limpa em caso de bloqueios. |
-| `ThrottleManager` | Impõe atrasos mínimos entre requisições (por host/rota), evitando rajadas que acionem mitigação anti‑bot. |
+| `SessionIdentity` | Seleciona/rotaciona User-Agent e mantém cookies sincronizados por domínio/estado, reduzindo bloqueios e fingerprinting previsível. |
+| `SessionIdentityManager` | Gerencia cookies e User-Agent por domínio/sessão; persiste e reaproveita quando saudável; reinicia/limpa em caso de bloqueios. |
+| `DomainPaceController` | Coordena rate limit, token bucket e atrasos humanizados por domínio, evitando rajadas que acionem mitigação anti‑bot. |
 | `RateLimiter` | Limita taxa de requisições (p.ex. token bucket) por janela/host; garante respeito a limites globais e específicos. |
 | `CircuitBreaker` | Abre o circuito após falhas repetidas/timeouts; evita insistir em endpoints instáveis; fecha/half‑open após cooldown. |
 | `BlockRecoveryManager` | Detecta sinais de bloqueio (CAPTCHA, 403, padrões de HTML) e aciona recuperação: troca UA/cookies, backoff e limpeza de estado. |
@@ -147,7 +147,7 @@ flowchart TD
 | `DataQualityValidator` | Valida qualidade dos dados (ex.: preço numérico/positivo, nome não vazio, moeda/marketplace coerentes), rejeitando outliers. |
 
 Notas rápidas de uso:
-- Preferir compor `ThrottleManager` + `RateLimiter` + `HumanizeDelayManager` para tráfego sustentado e previsível.
+- Preferir o `DomainPaceController` aompanhado de `HumanizeDelayManager` para tráfego sustentado e previsível.
 - Consultar o cache (`IntelligentCacheManager`) antes de acionar o `market_scraper`; tratar 304 para evitar retrabalho.
 - Em erro repetido, verificar estado do `CircuitBreaker` e acionar `BlockRecoveryManager` antes de reintentar.
 - Validar sempre com `DataQualityValidator` antes de persistir/propagar dados para comparação/alertas.
@@ -201,7 +201,7 @@ Notas rápidas de uso:
 
 - Boas práticas para agentes (autoajuste):
   - Use `SCRAPER_HTTP_BLOCKED_TOTAL` e `SCRAPER_CIRCUIT_OPEN` para acionar backoff e rotação de UA/cookies.
-  - Ajuste cadência via `ThrottleManager` e `RateLimiter` quando `http_request_latency_seconds` ou `api_errors_total` aumentarem.
+  - Ajuste cadência via `DomainPaceController` e `RateLimiter` quando `http_request_latency_seconds` ou `api_errors_total` aumentarem.
   - Condicione rechecagens com `AdaptiveRecheckManager` considerando `SCRAPER_RETRY_TOTAL` e variação recente de preço.
 
 - Referências rápidas (FastAPI + Prometheus):
@@ -222,7 +222,7 @@ Notas rápidas de uso:
 - Alteração de interfaces: tenha extrema cautela ao mudar contratos de API, esquemas Pydantic, assinaturas de tasks Celery e estruturas de resposta do scraper. Preserve retrocompatibilidade (parâmetros opcionais com default), documente deprecações e atualize `AGENTS.md`, `README.md` e testes.
 - Banco e migrações: não modifique esquemas sem migrar via Alembic; descreva riscos e plano de rollback. Nunca apague dados em massa em rotinas automatizadas.
 - Observabilidade: ao introduzir funcionalidades, inclua métricas relevantes (latência, contadores de erro, tamanhos de fila) e logs estruturados. Atualize `shared/infra/prometheus/alert_rules.yml` se o SLO for afetado.
-- Desempenho e limites: respeite `ThrottleManager`/`RateLimiter`/`CircuitBreaker` ao criar rotas/tarefas que façam I/O; utilize `IntelligentCacheManager` antes de novas coletas.
+- Desempenho e limites: respeite `DomainPaceController`/`RateLimiter`/`CircuitBreaker` ao criar rotas/tarefas que façam I/O; utilize `IntelligentCacheManager` antes de novas coletas.
 - Segurança e segredos: nunca logue tokens/senhas; use `.env` e utilidades em `shared/infra` para acessar segredos. Evite hardcode de URLs/credenciais.
 - Compatibilidade local/Docker: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos (ex.: métricas Beat 8001, Worker 8002, API 8000, Scraper 8010 em dev).
 - Ao final de cada Sprint, Etapas ou Fases, trazer alertas para que haja atualização nos arquivos `README.md` e `AGENTS.md`.
@@ -289,7 +289,7 @@ Notas rápidas de uso:
 - Para preparar o ambiente local e facilitar reativação futura:
   - `playwright install chromium` (após ativar a venv e instalar requirements)
 - Diretrizes:
-  - Execute Playwright apenas para testes controlados, respeitando `ThrottleManager`/`RateLimiter`/`CircuitBreaker` e limites de domínio.
+  - Execute Playwright apenas para testes controlados, respeitando `DomainPaceController`/`RateLimiter`/`CircuitBreaker` e limites de domínio.
   - Mantenha a flag/estratégia de scraping configurada via `.env.market_scraper` (`SCRAPER_STRATEGIES`) e use headless conforme variáveis (`PLAYWRIGHT_HEADLESS`, `PLAYWRIGHT_TIMEOUT`).
 
 ### Tarefas Celery disponíveis
