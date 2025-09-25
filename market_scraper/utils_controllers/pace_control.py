@@ -18,7 +18,7 @@ from shared.metrics.metrics_scraper import (
 )
 
 from market_scraper.utils.circuit_breaker import CircuitBreaker
-from market_scraper.utils.configuration.pace_control import (
+from market_scraper.utils_controllers.configuration.pace_control import (
     PaceControlPolicy, 
     settings as pace_control_settings
 )

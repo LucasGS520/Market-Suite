@@ -11,7 +11,7 @@ from typing import Dict
 import httpx
 from requests import Response, cookies
 
-from market_scraper.utils.configuration.session_identity import (
+from market_scraper.utils_controllers.configuration.session_identity import (
     SessionIdentityPolicy,
     settings as identity_settings,
 )

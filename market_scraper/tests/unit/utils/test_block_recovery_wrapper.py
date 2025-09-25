@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
 os.environ.setdefault("SECRET_KEY", "dummy")
 
-from market_scraper.utils.block_recovery import BlockRecoveryManager, recover_html_if_blocked
+from market_scraper.utils_controllers.block_recovery import BlockRecoveryManager, recover_html_if_blocked
 from shared.enums import BlockResult
 
 

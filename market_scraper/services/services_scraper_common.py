@@ -21,13 +21,13 @@ import structlog
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.http_cache import get_cache_headers
-from market_scraper.utils.block_recovery import BlockRecoveryManager
+from market_scraper.utils_controllers.block_recovery import BlockRecoveryManager
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.mechanicalsoup_login import login_and_get_cookies
 from market_scraper.utils.circuit_breaker import CircuitBreaker
-from market_scraper.utils.pace_control import pace_controller_registry
-from market_scraper.utils.session_identity import session_identity_manager
+from market_scraper.utils_controllers.pace_control import pace_controller_registry
+from market_scraper.utils_controllers.session_identity import session_identity_manager
 
 from shared.enums import BlockResult
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping

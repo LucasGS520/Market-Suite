@@ -12,7 +12,7 @@ from shared.enums import BlockResult
 from shared.utils.redis_client import suspend_scraping
 
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
-from market_scraper.utils.session_identity import SessionIdentityManager, session_identity_manager
+from market_scraper.utils_controllers.session_identity import SessionIdentityManager, session_identity_manager
 from market_scraper.utils.intelligent_cache import IntelligentCacheManager
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.robots_txt import RobotsTxtManager

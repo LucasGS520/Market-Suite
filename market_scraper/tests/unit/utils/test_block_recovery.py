@@ -9,7 +9,7 @@ import httpx
 os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
 os.environ.setdefault("SECRET_KEY", "dummy")
 
-from market_scraper.utils.block_recovery import BlockRecoveryManager
+from market_scraper.utils_controllers.block_recovery import BlockRecoveryManager
 from shared.enums import BlockResult
 
 

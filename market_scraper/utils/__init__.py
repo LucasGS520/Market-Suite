@@ -4,7 +4,7 @@ Este pacote expõe apenas funcionalidades próprias do scraper.
 Para rotinas compartilhadas utilize ``shared.utils`` diretamente
 """
 
-from .block_recovery import recover_html_if_blocked
+from ..utils_controllers.block_recovery import recover_html_if_blocked
 from .requests_html_render import fetch_rendered_html
 
 

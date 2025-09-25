@@ -6,8 +6,8 @@ from typing import Callable
 
 import pytest
 
-from market_scraper.utils.session_identity import SessionIdentityManager
-from market_scraper.utils.configuration.session_identity import (
+from market_scraper.utils_controllers.session_identity import SessionIdentityManager
+from market_scraper.utils_controllers.configuration.session_identity import (
     SessionIdentityPolicy,
     UserAgentConfig,
     CookieTemplateConfig,
