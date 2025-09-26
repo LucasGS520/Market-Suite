@@ -208,3 +208,23 @@ async def test_is_allowed_sem_redis(no_redis, mock_http):
 
     assert await parser.is_allowed("/publico/pagina", ua) is True
     assert await parser.is_allowed("/privado/segredo", ua) is False
+
+@pytest.mark.asyncio
+async def test_disallow_rule_without_trailing_slash(fake_redis, mock_http):
+    """ Garante que regras simples bloqueiam caminhos exatos sem afetar outros """
+    robots_url = "https://example.com/robots.txt"
+    ua = "*"
+    mock_http[(robots_url, ua)] = type("Resp", (), {
+        "text": """
+        User-agent: *
+        Disallow: /search
+        """,
+        "status_code": 200,
+    })()
+
+    parser = RobotsTxtParser(base_url="https://example.com")
+    parser.redis = fake_redis
+
+    assert await parser.is_allowed("/search", ua) is False
+    assert await parser.is_allowed("/product", ua) is True
+    

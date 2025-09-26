@@ -152,11 +152,19 @@ class RobotsTxtParser:
             """ Retorna ``True`` quando a regra casa com o caminho analisado """
             if not rule:
                 return True
+            
+            escaped_rule = re.escape(rule)
+            has_end_anchor = False
             if rule.endswith("$"):
-                pattern = re.escape(rule[:-1]).replace(r"\*", ".*") + "$"
-            else:
-                pattern = re.escape(rule[:-1]).replace(r"\*", ".*")
-            return re.match("^" + pattern, target) is not None
+                escaped_rule = re.escape(rule[:-1])
+                has_end_anchor = True
+            
+            escaped_rule = escaped_rule.replace(r"\*", ".*")
+            pattern = f"^{escaped_rule}"
+            if has_end_anchor:
+                pattern += "$"
+
+            return re.match(pattern, target) is not None
 
         allowed = True
         best_len = -1
