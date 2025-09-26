@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 @dataclass(frozen=True)
-class CircuitBreakerpolicy:
+class CircuitBreakerPolicy:
     """ Representa a política aplicada a um domínio específico """
     failure_threshold: int
     recovery_time: int
@@ -35,11 +35,11 @@ class CircuitBreakerpolicy:
     
 class CircuitBreakerSettings:
     """ Armazena política padrão e políticas específicas por domínio """
-    def __init__(self, *, defaults: CircuitBreakerpolicy, domain: Dict[str, CircuitBreakerpolicy]) -> None:
+    def __init__(self, *, defaults: CircuitBreakerPolicy, domains: Dict[str, CircuitBreakerPolicy]) -> None:
         self._defaults = defaults
-        self._domain = domain
+        self._domains = domains
 
-    def policy_for(self, host: str | None) -> CircuitBreakerpolicy:
+    def policy_for(self, host: str | None) -> CircuitBreakerPolicy:
         """ Seleciona a política adequada para o domínio informado """
         if not host:
             return self._defaults
@@ -65,7 +65,7 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as handler:
         return yaml.safe_load(handler) or {}
     
-def _policy_from(data: Dict[str, Any] | None) -> CircuitBreakerpolicy:
+def _policy_from(data: Dict[str, Any] | None) -> CircuitBreakerPolicy:
     """ Normaliza bloco de configuração em :class:`CircuitBreakerPolicy` """
     if not isinstance(data, dict):
         data = {}
@@ -78,7 +78,7 @@ def _policy_from(data: Dict[str, Any] | None) -> CircuitBreakerpolicy:
         
     failure_threshold = max(1, _int(data.get("failure_threshold"), 5))
     recovery_time = max(60, _int(data.get("recovery_time"), 300))
-    return CircuitBreakerpolicy(
+    return CircuitBreakerPolicy(
         failure_threshold=failure_threshold,
         recovery_time=recovery_time,
     )
@@ -88,7 +88,7 @@ def _build_settings(data: Dict[str, Any]) -> CircuitBreakerSettings:
     defaults = _policy_from(data.get("defaults"))
     domains_raw = data.get("domains") or {}
 
-    domains: Dict[str, CircuitBreakerpolicy] = {}
+    domains: Dict[str, CircuitBreakerPolicy] = {}
     if isinstance(domains_raw, dict):
         for domain, raw_policy in domains_raw.items():
             if not isinstance(domain, str):
@@ -133,17 +133,17 @@ def _load_settings() -> CircuitBreakerSettings:
         data = _load_yaml(path)
         settings_obj = _build_settings(data)
         _CACHED_SETTINGS = settings_obj
-        _CACHED_MTIME = path.stat().st_mtime if path.exists() else None
+        _CONFIG_MTIME = path.stat().st_mtime if path.exists() else None
         return settings_obj
     
-class _SettingsAcessor:
+class _SettingsAccessor:
     """ Wrapper que expõe as configurações atuais sob interface simple """
     def __call__(self) -> CircuitBreakerSettings:
         """ Permite obter ``CircuitBreakerSetting`` usando sintaxe de chamada """
         return _load_settings()
     
-    def policy_for(self, host: str | None) -> CircuitBreakerpolicy:
+    def policy_for(self, host: str | None) -> CircuitBreakerPolicy:
         """ Encaminha para :meth:`CircuitBreakerSettings.policy_for` """
         return _load_settings().policy_for(host)
-    
-setattings = _SettingsAcessor()
+
+settings = _SettingsAccessor()
