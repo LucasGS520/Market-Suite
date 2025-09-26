@@ -157,8 +157,21 @@ async def scrape_product_common_async(
         _mark_success()
         return pre_pipeline_result.cached_response
 
-    def _persist_success(details: dict[str, Any], *, extraction_method: str | None = None) -> None:
-        """ Armazena dados válidos no cache inteligente com metadados """
+    def _persist_success(details: dict[str, Any], *, extraction_method: str | None = None) -> bool:
+        """ Armazena dados válidos no cache inteligente com metadados 
+        
+        A validação dos dados é executada imediatamente antes da persistência
+        para impedir que informações inconsistentes sejam armazenadas no cache.
+        """
+        try:
+            validator.validate(details)
+        except ValueError as err:
+            logger.warning(
+                "cache_blocked_invalid_data",
+                url=safe_log_url,
+                erro=sanitize_log_data(str(err)),
+            )
+            return False
 
         headers_cache = get_cache_headers(normalized_url)
         cache_value: dict[str, Any] = {"data": details}
@@ -187,10 +200,11 @@ async def scrape_product_common_async(
             value=cache_value,
         )
         logger.info(
-            "stored_cache", 
-            url=normalized_url, 
+            "stored_cache",
+            url=normalized_url,
             metadata_keys=list(metadata.keys())
         )
+        return True
 
     #Determina o contexto a partir do tipo de produto, permitindo políticas granulares
     pipeline_context = "competitor" if product_type == "competitor" else "default"
@@ -267,7 +281,14 @@ async def scrape_product_common_async(
                 )
                 continue
             method = entry.get("extraction_method")
-            _persist_success(pipeline_details, extraction_method=method)
+            stored = _persist_success(pipeline_details, extraction_method=method)
+            if not stored:
+                logger.info(
+                    "pipeline_data_blocked_before_cache",
+                    url=safe_log_url,
+                    step=method,
+                )
+                continue
             logger.info(
                 "pipeline_short_circuit",
                 url=safe_log_url,
@@ -303,10 +324,19 @@ async def scrape_product_common_async(
                 erro=sanitize_log_data(str(err)),
             )
         else:
-            _persist_success(
+            stored = _persist_success(
                 pipeline_details,
                 extraction_method=pipeline_result.get("extraction_method"),
             )
+            if not stored:
+                logger.info(
+                    "pipeline_data_blocked_before_cache",
+                    url=safe_log_url,
+                )
+                return {
+                    "status": "error",
+                    "detail": "Dados inválidos bloqueados antes do cache",
+                }
             logger.info(
                 "pipeline_success_fallback",
                 url=safe_log_url,

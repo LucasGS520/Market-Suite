@@ -213,7 +213,12 @@ async def test_scrape_product_common_async_pipeline_invalido(monkeypatch):
 
     pipeline_falso = PipelineSimulado(resultado=resultado_pipeline)
     monkeypatch.setattr(common, "SynergicPipeline", lambda *a, **k: pipeline_falso)
-    monkeypatch.setattr(common.cache_manager, "set", lambda *a, **k: None)
+    chamada_cache = {"valor": 0}
+
+    def _registrar_cache(*a, **k):
+        chamada_cache["valor"] += 1
+
+    monkeypatch.setattr(common.cache_manager, "set", _registrar_cache)
     monkeypatch.setattr(common, "get_cache_headers", lambda url: {})
 
     payload = SimpleNamespace(product_url="https://exemplo.com/item")
@@ -226,6 +231,63 @@ async def test_scrape_product_common_async_pipeline_invalido(monkeypatch):
 
     assert resultado["status"] == "error"
     assert resultado["detail"] == "Nenhuma etapa do pipeline obteve dados válidos"
+    assert chamada_cache["valor"] == 0
+
+@pytest.mark.asyncio
+async def test_scrape_product_common_async_bloqueia_cache_invalido(monkeypatch):
+    """ Quando o pipeline retorna dados inválidos não deve persistir no cache """
+    monkeypatch.setattr(common.cache_manager, "get", lambda *a, **k: None)
+    monkeypatch.setattr(common.cache_manager, "touch", lambda *a, **k: None)
+    monkeypatch.setattr(common, "pipeline_steps_for", lambda *a, **k: [object()])
+    monkeypatch.setattr(common, "pipeline_execution_mode_for", lambda *a, **k: "sequential")
+    monkeypatch.setattr(common, "get_cache_headers", lambda url: {})
+
+    resultado_pipeline = {
+        "results": [
+            {
+                "status": "success",
+                "details": {"name": "Produto", "current_price": "10"},
+                "extraction_method": "EtapaFalsa",
+            }
+        ],
+        "shared_context": {},
+    }
+
+    pipeline_falso = PipelineSimulado(resultado=resultado_pipeline)
+    monkeypatch.setattr(common, "SynergicPipeline", lambda *a, **k: pipeline_falso)
+
+    chamada_cache = {"valor": 0}
+
+    def _registrar_cache(*a, **k):
+        chamada_cache["valor"] += 1
+
+    monkeypatch.setattr(common.cache_manager, "set", _registrar_cache)
+
+    class validadorSequencial:
+        """ Simula validador que falha apenas na persistência """
+        def __init__(self) -> None:
+            self.chamadas = 0
+
+        def validate(self, data: dict) -> None:
+            self.chamadas += 1
+            if self.chamadas == 2:
+                raise ValueError("Falha na validação tardia")
+            
+    validador = validadorSequencial()
+    monkeypatch.setattr(common, "validator", validador)
+    monkeypatch.setattr(common.pre_pipeline_orchestrator, "validator", validador)
+
+    payload = SimpleNamespace(product_url="https://exemplo.com/item")
+    resultado = await common.scrape_product_common_async(
+        url="https://exemplo.com/item",
+        user_id=uuid4(),
+        payload=payload,
+        product_type="monitored",
+    )
+
+    assert resultado["status"] == "error"
+    assert resultado["detail"] == "Nenhuma etapa do pipeline obteve dados válidos"
+    assert chamada_cache["valor"] == 0
 
 @pytest.mark.asyncio
 async def test_scrape_product_common_async_pipeline_not_modified(monkeypatch):
