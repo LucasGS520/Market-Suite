@@ -275,7 +275,7 @@ def _load_settings() -> PaceControlSettings:
     """ Carrega e cacheia as configurações de pace control """
     global _CACHED_SETTINGS, _CACHED_FINGERPRINT, _CONFIG_MTIME
     
-    path = _config_path
+    path = _config_path()
     _maybe_reload(path)
 
     with _CONFIG_LOCK:
