@@ -18,7 +18,6 @@ __all__ = [
     "TokenBucketConfig",
     "JitterConfig",
     "HumanDelayConfig",
-    "CircuitBreakerConfig",
     "PaceControlPolicy",
     "PaceControlSettings",
     "settings",
@@ -53,19 +52,12 @@ class HumanDelayConfig:
     fatigue_max: float
 
 @dataclass(frozen=True)
-class CircuitBreakerConfig:
-    """ Estrutura base para configuração de circuit breaker por domínio """
-    failure_threshold: int
-    recovery_time: int
-
-@dataclass(frozen=True)
 class PaceControlPolicy:
     """ Agrega todas as configurações necessárias para o controle de ritmo """
     rate_limit: RateLimitConfig | None
     token_bucket: TokenBucketConfig
     jitter: JitterConfig
     human_delay: HumanDelayConfig
-    circuit_breaker: CircuitBreakerConfig
 
     def fingerprint(self) -> tuple:
         """ Retorna assinatura imutável da política para permitir cache seguro """
@@ -84,8 +76,6 @@ class PaceControlPolicy:
             self.human_delay.base_delay,
             self.human_delay.fatigue_min,
             self.human_delay.fatigue_max,
-            self.circuit_breaker.failure_threshold,
-            self.circuit_breaker.recovery_time,
         )
     
 class PaceControlSettings:
@@ -178,8 +168,14 @@ def _jitter_from(data: Dict[str, Any] | None) -> JitterConfig:
         except (TypeError, ValueError):
             return fallback
         
-    jitter_min = _float(data.get("min"), scraper_settings.JITTER_MIN)
-    jitter_max = _float(data.get("max"), scraper_settings.JITTER_MAX)
+    jitter_min = _float(
+        data.get("min", data.get("min_delay")),
+        scraper_settings.JITTER_MIN,
+    )
+    jitter_max = _float(
+        data.get("max", data.get("max_delay")),
+        scraper_settings.JITTER_MAX,
+    )
 
     if jitter_max < jitter_min:
         jitter_min, jitter_max = jitter_max, jitter_min
@@ -217,43 +213,23 @@ def _human_delay_from(data: Dict[str, Any] | None) -> HumanDelayConfig:
         fatigue_max=fatigue_max,
     )
 
-def _circuit_breaker_from(data: Dict[str, Any] | None) -> CircuitBreakerConfig:
-    """ Cria configuração padrão de circuit breaker, mesmo que ainda não utilizada """
-    if not isinstance(data, dict):
-        data = {}
-
-    def _int(value: Any, fallback: int) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return fallback
-        
-    failure_threshold = max(1, _int(data.get("failure_threshold"), 5))
-    recovery_timeout = max(60, _int(data.get("recovery_timeout"), 300))
-    return CircuitBreakerConfig(
-        failure_threshold=failure_threshold,
-        recovery_time=recovery_timeout,
-    )
-
 def _compose_policy(raw: Dict[str, Any], defaults: PaceControlPolicy) -> PaceControlPolicy:
     """ Mescla dados brutos com ``defaults`` produzindo uma política consistente """
     rate_limit = _rate_limit_from(raw.get("rate_limit")) or defaults.rate_limit
     token_bucket = _token_bucket_from(raw.get("token_bucket"))
     jitter = _jitter_from(raw.get("jitter"))
     human_delay = _human_delay_from(raw.get("human_delay"))
-    circuit_breaker = _circuit_breaker_from(raw.get("circuit_breaker"))
 
     return PaceControlPolicy(
         rate_limit=rate_limit,
         token_bucket=token_bucket,
         jitter=jitter,
         human_delay=human_delay,
-        circuit_breaker=circuit_breaker,
     )
 
 def _build_settings(data: Dict[str, Any]) -> PaceControlSettings:
     """ Constrói ``PaceControlSettings`` a partir da estrutura YAML normalizada """
-    defaults_raw = data.get("deafults") or {}
+    defaults_raw = data.get("defaults") or {}
     defaults_policy = PaceControlPolicy(
         rate_limit=_rate_limit_from(defaults_raw.get("rate_limit"))
         or RateLimitConfig(
@@ -263,7 +239,6 @@ def _build_settings(data: Dict[str, Any]) -> PaceControlSettings:
         token_bucket=_token_bucket_from(defaults_raw.get("token_bucket")),
         jitter=_jitter_from(defaults_raw.get("jitter")),
         human_delay=_human_delay_from(defaults_raw.get("human_delay")),
-        circuit_breaker=_circuit_breaker_from(defaults_raw.get("circuit_breaker")),
     )
 
     domains_raw = data.get("domains") or {}

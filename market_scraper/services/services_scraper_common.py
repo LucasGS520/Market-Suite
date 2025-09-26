@@ -138,8 +138,23 @@ async def scrape_product_common_async(
 
     shared_context: dict[str, Any] = pre_pipeline_result.shared_context
     
+    circuit_breaker = shared_context.get("circuit_breaker")
+
+    def _mark_success() -> None:
+        """ Marca sucesso no circuit breaker, ignorando erros silenciosos """
+        if circuit_breaker is None:
+            return
+        try:
+            circuit_breaker.record_success(host_label)
+        except Exception as err:
+            logger.debug(
+                "circuit_success_mark_failed",
+                error=sanitize_log_data(str(err)),
+            )
+
     if pre_pipeline_result.cached_response:
         _record_status("success")
+        _mark_success()
         return pre_pipeline_result.cached_response
 
     def _persist_success(details: dict[str, Any], *, extraction_method: str | None = None) -> None:
@@ -259,6 +274,7 @@ async def scrape_product_common_async(
                 step=method,
             )
             _record_status("success")
+            _mark_success()
             return {"status": "success", "details": pipeline_details}
         
         if status_step == "NOT_MODIFIED":
@@ -270,6 +286,7 @@ async def scrape_product_common_async(
                     url=safe_log_url,
                 )
                 _record_status("not_modified")
+                _mark_success()
                 return {"status": "NOT_MODIFIED", "details": cached_pipeline}
     
     pipeline_status = pipeline_result.get("status") or "error"
@@ -295,6 +312,7 @@ async def scrape_product_common_async(
                 url=safe_log_url,
             )
             _record_status("success")
+            _mark_success()
             return {"status": "success", "details": pipeline_details}
         
     if pipeline_status == "NOT_MODIFIED":
@@ -306,6 +324,7 @@ async def scrape_product_common_async(
                 url=safe_log_url,
             )
             _record_status("not_modified")
+            _mark_success()
             return {"status": "NOT_MODIFIED", "details": cached_pipeline}
         _record_status("not_modified")
         return {"status": "NOT_MODIFIED"}

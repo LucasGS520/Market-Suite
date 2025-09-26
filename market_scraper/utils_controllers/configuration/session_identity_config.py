@@ -38,6 +38,15 @@ class SessionIdentityPolicy:
     user_agent: UserAgentConfig
     cookie_template: CookieTemplateConfig
 
+    def fingerprint(self) -> tuple[int, int, tuple[tuple[str, str], ...]]:
+        """ Retorna assinatura imutável da política para facilitar cache """
+        cookies_signature = tuple(sorted(self.cookie_template.template.items()))
+        return (
+            self.user_agent.max_requests,
+            self.user_agent.session_timeout,
+            cookies_signature,
+        )
+
 class SessionIdentitySettings:
     """ Representa o conjunto de políticas carregadas do YAML """
     def __init__(self, *, defaults: SessionIdentityPolicy, domains: Dict[str, SessionIdentityPolicy]) -> None:
@@ -100,12 +109,12 @@ def _cookies_from(data: Dict[str, Any] | None) -> CookieTemplateConfig:
 
     return CookieTemplateConfig(template=template)
 
-def _build_setttings(data: Dict[str, Any]) -> SessionIdentitySettings:
+def _build_settings(data: Dict[str, Any]) -> SessionIdentitySettings:
     """ Transforma os dados carregados em ``SessionIdentitySettings`` """
     defaults_raw = data.get("defaults") or {}
     defaults = SessionIdentityPolicy(
         user_agent=_user_agent_from(defaults_raw.get("user_agent")),
-        cookies=_cookies_from(defaults_raw.get("cookies")),
+        cookie_template=_cookies_from(defaults_raw.get("cookies")),
     )
 
     domains_raw = data.get("domains") or {}
@@ -116,7 +125,7 @@ def _build_setttings(data: Dict[str, Any]) -> SessionIdentitySettings:
                 continue
             domains[domain.lower()] = SessionIdentityPolicy(
                 user_agent=_user_agent_from(raw_policy.get("user_agent")),
-                cookies=_cookies_from(raw_policy.get("cookies")),
+                cookie_template=_cookies_from(raw_policy.get("cookies")),
             )
 
     return SessionIdentitySettings(defaults=defaults, domains=domains)
@@ -155,7 +164,7 @@ def _load_settings() -> SessionIdentitySettings:
             return _CACHED_SETTINGS
         
         data = _load_yaml(path)
-        settings_obj = _build_setttings(data)
+        settings_obj = _build_settings(data)
         _CACHED_SETTINGS = settings_obj
         _CONFIG_MTIME = path.stat().st_mtime if path.exists() else None
         return settings_obj

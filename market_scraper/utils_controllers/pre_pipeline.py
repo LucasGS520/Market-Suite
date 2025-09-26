@@ -128,7 +128,7 @@ class PrePipelineOrchestrator:
             cookies_jar = self.identity_manager.get_cookies(session_key, host=host_label)
             cookies_jar.update(seed_cookies)
 
-        shared_context:dict[str, Any] = {
+        shared_context: dict[str, Any] = {
             "url": url,
             "product_type": product_type,
             "pace_controller": controller,

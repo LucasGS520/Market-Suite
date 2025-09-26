@@ -17,10 +17,10 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_JITTER_SECONDS,
 )
 
-from market_scraper.utils.circuit_breaker import CircuitBreaker
+from market_scraper.utils.circuit_breaker import domain_circuit_breaker_registry
 from market_scraper.utils_controllers.configuration.pace_control_config import (
     PaceControlPolicy,
-    settings as pace_control_settings
+    settings as pace_control_settings,
 )
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils.rate_limiter import RateLimiter
@@ -57,8 +57,7 @@ class DomainPaceController:
             fatigue_range=(policy.human_delay.fatigue_min, policy.human_delay.fatigue_max),
         )
 
-        self.circuit_breaker = CircuitBreaker()
-        self.circuit_breaker_config = policy.circuit_breaker
+        self.circuit_breaker = domain_circuit_breaker_registry.get(self.host)
 
         self.rate_limiter: RateLimiter | None = None
         if policy.rate_limit:
@@ -86,18 +85,25 @@ class DomainPaceController:
     async def wait_for_turn(
         self,
         *,
-        circuit_key: str, 
+        circuit_key: str,
         identifier: Optional[str] = None,
         humanized_text: str | None = None,
         reflection_time: float = 1.0,
     ) -> None:
         """ Aguarda liberação de token, aplica jitter e atraso humanizado """
+        if not self.circuit_breaker.allow_request(circuit_key):
+            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Circuit breaker ativo para o domínio",
+            )
+        
         if self.rate_limiter and not self.rate_limiter.allow_request(identifier):
             SCRAPER_HTTP_BLOCKED_TOTAL.inc()
             self.circuit_breaker.record_failure(circuit_key)
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Limite de requisições excedido para o domínio"
+                detail="Limite de requisições excedido para o domínio",
             )
 
         sleep_time = 0.0
@@ -159,9 +165,11 @@ class DomainPaceController:
                 base_delay=policy.human_delay.base_delay,
                 fatigue_range=(policy.human_delay.fatigue_min, policy.human_delay.fatigue_max),
             )
-            self.circuit_breaker_config = policy.circuit_breaker
             self._tokens = min(self._tokens, self._token_capacity)
             self._timestamp = time.monotonic()
+
+        #Recarrega circuit breaker com a política dedicada ao domínio
+        self.circuit_breaker = domain_circuit_breaker_registry.get(self.host)
 
         if policy.rate_limit:
             self.rate_limiter = RateLimiter(
@@ -174,7 +182,7 @@ class DomainPaceController:
 
 class PaceControllerRegistry:
     """ Gerencia instâncias de ``DomainPaceController`` por domínio """
-    def __init__(self):
+    def __init__(self) -> None:
         self._controllers: Dict[str, DomainPaceController] = {}
         self._lock = threading.Lock()
 

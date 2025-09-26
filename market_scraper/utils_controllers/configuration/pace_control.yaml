@@ -10,15 +10,12 @@ defaults:
     min_rate: 0.05
     decrease_factor: 0.85
   jitter:
-    min_delay: 2.0
-    max_delay: 7.0
+    min: 2.0
+    max: 7.0
   human_delay:
     avg_wpm: 200
     base_delay: 1.0
     fatigue_range: [0.5, 2.0]
-  circuit_breaker:
-    failure_threshold: 5
-    recovery_time: 300
 
 #Regras específicas por domínio monitorado
 #Apenas os campos presentes são aplicados; demais herdam de ``defaults``

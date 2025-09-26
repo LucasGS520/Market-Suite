@@ -6,7 +6,7 @@ import threading
 import time
 import random
 from dataclasses import dataclass
-from typing import Dict
+from typing import Any, Dict, Optional
 
 import httpx
 from requests import Response, cookies
@@ -24,13 +24,13 @@ class _UserAgentState:
     value: str
     count: int
     start_time: float
-    signature: tuple[int, int]
+    signature: tuple[int, int, tuple[tuple[str, str], ...]]
 
 @dataclass
 class _CookiesState:
     """ Armazena cookies gerados e a assinatura da política vigente """
     jar: cookies.RequestsCookieJar
-    signature: tuple[int, int]
+    signature: tuple[int, int, tuple[tuple[str, str], ...]]
 
 class SessionIdentityManager:
     """ Coordena identidade de sessão reutilizável pelo scraper """
@@ -39,10 +39,9 @@ class SessionIdentityManager:
         self._cookies: Dict[str, _CookiesState] = {}
         self._lock = threading.Lock()
 
-    def _policy_signature(self, policy: SessionIdentityPolicy) -> tuple[int, int]:
+    def _policy_signature(self, policy: SessionIdentityPolicy) -> tuple[int, int, tuple[tuple[str, str], ...]]:
         """ Gera assinatura estável da política para detectar alterações """
-        ua = policy.user_agent
-        return (ua.max_requests, ua.session_timeout)
+        return policy.fingerprint()
     
     def _session_key(self, session_id: str, *, host: str | None) -> str:
         """ Normaliza chave composta por domínio e identificador de sessão """
@@ -62,6 +61,7 @@ class SessionIdentityManager:
                 state is None
                 or state.count >= policy.user_agent.max_requests
                 or (now - state.start_time) >= policy.user_agent.session_timeout
+                or state.signature != signature
             ): 
                 value = random.choice(USER_AGENTS)
                 state = _UserAgentState(
@@ -150,6 +150,23 @@ class SessionIdentityManager:
             ]
             for key in expired_cookies:
                 self._cookies.pop(key, None)
+
+    def snapshot(self, session_id: str, *, host: str | None = None) -> dict[str, Any | None]:
+        """ Retorna visão resumida da sessão para logs e diagnósticos """
+        key = self._session_key(session_id, host=host)
+        with self._lock:
+            ua_state = self._user_agents.get(key)
+            cookie_state = self._cookies.get(key)
+
+            return {
+                "session_key": key,
+                "user_agent": ua_state.value if ua_state else None,
+                "ua_uses": ua_state.count if ua_state else None,
+                "cookies_signature": (
+                    tuple(sorted(cookie_state.jar.items())) if cookie_state else None
+                ),
+            }
+
 
 #Instância compartilhada para reutilização entre módulos
 session_identity_manager = SessionIdentityManager()
