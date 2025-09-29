@@ -20,7 +20,7 @@ import requests
 import structlog
 
 from shared.core.config_base import ConfigBase
-from shared.metrics import metrics_scraper as metrics
+from shared import metrics
 from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.redis_client import get_redis_client
 
