@@ -47,10 +47,28 @@ SCRAPER_BACKOFF_FACTOR = Gauge(
     "Fator de backoff/exponenciação atual usado pelo controlador de ritmo",
 )
 
-SCRAPER_CIRCUIT_OPEN = Gauge(
-    "scraper_circuit_open",
-    "Estado atual do circuit breaker do scraper",
-    ["state"],
+SCRAPER_CIRCUIT_STATE = Gauge(
+    "scraper_circuit_state",
+    "Estado atual do circuit breaker do scraper por domínio",
+    ["host", "state"],
+)
+
+SCRAPER_CIRCUIT_TRANSITIONS_TOTAL = Counter(
+    "scraper_circuit_transitions_total",
+    "Total de mudanças de estado do circuit breaker do scraper por domínio",
+    ["host", "state"],
+)
+
+SCRAPER_CIRCUIT_ATTEMPTS_TOTAL = Counter(
+    "scraper_circuit_attempts_total",
+    "Total de tentativas observadas pelo circuit breaker (permitidas, bloqueadas e falhas)",
+    ["host", "result"],
+)
+
+SCRAPER_CIRCUIT_SUSPENSIONS_TOTAL = Counter(
+    "scraper_circuit_suspensions_total",
+    "Total de suspensões aplicadas pelo circuit breaker por nível de severidade",
+    ["host", "level"],
 )
 
 SCRAPING_SUSPENDED_FLAG = Gauge(
@@ -58,8 +76,6 @@ SCRAPING_SUSPENDED_FLAG = Gauge(
     "Flag de suspensão global de scraping",
 )
 
-SCRAPER_CIRCUIT_OPEN.labels(state="open").set(0)
-SCRAPER_CIRCUIT_OPEN.labels(state="closed").set(1)
 SCRAPING_SUSPENDED_FLAG.set(0)
 
 SCRAPER_RETRY_TOTAL = Counter(
@@ -119,12 +135,6 @@ SCRAPER_URL_STATUS_TOTAL = Counter(
     ["url_host", "status"],
 )
 
-SCRAPER_CIRCUIT_STATE_CHANGES_TOTAL = Counter(
-    "scraper_circuit_state_changes_total",
-    "Total de mudanças de estado do circuit breaker do scraper",
-    ["state"],
-)
-
 __all__ = [
     "SCRAPING_LATENCY_SECONDS",
     "SCRAPER_IN_FLIGHT",
@@ -133,7 +143,10 @@ __all__ = [
     "SCRAPER_HTTP_BLOCKED_TOTAL",
     "SCRAPER_JITTER_SECONDS",
     "SCRAPER_BACKOFF_FACTOR",
-    "SCRAPER_CIRCUIT_OPEN",
+    "SCRAPER_CIRCUIT_STATE",
+    "SCRAPER_CIRCUIT_TRANSITIONS_TOTAL",
+    "SCRAPER_CIRCUIT_ATTEMPTS_TOTAL",
+    "SCRAPER_CIRCUIT_SUSPENSIONS_TOTAL",
     "SCRAPING_SUSPENDED_FLAG",
     "SCRAPER_RETRY_TOTAL",
     "SCRAPER_CAPTCHA_TOTAL",
@@ -145,5 +158,4 @@ __all__ = [
     "SCRAPER_REQUEST_SIZE_BYTES",
     "SCRAPER_RESPONSE_SIZE_BYTES",
     "SCRAPER_URL_STATUS_TOTAL",
-    "SCRAPER_CIRCUIT_STATE_CHANGES_TOTAL",
 ]

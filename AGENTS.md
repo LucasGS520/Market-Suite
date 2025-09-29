@@ -200,7 +200,7 @@ Notas rápidas de uso:
   - Redis: `redis_memory_usage_bytes` com headroom > 20%; filas sem picos contínuos.
 
 - Boas práticas para agentes (autoajuste):
-  - Use `SCRAPER_HTTP_BLOCKED_TOTAL` e `SCRAPER_CIRCUIT_OPEN` para acionar backoff e rotação de UA/cookies.
+  - Use `SCRAPER_HTTP_BLOCKED_TOTAL` e `SCRAPER_CIRCUIT_STATE` para acionar backoff e rotação de UA/cookies.
   - Ajuste cadência via `DomainPaceController` e `RateLimiter` quando `http_request_latency_seconds` ou `api_errors_total` aumentarem.
   - Condicione rechecagens com `AdaptiveRecheckManager` considerando `SCRAPER_RETRY_TOTAL` e variação recente de preço.
 
