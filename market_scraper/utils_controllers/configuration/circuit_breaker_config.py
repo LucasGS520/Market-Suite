@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
-import os
 import threading
+import os
 
 import yaml
 
@@ -100,7 +100,16 @@ def _build_settings(data: Dict[str, Any]) -> CircuitBreakerSettings:
 _CONFIG_LOCK = threading.Lock()
 _CACHED_SETTINGS: CircuitBreakerSettings | None = None
 _CONFIG_MTIME: float | None = None
-_HOT_RELOAD = bool(os.getenv("CIRCUIT_BREAKER_CONFIG_HOT_RELOAD"))
+_TRUTHY_HOT_RELOAD_VALUES = {"1", "true", "yes", "y", "on", "t"}
+
+def _parse_hot_reload_flag(raw_value: str | None) -> bool:
+    """ Interpreta a flag de hot-reload aceitando apenas valores afirmativos """
+    if raw_value is None:
+        return False
+    
+    return raw_value.strip().lower() in _TRUTHY_HOT_RELOAD_VALUES
+
+_HOT_RELOAD = _parse_hot_reload_flag(os.getenv("CIRCUIT_BREAKER_CONFIG_HOT_RELOAD"))
 
 def _maybe_reload(path: Path) -> None:
     """ Limpa cache quando o hot-reload está ativado e o arquivo foi modificado """

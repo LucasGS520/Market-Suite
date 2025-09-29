@@ -89,7 +89,7 @@ def test_hot_reload_detects_changes(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CIRCUIT_CONFIG_FILE", str(config_file))
     monkeypatch.setenv("CIRCUIT_BREAKER_CONFIG_HOT_RELOAD", "1")
 
-    config._HOT_RELOAD = True
+    config._HOT_RELOAD = config._parse_hot_reload_flag("1")
     _reset_module_state()
 
     settings_a = config._load_settings()
@@ -119,3 +119,34 @@ def test_load_settings_ignores_missing_file(monkeypatch, tmp_path) -> None:
 
     settings_obj = config._load_settings()
     assert settings_obj.policy_for("foo").fingerprint() == (5, 300)
+
+def test_maybe_reload_respects_hot_reload_flag(monkeypatch, tmp_path) -> None:
+    """ Garante que o cache só é invalidado quando a flag de hot-reload estiver ativa """
+    config_file = tmp_path / "circuit_breaker.yaml"
+    config_file.write_text(
+        "defaults: {failure_threshold: 5, recovery_time: 300}\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("CIRCUIT_CONFIG_FILE", str(config_file))
+
+    sentinel = object()
+
+    config._HOT_RELOAD = config._parse_hot_reload_flag("0")
+    config._CACHED_SETTINGS = sentinel
+    config._CONFIG_MTIME = -1.0
+
+    config._maybe_reload(config_file)
+
+    assert config._CACHED_SETTINGS is sentinel
+    assert config._CONFIG_MTIME == -1.0
+
+    config._HOT_RELOAD = config._parse_hot_reload_flag("1")
+    config._CACHED_SETTINGS = sentinel
+    config._CONFIG_MTIME = -1.0
+
+    config._maybe_reload(config_file)
+
+    assert config._CACHED_SETTINGS is None
+    assert config._CONFIG_MTIME == pytest.approx(config_file.stat().st_mtime)
+    
