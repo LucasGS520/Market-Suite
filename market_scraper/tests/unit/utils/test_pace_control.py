@@ -12,7 +12,6 @@ from market_scraper.utils_controllers.configuration.pace_control_config import (
     TokenBucketConfig,
     JitterConfig,
     HumanDelayConfig,
-    CircuitBreakerConfig,
     RateLimitConfig,
 )
 
@@ -25,7 +24,6 @@ def base_policy() -> PaceControlPolicy:
         token_bucket=TokenBucketConfig(rate=2.0, capacity=2.0, min_rate=0.5, decrease_factor=0.5),
         jitter=JitterConfig(min=0.0, max=0.0),
         human_delay=HumanDelayConfig(avg_wpm=200.0, base_delay=0.0, fatigue_min=0.0, fatigue_max=0.0),
-        circuit_breaker=CircuitBreakerConfig(failure_threshold=5, recovery_time=300),
     )
 
 @pytest.mark.asyncio
@@ -87,7 +85,6 @@ def test_update_policy_altera_parametros(base_policy: PaceControlPolicy) -> None
         token_bucket=TokenBucketConfig(rate=5.0, capacity=5.0, min_rate=1.0, decrease_factor=0.8),
         jitter=JitterConfig(min=0.0, max=0.0),
         human_delay=HumanDelayConfig(avg_wpm=150.0, base_delay=1.0, fatigue_min=0.1, fatigue_max=0.2),
-        circuit_breaker=CircuitBreakerConfig(failure_threshold=3, recovery_time=120),
     )
 
     controller.update_policy(nova_politica)
@@ -103,7 +100,6 @@ async def test_wait_for_turn_respeita_rate_limiter(monkeypatch: pytest.MonkeyPat
         token_bucket=base_policy.token_bucket,
         jitter=base_policy.jitter,
         human_delay=base_policy.human_delay,
-        circuit_breaker=base_policy.circuit_breaker,
     )
     fake_rate_limiter = SimpleNamespace(allow_request=lambda identifier: False)
 
