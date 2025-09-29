@@ -135,6 +135,44 @@ SCRAPER_URL_STATUS_TOTAL = Counter(
     ["url_host", "status"],
 )
 
+SCRAPER_RATE_LIMIT_REQUESTS_TOTAL = Counter(
+    "scraper_rate_limit_requests_total",
+    "Total de verificações realizadas pelo limitador de taxa do scraper",
+    ["host", "result"],
+)
+
+SCRAPER_RATE_LIMIT_LATENCY_SECONDS = Histogram(
+    "scraper_rate_limit_latency_seconds",
+    "Latência das verificações do limitador de taxa do scraper (segundos)",
+    ["host"],
+    buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0],
+)
+
+SCRAPER_RATE_LIMIT_MODE = Gauge(
+    "scraper_rate_limit_mode",
+    "Modo atual do limitador de taxa (1=ativo via Redis, 0=passivo sem Redis)",
+    ["host"],
+)
+
+SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
+    "scraper_cache_lookups_total",
+    "Total de consultas ao cache inteligente do scraper",
+    ["backend", "outcome"],
+)
+
+SCRAPER_CACHE_LATENCY_SECONDS = Histogram(
+    "scraper_cache_latency_seconds",
+    "Latência das operações do cache inteligente do scraper (segundos)",
+    ["operation"],
+    buckets=[0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5],
+)
+
+SCRAPER_CACHE_LOCAL_SIZE = Gauge(
+    "scraper_cache_local_size",
+    "Quantidade de entradas armazenadas no cache local de contingência do scraper",
+)
+
+
 __all__ = [
     "SCRAPING_LATENCY_SECONDS",
     "SCRAPER_IN_FLIGHT",
@@ -158,4 +196,10 @@ __all__ = [
     "SCRAPER_REQUEST_SIZE_BYTES",
     "SCRAPER_RESPONSE_SIZE_BYTES",
     "SCRAPER_URL_STATUS_TOTAL",
+    "SCRAPER_RATE_LIMIT_REQUESTS_TOTAL",
+    "SCRAPER_RATE_LIMIT_LATENCY_SECONDS",
+    "SCRAPER_RATE_LIMIT_MODE",
+    "SCRAPER_CACHE_LOOKUPS_TOTAL",
+    "SCRAPER_CACHE_LATENCY_SECONDS",
+    "SCRAPER_CACHE_LOCAL_SIZE",
 ]

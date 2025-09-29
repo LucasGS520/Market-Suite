@@ -101,7 +101,10 @@ flowchart TD
   - `SCRAPER_STRATEGY_TOTAL` (labels: classe, status).
   - `SCRAPER_FALLBACK_TOTAL` (contador global de fallback).
   - `SCRAPING_LATENCY_SECONDS` (histograma por etapa).
-  - Complementares: `SCRAPER_HTTP_BLOCKED_TOTAL`, `SCRAPER_CACHE_HIT_TOTAL` quando importados por rotas específicas.
+  - `SCRAPER_RATE_LIMIT_REQUESTS_TOTAL` (labels: host, result) e `SCRAPER_RATE_LIMIT_MODE` (gauge para modo ativo/passivo)
+  - `SCRAPER_CACHE_LOOKUPS_TOTAL` (labels: backend, outcome) + `SCRAPER_CACHE_LATENCY_SECONDS` para acompanhar hits, misses e expirações
+  - `SCRAPER_CACHE_LOCAL_SIZE` (gauge com volume atual do cache local)
+  - Complementares: `SCRAPER_HTTP_BLOCKED_TOTAL` quando importado por rotas específicas.
 
 #### Checklist para novas estratégias ou etapas
 1. Criar a classe herdando de `ScrapingStrategy` ou `PipelineStep`.

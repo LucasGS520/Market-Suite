@@ -65,6 +65,7 @@ class DomainPaceController:
                 redis_key=f"scraper:pace:{self.host}",
                 max_requests=policy.rate_limit.max_requests,
                 window_seconds=policy.rate_limit.window,
+                metrics_host=self.host,
             )
 
     @property
@@ -176,6 +177,7 @@ class DomainPaceController:
                 redis_key=f"scraper:pace:{self.host}",
                 max_requests=policy.rate_limit.max_requests,
                 window_seconds=policy.rate_limit.window,
+                metrics_host=self.host,
             )
         else:
             self.rate_limiter = None

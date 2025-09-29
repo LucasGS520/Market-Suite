@@ -16,6 +16,11 @@ import structlog
 
 from market_scraper.core.config_scraper import settings
 
+from shared.metrics.metrics_scraper import (
+    SCRAPER_CACHE_LATENCY_SECONDS,
+    SCRAPER_CACHE_LOCAL_SIZE,
+    SCRAPER_CACHE_LOOKUPS_TOTAL,
+)
 from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.redis_client import get_redis_client
 
@@ -40,6 +45,7 @@ class IntelligentCacheManager:
         self.ttl = int(ttl) if ttl is not None else DEFAULT_CACHE_TTL
         #Armazenamento local utilizado quando o Redis não está disponível
         self._local_cache: Dict[str, Dict[str, Any]] = {}
+        SCRAPER_CACHE_LOCAL_SIZE.set(0)
 
     def _hash_content(self, marketplace: str, url: str) -> str:
         """ Gera um hash único combinando marketplace e URL normalizada """
@@ -56,12 +62,34 @@ class IntelligentCacheManager:
         key = self._build_key(marketplace, url)
         client = get_redis_client()
 
-        if client is not None:
+        start = time.perf_counter()
+
+        if client is None:
+            SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
+                backend="redis",
+                outcome="unavailable",
+            ).inc()
+        else:
             try:
                 data = client.get(key)
                 if data:
+                    SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
+                        backend="redis",
+                        outcome="hit",
+                    ).inc()
+                    SCRAPER_CACHE_LATENCY_SECONDS.labels(operation="get").observe(
+                        time.perf_counter() - start
+                    )
                     return json.loads(data)
+                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
+                    backend="redis",
+                    outcome="miss",
+                ).inc()
             except Exception as err:
+                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
+                    backend="redis",
+                    outcome="error",
+                ).inc()
                 logger.warning(
                     "falha_cache_redis",
                     erro=sanitize_log_data(str(err)),
@@ -70,12 +98,34 @@ class IntelligentCacheManager:
 
         entry = self._local_cache.get(key)
         if not entry:
+            SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
+                backend="local",
+                outcome="miss",
+            ).inc()
+            SCRAPER_CACHE_LATENCY_SECONDS.labels(operation="get").observe(
+                time.perf_counter() - start
+            )
             return None
-        
+
         ttl_entry = entry.get("ttl", self.ttl)
         if time.time() - entry["timestamp"] > ttl_entry:
             self._local_cache.pop(key, None)
+            SCRAPER_CACHE_LOCAL_SIZE.set(len(self._local_cache))
+            SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
+                backend="local",
+                outcome="expired",
+            ).inc()
+            SCRAPER_CACHE_LATENCY_SECONDS.labels(operation="get").observe(
+                time.perf_counter() - start
+            )
             return None
+        SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
+            backend="local",
+            outcome="hit",
+        ).inc()
+        SCRAPER_CACHE_LATENCY_SECONDS.labels(operation="get").observe(
+            time.perf_counter() - start
+        )
         return entry["value"]
 
     def set(
@@ -92,10 +142,16 @@ class IntelligentCacheManager:
         key = self._build_key(marketplace, url)
         client = get_redis_client()
 
+        start = time.perf_counter()
+
         if client is not None:
             try:
                 client.setex(key, ttl, json.dumps(value))
             except Exception as err:
+                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
+                    backend="redis",
+                    outcome="error",
+                ).inc()
                 logger.warning(
                     "falha_cache_redis",
                     erro=sanitize_log_data(str(err)),
@@ -107,9 +163,17 @@ class IntelligentCacheManager:
         if entry and entry.get("value") == value:
             entry["timestamp"] = now
             entry["ttl"] = ttl
+            SCRAPER_CACHE_LOCAL_SIZE.set(len(self._local_cache))
+            SCRAPER_CACHE_LATENCY_SECONDS.labels(operation="set").observe(
+                time.perf_counter() - start
+            )
             return
         
         self._local_cache[key] = {"value": value, "timestamp": now, "ttl": ttl}
+        SCRAPER_CACHE_LOCAL_SIZE.set(len(self._local_cache))
+        SCRAPER_CACHE_LATENCY_SECONDS.labels(operation="set").observe(
+            time.perf_counter() - start
+        )
 
     def touch(self, *, marketplace: str | None, url: str, ttl: Optional[int] = None) -> None:
         """ Renova o TTL da chave após um acesso bem-sucedido do cache """
@@ -117,6 +181,8 @@ class IntelligentCacheManager:
         key = self._build_key(marketplace, url)
         ttl = int(ttl) if ttl is not None else self.ttl
         client = get_redis_client()
+
+        start = time.perf_counter()
 
         if client is not None:
             try:
@@ -132,5 +198,9 @@ class IntelligentCacheManager:
         if entry:
             entry["timestamp"] = time.time()
             entry["ttl"] = ttl
+        SCRAPER_CACHE_LOCAL_SIZE.set(len(self._local_cache))
+        SCRAPER_CACHE_LATENCY_SECONDS.labels(operation="touch").observe(
+            time.perf_counter() - start
+        )
             
 __all__ = ["IntelligentCacheManager", "DEFAULT_CACHE_PREFIX", "DEFAULT_CACHE_TTL"]

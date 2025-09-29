@@ -40,6 +40,9 @@ class FakeRedis:
         self._purge_expired()
         return self.data.get(key)
 
+    def setex(self, key, ttl, value):
+        self.set(key, value, ex=ttl)
+
     def exists(self, key):
         self._purge_expired()
         return key in self.data
@@ -97,17 +100,10 @@ def patch_rate_limiter(monkeypatch):
     """ Substitui a classe Redis por uma fake e evitar conexão real com redis e leitura de arquivo Lua """
     fake_redis = FakeRedis()
 
-    def fake_init(self, redis_key: str, max_requests: int, window_seconds: int):
-        self.redis = fake_redis
-        self.key = redis_key
-        self.limit = max_requests
-        self.window = window_seconds
-        self.window_ms = window_seconds * 1000
-        self.lua_sha = "fake-sha"
-
-    monkeypatch.setattr(RateLimiter, "__init__", fake_init)
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("market_scraper.utils.rate_limiter.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_scraper.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("market_scraper.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(
         "market_scraper.utils.robots_txt.requests.get",
