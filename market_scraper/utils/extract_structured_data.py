@@ -1,10 +1,10 @@
 """ Funções auxiliares para extração de dados estruturados com Extruct 
 
-Este módulo centraliza a utilização da biblioteca ``extruct`` para
-recuperar metadados como JSON-LD, Microdata e Open Graph a partir de 
-um HTML bruto. Ao padronizar essa etapa em uma função única, 
-facilitamos a manutenção e garantimos comportamento consistente entre
-as estratégias de scraping.
+O módulo concentra a utilização da biblioteca ``extruct`` para 
+recuperar metadados como JSON-LD, Microdata e OpenGraph a partir de
+um HTML bruto. Ao padronizar essa etapa em uma função única, garantimos
+comportamento consistente entre as estratégias de scraping e uma
+instrumentação homogênea das métricas de parsing.
 """
 
 from typing import Any, Dict, Optional
@@ -36,7 +36,7 @@ def extract_structured_data(html: str, url: Optional[str] = None) -> Dict[str, A
         Em caso de erro de parsing, retorna um dicionário vazio para permitir que a estratégia realize o fallback adequado
     """
     base_url = get_base_url(html, url)
-    home = perf_counter()
+    start_time = perf_counter()
     try:
         result = extruct.extract(
             html,
@@ -48,9 +48,12 @@ def extract_structured_data(html: str, url: Optional[str] = None) -> Dict[str, A
         return result
     except (JSONDecodeError, ValueError) as exc:
         PARSER_FAILURE_TOTAL.labels(library="extruct").inc()
-        logger.exception("Erro ao extrair dados estruturados com Extruct", erro=sanitize_log_data(str(exc)))
+        logger.exception(
+            "erro_extracao_dados_estruturados",
+            error=sanitize_log_data(str(exc)),
+        )
         #Retorna um dicionário com listas vazias para sinalizar ausência de dados válidos sem interromper o fluxo das estratégias
         return {"json-ld": [], "microdata": [], "opengraph": []}
     finally:
-        duration = perf_counter() - home
+        duration = perf_counter() - start_time
         PARSER_DURATION_SECONDS.labels(library="extruct").observe(duration)

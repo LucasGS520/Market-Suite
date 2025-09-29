@@ -10,8 +10,12 @@ from market_scraper.core.config_scraper import settings
 
 
 class HumanizedDelayManager:
-    """ Calcula atrasos dinâmicos para simulação de navegação humana """
-
+    """ Calcula atrasos dinâmicos para simulação de navegação humana 
+    
+    O gerenciador combina tempo de leitura estimado, pequenas pausas de
+    reflexão e um fator de fadiga aleatório para variar o ritmo das
+    requisições e mitigar bloqueios por comportamento robótico.
+    """
     def __init__(
         self,
         avg_wpm: int | float = settings.HUMAN_AVG_WPM,
@@ -33,12 +37,12 @@ class HumanizedDelayManager:
         return self.base_delay + reflection_time + reading_time + fatigue
 
     def wait(self, text: str | None, reflection_time: float = 1.0) -> None:
-        """ Aguarda o tempo calculado de forma síncrona """
+        """ Bloqueia o fluxo pelo tempo calculado de forma síncrona """
         delay = self.calculate_delay(text, reflection_time)
         time.sleep(delay)
 
     async def wait_async(self, text: str | None, reflection_time: float = 1.0) -> None:
-        """ Aguarda o tempo calculado de forma assíncrona """
+        """ Aguarda de forma assíncrona o tempo calculado para a interação """
         delay = self.calculate_delay(text, reflection_time)
         await asyncio.sleep(delay)
 

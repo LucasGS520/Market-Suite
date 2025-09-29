@@ -6,19 +6,25 @@ import re
 
 
 class DataQualityValidator:
-    """ Verifica consistência básica dos dados obtidos no parser """
-
+    """ Verifica consistência básica dos dados obtidos no parser 
+    
+    O objetivo é interromper o pipeline o quanto antes quando valores
+    essenciais estão ausentes ou apresentam formatos suspeitos, evitando
+    que dados inválidos cheguem às camadas de comparação ou alerta.
+    """
     def __init__(
         self,
         mandatory_fields: Iterable[str] | None = None,
         expected_currency: str | None = None,
     ) -> None:
-        """ Inicializa o validador com campos obrigatórios e moeda esperada opcional """
+        """ Inicializa o validador com campos obrigatórios e moeda esperada """
         #Apenas ``name`` e ``current_price`` são verificados por padrão
-        self.mandatory_fields = list(mandatory_fields or [
-            "name",
-            "current_price",
-        ])
+        self.mandatory_fields = list(
+            mandatory_fields or [
+                "name",
+                "current_price",
+            ]
+        )
         #Moeda esperada, como ``R$`` ou ``US$``
         self.expected_currency = expected_currency
 
