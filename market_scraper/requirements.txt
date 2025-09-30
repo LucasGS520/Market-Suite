@@ -1,9 +1,11 @@
 aiohttp==3.12.15
 beautifulsoup4==4.13.4
 cloudscraper==1.2.71
+cachetools==5.2.2
 extruct==0.15.0
 fastapi==0.115.12
 httpx==0.28.1
+httpx-cache==0.13.0
 lxml==4.9.4
 mechanicalsoup==1.4.0
 parsel==1.9.1
