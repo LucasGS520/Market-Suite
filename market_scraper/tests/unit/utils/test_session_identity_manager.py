@@ -21,7 +21,10 @@ def configure_policy(monkeypatch: pytest.MonkeyPatch) -> Callable[..., SessionId
             user_agent=UserAgentConfig(max_requests=max_requests, session_timeout=session_timeout),
             cookie_template=CookieTemplateConfig(template=template or {}),
         )
-        monkeypatch.setattr("market_scraper.utils.session_identity.identity_settings.policy_for", lambda host: policy)
+        monkeypatch.setattr(
+            "market_scraper.utils_controllers.session_identity.identity_settings.policy_for", 
+            lambda host: policy,
+        )
         return policy
     
     return _apply
@@ -42,7 +45,10 @@ def test_user_agent_rotaciona_apos_limite(monkeypatch: pytest.MonkeyPatch, confi
     """ Deve reutilizar o mesmo User-Agent enquanto não atinge o limite """
     configure_policy(max_requests=2)
     uas = iter(["UA-1", "UA-2"])
-    monkeypatch.setattr("market_scraper.utils.session_identity.random.choice", lambda seq: next(uas))
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.session_identity.random.choice", 
+        lambda seq: next(uas),
+    )
 
     assert manager.get_user_agent("sessao", host="example.com") == "UA-1"
     assert manager.get_user_agent("sessao", host="example.com") == "UA-1"
@@ -54,9 +60,15 @@ def test_user_agent_rotaciona_apos_timeout(monkeypatch: pytest.MonkeyPatch, conf
     uas = iter(["UA-1", "UA-2"])
     tempos = [0.0, 1.0, 6.0]
 
-    monkeypatch.setattr("market_scraper.utils.session_identity.random.choice", lambda seq: next(uas))
-    monkeypatch.setattr("market_scraper.utils.session_identity.time.monotonic", lambda: tempos.pop(0))
-
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.session_identity.random.choice",
+        lambda seq: next(uas),
+    )
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.session_identity.time.monotonic",
+        lambda: tempos.pop(0),
+    )
+    
     assert manager.get_user_agent("sessao", host="example.com") == "UA-1"
     assert manager.get_user_agent("sessao", host="example.com") == "UA-1"
     assert manager.get_user_agent("sessao", host="example.com") == "UA-2"

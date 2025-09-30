@@ -30,7 +30,10 @@ def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
     mgr = BlockRecoveryManager(identity_manager=identity, delay_manager=delay)
 
     called = []
-    monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: called.append(s))
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.block_recovery.suspend_scraping",
+        lambda s: called.append(s),
+    )
 
     class DummyRobots:
         async def is_allowed(self, path, user_agent):
@@ -39,7 +42,10 @@ def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
         async def get_crawl_delay(self, user_agent):
             return 0
         
-    monkeypatch.setattr("market_scraper.utils.block_recovery.RobotsTxtManager", lambda base_url: DummyRobots())
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.block_recovery.RobotsTxtManager", 
+        lambda base_url: DummyRobots(),
+    )
 
     class DummyClient:
         def __init__(self, *a, **k):
@@ -83,7 +89,10 @@ def test_handle_block_uses_cache_when_request_fails(monkeypatch):
 
     mgr = BlockRecoveryManager(identity_manager=identity, delay_manager=delay)
 
-    monkeypatch.setattr("market_scraper.utils.block_recovery.suspend_scraping", lambda s: None)
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.block_recovery.suspend_scraping", 
+        lambda s: None,
+    )
 
     class DummyRobots:
         async def is_allowed(self, path, user_agent):
@@ -92,7 +101,10 @@ def test_handle_block_uses_cache_when_request_fails(monkeypatch):
         async def get_crawl_delay(self, user_agent):
             return 0
         
-    monkeypatch.setattr("market_scraper.utils.block_recovery.RobotsTxtManager", lambda base_url: DummyRobots())
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.block_recovery.RobotsTxtManager", 
+        lambda base_url: DummyRobots(),
+    )
 
     class FailClient:
         def __init__(self, *a, **k):
@@ -113,7 +125,10 @@ def test_handle_block_uses_cache_when_request_fails(monkeypatch):
         def get(self, *, marketplace, url):
             return {"html": "<cached></cached>"}
 
-    monkeypatch.setattr("market_scraper.utils.block_recovery.IntelligentCacheManager", DummyCache)
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.block_recovery.IntelligentCacheManager", 
+        DummyCache,
+    )
 
     html = asyncio.run(mgr.handle_block(BlockResult.HTTP_429, session_id="sess", url="http://exemplo.com"))
 

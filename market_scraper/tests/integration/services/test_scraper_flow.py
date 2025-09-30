@@ -125,7 +125,10 @@ def setup_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_wait_for_turn(self, *, circuit_key: str, identifier: str | None = None, humanized_text: str | None = None, reflection_time: float = 1.0) -> None:
         return None
 
-    monkeypatch.setattr("market_scraper.utils.pace_control.DomainPaceController.wait_for_turn", fake_wait_for_turn)
+    monkeypatch.setattr(
+        "market_scraper.utils_controllers.pace_control.DomainPaceController.wait_for_turn",
+        fake_wait_for_turn,
+    )
     monkeypatch.setattr("market_scraper.services.services_scraper_common.pace_registry", type("DummyRegistry", (), {"get": lambda self, host: DummyPaceController()})())
 
     def _fake_feature_flag(feature: str, url: str, *, context: str = "default", identifier: str | None = None, **kwargs) -> FeatureFlagDecision:
