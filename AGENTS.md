@@ -106,6 +106,22 @@ flowchart TD
   - `SCRAPER_CACHE_LOCAL_SIZE` (gauge com volume atual do cache local)
   - Complementares: `SCRAPER_HTTP_BLOCKED_TOTAL` quando importado por rotas específicas.
 
+#### Consolidação dos utilitários do `market_scraper`
+- `market_scraper/utils/` mantém helpers puros (sem estado compartilhado) como validação de dados (`DataQualityValidator`), utilidades HTTP, cache inteligente, rotação de user-agent e parsers auxiliares. Esses módulos podem ser importados diretamente pelas etapas do pipeline sem depender de configuração global.
+- `market_scraper/utils_controllers` concentra orquestradores com estado (controle de ritmo, recuperação pós-bloqueio, pré-processamento obrigatório, sessão/cookies). Eles encapsulam acesso a Redis, métricas e circuit breaker, evitando que cada etapa manipule diretamente recursos externos.
+- `shared/utils` continua sendo a fonte para rotinas verdadeiramente compartilhadas (normalização de URL, logging, Redis). Sempre avalie se o helper pertence á camada comum antes de criar novos módulos no scraper.
+
+**Boas práticas ao criar/editar utilitários:**
+- Comente e escreva docstrings em protuguês explicando entradas, saídas e efeitos colaterais.
+- Prefira funções puras em `utils/`; quando precisar manter estado ou coordenar múltiplos utilitários, promova a regra para um controller em `utils_controllers/`.
+- Exponha métricas existentes em vez de criar novas duplicadas. Bloqueios de robots/HTTP incrementam `SCRAPER_HTTP_BLOCKED_TOTAL`, status agregados usam `SCRAPER_URL_STATUS_TOTAL` e rotinas de ritmo devem acionar `SCRAPER_RATE_LIMIT_REQUESTS_TOTAL`
+- Sempre que um controller depender de arquivos externos, acrescente variáveis de ambiente correspondentes e decreva o comportamento no `README.md`/`AGENTS.md`
+
+**Testes de regressão dos utilitários:**
+- `pytest market_scraper/tests/unit/utils -q`
+- `pytest market_scraper/tests/unit/utils_controllers -q`
+- Módulos que utilizam hot-reload possuem fixtures dedicadas (`tmp_path`, `monkeypatch`) para simular alterações em disco; reutilize-as para garantir cobertura.
+
 #### Checklist para novas estratégias ou etapas
 1. Criar a classe herdando de `ScrapingStrategy` ou `PipelineStep`.
 2. Registrar no YAML (`strategies` ou `pipeline_steps`) e definir a ordem desejada.

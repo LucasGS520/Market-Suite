@@ -92,6 +92,12 @@ Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML
 - **utils/** - reúne auxiliares como rotação de *user agent*, gerenciamento de cookies, delays humanizados, leitura de ``robots.txt`` e funções de preço.
 - **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço, incluindo cenários que validam a seleção de etapas via YAML.
 
+#### Camada de utilitários consolidados
+- `market_scraper/utils` concentra helpers puros e reutilizáveis (normalização de URLs específicas, validação de dados, cache inteligente, funções de preço, rederização leve). Esses módulos não mantêm estado compartilhado e podem ser importados diretamente pelas etapas do pipeline.
+- `market_scraper/utils_controllers` abriga componentes com estado ou dependências externas, como controle de ritmo por domínio (`DomainPaceController`), gerenciamento de sessão/identidade (`SessionIdentityManager`), orquestração de pré-processamento e mecanismos de recuperação pós-bloqueio. Utilize-os quando a regra precisar coordenar múltiplos utilitários ou expor métricas.
+- `market_scraper/utils_controllers/configuration` oferece loaders com hot-reload para políticas de ritmo, identidade e circuit breaker. O módulo ``base_loader.py`` padroniza leitura de YAML, cache em memória e invalidação por hash/mtime; derive novos loaders a partir dele para manter comportamento consistente.
+- Testes dedicados garantem regressão: ``pytest market_scraper/tests/unit/utils -q`` cobre helpers puros, enquanto ``pytest market_scraper/tests/unit/utils_controllers -q`` valida controllers e loaders configuráveis. 
+
 Os parsers de HTML e dados estruturados residem em `market_scraper/parsers`, cada módulo responsável apenas por transformar o HTML bruto em um dicionário padronizado. Os `SynergicPipeline` concentra toda a orquestração e fallback, evitando estratégias isoladas.
 
 ### Papel na arquitetura

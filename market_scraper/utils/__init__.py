@@ -1,7 +1,10 @@
 """ Utilitários e helpers usados em toda a aplicação de scraping
 
-Este pacote expõe apenas funcionalidades próprias do scraper.
-Para rotinas compartilhadas utilize ``shared.utils`` diretamente
+Reune somente funções puras e helpers específicos do ``market_scraper``
+Controllers com estado (cookies, ritmo, circuito) residem em 
+``market_scraper.utils_controllers`` para manter responsabilidades
+isoladas. Para rotinas realmente compartilhadas entre serviços
+consulte ``shared.utils`` diretamente.
 """
 
 from ..utils_controllers.block_recovery import recover_html_if_blocked
