@@ -12,6 +12,7 @@ from market_scraper.services.domain_policy import (
     is_feature_enabled,
     FeatureFlagConfig,
 )
+from shared.metrics.metrics_scraper import SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS
 
 def _nomes_das_etapas(etapas: list) -> list[str]:
     """ Extrai os nomes das classes para facilitar asserções legíveis """
@@ -206,4 +207,84 @@ def test_feature_flag_disabled(monkeypatch):
     )
 
     assert ativo is False
+    
+def test_load_config_mantem_estado_com_yaml_invalido(monkeypatch, tmp_path, capfd):
+    """ Ao encontrar YAML inválido deve manter a configuração anterior e registrar o erro """
+
+    valido = (
+        "pipeline_steps:\n"
+        "  base: ExtructExtractionStep\n"
+        "pipeline_policies:\n"
+        "  example.com:\n"
+        "    - base\n"
+    )
+
+    invalido = (
+        "pipeline_steps: [\n"
+        "  - base\n"
+    )
+
+    cfg = tmp_path / "domain_policy.yaml"
+    cfg.write_text(valido, encoding="utf-8")
+
+    monkeypatch.setattr(domain_policy, "CONFIG_PATH", cfg)
+    domain_policy.load_config()
+
+    passos_antes = _nomes_das_etapas(pipeline_steps_for("https://example.com/item"))
+    assert passos_antes == ["ExtructExtractionStep"]
+    mtime_antes = domain_policy._CONFIG_MTIME
+    hash_antes = domain_policy._CONFIG_HASH
+
+    cfg.write_text(invalido, encoding="utf-8")
+
+    capfd.readouterr()
+    domain_policy.load_config()
+    stdout, stderr = capfd.readouterr()
+
+    assert "domain_policy_config_invalid" in stdout
+    assert _nomes_das_etapas(pipeline_steps_for("https://example.com/item")) == passos_antes
+    assert domain_policy._CONFIG_MTIME == mtime_antes
+    assert domain_policy._CONFIG_HASH == hash_antes
+    assert domain_policy.CONFIG_LOAD_FAILED is True
+    assert SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS._value.get() == 0
+
+
+def test_load_config_recupera_apos_correcao(monkeypatch, tmp_path):
+    """ Após correção do YAML a configuração deve ser atualizada e as métricas resetadas """
+
+    inicial = (
+        "pipeline_steps:\n"
+        "  base: ExtructExtractionStep\n"
+        "pipeline_policies:\n"
+        "  example.com:\n"
+        "    - base\n"
+    )
+
+    corrigido = (
+        "pipeline_steps:\n"
+        "  base: ParselExtractionStep\n"
+        "pipeline_policies:\n"
+        "  example.com:\n"
+        "    - base\n"
+    )
+
+    cfg = tmp_path / "domain_policy.yaml"
+    cfg.write_text(inicial, encoding="utf-8")
+
+    monkeypatch.setattr(domain_policy, "CONFIG_PATH", cfg)
+    domain_policy.load_config()
+
+    hash_inicial = domain_policy._CONFIG_HASH
+
+    cfg.write_text("pipeline_steps: [\n", encoding="utf-8")
+    domain_policy.load_config()
+
+    cfg.write_text(corrigido, encoding="utf-8")
+    domain_policy.load_config()
+
+    passos_novos = _nomes_das_etapas(pipeline_steps_for("https://example.com/item"))
+    assert passos_novos == ["ParselExtractionStep"]
+    assert domain_policy._CONFIG_HASH != hash_inicial
+    assert domain_policy.CONFIG_LOAD_FAILED is False
+    assert SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS._value.get() == 1
     

@@ -15,12 +15,15 @@ from typing import Any, Dict, List, Type, Literal, cast
 import hashlib
 import os
 
+import structlog
 import yaml
 
 import market_scraper.services.pipeline_steps as pipeline_steps_module
 from market_scraper.services.synergic_pipeline import PipelineStep
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils_controllers.configuration.base_loader import calculate_file_hash
+from shared.metrics.metrics_scraper import SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS
+from shared.utils.logging_utils import sanitize_log_data
 
 
 #Caminho do arquivo de configuração. Pode ser alterado via variável de ambiente ``DOMAIN_POLICY_FILE``
@@ -43,6 +46,11 @@ PIPELINE_STEP_OPTIONS: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
 _HOT_RELOAD = bool(os.getenv("DOMAIN_POLICY_HOT_RELOAD"))
 _CONFIG_MTIME = 0.0
 _CONFIG_HASH: str | None = None
+
+#Indicador da última tentativa de carga do arquivo de políticas
+CONFIG_LOAD_FAILED = False
+
+logger = structlog.get_logger("domain_policy")
 
 @dataclass(frozen=True)
 class FeatureFlagConfig:
@@ -170,7 +178,7 @@ def load_config() -> None:
     """ Carrega as etapas do pipeline e políticas do arquivo configurado """
     global PIPELINE_STEP_REGISTRY, PIPELINE_POLICIES
     global PIPELINE_EXECUTION, FEATURE_FLAGS, _CONFIG_MTIME, _CONFIG_HASH
-    global PIPELINE_STEP_OPTIONS
+    global PIPELINE_STEP_OPTIONS, CONFIG_LOAD_FAILED
 
     if not CONFIG_PATH.exists():
         PIPELINE_STEP_REGISTRY = {}
@@ -180,10 +188,31 @@ def load_config() -> None:
         PIPELINE_STEP_OPTIONS = {}
         _CONFIG_MTIME = 0.0
         _CONFIG_HASH = None
+        CONFIG_LOAD_FAILED = False
+        SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(1)
         return
 
-    with CONFIG_PATH.open("r", encoding="utf-8") as handler:
-        data = yaml.safe_load(handler) or {}
+    try:
+        with CONFIG_PATH.open("r", encoding="utf-8") as handler:
+            data = yaml.safe_load(handler) or {}
+    except yaml.YAMLError as exc:
+        logger.error(
+            "domain_policy_config_invalid",
+            config_path=str(CONFIG_PATH),
+            error=sanitize_log_data(str(exc)),
+        )
+        CONFIG_LOAD_FAILED = True
+        SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(0)
+        return
+    except OSError as exc:
+        logger.exception(
+            "domain_policy_config_read_error",
+            config_path=str(CONFIG_PATH),
+            error=sanitize_log_data(str(exc)),
+        )
+        CONFIG_LOAD_FAILED = True
+        SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(0)
+        return
     
     #Mapeia etapas do pipeline sinérgico com opções padrão
     step_registry: Dict[str, StepDefinition] = {}
@@ -220,6 +249,8 @@ def load_config() -> None:
     FEATURE_FLAGS = flags
     _CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
     _CONFIG_HASH = calculate_file_hash(CONFIG_PATH)
+    CONFIG_LOAD_FAILED = False
+    SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(1)
 
 def _compute_rollout_bucket(identifier: str) -> float:
     """ Calcula um valor de 0 a 100 a partir de um identificador estável """

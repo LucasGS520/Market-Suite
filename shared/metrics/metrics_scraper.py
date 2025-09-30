@@ -78,6 +78,13 @@ SCRAPING_SUSPENDED_FLAG = Gauge(
 
 SCRAPING_SUSPENDED_FLAG.set(0)
 
+SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS = Gauge(
+    "scraper_domain_policy_last_load_success",
+    "Indica se a última carga do domain_policy.yaml foi bem-sucedida (1) ou falhou (0)",
+)
+
+SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(1)
+
 SCRAPER_RETRY_TOTAL = Counter(
     "scraper_retry_total",
     "Total de tentativas de retry feitas pelo scraper",
@@ -186,6 +193,7 @@ __all__ = [
     "SCRAPER_CIRCUIT_ATTEMPTS_TOTAL",
     "SCRAPER_CIRCUIT_SUSPENSIONS_TOTAL",
     "SCRAPING_SUSPENDED_FLAG",
+    "SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS",
     "SCRAPER_RETRY_TOTAL",
     "SCRAPER_CAPTCHA_TOTAL",
     "SCRAPER_BROWSER_FALLBACK_TOTAL",
