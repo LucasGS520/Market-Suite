@@ -103,7 +103,10 @@ async def test_wait_for_turn_respeita_rate_limiter(monkeypatch: pytest.MonkeyPat
     )
     fake_rate_limiter = SimpleNamespace(allow_request=lambda identifier: False)
 
-    monkeypatch.setattr("market_scraper.utils.pace_control.RateLimiter", lambda redis_key, max_requests, window_seconds: fake_rate_limiter)
+    monkeypatch.setattr(
+        "market_scraper.utils.pace_control.RateLimiter", 
+        lambda redis_key, max_requests, window_seconds, metrics_host=None: fake_rate_limiter,
+    )
 
     controller = DomainPaceController("example.com", policy)
 

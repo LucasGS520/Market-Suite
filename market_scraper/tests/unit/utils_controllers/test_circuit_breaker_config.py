@@ -3,26 +3,22 @@
 from __future__ import annotations
  
 import importlib
+import os
 import textwrap
 import time
+from pathlib import Path
 
 import pytest
 
 from market_scraper.utils_controllers.configuration import circuit_breaker_config as config
 
 
-def _reset_module_state() -> None:
-    """ Reinicia o cache do módulo de configuração para recarregamentos controlados """
-    config._CACHED_SETTINGS = None
-    config._CONFIG_MTIME = None
-
 @pytest.fixture(autouse=True)
-def cleanup_environment(monkeypatch):
+def cleanup_environment(monkeypatch: pytest.MonkeyPatch):
     """ Garante isolamento entre cenários de teste removendo efeitos colaterais """
     yield
     monkeypatch.delenv("CIRCUIT_CONFIG_FILE", raising=False)
     monkeypatch.delenv("CIRCUIT_BREAKER_CONFIG_HOT_RELOAD", raising=False)
-    _reset_module_state()
     importlib.reload(config)
 
 def test_policy_for_returns_domain_specific_policy() -> None:
@@ -51,8 +47,8 @@ def test_build_settings_normalizes_domains() -> None:
     assert settings.policy_for("LOJA.com").fingerprint() == (3, 180)
     assert settings.policy_for("api.exemplo.com").fingerprint() == (9, 600)
 
-def test_circuit_breaker_module_loads_policies(monkeypatch, tmp_path) -> None:
-    """ Confirma que a importação do módulo público expõe as politicas esperadas """
+def test_circuit_breaker_module_loads_policies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """ Confirma que a importação pública expõe as politicas esperadas """
     config_file = tmp_path / "circuit_breaker.yaml"
     config_file.write_text(
         textwrap.dedent(
@@ -70,7 +66,6 @@ def test_circuit_breaker_module_loads_policies(monkeypatch, tmp_path) -> None:
     )
 
     monkeypatch.setenv("CIRCUIT_CONFIG_FILE", str(config_file))
-    _reset_module_state()
 
     module = importlib.import_module("market_scraper.utils.circuit_breaker")
     module = importlib.reload(module)
@@ -81,29 +76,30 @@ def test_circuit_breaker_module_loads_policies(monkeypatch, tmp_path) -> None:
     default_policy = module.circuit_breaker_settings.policy_for("outro-dominio.com")
     assert default_policy.fingerprint() == (7, 400)
 
-def test_hot_reload_detects_changes(monkeypatch, tmp_path) -> None:
+def test_hot_reload_detects_changes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """ Verifica que o hot-reload invalida o cache quando o arquivo é modificado """
     config_file = tmp_path / "circuit_breaker.yaml"
-    config_file.write_text("defaults: {failure_threhold: 5, recovery_time: 300}\n", encoding="utf-8")
+    config_file.write_text(
+        "defaults: {failure_threshold: 5, recovery_time: 300}\n",
+        encoding="utf-8",
+    )
 
     monkeypatch.setenv("CIRCUIT_CONFIG_FILE", str(config_file))
     monkeypatch.setenv("CIRCUIT_BREAKER_CONFIG_HOT_RELOAD", "1")
+    importlib.reload(config)
 
-    config._HOT_RELOAD = config._parse_hot_reload_flag("1")
-    _reset_module_state()
-
-    settings_a = config._load_settings()
-    assert settings_a.policy_for("foo").fingerprint() == (5, 300)
+    settings_a = config.settings.policy_for("foo")
+    assert settings_a.fingerprint() == (5, 300)
 
     time.sleep(0.05)
     config_file.write_text(
         "defaults: {failure_threshold: 6, recovery_time: 120}\n",
         encoding="utf-8",
     )
+    os.utime(config_file, None)
 
-    config._maybe_reload(config_file)
-    settings_b = config._load_settings()
-    assert settings_b.policy_for("foo").fingerprint() == (6, 120)
+    settings_b = config.settings.policy_for("foo")
+    assert settings_b.fingerprint() == (6, 120)
 
 def test_policy_from_handles_invalid_entries() -> None:
     """ Garante que valores inválidos são normalizados para defaults seguros """
@@ -116,37 +112,34 @@ def test_load_settings_ignores_missing_file(monkeypatch, tmp_path) -> None:
     """ Confirma que carregar um arquiv inexistente devolve a política padrão """
     config_path = tmp_path / "missing.yaml"
     monkeypatch.setenv("CIRCUIT_CONFIG_FILE", str(config_path))
+    importlib.reload(config)
 
-    settings_obj = config._load_settings()
-    assert settings_obj.policy_for("foo").fingerprint() == (5, 300)
+    settings_obj = config.settings.policy_for("foo")
+    assert settings_obj.fingerprint() == (5, 300)
 
-def test_maybe_reload_respects_hot_reload_flag(monkeypatch, tmp_path) -> None:
-    """ Garante que o cache só é invalidado quando a flag de hot-reload estiver ativa """
+def test_reload_forces_refresh_when_hot_reload_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """ Garante que ``settings.reload`` aplica alterações quando hot-reload está inativo """
     config_file = tmp_path / "circuit_breaker.yaml"
     config_file.write_text(
-        "defaults: {failure_threshold: 5, recovery_time: 300}\n",
+        "defaults: {failure_threshold: 3, recovery_time: 90}\n",
         encoding="utf-8",
     )
 
     monkeypatch.setenv("CIRCUIT_CONFIG_FILE", str(config_file))
+    importlib.reload(config)
 
-    sentinel = object()
+    first_policy = config.settings.policy_for("foo")
+    assert first_policy.fingerprint() == (3, 90)
 
-    config._HOT_RELOAD = config._parse_hot_reload_flag("0")
-    config._CACHED_SETTINGS = sentinel
-    config._CONFIG_MTIME = -1.0
+    config_file.write_text(
+        "defaults: {failure_threshold: 9, recovery_time: 240}\n",
+        encoding="utf-8",
+    )
 
-    config._maybe_reload(config_file)
+    cached_policy = config.settings.policy_for("foo")
+    assert cached_policy.fingerprint() == (3, 90)
 
-    assert config._CACHED_SETTINGS is sentinel
-    assert config._CONFIG_MTIME == -1.0
-
-    config._HOT_RELOAD = config._parse_hot_reload_flag("1")
-    config._CACHED_SETTINGS = sentinel
-    config._CONFIG_MTIME = -1.0
-
-    config._maybe_reload(config_file)
-
-    assert config._CACHED_SETTINGS is None
-    assert config._CONFIG_MTIME == pytest.approx(config_file.stat().st_mtime)
-    
+    refreshed_policy = config.settings.reload().policy_for("foo")
+    assert refreshed_policy.fingerprint() == (9, 240)

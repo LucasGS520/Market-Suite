@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import time
 import textwrap
 from pathlib import Path
 
@@ -49,16 +50,36 @@ def test_arquivo_inexistente_retorna_defaults(reload_identity_config) -> None:
     assert policy.user_agent.max_requests == 50
     assert policy.user_agent.session_timeout == 3600
 
-def test_politica_personalizada_por_ambiente(reload_identity_config) -> None:
-    """ Verifica que políticas seguras são usadas quando o YAML não está disponível """
-    module, config_path = reload_identity_config(content=None)
-    if config_path.exists():
-        os.remove(config_path)
+def test_reload_forca_releitura(reload_identity_config) -> None:
+    """ Garante que ``settings.reload`` limpa o cache mesmo sem hot-reload ativo """
 
-    policy = module.settings.policy_for("dominio.com")
+    first_content = textwrap.dedent(
+        """
+        defaults:
+          user_agent:
+            max_requests: 2
+            session_timeout: 90
+        """
+    )
+    
+    module, path = reload_identity_config(content=first_content)
+    assert module.settings.policy_for("site.com").user_agent.max_requests == 2
 
-    assert policy.user_agent.max_requests == 50
-    assert policy.user_agent.session_timeout == 3600
+    path.write_text(
+        textwrap.dedent(
+            """
+            defaults:
+              user_agent:
+                max_requests: 8
+                session_timeout: 300
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    reloaded_policy = module.settings.reload().policy_for("site.com")
+    assert reloaded_policy.user_agent.max_requests == 8
+    assert reloaded_policy.user_agent.session_timeout == 300
 
 def test_pipeline_personalizada_por_ambiente(reload_identity_config) -> None:
     """ Confirma que caminhos customizados são respeitados e retornam novos valores """
@@ -127,6 +148,7 @@ def test_hot_reload_aplica_alteracoes(reload_identity_config) -> None:
 
     assert module.settings.policy_for("site.com").user_agent.max_requests == 4
 
+    time.sleep(0.05)
     path.write_text(
         textwrap.dedent(
             """
@@ -138,7 +160,7 @@ def test_hot_reload_aplica_alteracoes(reload_identity_config) -> None:
         ),
         encoding="utf-8",
     )
-    os.time(path, None)
+    os.utime(path, None)
 
     updated_policy = module.settings.policy_for("site.com")
     assert updated_policy.user_agent.max_requests == 9

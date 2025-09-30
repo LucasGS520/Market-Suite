@@ -170,7 +170,7 @@ class SynergicPipeline:
                             if not first_success_detected:
                                 first_success_detected = True
                                 logger.info(
-                                    "parallel_pipeline_first_success",
+                                    "parallel_first_success",
                                     step=step_name,
                                     status=status,
                                 )

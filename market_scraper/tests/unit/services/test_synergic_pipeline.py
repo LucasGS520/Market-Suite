@@ -138,7 +138,7 @@ async def test_pipeline_paralelo_registra_fallback(monkeypatch):
     assert len(histograma.observacoes) == 2
     assert ("EtapaSucesso", "success") in contador_estrategia.rotulos
     assert ("EtapaErro", "error") in contador_estrategia.rotulos
-    assert ("parallel_pipeline_first_success", {"step": "EtapaSucesso", "status": "success"}) in logger_falso.eventos
+    assert ("parallel_first_success", {"step": "EtapaSucesso", "status": "success"}) in logger_falso.eventos
 
 @pytest.mark.asyncio
 async def test_pipeline_sequencial_fallback_intermediario(monkeypatch):

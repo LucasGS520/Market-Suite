@@ -73,7 +73,13 @@ def test_metricas_cache_monitoram_hits_e_expiracao(monkeypatch) -> None:
     assert (
         SCRAPER_CACHE_LOOKUPS_TOTAL.labels(backend="redis", outcome="unavailable")._value.get() == redis_unavailable_before + 1
     )
+    cache.set(marketplace="dominio.com", url=url, value=valor)
+    assert cache.get(marketplace="dominio.com", url=url) == valor
+    
     assert _hist_count(SCRAPER_CACHE_LATENCY_SECONDS, operation="get") == get_count_before + 2
+    assert (
+        SCRAPER_CACHE_LOOKUPS_TOTAL.labels(backend="local", outcome="hit")._value.get() == local_hit_before + 1
+    )
 
     size_after_hit = SCRAPER_CACHE_LOCAL_SIZE._value.get()
     assert size_after_hit >= 1

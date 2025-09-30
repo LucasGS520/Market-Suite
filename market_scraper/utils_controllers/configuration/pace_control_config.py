@@ -4,13 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
-import os
-import threading
-
-import yaml
+from typing import Any, Dict
 
 from market_scraper.core.config_scraper import settings as scraper_settings
+from market_scraper.utils_controllers.configuration.base_loader import HotReloadSettingsStore
 
 
 __all__ = [
@@ -96,28 +93,6 @@ class PaceControlSettings:
                 return policy
             
         return self._defaults
-    
-def _config_path() -> Path:
-    """ Resolve o caminho do arquivo de configuração considerando variáveis de ambiente """
-    default = Path(__file__).with_name("pace_control.yaml")
-    raw_path = os.getenv("PACE_CONTROL_CONFIG_FILE")
-    if raw_path:
-        return Path(raw_path)
-    return default
-
-_CONFIG_LOCK = threading.Lock()
-_CACHED_SETTINGS: PaceControlSettings | None = None
-_CACHED_FINGERPRINT: tuple | None = None
-_CONFIG_MTIME: float | None = None
-_HOT_RELOAD = bool(os.getenv("PACE_CONTROL_CONFIG_HOT_RELOAD"))
-
-def _load_yaml(path: Path) -> Dict[str, Any]:
-    """ Carrega o conteúdo YAML retornando dicionário vazio em caso de erro """
-    if not path.exists():
-        return {}
-    
-    with path.open("r", encoding="utf-8") as handler:
-        return yaml.safe_load(handler) or {}
     
 def _rate_limit_from(data: Dict[str, Any] | None) -> RateLimitConfig | None:
     """ Normaliza bloco de rate limit e retorna ``None`` se inválido """
@@ -251,52 +226,31 @@ def _build_settings(data: Dict[str, Any]) -> PaceControlSettings:
 
     return PaceControlSettings(defaults=defaults_policy, domains=domains)
 
-def _maybe_reload(path: Path) -> None:
-    """ Recarrega o arquivo quando `HOT_RELOAD` estiver ativo """
-    global _CONFIG_MTIME, _CACHED_SETTINGS, _CACHED_FINGERPRINT
-
-    if not _HOT_RELOAD:
-        return
-    
-    if not path.exists():
-        if _CACHED_SETTINGS is not None:
-            _CACHED_SETTINGS = None
-            _CACHED_FINGERPRINT = None
-            _CONFIG_MTIME = None
-        return
-    
-    current_mtime = path.stat().st_mtime
-    if _CONFIG_MTIME != current_mtime:
-        _CONFIG_MTIME = current_mtime
-        _CACHED_SETTINGS = None
-        _CACHED_FINGERPRINT = None
+_SETTINGS_STORE = HotReloadSettingsStore[
+    PaceControlSettings
+](
+    default_path=Path(__file__).with_name("pace_control.yaml"),
+    env_var="PACE_CONTROL_CONFIG_FILE",
+    hot_reload_env="PACE_CONTROL_CONFIG_HOT_RELOAD",
+    builder=_build_settings,
+)
 
 def _load_settings() -> PaceControlSettings:
-    """ Carrega e cacheia as configurações de pace control """
-    global _CACHED_SETTINGS, _CACHED_FINGERPRINT, _CONFIG_MTIME
-    
-    path = _config_path()
-    _maybe_reload(path)
-
-    with _CONFIG_LOCK:
-        if _CACHED_SETTINGS is not None:
-            return _CACHED_SETTINGS
-        
-        data = _load_yaml(path)
-        settings_obj = _build_settings(data)
-        _CACHED_SETTINGS = settings_obj
-        _CACHED_FINGERPRINT = settings_obj.policy_for(None).fingerprint()
-        _CONFIG_MTIME = path.stat().st_mtime if path.exists() else None
-        return settings_obj
+    """ Carrega as configurações de pace control utilizando cache compartilhado """
+    return _SETTINGS_STORE.get()
     
 class _SettingsAccessor:
     """ Wrapper que expõe `PaceControlSettings` sob uma interface simples """
     def __call__(self) -> PaceControlSettings:
         """ Permite obter a instância atual utilizando sintaxe de chamada """
-        return _load_settings()
+        return _SETTINGS_STORE.get()
     
     def policy_for(self, host: str | None) -> PaceControlPolicy:
         """ Encaminha a resolução da política para o loader interno """
-        return _load_settings().policy_for(host)
-    
+        return _SETTINGS_STORE.get().policy_for(host)
+
+    def reload(self) -> PaceControlSettings:
+        """ Força a recarga das configurações de pace control """
+        return _SETTINGS_STORE.reload()
+
 settings = _SettingsAccessor()

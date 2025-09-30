@@ -24,7 +24,7 @@ def reload_pace_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
             if value is None:
                 monkeypatch.delenv(key, raising=False)
             else:
-                monkeypatch.delenv(key, raising=False)
+                monkeypatch.setenv(key, value)
         module = importlib.reload(pace_config)
         return module, config_path
     
@@ -76,7 +76,7 @@ def test_settings_respeita_caminho_personalizado(reload_pace_config) -> None:
     module, _ = reload_pace_config(content=yaml_content)
 
     defaults_policy = module.settings.policy_for(None)
-    assert defaults_policy.humand_delay.base_delay == pytest.approx(0.8)
+    assert defaults_policy.human_delay.base_delay == pytest.approx(0.8)
     assert defaults_policy.human_delay.avg_wpm == pytest.approx(200)
 
     domain_policy = module.settings.policy_for("exemplo.com")

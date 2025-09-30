@@ -66,11 +66,11 @@ def test_handle_block_invokes_managers(monkeypatch, block_type, expected):
 
     html = asyncio.run(mgr.handle_block(block_type, session_id="sess", url="http://example.com"))
 
-    identity.rotate.assert_called_once_with("sess")
-    identity.get_user_agent.assert_called_once_with("sess")
-    identity.reset.assert_called_once_with("sess")
-    identity.get_cookies.assert_called_once_with("sess")
-    identity.update_from_response.assert_called_once()
+    identity.rotate_user_agent.assert_called_once_with("sess", host="example.com")
+    identity.get_user_agent.assert_called_once_with("sess", host="example.com")
+    identity.reset_cookies.assert_called_once_with("sess", host="example.com")
+    identity.get_cookies.assert_called_once_with("sess", host="example.com")
+    identity.update_cookies.assert_called_once()
     delay.prolong.assert_called_once_with()
     assert called == [expected]
     assert html == "<html>ok</html>"

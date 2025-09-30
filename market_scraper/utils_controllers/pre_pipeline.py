@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from uuid import UUID
 from urllib.parse import urlparse
 
@@ -41,11 +41,15 @@ class PrePipelineOrchestrator:
         identity_manager: SessionIdentityManager,
         validator: DataQualityValidator,
         pace_registry: PaceControllerRegistry | None = None,
+        robots_parser_factory: Callable[[str], RobotsTxtParser] | None = None,
+        blocked_counter_factory: Callable[[], Any] | None = None,
     ) -> None:
         self.cache_manager = cache_manager
         self.identity_manager = identity_manager
         self.validator = validator
         self.pace_registry = pace_registry or pace_controller_registry
+        self.robots_parser_factory = robots_parser_factory or RobotsTxtParser
+        self.blocked_counter_factory = blocked_counter_factory or (lambda: SCRAPER_HTTP_BLOCKED_TOTAL)
     
     async def run(
         self,
@@ -80,10 +84,10 @@ class PrePipelineOrchestrator:
         session_key = f"{user_id}:{product_type}"
         user_agent = self.identity_manager.get_user_agent(session_key, host=host_label)
 
-        parser = RobotsTxtParser(base_url=url)
+        parser = self.robots_parser_factory(base_url=url)
         path = urlparse(url).path or "/"
         if not await parser.is_allowed(path, user_agent):
-            SCRAPER_HTTP_BLOCKED_TOTAL.inc()
+            self.blocked_counter_factory().inc()
             logger.warning(
                 "blocking_robots",
                 url=safe_log_url,

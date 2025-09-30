@@ -28,6 +28,7 @@ from market_scraper.utils.circuit_breaker import CircuitBreaker
 from market_scraper.utils_controllers.pace_control import pace_controller_registry
 from market_scraper.utils_controllers.session_identity import session_identity_manager
 from market_scraper.utils_controllers.pre_pipeline import PrePipelineOrchestrator
+from market_scraper.utils.robots_txt import RobotsTxtParser
 
 from shared.enums import BlockResult
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
@@ -58,11 +59,13 @@ validator = DataQualityValidator()
 pace_registry = pace_controller_registry
 
 #Orquestrador centralizado para robots.txt, cache e identidade
-pre_pripeline_orchestrator = PrePipelineOrchestrator(
+pre_pipeline_orchestrator = PrePipelineOrchestrator(
     cache_manager=cache_manager,
     identity_manager=identity_manager,
     validator=validator,
     pace_registry=pace_registry,
+    robots_parser_factory=lambda base_url: RobotsTxtParser(base_url),
+    blocked_counter_factory=lambda: SCRAPER_HTTP_BLOCKED_TOTAL,
 )
 
 async def scrape_product_common_async(
@@ -114,7 +117,7 @@ async def scrape_product_common_async(
 
     reference_text = getattr(payload, "name_identification", None) or normalized_url
     try:
-        pre_pipeline_result = await pre_pripeline_orchestrator.run(
+        pre_pipeline_result = await pre_pipeline_orchestrator.run(
             url=normalized_url,
             user_id=user_id,
             product_type=product_type,
