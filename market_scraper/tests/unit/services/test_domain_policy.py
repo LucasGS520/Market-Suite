@@ -1,6 +1,6 @@
 """ Testes para o módulo de política de domínio focado no SynergicPipeline """
 
-import time
+import os
 
 import pytest
 
@@ -65,8 +65,9 @@ def test_hot_reload_pipeline(monkeypatch, tmp_path):
     etapas = pipeline_steps_for(url)
     assert _nomes_das_etapas(etapas) == ["SelectorLibExtractionStep"]
 
-    time.sleep(1)
+    original_mtime = cfg.stat().st_mtime
     cfg.write_text(atualizado, encoding="utf-8")
+    os.utime(cfg, (original_mtime, original_mtime))
 
     etapas = pipeline_steps_for(url)
     assert _nomes_das_etapas(etapas) == ["ParselExtractionStep"]

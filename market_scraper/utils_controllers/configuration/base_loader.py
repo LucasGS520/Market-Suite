@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Generic, Optional, TypeVar
 import os
 import threading
+import hashlib
 
 import yaml
 
@@ -20,6 +21,7 @@ __all__ = [
     "parse_env_flag",
     "resolve_config_path",
     "load_yaml_file",
+    "calculate_file_hash",
     "HotReloadSettingsStore",
 ]
 
@@ -48,7 +50,18 @@ def load_yaml_file(path: Path) -> Dict[str, Any]:
         return {}
     with path.open("r", encoding="utf-8") as handler:
         return yaml.safe_load(handler) or {}
+
+def calculate_file_hash(path: Path) -> Optional[str]:
+    """ Calcula o hash SHA256 do arquivo informado, retornando `None` se indisponível """
+    if not path.exists() or not path.is_file():
+        return None
     
+    digest = hashlib.sha256()
+    with path.open("rb") as handler:
+        for chunk in iter(lambda: handler.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
 class HotReloadSettingsStore(Generic[T]):
     """ Armazena em cache configurações derivadas de um arquivo YAML """
     def __init__(
@@ -66,6 +79,7 @@ class HotReloadSettingsStore(Generic[T]):
         self._lock = threading.RLock()
         self._cached: Optional[T] = None
         self._mtime: Optional[float] = None
+        self._hash: Optional[str] = None
 
     def _current_path(self) -> Path:
         """ Obtém o caminho ativo considerando variáveis de ambiente """
@@ -79,20 +93,30 @@ class HotReloadSettingsStore(Generic[T]):
     
     def _invalidate_if_need(self, path: Path) -> None:
         """ Limpa o cache quando o arquivo foi alterado ou removido """
-        if not self._hot_reload_enabled():
+        hot_relaod = self._hot_reload_enabled()
+        if not hot_relaod:
             return
         
         with self._lock:
             if not path.exists():
-                if self._cached is not None or self._mtime is not None:
+                if self._cached is not None or self._mtime is not None or self._hash is not None:
                     self._cached = None
                     self._mtime = None
+                    self._hash = None
                 return
             
             current_mtime = path.stat().st_mtime
             if self._mtime != current_mtime:
                 self._cached = None
                 self._mtime = current_mtime
+                self._hash = calculate_file_hash(path)
+                return
+            
+            current_hash = calculate_file_hash(path)
+            if self._hash != current_hash:
+                self._cached = None
+                self._mtime = current_mtime
+                self._hash = current_hash
 
     def get(self) -> T:
         """ Retorna as configurações atuais, carregando do disco quando necessário """
@@ -107,9 +131,15 @@ class HotReloadSettingsStore(Generic[T]):
             settings = self._builder(data)
             self._cached = settings
             try:
-                self._mtime = path.stat().st_mtime
+                stat_info = path.stat()
+                self._mtime = stat_info.st_mtime
+                if self._hot_reload_enabled():
+                    self._hash = calculate_file_hash(path)
+                else:
+                    self._hash = None
             except FileNotFoundError:
                 self._mtime = None
+                self._hash = None
             return settings
         
     def reload(self) -> T:
@@ -117,6 +147,7 @@ class HotReloadSettingsStore(Generic[T]):
         with self._lock:
             self._cached = None
             self._mtime = None
+            self._hash = None
         return self.get()
     
     def clear(self) -> None:
@@ -124,4 +155,5 @@ class HotReloadSettingsStore(Generic[T]):
         with self._lock:
             self._cached = None
             self._mtime = None
+            self._hash = None
             

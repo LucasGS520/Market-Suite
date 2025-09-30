@@ -20,6 +20,7 @@ import yaml
 import market_scraper.services.pipeline_steps as pipeline_steps_module
 from market_scraper.services.synergic_pipeline import PipelineStep
 from market_scraper.utils.http_utils import extract_hostname
+from market_scraper.utils_controllers.configuration.base_loader import calculate_file_hash
 
 
 #Caminho do arquivo de configuração. Pode ser alterado via variável de ambiente ``DOMAIN_POLICY_FILE``
@@ -41,6 +42,7 @@ PIPELINE_STEP_OPTIONS: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
 #Controle interno de hot-reload
 _HOT_RELOAD = bool(os.getenv("DOMAIN_POLICY_HOT_RELOAD"))
 _CONFIG_MTIME = 0.0
+_CONFIG_HASH: str | None = None
 
 @dataclass(frozen=True)
 class FeatureFlagConfig:
@@ -167,7 +169,7 @@ def _normalize_flag_structure(raw: Dict[str, Any]) -> Dict[str, Dict[str, Featur
 def load_config() -> None:
     """ Carrega as etapas do pipeline e políticas do arquivo configurado """
     global PIPELINE_STEP_REGISTRY, PIPELINE_POLICIES
-    global PIPELINE_EXECUTION, FEATURE_FLAGS, _CONFIG_MTIME
+    global PIPELINE_EXECUTION, FEATURE_FLAGS, _CONFIG_MTIME, _CONFIG_HASH
     global PIPELINE_STEP_OPTIONS
 
     if not CONFIG_PATH.exists():
@@ -177,6 +179,7 @@ def load_config() -> None:
         FEATURE_FLAGS = {}
         PIPELINE_STEP_OPTIONS = {}
         _CONFIG_MTIME = 0.0
+        _CONFIG_HASH = None
         return
 
     with CONFIG_PATH.open("r", encoding="utf-8") as handler:
@@ -216,6 +219,7 @@ def load_config() -> None:
 
     FEATURE_FLAGS = flags
     _CONFIG_MTIME = CONFIG_PATH.stat().st_mtime
+    _CONFIG_HASH = calculate_file_hash(CONFIG_PATH)
 
 def _compute_rollout_bucket(identifier: str) -> float:
     """ Calcula um valor de 0 a 100 a partir de um identificador estável """
@@ -333,9 +337,10 @@ def _reload_if_needed() -> None:
     if not _HOT_RELOAD or not CONFIG_PATH.exists():
         return
 
-    global _CONFIG_MTIME
+    global _CONFIG_MTIME, _CONFIG_HASH
     current_mtime = CONFIG_PATH.stat().st_mtime
-    if current_mtime != _CONFIG_MTIME:
+    current_hash = calculate_file_hash(CONFIG_PATH)
+    if current_mtime != _CONFIG_MTIME or current_hash != _CONFIG_HASH:
         load_config()
 
 def _select_names_for_context(names: Dict[str, List[str]] | List[str], context: str) -> List[str]:

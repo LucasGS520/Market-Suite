@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
 
 import pytest
@@ -72,11 +71,10 @@ def test_hot_reload_settings_store_com_cache(tmp_path: Path, monkeypatch: pytest
     refreshed = store.reload()
     assert refreshed["valor"] == 2
 
+    original_mtime = config_file.stat().st_mtime
     monkeypatch.setenv("TEST_HOT_RELOAD", "1")
-    time.sleep(0.05)
     config_file.write_text("valor: 3\n", encoding="utf-8")
-    os.utime(config_file, None)
-    time.sleep(0.01)
+    os.utime(config_file, (original_mtime, original_mtime))
 
     updated = store.get()
     assert updated["valor"] == 3
