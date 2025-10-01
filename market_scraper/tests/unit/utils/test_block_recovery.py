@@ -121,13 +121,13 @@ def test_handle_block_uses_cache_when_request_fails(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", FailClient)
 
-    class DummyCache:
+    class DummyCacheAdapter:
         def get(self, *, marketplace, url):
             return {"html": "<cached></cached>"}
 
     monkeypatch.setattr(
-        "market_scraper.utils_controllers.block_recovery.IntelligentCacheManager", 
-        DummyCache,
+        "market_scraper.utils_controllers.block_recovery.cache_adapter", 
+        DummyCacheAdapter(),
     )
 
     html = asyncio.run(mgr.handle_block(BlockResult.HTTP_429, session_id="sess", url="http://exemplo.com"))

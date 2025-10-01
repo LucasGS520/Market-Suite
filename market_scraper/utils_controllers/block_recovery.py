@@ -13,7 +13,7 @@ from shared.utils.redis_client import suspend_scraping
 
 from market_scraper.utils.humanized_delay import HumanizedDelayManager
 from market_scraper.utils_controllers.session_identity import SessionIdentityManager, session_identity_manager
-from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.cache_adapter import cache_adapter
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.robots_txt import RobotsTxtManager
 
@@ -97,10 +97,10 @@ class BlockRecoveryManager:
                     self.identity_manager.update_cookies(session_key, resp, host=host)
                     result_log = "requisicao"
             except Exception:
-                cache = IntelligentCacheManager()
                 marketplace = extract_hostname(url)
                 try:
-                    cached = cache.get(marketplace=marketplace, url=url) or {}
+                    #O adaptador garante compatibilidade com dados gravados antes da migração de chaves
+                    cached = cache_adapter.get(marketplace=marketplace, url=url) or {}
                     recovered_html = cached.get("html")
                     if recovered_html:
                         result_log = "cache"

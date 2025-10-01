@@ -16,7 +16,7 @@ from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils.data_quality_validator import DataQualityValidator
-from market_scraper.utils.intelligent_cache import IntelligentCacheManager
+from market_scraper.utils.cache_adapter import CacheAdapter
 from market_scraper.utils.robots_txt import RobotsTxtParser
 from market_scraper.utils_controllers.pace_control import DomainPaceController, PaceControllerRegistry, pace_controller_registry
 from market_scraper.utils_controllers.session_identity import SessionIdentityManager
@@ -37,14 +37,14 @@ class PrePipelineOrchestrator:
     def __init__(
         self,
         *,
-        cache_manager: IntelligentCacheManager,
+        cache_adapter: CacheAdapter,
         identity_manager: SessionIdentityManager,
         validator: DataQualityValidator,
         pace_registry: PaceControllerRegistry | None = None,
         robots_parser_factory: Callable[[str], RobotsTxtParser] | None = None,
         blocked_counter_factory: Callable[[], Any] | None = None,
     ) -> None:
-        self.cache_manager = cache_manager
+        self.cache_adapter = cache_adapter
         self.identity_manager = identity_manager
         self.validator = validator
         self.pace_registry = pace_registry or pace_controller_registry
@@ -104,7 +104,8 @@ class PrePipelineOrchestrator:
             await asyncio.sleep(delay)
 
         logger.info("checking_cache", url=safe_log_url)
-        cached_entry = self.cache_manager.get(marketplace=marketplace, url=url)
+        #O adaptador abstrai versões diferentes das chaves de cache sem alterar chamadores
+        cached_entry = self.cache_adapter.get(marketplace=marketplace, url=url)
         cached_response: Optional[dict[str, Any]] = None
 
         if cached_entry:
@@ -119,7 +120,7 @@ class PrePipelineOrchestrator:
                     reason=sanitize_log_data(str(err)),
                 )
             else:
-                self.cache_manager.touch(marketplace=marketplace, url=url)
+                self.cache_adapter.touch(marketplace=marketplace, url=url)
                 cached_response = {"status": "success", "details": details}
                 logger.info("cache_used", url=safe_log_url)
         else:

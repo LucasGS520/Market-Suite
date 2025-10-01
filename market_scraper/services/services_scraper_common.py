@@ -19,8 +19,7 @@ from fastapi import HTTPException, status
 import structlog
 
 from market_scraper.utils.http_utils import extract_hostname
-from market_scraper.utils.intelligent_cache import IntelligentCacheManager
-from market_scraper.utils.http_cache import get_cache_headers
+from market_scraper.utils.cache_adapter import cache_adapter
 from market_scraper.utils_controllers.block_recovery import BlockRecoveryManager
 from market_scraper.utils.data_quality_validator import DataQualityValidator
 from market_scraper.utils.mechanicalsoup_login import login_and_get_cookies
@@ -46,9 +45,6 @@ from market_scraper.services.domain_policy import (
 #Logger estruturado para registrar o fluxo do scraping
 logger = structlog.get_logger("scraper_common")
 
-#Gerenciador de cache inteligente para produtos
-cache_manager = IntelligentCacheManager()
-
 #Gerencia identidade (User-Agent + cookies) entre requisições
 identity_manager = session_identity_manager
 
@@ -60,7 +56,7 @@ pace_registry = pace_controller_registry
 
 #Orquestrador centralizado para robots.txt, cache e identidade
 pre_pipeline_orchestrator = PrePipelineOrchestrator(
-    cache_manager=cache_manager,
+    cache_adapter=cache_adapter,
     identity_manager=identity_manager,
     validator=validator,
     pace_registry=pace_registry,
@@ -176,7 +172,8 @@ async def scrape_product_common_async(
             )
             return False
 
-        headers_cache = get_cache_headers(normalized_url)
+        #Utiliza o adaptador para aplicar versionamento e fallback ao recuperar cabeçalhos HTTP
+        headers_cache = cache_adapter.get_headers(normalized_url)
         cache_value: dict[str, Any] = {"data": details}
         if headers_cache.get("etag") or headers_cache.get("last_modified"):
             cache_value["headers"] = headers_cache
@@ -197,7 +194,7 @@ async def scrape_product_common_async(
         if metadata:
             cache_value["metadata"] = metadata
 
-        cache_manager.set(
+        cache_adapter.set(
             marketplace=marketplace,
             url=normalized_url,
             value=cache_value,
@@ -302,9 +299,10 @@ async def scrape_product_common_async(
             return {"status": "success", "details": pipeline_details}
         
         if status_step == "NOT_MODIFIED":
-            cached_pipeline = cache_manager.get(marketplace=marketplace, url=normalized_url)
+            #Consulta o adaptador para reaproveitar dados cacheados mesmo após mudanças de prefixos
+            cached_pipeline = cache_adapter.get(marketplace=marketplace, url=normalized_url)
             if cached_pipeline:
-                cache_manager.touch(marketplace=marketplace, url=normalized_url)
+                cache_adapter.touch(marketplace=marketplace, url=normalized_url)
                 logger.info(
                     "pipeline_not_modified",
                     url=safe_log_url,
@@ -349,9 +347,10 @@ async def scrape_product_common_async(
             return {"status": "success", "details": pipeline_details}
         
     if pipeline_status == "NOT_MODIFIED":
-        cached_pipeline = cache_manager.get(marketplace=marketplace, url=normalized_url)
+        #Tenta reaproveitar o cache legado caso o pipeline sinalize ``NOT_MODIFIED``
+        cached_pipeline = cache_adapter.get(marketplace=marketplace, url=normalized_url)
         if cached_pipeline:
-            cache_manager.touch(marketplace=marketplace, url=normalized_url)
+            cache_adapter.touch(marketplace=marketplace, url=normalized_url)
             logger.info(
                 "pipeline_not_modified",
                 url=safe_log_url,

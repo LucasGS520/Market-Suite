@@ -18,7 +18,7 @@ import requests
 import mechanicalsoup
 
 from .synergic_pipeline import PipelineStep
-from market_scraper.utils.http_cache import ContentSignature, NOT_MODIFIED
+from market_scraper.utils.cache_adapter import cache_adapter, NOT_MODIFIED
 from market_scraper.parsers import (
     parse_with_extruct,
     parse_with_parsel,
@@ -260,7 +260,7 @@ class RequestsHTMLRenderStep(PipelineStep):
                 "detail": "Tempo limite ao baixar ou renderizar HTML com Requests-HTML",
             }
         shared_context["html"] = html
-        signature = ContentSignature(url).check_or_update(html)
+        signature = cache_adapter.check_or_update_signature(url, html)
         shared_updates: dict[str, Any] = {"html": html}
         
         if signature is NOT_MODIFIED:
