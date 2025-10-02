@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Type, Literal, cast
 import hashlib
 import os
+from inspect import isclass
 
 import structlog
 import yaml
@@ -54,6 +55,13 @@ _CONFIG_HASH: str | None = None
 CONFIG_LOAD_FAILED = False
 
 logger = structlog.get_logger("domain_policy")
+
+class DomainPolicyValidationError(Exception):
+    """ Erro lançado quando a configuração do ``domain_policy`` é inválida """
+    def __init__(self, errors: List[str]) -> None:
+        message = "; ".join(errors)
+        super().__init__(message)
+        self.errors = errors
 
 @dataclass(frozen=True)
 class FeatureFlagConfig:
@@ -177,6 +185,107 @@ def _normalize_flag_structure(raw: Dict[str, Any]) -> Dict[str, Dict[str, Featur
             normalized[domain] = contexts
     return normalized
 
+REQUIRED_TOP_LEVEL_KEYS = {
+    "pipeline_steps",
+    "pipeline_policies",
+    "pipeline_execution",
+    "pipeline_step_options",
+    "feature_flags",
+}
+
+def _validate_config_schema(data: Dict[str, Any]) -> Dict[str, StepDefinition]:
+    """ Valida a estrutura mínima do arquivo YAML e monta o registro de etapas """
+    errors: List[str] = []
+
+    missing = [key for key in REQUIRED_TOP_LEVEL_KEYS if key not in data]
+    if missing:
+        errors.append(
+            "Chaves obrigatórias ausentes no domain_policy: " + ", ".join(sorted(missing))
+        )
+
+    raw_steps = data.get("pipeline_steps")
+    if not isinstance(raw_steps, dict) or not raw_steps:
+        errors.append("'pipeline_steps' deve ser um dicionário não vazio")
+        raw_steps = {}
+
+    step_registry: Dict[str, StepDefinition] = {}
+    for name, entry in raw_steps.items():
+        class_name: str | None = None
+        default_options: Dict[str, Any] = {}
+        if isinstance(entry, str):
+            class_name = entry
+        elif isinstance(entry, dict):
+            class_name = entry.get("class")
+            raw_options = entry.get("default_options") or entry.get("options") or {}
+            if isinstance(raw_options, dict):
+                default_options = {key: value for key, value in raw_options.items()}
+        if not class_name:
+            errors.append(f"Etapa '{name}' sem classe configurada")
+            continue
+        step_cls = getattr(pipeline_steps_module, class_name, None)
+        if not (isclass(step_cls) and issubclass(step_cls, PipelineStep)):
+            errors.append(
+                f"Etapa '{name}' referencia classe inexistente ou inválida: '{class_name}'"
+            )
+            continue
+        step_registry[name] = StepDefinition(cls=step_cls, default_options=default_options)
+
+    if not step_registry:
+        errors.append("Nenhuma etapa válida encontrada em 'pipeline_steps'")
+
+    raw_policies = data.get("pipeline_policies")
+    normalized_policies = _normalize_policy_structure(raw_policies or {})
+    if not normalized_policies:
+        errors.append("'pipeline_policies' deve conter ao menos a chave 'default'")
+    elif "default" not in normalized_policies:
+        errors.append("'pipeline_policies' deve definir o domínio 'default'")
+
+    for domain, contexts in normalized_policies.items():
+        for context_name, names in contexts.items():
+            for step_name in names:
+                if step_name not in step_registry:
+                    errors.append(
+                        f"Etapa '{step_name}' referenciada em '{domain}/{context_name}' não está definida"
+                    )
+
+    raw_execution = data.get("pipeline_execution")
+    if not isinstance(raw_execution, dict) or not raw_execution:
+        errors.append("'pipeline_execution' deve definir a chave 'default'")
+    elif "default" not in raw_execution:
+        errors.append("'pipeline_execution' deve definir a chave 'default'")
+    else:
+        default_execution = raw_execution.get("default")
+        if isinstance(default_execution, dict):
+            if "default" not in default_execution:
+                errors.append(
+                    "'pipeline_execution/default' deve conter o conexto 'default'"
+                )
+        elif default_execution not in {"sequential", "parallel", "conditional"}:
+            errors.append(
+                "'pipeline_execution/default' deve ser modo válido ou mapa para 'default/default'"
+            )
+        
+    raw_options = data.get("pipeline_step_options")
+    normalized_options = _normalize_step_options_structure(raw_options or {})
+    if not normalized_options:
+        errors.append(
+            "'pipeline_step_options' deve conter configurações ao menos para 'default/default'"
+        )
+    else:
+        default_options_entry = normalized_options.get("default", {})
+        if "default" not in default_options_entry:
+            errors.append(
+                "'pipeline_step_options' deve conter configurações ao menos para 'default/default'"
+            )
+
+    if "feature_flags" not in data:
+        errors.append("'feature_flags' deve estar presente, ainda que vazio")
+
+    if errors:
+        raise DomainPolicyValidationError(errors)
+    
+    return step_registry
+
 def load_config() -> None:
     """ Carrega as etapas do pipeline e políticas do arquivo configurado """
     global PIPELINE_STEP_REGISTRY, PIPELINE_POLICIES
@@ -217,23 +326,17 @@ def load_config() -> None:
         SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(0)
         return
     
-    #Mapeia etapas do pipeline sinérgico com opções padrão
-    step_registry: Dict[str, StepDefinition] = {}
-    for name, entry in (data.get("pipeline_steps") or {}).items():
-        class_name: str | None = None
-        default_options: Dict[str, Any] = {}
-        if isinstance(entry, str):
-            class_name = entry
-        elif isinstance(entry, dict):
-            class_name = entry.get("class")
-            raw_options = entry.get("default_options") or entry.get("options") or {}
-            if isinstance(raw_options, dict):
-                default_options = {key: value for key, value in raw_options.items()}
-        if not class_name:
-            continue
-        step_cls = getattr(pipeline_steps_module, class_name, None)
-        if step_cls:
-            step_registry[name] = StepDefinition(cls=step_cls, default_options=default_options)
+    try:
+        step_registry = _validate_config_schema(data)
+    except DomainPolicyValidationError as exc:
+        logger.error(
+            "domain_policy_config_validation_error",
+            config_path=str(CONFIG_PATH),
+            errors=[sanitize_log_data(error) for error in exc.errors],
+        )
+        CONFIG_LOAD_FAILED = True
+        SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(0)
+        return
 
     PIPELINE_STEP_REGISTRY = step_registry
     PIPELINE_POLICIES = _normalize_policy_structure(data.get("pipeline_policies") or {})
@@ -254,6 +357,18 @@ def load_config() -> None:
     _CONFIG_HASH = calculate_file_hash(CONFIG_PATH)
     CONFIG_LOAD_FAILED = False
     SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(1)
+
+def ensure_config_loaded_or_raise() -> None:
+    """ Garante carga válida da política, interrompendo quando houver erros """
+    load_config()
+    if CONFIG_LOAD_FAILED:
+        logger.error(
+            "domain_policy_initial_load_failed",
+            config_path=str(CONFIG_PATH),
+        )
+        raise RuntimeError(
+            "Falha ao carregar domain_policy.yaml. verifique os logs para detalhes."
+        )
 
 def _compute_rollout_bucket(identifier: str) -> float:
     """ Calcula um valor de 0 a 100 a partir de um identificador estável """
