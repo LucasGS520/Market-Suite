@@ -314,17 +314,6 @@ Esses passos mantêm o serviço aderente às boas práticas de segurança (LGPD/
 - Seguir o princípio de minimização de dados (LGPD/GDPR), coletando apenas os campos essenciais (nome, preço, etc...).
 - Documentar e revisar periodicamente exceções de compliance em conjunto com a equipe jurídica antes de ativar novas etapas.
 
-
-## Serviços Utilitários
-- **IntelligentCacheManager** - armazena resultados de produtos por domínio e URL para reduzir requisições repetidas.
-- **DataQualityValidator** - garante que `name` e `current_price` estejam presentes e que o preço seja válido.
-- **SessionIdentityManager** - controla User-Agent e cookies para cada requisição, evitando bloqueios.
-- **BlockRecoveryManager** e **HumanizedDelayManager** - auxiliam na recuperação de bloqueios, rotacionam recursos e, após uma suspensão temporária, tentam nova requisição ou consultam o cache para obter o HTML, registrando o resultado em log.
-
-## Resultado Esperado
-Para cada URL o serviço retorna um dicionário com `name` e `current_price`. Se o conteúdo não mudou desde a última coleta o endpoint responde **304 Not Modified**.
-Bloqueios sucessivos podem resultar em suspensão temporária do scraping.
-
 ## Decisões de Arquitetura e Migração
 - **Descontinuação de estratégias isoladas**: versões anteriores executavam estratégias diretas (`structured_data_strategy`, `html_static_strategy`) sem o pipeline. Essas abrodagens foram removidas para reduzir divergência de comportamento entre domínios.
 - **Fonte única de configuração**: o `domain_policy.yaml` é agora a única referência para ativar etapas, modos de execução e limites. Commits futuros que criem novas etapas devem incluir ajustes nesse arquivo.

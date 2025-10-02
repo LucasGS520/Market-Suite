@@ -18,12 +18,15 @@ import os
 import structlog
 import yaml
 
+from shared.metrics.metrics_scraper import SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS
+from shared.utils.logging_utils import sanitize_log_data
+
 import market_scraper.services.pipeline_steps as pipeline_steps_module
 from market_scraper.services.synergic_pipeline import PipelineStep
 from market_scraper.utils.http_utils import extract_hostname
 from market_scraper.utils_controllers.configuration.base_loader import calculate_file_hash
-from shared.metrics.metrics_scraper import SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS
-from shared.utils.logging_utils import sanitize_log_data
+
+
 
 
 #Caminho do arquivo de configuração. Pode ser alterado via variável de ambiente ``DOMAIN_POLICY_FILE``

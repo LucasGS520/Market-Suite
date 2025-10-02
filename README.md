@@ -89,13 +89,13 @@ Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML
 - **services/** - executa o fluxo de scraping controlando rate limiting, circuit breaker, cache inteligente e a orquestração do `SynergiPipeline`.
 - **services/domain_policy.py** - carrega o `domain_policy.yaml`, aplica hot reload opcional e constrói as etapas do pipeline para cada domínio/contexto suportado.
 - **services/pipeline_steps.py** - catálogo de etapas reutilizáveis; cada classe herda de `PipelineStep` e implementa o método `run` recebendo e atualizando o `shared_context`.
-- **utils/** - reúne auxiliares como rotação de *user agent*, gerenciamento de cookies, delays humanizados, leitura de ``robots.txt`` e funções de preço.
+- **utils/** - reúne utilitários auxiliares para o fluxo de scraping.
 - **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço, incluindo cenários que validam a seleção de etapas via YAML.
 
 #### Camada de utilitários consolidados
-- `market_scraper/utils` concentra helpers puros e reutilizáveis (normalização de URLs específicas, validação de dados, cache inteligente, funções de preço, rederização leve). Esses módulos não mantêm estado compartilhado e podem ser importados diretamente pelas etapas do pipeline.
-- `market_scraper/utils_controllers` abriga componentes com estado ou dependências externas, como controle de ritmo por domínio (`DomainPaceController`), gerenciamento de sessão/identidade (`SessionIdentityManager`), orquestração de pré-processamento e mecanismos de recuperação pós-bloqueio. Utilize-os quando a regra precisar coordenar múltiplos utilitários ou expor métricas.
-- `market_scraper/utils_controllers/configuration` oferece loaders com hot-reload para políticas de ritmo, identidade e circuit breaker. O módulo ``base_loader.py`` padroniza leitura de YAML, cache em memória e invalidação por hash/mtime; derive novos loaders a partir dele para manter comportamento consistente.
+- `market_scraper/utils` concentra helpers puros e reutilizáveis. Esses módulos não mantêm estado compartilhado e podem ser importados diretamente pelas etapas do pipeline.
+- `market_scraper/utils_controllers` abriga componentes com estado ou dependências externas. Utilize-os quando a regra precisar coordenar múltiplos utilitários ou expor métricas.
+- `market_scraper/utils_controllers/configuration` oferece loaders com hot-reload; derive novos loaders a partir dele para manter comportamento consistente.
 - Testes dedicados garantem regressão: ``pytest market_scraper/tests/unit/utils -q`` cobre helpers puros, enquanto ``pytest market_scraper/tests/unit/utils_controllers -q`` valida controllers e loaders configuráveis. 
 
 Os parsers de HTML e dados estruturados residem em `market_scraper/parsers`, cada módulo responsável apenas por transformar o HTML bruto em um dicionário padronizado. Os `SynergicPipeline` concentra toda a orquestração e fallback, evitando estratégias isoladas.
@@ -115,7 +115,7 @@ O diretório ``shared`` concentra componentes reutilizáveis que dão suporte ao
 - ``infra/`` - infraestrutura comum localizada em ``shared/infra``: base ORM, scripts Redis e arquivos de observabilidade.
 - ``metrics/`` - métricas Prometheus para HTTP, banco, cache, Celery e scraping.
 - ``schemas/`` - modelos Pydantic que definem o contrato de dados entre os serviços, incluindo ``schemas_scraper.py`` com ``ScraperRequest`` e ``ScraperResponse``.
-- ``utils/`` - funções auxiliares como normalização de URLs, mascaramento de logs e cliente Redis.
+- ``utils/`` - funções auxiliares.
 - ``tests/`` - testes que validam a integração e a consistência dos utilitários compartilhados.
 
 ### Papel na arquitetura
@@ -254,22 +254,6 @@ PLAYWRIGHT_HEADLESS=1
 PLAYWRIGHT_TIMEOUT=30000
 
 ```
-
-## Pipeline de Scraping
-O fluxo completo integra API, Celery e ``SynergicPipeline``:
-
-1. A API agenda a coleta e envia a URL para o ``markeT_scraper``.
-2. O serviço consulta o ``IntelligentCacheManager`` para decidir se uma resposta 304 pode ser retornada sem nova coleta.
-3. O ``domain_policy.yaml`` define quais estratégias e etapas devem ser executadas para o domínio/contexto solicitado.
-4. O ``SynergicPipeline`` executa as etapas registradas, compartilhando contexto e aplicando fallbacks automático até encontrar um resultado válido ou esgotar as alternativas.
-5. O resultado validado é armazenado em cache, métricas são registradas e a resposta estruturada é devolvida à API para persistência ou comparação.
-
-### Proteções ativas por camada
-1. **DomainPaceController** - combina rate limit dinâmico, token bucket e atrasos humanizados para garantir ritmo previsível entre requisições.
-2. **SessionIdentityManager** - controla User-Agent e cookies por domínio/sessão reduzindo bloqueios por fingerprinting.
-3. **CircuitBreaker** - monitora falhas consecutivas (403/429/timeouts) e abre o circuito para o domínio afetado, evitando insistir em endpoints indisponíveis.
-4. **BlockRecoveryManager** - identifica CAPTCHAs ou padrões de bloqueio; quando não há recuperação possível o evento é registrado em métricas e logs estruturados.
-5. **AdaptiveRecheckManager** e **InteligentCacheManager** - ajustam os intervalos de rechecagem com base em históricos de mudanças e mantêm os dados em cache com TTL, ETag e assinatura para reduzir acessos redundantes.
 
 ## Execução
 Para levantar todo o ambiente com banco de dados, Redis e serviços auxiliares utilize:
