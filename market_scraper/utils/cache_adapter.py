@@ -138,7 +138,15 @@ class AsyncCacheBackend:
                     )
                 if candidate is None:
                     raise ValueError("redis_factory returned None")
-                required_methods = ("setex", "get", "ttl", "expire")
+                required_methods = (
+                    "setex", 
+                    "set",
+                    "get", 
+                    "ttl", 
+                    "delete",
+                    "expire",
+                    "eval",
+                )
                 missing = [name for name in required_methods if not hasattr(candidate, name)]
                 if missing:
                     raise AttributeError(
@@ -266,7 +274,7 @@ class AsyncCacheBackend:
                     else:
                         SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
                             backend="redis",
-                            outcome="stale",
+                            outcome="hit",
                         ).inc()
                         SCRAPER_CACHE_LATENCY_SECONDS.labels(operation="get").observe(
                             time.perf_counter() - start

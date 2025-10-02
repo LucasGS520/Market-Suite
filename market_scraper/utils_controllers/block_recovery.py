@@ -5,6 +5,7 @@ from typing import List, Optional
 from urllib.parse import urlparse
 
 import asyncio
+import inspect
 import structlog
 import httpx
 
@@ -100,7 +101,11 @@ class BlockRecoveryManager:
                 marketplace = extract_hostname(url)
                 try:
                     #O adaptador garante compatibilidade com dados gravados antes da migração de chaves
-                    cached = await cache_adapter.get(marketplace=marketplace, url=url) or {}
+                    cached_result = cache_adapter.get(marketplace=marketplace, url=url)
+                    #Compatibilidade com adaptadroes síncronos utlizados em testes antigos
+                    if inspect.isawaitable(cached_result):
+                        cached_result = await cached_result
+                    cached = cached_result or {}
                     recovered_html = cached.get("html")
                     if recovered_html:
                         result_log = "cache"
