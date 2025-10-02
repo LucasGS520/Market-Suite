@@ -446,10 +446,21 @@ class CacheAdapter:
         signature_namespace: str | None = None,
         version: str | None = None,
         fallback_to_legacy: bool = True,
+        write_legacy_headers: bool = True,
         redis_url: str | None = None,
         redis_factory: Callable[[], redis.Redis | None] | None = None,
     ) -> None:
-        """ COnfigura o adaptador de cache definindo namespaces e dependências """
+        """ Configura o adaptador de cache definindo namespaces e dependências 
+        
+        Parâmetros:
+        - ``cache_manager``: instância principal responsável pelas operações de cache.
+        - ``legacy_cache_manager``: gerenciador opcional para leitura/escrita no formato anterior.
+        - ``data_namespace``/``headers_namespace``/``signature_namespace``: namespaces aplicados a cada grupo de chaves.
+        - ``version``: versão opcional que será anexada às chaves para facilitar migrações.
+        - ``fallback_to_legacy``: quando ``True``, permite consultar/escrever no cache legado durante a transição.
+        - ``write_legacy_headers``: controla se cabeçalhos HTTP devem continuar sendo replicados no formato antigo.
+        - ``redis_url`` e ``redis_factory``: fontes de configuração para inicializar clientes Redis personalizados.
+        """
         manager = cache_manager or AsyncCacheBackend(
             prefix=DEFAULT_CACHE_PREFIX,
             default_ttl=DEFAULT_CACHE_TTL,
@@ -467,6 +478,7 @@ class CacheAdapter:
             for value in (version, data_namespace, headers_namespace, signature_namespace)
         ) or (legacy_cache_manager is not None and legacy_cache_manager is not manager)
         self._fallback_enabled = fallback_to_legacy and fallback_requested
+        self._write_legacy_headers = write_legacy_headers
         self.redis_url = redis_url or settings.redis_url
         self.redis_factory = redis_factory
 
