@@ -156,7 +156,11 @@ async def scrape_product_common_async(
         _mark_success()
         return pre_pipeline_result.cached_response
 
-    def _persist_success(details: dict[str, Any], *, extraction_method: str | None = None) -> bool:
+    async def _persist_success(
+        details: dict[str, Any],
+        *,
+        extraction_method: str | None = None,
+    ) -> bool:
         """ Armazena dados válidos no cache inteligente com metadados 
         
         A validação dos dados é executada imediatamente antes da persistência
@@ -173,7 +177,7 @@ async def scrape_product_common_async(
             return False
 
         #Utiliza o adaptador para aplicar versionamento e fallback ao recuperar cabeçalhos HTTP
-        headers_cache = cache_adapter.get_headers(normalized_url)
+        headers_cache = await cache_adapter.get_headers(normalized_url)
         cache_value: dict[str, Any] = {"data": details}
         if headers_cache.get("etag") or headers_cache.get("last_modified"):
             cache_value["headers"] = headers_cache
@@ -194,7 +198,7 @@ async def scrape_product_common_async(
         if metadata:
             cache_value["metadata"] = metadata
 
-        cache_adapter.set(
+        await cache_adapter.set(
             marketplace=marketplace,
             url=normalized_url,
             value=cache_value,
@@ -281,7 +285,10 @@ async def scrape_product_common_async(
                 )
                 continue
             method = entry.get("extraction_method")
-            stored = _persist_success(pipeline_details, extraction_method=method)
+            stored = await _persist_success(
+                pipeline_details,
+                extraction_method=method,
+            )
             if not stored:
                 logger.info(
                     "pipeline_data_blocked_before_cache",
@@ -300,9 +307,9 @@ async def scrape_product_common_async(
         
         if status_step == "NOT_MODIFIED":
             #Consulta o adaptador para reaproveitar dados cacheados mesmo após mudanças de prefixos
-            cached_pipeline = cache_adapter.get(marketplace=marketplace, url=normalized_url)
+            cached_pipeline = await cache_adapter.get(marketplace=marketplace, url=normalized_url)
             if cached_pipeline:
-                cache_adapter.touch(marketplace=marketplace, url=normalized_url)
+                await cache_adapter.touch(marketplace=marketplace, url=normalized_url)
                 logger.info(
                     "pipeline_not_modified",
                     url=safe_log_url,
@@ -325,7 +332,7 @@ async def scrape_product_common_async(
                 erro=sanitize_log_data(str(err)),
             )
         else:
-            stored = _persist_success(
+            stored = await _persist_success(
                 pipeline_details,
                 extraction_method=pipeline_result.get("extraction_method"),
             )
@@ -348,9 +355,9 @@ async def scrape_product_common_async(
         
     if pipeline_status == "NOT_MODIFIED":
         #Tenta reaproveitar o cache legado caso o pipeline sinalize ``NOT_MODIFIED``
-        cached_pipeline = cache_adapter.get(marketplace=marketplace, url=normalized_url)
+        cached_pipeline = await cache_adapter.get(marketplace=marketplace, url=normalized_url)
         if cached_pipeline:
-            cache_adapter.touch(marketplace=marketplace, url=normalized_url)
+            await cache_adapter.touch(marketplace=marketplace, url=normalized_url)
             logger.info(
                 "pipeline_not_modified",
                 url=safe_log_url,

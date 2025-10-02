@@ -1,9 +1,6 @@
 import pytest
 import time
 
-from market_scraper.utils.rate_limiter import RateLimiter
-import sys, types
-
 #FakeRedis universal para testes unitarios
 class FakeRedis:
     def __init__(self):
@@ -100,31 +97,54 @@ def patch_rate_limiter(monkeypatch):
     """ Substitui a classe Redis por uma fake e evitar conexão real com redis e leitura de arquivo Lua """
     fake_redis = FakeRedis()
 
+    class AsyncFakeRedis:
+        """ Versão assíncrona do Redis fake utilizada pelo adaptador de cache """
+        def __init__(self, backend: FakeRedis) -> None:
+            self._backend = backend
+
+        async def get(self, key: str):
+            return self._backend.get(key)
+        
+        async def setext(self, key: str, ttl: int, value: str) -> None:
+            self._backend.setex(key, ttl, value)
+
+        async def ttl(self, key: str) -> None:
+            remaining = self._backend.ttl(key)
+            if remaining is None:
+                return -1
+            return remaining
+        
+        async def delete(self, key: str) -> None:
+            self._backend.delete(key)
+
+        async def expire(self, key: str, secs: int) -> None:
+            self._backend.expire(key, secs)
+
+        async def set(self, key: str, value: str, *, ex: int | None = None, nx: bool = False):
+            if nx and key in self._backend.data:
+                return False
+            self._backend.set(key, value, ex=ex)
+            return True
+
+        async def eval(self, script: str, numkeys: int, key: str, token: str) -> None:
+            stored = self._backend.get(key)
+            if stored == token:
+                self._backend.delete(key)
+
+    async_fake = AsyncFakeRedis(fake_redis)
+
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_scraper.utils.rate_limiter.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr("market_scraper.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("market_scraper.utils.intelligent_cache.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr(
+        "market_scraper.utils.cache_adapter.redis.Redis.from_url",
+        lambda *a, **k: async_fake,
+    )
     monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
     monkeypatch.setattr(
         "market_scraper.utils.robots_txt.requests.get",
         lambda *a, **k: type("Resp", (), {"status_code": 200, "text": ""})()
     )
-
-    class DummyCacheManager:
-        """ Cache fictício para evitar dependência de Redis """
-        def __init__(self, *a, **k):
-            pass
-
-        def get(self, *a, **k):
-            return None
-
-        def set(self, *a, **k):
-            pass
-
-        def _hash_content(self, *a, **k):
-            return ""
-
-    sys.modules.setdefault("market_scraper.utils.intelligent_cache", types.SimpleNamespace(IntelligentCacheManager=DummyCacheManager))
 
     class DummyCircuitBreaker:
         def allow_request(self, *a, **k):

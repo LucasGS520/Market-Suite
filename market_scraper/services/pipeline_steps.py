@@ -260,7 +260,7 @@ class RequestsHTMLRenderStep(PipelineStep):
                 "detail": "Tempo limite ao baixar ou renderizar HTML com Requests-HTML",
             }
         shared_context["html"] = html
-        signature = cache_adapter.check_or_update_signature(url, html)
+        signature = await cache_adapter.check_or_update_signature(url, html)
         shared_updates: dict[str, Any] = {"html": html}
         
         if signature is NOT_MODIFIED:

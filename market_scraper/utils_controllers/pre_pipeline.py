@@ -105,7 +105,7 @@ class PrePipelineOrchestrator:
 
         logger.info("checking_cache", url=safe_log_url)
         #O adaptador abstrai versões diferentes das chaves de cache sem alterar chamadores
-        cached_entry = self.cache_adapter.get(marketplace=marketplace, url=url)
+        cached_entry = await self.cache_adapter.get(marketplace=marketplace, url=url)
         cached_response: Optional[dict[str, Any]] = None
 
         if cached_entry:
@@ -120,7 +120,7 @@ class PrePipelineOrchestrator:
                     reason=sanitize_log_data(str(err)),
                 )
             else:
-                self.cache_adapter.touch(marketplace=marketplace, url=url)
+                await self.cache_adapter.touch(marketplace=marketplace, url=url)
                 cached_response = {"status": "success", "details": details}
                 logger.info("cache_used", url=safe_log_url)
         else:

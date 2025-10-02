@@ -100,7 +100,7 @@ class BlockRecoveryManager:
                 marketplace = extract_hostname(url)
                 try:
                     #O adaptador garante compatibilidade com dados gravados antes da migração de chaves
-                    cached = cache_adapter.get(marketplace=marketplace, url=url) or {}
+                    cached = await cache_adapter.get(marketplace=marketplace, url=url) or {}
                     recovered_html = cached.get("html")
                     if recovered_html:
                         result_log = "cache"

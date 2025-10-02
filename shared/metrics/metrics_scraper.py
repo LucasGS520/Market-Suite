@@ -179,6 +179,12 @@ SCRAPER_CACHE_LOCAL_SIZE = Gauge(
     "Quantidade de entradas armazenadas no cache local de contingência do scraper",
 )
 
+SCRAPER_CACHE_LOCK_TOTAL = Counter(
+    "scraper_cache_lock_total",
+    "Total de tentativas de lock distribuído realizadas pelo cache do scraper",
+    ["outcome"],
+)
+
 
 __all__ = [
     "SCRAPING_LATENCY_SECONDS",
@@ -210,4 +216,5 @@ __all__ = [
     "SCRAPER_CACHE_LOOKUPS_TOTAL",
     "SCRAPER_CACHE_LATENCY_SECONDS",
     "SCRAPER_CACHE_LOCAL_SIZE",
+    "SCRAPER_CACHE_LOCK_TOTAL",
 ]
