@@ -1,96 +1,180 @@
-import pytest
+import hashlib
+import math
 import time
+from typing import Any, Dict, List
 
-#FakeRedis universal para testes unitarios
+import pytest
+
 class FakeRedis:
-    def __init__(self):
-        self.data = {}
-        self.scripts = {}
-        self._expirations = {}
-        self.current_time = 0
+    """Simula operações essenciais do Redis para cenários de teste."""
 
-    def _purge_expired(self):
-        """ Remove chaves expiradas com base no tempo interno """
-        expirados = [k for k, t in self._expirations.items() if t <= self.current_time]
-        for key in expirados:
-            self.data.pop(key, None)
-            self.data.pop(f"ttl:{key}", None)
-            self._expirations.pop(key, None)
+    def __init__(self) -> None:
+        """Prepara os armazenamentos internos e o relógio virtual."""
+        self._data: Dict[str, object] = {}
+        self._expirations: Dict[str, float | None] = {}
+        self._scripts: Dict[str, str] = {}
+        self._sorted_sets: Dict[str, List[float]] = {}
+        self.current_time: float = 0.0
 
-    def script_load(self, source):
-        sha = f"fake-sha-{len(self.scripts)}"
-        self.scripts[sha] = source
+    def _purge_expired(self) -> None:
+        """Remove chaves cujo TTL expirou no relógio virtual."""
+        expired_keys = [
+            key
+            for key, expires_at in self._expirations.items()
+            if expires_at is not None and expires_at <= self.current_time
+        ]
+        for key in expired_keys:
+            self.delete(key)
+
+    @staticmethod
+    def _normalize_score(raw: float | str) -> float:
+        """Normaliza os valores de score usados em estruturas ordenadas."""
+        if isinstance(raw, str):
+            if raw == "-inf":
+                return float("-inf")
+            if raw in {"+inf", "inf"}:
+                return float("inf")
+            return float(raw)
+        return float(raw)
+
+    def script_load(self, source: str) -> str:
+        """Carrega um script fictício e retorna seu hash SHA1 como identificador."""
+        sha = hashlib.sha1(source.encode("utf-8")).hexdigest()
+        self._scripts[sha] = source
         return sha
 
-    def set(self, key, value, ex=None):
+    def set(self, key: str, value: object, ex: int | None = None, nx: bool = False) -> bool:
+        """ Define um valor e registra opcionalmente o TTL, respeitando a opção NX """
         self._purge_expired()
+        if nx and key in self.data:
+            return False
         self.data[key] = value
-        if ex:
-            self.data[f"ttl:{key}"] = ex
+        if ex is not None:
             self._expirations[key] = self.current_time + ex
         else:
             self._expirations.pop(key, None)
-            self.data.pop(f"ttl:{key}", None)
+        return True
 
-
-    def get(self, key):
-        self._purge_expired()
-        return self.data.get(key)
-
-    def setex(self, key, ttl, value):
+    def setex(self, key: str, ttl: int, value: object) -> None:
+        """ Encapsula ``SET`` com expiração obrigatória """
         self.set(key, value, ex=ttl)
 
-    def exists(self, key):
+    def get(self, key: str) -> object | None:
+        """ Obtém o valor associado à chave, respeitando expirações """
         self._purge_expired()
-        return key in self.data
+        return self._data.get(key)
 
-    def evalsha(self, sha, num_keys, redis_key, now_ms, window_ms, limit):
-        if redis_key not in self.data:
-            self.data[redis_key] = []
+    def ttl(self, key: str) -> int:
+        """Retorna o TTL restante em segundos, seguindo convenções do Redis."""
+        self._purge_expired()
+        if key not in self._data:
+            return -2
+        expires_at = self._expirations.get(key)
+        if expires_at is None:
+            return -1
+        remaining = expires_at - self.current_time
+        if remaining <= 0:
+            self.delete(key)
+            return -2
+        return int(math.ceil(remaining))
 
-        window_start = now_ms - window_ms
-        self.data[redis_key] = [ts for ts in self.data[redis_key] if ts > window_start]
-        self.data[redis_key].append(now_ms)
-        return 1 if len(self.data[redis_key]) <= limit else 0
+    def expire(self, key: str, secs: int) -> bool:
+        """Atualiza o TTL de uma chave existente."""
+        self._purge_expired()
+        if key not in self._data:
+            return False
+        self._expirations[key] = self.current_time + secs
+        return True
 
-    def incr(self, key):
-        value = int(self.data.get(key, 0)) + 1
-        self.data[key] = value
+    def exists(self, key: str) -> int:
+        """ Retorna ``1`` qaundo a chave está ativa """
+        self._purge_expired()
+        return 1 if key in self._data else 0
+    
+    def incr(self, key: str) -> int:
+        """Incrementa e devolve o valor inteiro armazenado na chave."""
+        self._purge_expired()
+        value = int(self._data.get(key, 0)) + 1
+        self._data[key] = value
         return value
 
-    def expire(self, key, secs):
-        self._purge_expired()
-        if key in self.data:
-            self.data[f"ttl:{key}"] = secs
-            self._expirations[key] = self.current_time + secs
+    def delete(self, key: str) -> int:
+        """Remove chaves de todos os armazenamentos internos."""
+        removed = 0
+        if key in self._data:
+            removed += 1
+            self._data.pop(key, None)
+        self._expirations.pop(key, None)
+        if key in self._sorted_sets:
+            removed += 1
+            self._sorted_sets.pop(key, None)
+        return removed
 
-    def ttl(self, key):
-        """ Retorna o tempo restante de uma chave em segundos """
-        self._purge_expired()
-        if key not in self.data:
-            return None
-        exp = self._expirations.get(key)
-        if exp is None:
-            return None
-        return max(0, int(exp - self.current_time))
+    def zremrangebyscore(self, key: str, min_score: float | str, max_score: float | str) -> int:
+        """Remove elementos do conjunto ordenado dentro do intervalo informado."""
+        scores = self._sorted_sets.get(key)
+        if scores is None:
+            return 0
+        min_value = self._normalize_score(min_score)
+        max_value = self._normalize_score(max_score)
+        original_len = len(scores)
+        self._sorted_sets[key] = [
+            score for score in scores if not (min_value <= score <= max_value)
+        ]
+        removed = original_len - len(self._sorted_sets[key])
+        if not self._sorted_sets[key]:
+            self._sorted_sets.pop(key, None)
+        return removed
 
-    def advance_time(self, secs: int):
-        """ Avança o relógio interno para simular expiração """
+    def zcard(self, key: str) -> int:
+        """Retorna a quantidade de elementos em um conjunto ordenado."""
+        scores = self._sorted_sets.get(key, [])
+        return len(scores)
+
+    def evalsha(self, sha: str, num_keys: int, *keys_and_args: Any) -> Any:
+        """Executa um script previamente carregado com base no hash informado."""
+        script = self._scripts.get(sha)
+        if script is None:
+            raise ValueError("script não encontrado para o SHA informado")
+        keys = list(keys_and_args[:num_keys])
+        args = list(keys_and_args[num_keys:])
+        return self._execute_script(script, keys, args)
+
+    def eval(self, script: str, num_keys: int, *keys_and_args: Any) -> Any:
+        """Processa scripts inline necessários nos testes."""
+        keys = list(keys_and_args[:num_keys])
+        args = list(keys_and_args[num_keys:])
+        return self._execute_script(script, keys, args)
+    
+    def _execute_script(self, script: str, keys: list[str], args: list[Any]) -> Any:
+        """Interpreta scripts utilizados pelo cache e pelo rate limiter."""
+        if "redis.call('get', KEYS[1]) == ARGV[1]" in script and keys:
+            token = args[0] if args else None
+            stored = self.get(keys[0])
+            if stored == token:
+                self.delete(keys[0])
+                return 1
+            return 0
+        if len(keys) == 1 and len(args) == 3:
+            redis_key = keys[0]
+            now_ms = int(args[0])
+            window_ms = int(args[1])
+            limit = int(args[2])
+            window_start = now_ms - window_ms
+            entries = [
+                score
+                for score in self._sorted_sets.get(redis_key, [])
+                if score > window_start
+            ]
+            entries.append(now_ms)
+            self._sorted_sets[redis_key] = entries
+            return 1 if len(entries) <= limit else 0
+        return None
+
+    def advance_time(self, secs: int) -> None:
+        """Avança o relógio interno para facilitar testes de expiração."""
         self.current_time += secs
         self._purge_expired()
-
-    def zremrangebyscore(self, redis_key, min_score, max_score):
-        if redis_key not in self.data:
-            return 0
-        self.data[redis_key] = [ts for ts in self.data[redis_key] if ts > max_score]
-        return len(self.data[redis_key])
-
-    def zcard(self, redis_key):
-        return len(self.data.get(redis_key, []))
-
-    def delete(self, redis_key):
-        if redis_key in self.data:
-            del self.data[redis_key]
 
 @pytest.fixture(autouse=True)
 def patch_rate_limiter(monkeypatch):
@@ -98,38 +182,48 @@ def patch_rate_limiter(monkeypatch):
     fake_redis = FakeRedis()
 
     class AsyncFakeRedis:
-        """ Versão assíncrona do Redis fake utilizada pelo adaptador de cache """
+        """ Adapta o ``FakeRedis`` para a interface assíncrona esperada """
         def __init__(self, backend: FakeRedis) -> None:
             self._backend = backend
 
-        async def get(self, key: str):
+        async def get(self, key: str) -> object | None:
+            """Replica o comportamento de ``GET`` assíncrono."""
             return self._backend.get(key)
         
-        async def setext(self, key: str, ttl: int, value: str) -> None:
+        async def setex(self, key: str, ttl: int, value: str) -> None:
+            """ Executa ``SETEX`` mantendo a mesma semântica do cliente real """
             self._backend.setex(key, ttl, value)
 
-        async def ttl(self, key: str) -> None:
-            remaining = self._backend.ttl(key)
-            if remaining is None:
-                return -1
-            return remaining
-        
-        async def delete(self, key: str) -> None:
-            self._backend.delete(key)
+        async def ttl(self, key: str) -> int:
+            """Delega a consulta de TTL preservando códigos de retorno."""
+            return self._backend.ttl(key)
 
-        async def expire(self, key: str, secs: int) -> None:
-            self._backend.expire(key, secs)
+        async def delete(self, key: str) -> int:
+            """Remove uma chave do armazenamento compartilhado."""
+            return self._backend.delete(key)
 
-        async def set(self, key: str, value: str, *, ex: int | None = None, nx: bool = False):
-            if nx and key in self._backend.data:
-                return False
-            self._backend.set(key, value, ex=ex)
-            return True
+        async def expire(self, key: str, secs: int) -> bool:
+            """Atualiza o TTL da chave informada."""
+            return self._backend.expire(key, secs)
 
-        async def eval(self, script: str, numkeys: int, key: str, token: str) -> None:
-            stored = self._backend.get(key)
-            if stored == token:
-                self._backend.delete(key)
+        async def set(
+            self,
+            key: str,
+            value: str,
+            *,
+            ex: int | None = None,
+            nx: bool = False,
+        ) -> bool:
+            """Implementa ``SET`` com suporte a ``NX`` para locks distribuídos."""
+            return self._backend.set(key, value, ex=ex, nx=nx)
+
+        async def eval(self, script: str, numkeys: int, *keys_and_args: Any) -> Any:
+            """Executa scripts Lua simplificados sobre a instância fake."""
+            return self._backend.eval(script, numkeys, *keys_and_args)
+
+        async def evalsha(self, sha: str, numkeys: int, *keys_and_args: Any) -> Any:
+            """Encaminha a execução de scripts previamente carregados."""
+            return self._backend.evalsha(sha, numkeys, *keys_and_args)
 
     async_fake = AsyncFakeRedis(fake_redis)
 

@@ -118,7 +118,7 @@ class AsyncCacheBackend:
         self.lock_timeout = lock_timeout
 
     async def _get_redis(self) -> redis.Redis | None:
-        """ Obtém ou inicializa o cliente Redis assíncrono """
+        """ Obtém ou inicializa o cliente Redis assíncrono com validação básica """
         if self._redis is not None:
             return self._redis
         
@@ -127,20 +127,29 @@ class AsyncCacheBackend:
                 return self._redis
             try:
                 if self._redis_factory is not None:
-                    candidate = await candidate
+                    candidate = self._redis_factory()
                     if inspect.isawaitable(candidate):
                         candidate = await candidate
-                    self._redis = candidate
                 else:
-                    self._redis = redis.Redis.from_url(
+                    candidate = redis.Redis.from_url(
                         self.redis_url,
                         encoding="utf-8",
                         decode_responses=False,
                     )
+                if candidate is None:
+                    raise ValueError("redis_factory returned None")
+                required_methods = ("setex", "get", "ttl", "expire")
+                missing = [name for name in required_methods if not hasattr(candidate, name)]
+                if missing:
+                    raise AttributeError(
+                        "client Redis incompatible: missing methods " + ", ".join(sorted(missing))
+                    )
+                self._redis = candidate
             except Exception as err:
                 logger.warning(
                     "initialize_redis_async_failed",
                     error=sanitize_log_data(str(err)),
+                    error_type=err.__class__.__name__,
                 )
                 self._redis = None
         return self._redis
@@ -333,8 +342,12 @@ class AsyncCacheBackend:
             time.perf_counter() - start
         )
 
-    async def _acquire_lock(self, client: redis.Redis, key: str) -> tuple[bool, Optional[str], str]:
-        """ Tenta adquirir um lock no Redis usando ``SET NX`` """
+    async def _acquire_lock(
+        self,
+        client: redis.Redis,
+        key: str,
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """ Tenta adquirir um lock e retorna ``(acquired, lock_key, token)`` """
         token = secrets.token_hex(16)
         lock_key = f"{key}:lock"
         try:
@@ -343,7 +356,7 @@ class AsyncCacheBackend:
                 SCRAPER_CACHE_LOCK_TOTAL.labels(outcome="acquired").inc()
                 return True, lock_key, token
             SCRAPER_CACHE_LOCK_TOTAL.labels(outcome="miss").inc()
-            return False, None, lock_key
+            return False, None, None
         except Exception as err:
             SCRAPER_CACHE_LOCK_TOTAL.labels(outcome="error").inc()
             logger.warning(
@@ -351,7 +364,7 @@ class AsyncCacheBackend:
                 key=key,
                 error=sanitize_log_data(str(err)),
             )
-            return False, None, lock_key
+            return False, None, None
         
     async def _release_lock(
         self,
@@ -391,8 +404,8 @@ class AsyncCacheBackend:
         client = await self._get_redis()
 
         if client is not None:
-            acquired, token, lock_key = await self._acquire_lock(client, key)
-            if acquired and token is not None:
+            acquired, lock_key, token = await self._acquire_lock(client, key)
+            if acquired and token is not None and lock_key is not None:
                 try:
                     await client.expire(key, self._apply_jitter(ttl))
                 except Exception as err:
@@ -666,7 +679,7 @@ class CacheAdapter:
                 error=sanitize_log_data(str(err)),
             )
 
-    async def check_or_update_sifnature(
+    async def check_or_update_signature(
         self,
         url: str,
         html: str,
@@ -696,36 +709,36 @@ class CacheAdapter:
             update_if_not_modified=True,
         )
     
-async def _check_signature_for_key(
-    self,
-    url: str,
-    html: str,
-    *,
-    update_if_not_modified: bool,
-) -> Any:
-    """ Manipula assinaturas de conteúdo para a chave informada """
-    signature = hashlib.sha256(html.encode("utf-8")).hexdigest()
-    client = await self._get_raw_redis()
-    if client is None:
-        return signature
-    key = f"{DEFAULT_SIGNATURE_PREFIX}{_hash_url(url)}"
-    try:
-        previous = await client.get(key)
-        if isinstance(previous, bytes):
-            previous = previous.decode("utf-8")
-        if previous == signature:
-            if update_if_not_modified:
-                await client.set(key, signature, ex=settings.SIG_CACHE_TTL)
-            return NOT_MODIFIED
-        await client.set(key, signature, ex=settings.SIG_CACHE_TTL)
-        return signature
-    except Exception as err:
-        logger.warning(
-            "signature_content_failed",
-            url=url,
-            error=sanitize_log_data(str(err)),
-        )
-        return signature
+    async def _check_signature_for_key(
+        self,
+        url: str,
+        html: str,
+        *,
+        update_if_not_modified: bool,
+    ) -> Any:
+        """ Manipula assinaturas de conteúdo para a chave informada """
+        signature = hashlib.sha256(html.encode("utf-8")).hexdigest()
+        client = await self._get_raw_redis()
+        if client is None:
+            return signature
+        key = f"{DEFAULT_SIGNATURE_PREFIX}{_hash_url(url)}"
+        try:
+            previous = await client.get(key)
+            if isinstance(previous, bytes):
+                previous = previous.decode("utf-8")
+            if previous == signature:
+                if update_if_not_modified:
+                    await client.set(key, signature, ex=settings.SIG_CACHE_TTL)
+                return NOT_MODIFIED
+            await client.set(key, signature, ex=settings.SIG_CACHE_TTL)
+            return signature
+        except Exception as err:
+            logger.warning(
+                "signature_content_failed",
+                url=url,
+                error=sanitize_log_data(str(err)),
+            )
+            return signature
 
 def _load_namespace(env_name: str) -> Optional[str]:
     """ Carrega valores de namespace das variáveis de ambiente """
