@@ -2,16 +2,16 @@
 
 O módulo implementa uma versão enxuta do pipeline que processa etapas em
 sequência, respeitando limites de tempo configuráveis e registrando
-métricas por etapa. O objetivo é oferecer uma base simples, previsível e
-fácil de testar para o fluxo de scraping.
+métricas por etapa. A execução linear com métricas grante previsibilidade
+e observabilidade para o serviço de scraping.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Literal, Sequence
-import asyncio
 
 import structlog
 
@@ -21,6 +21,7 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_STEP_LATENCY_SECONDS,
     SCRAPER_STEP_SUCCESS_TOTAL,
 )
+from shared.utils.logging_utils import sanitize_log_data
 
 
 #Logger estruturado para acompanhamento dos eventos do pipeline
@@ -34,6 +35,17 @@ class PipelineContext:
     default_step_timeout: float
     html: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """ Inicializa chaves mínimas do ``shared_context``
+        
+        Garante que as etapas sempre encontrem informações básicas
+        sem depender de inicialização externa.
+        """
+        self.data.setdefault("url", self.url)
+        self.data.setdefault("source", self.source)
+        self.data.setdefault("domain", self.source)
+        self.data.setdefault("step_timeout", self.default_step_timeout)
 
     def set_html(self, html: str) -> None:
         """ Guarda o HTML obtido para que etapas posteriores possam reutilizá-lo """
@@ -82,9 +94,9 @@ class StepExecution:
 class PipelineOutcome:
     """ Guarda o resumo da execução do pipeline """
     status: Literal["success", "no_result", "timeout", "error"]
-    payload: dict[str, Any] | None = None
-    steps: list[StepExecution]
     context: PipelineContext
+    payload: dict[str, Any] | None = None
+    steps: list[StepExecution] = field(default_factory=list)
 
 class PipelineError(Exception):
     """ Erro genérico emitido quando a execução do pipeline falha """
@@ -124,7 +136,9 @@ class SynergicPipeline:
         """ Percorre as etapas em ordem até encontrar um payload válido """
         executions: list[StepExecution] = []
         payload: dict[str, Any] | None = None
-        status: Literal["sucess", "no_result", "timeout", "error"] = "no_result"
+        status: Literal["success", "no_result", "timeout", "error"] = "no_result"
+        context.data.setdefault("pipeline_timeout", self._pipeline_timeout)
+        context.data.setdefault("step_timeout", context.default_step_timeout)
 
         async def _run_sequence() -> None:
             nonlocal payload, status
@@ -160,17 +174,17 @@ class SynergicPipeline:
                             name=step.name,
                             status="error",
                             duration_seconds=duration,
-                            message=str(exc),
+                            message="Falha interna na etapa",
                         )
                     )
                     SCRAPER_STEP_LATENCY_SECONDS.labels(step.name).observe(duration)
-                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.soruce).inc()
+                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source).inc()
                     logger.exception(
                         "step_error",
                         step=step.name,
                         duration=duration,
                         url=context.url,
-                        error=str(exc),
+                        error=sanitize_log_data(str(exc)),
                     )
                     continue
 
@@ -178,20 +192,20 @@ class SynergicPipeline:
                 SCRAPER_STEP_LATENCY_SECONDS.labels(step.name).observe(duration)
 
                 if result.status == "success":
-                        SCRAPER_STEP_SUCCESS_TOTAL.labels(step.name, context.source).inc()
-                        executions.append(
-                            StepExecution(
-                                name=step.name,
-                                status="success",
-                                duration_seconds=duration,
-                                message=result.message,
-                            )
+                    SCRAPER_STEP_SUCCESS_TOTAL.labels(step.name, context.source).inc()
+                    executions.append(
+                        StepExecution(
+                            name=step.name,
+                            status="success",
+                            duration_seconds=duration,
+                            message=result.message,
                         )
-                        if result.payload:
-                            payload = context.build_payload(result.payload)
-                            status = "success"
-                            return
-                        continue
+                    )
+                    if result.payload:
+                        payload = context.build_payload(result.payload)
+                        status = "success"
+                        return
+                    continue
                 
                 SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source).inc()
                 executions.append(

@@ -1,7 +1,7 @@
 """ Estapas básicas para o pipeline sequencial do MarketScraper
 
 O foco é cobrir os casos estáticos mais comuns: baixar o HTML 
-sincronamente e tentar extrair os campos essenciais com parsers
+sincronamente e tentar extrair os campos essenciais com parsers leves
 leves. Cada etapa retorna ``StepResult`` para o ``SynergicPipeline``
 controlar fallback e métricas.
 """
@@ -29,9 +29,10 @@ async def download_html(url: str, *, timeout: float) -> str:
     headers = {"User-Agent": "marketsuite-scraper/1.0", "Accept": "text/html"}
     
     client_timeout = httpx.Timeout(
-        connect=settings.SCRAPER_HTTP_TIMEOUT_CONNECT,
-        read=settings.SCRAPER_HTTP_TIMEOUT_CONNECT,
-        write=settings.SCRAPER_HTTP_TIMEOUT_WRITE,
+        timeout,
+        connect=min(timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
+        read=min(timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
+        write=min(timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
         pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
     )
     limits = httpx.Limits(

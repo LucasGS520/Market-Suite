@@ -3,7 +3,7 @@ from __future__ import annotations
 """ Política de carregamento de etapas de pipeline por domínio
 
 As configurações são carregadas de um arquivo YAML durante a inicialização
-permitindo alterar a composição do pipeline sem nova publicação. Um 
+permitindo alterar a composição do pipeline sem nova publicação. Um
 `hot-reload` opcional recarrega o arquivo sempre que ele for modificado.
 As políticas podem ser definidas por domínio e por contexto (como tipo de
 página ou perfil do usuário), facilitando ajustes granulares sem alterar código.
@@ -11,7 +11,7 @@ página ou perfil do usuário), facilitando ajustes granulares sem alterar códi
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Type, Literal, cast
+from typing import Any, Dict, List, Type, Literal
 import hashlib
 import os
 from inspect import isclass
@@ -467,13 +467,15 @@ def is_feature_enabled(feature: str, url: str, *, context: str = "default", iden
     )
     return decision.enabled
 
-def _normalize_execution_mode(value: str | None) -> Literal["sequential", "parallel", "conditional"]:
-    """ Normaliza o modo de execução aceitando apenas valores suportados """
-    if not value:
-        return "sequential"
-    mode = value.lower()
-    if mode in {"parallel", "conditional", "sequential"}:
-        return cast(Literal["sequential", "parallel", "conditional"], mode)
+def _normalize_execution_mode(value: str | None, *, domain: str | None = None, context: str | None = None) -> Literal["sequential"]:
+    """ Normaliza o modo de execução, forçando ``sequential`` para todo caso """
+    if value and value.lower() not in {"", "sequential"}:
+        logger.warning(
+            "pipeline_execution_mode_forced",
+            configured=value,
+            domain=domain,
+            context=context,
+        )
     return "sequential"
 
 def enable_hot_reload() -> None:
@@ -499,7 +501,7 @@ def _select_names_for_context(names: Dict[str, List[str]] | List[str], context: 
     return list(names.get(context) or names.get("default") or [])
 
 def pipeline_steps_for(url: str, *, context: str = "default") -> List[PipelineStep]:
-    """ Retorna intâncias de etapas de pipeline para o domínio
+    """ Retorna intâncias de etapas de pipeline para o domínio informado
     
     ``context`` permite selecionar variações de pipeline definidas para o 
     domínio. Caso o contexto não exista, é utilizada a chave ``default``.
@@ -555,8 +557,8 @@ def pipeline_steps_for(url: str, *, context: str = "default") -> List[PipelineSt
                 continue
     return isinstance
 
-def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Literal["sequential", "parallel", "conditional"]:
-    """ Retorna o modo de execução do pipeline para o domínio/contexto informado """
+def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Literal["sequential"]:
+    """ Retorna o modo de execução do pipeline sempre no modo sequencial """
     _reload_if_needed()
 
     host = extract_hostname(url)
@@ -569,8 +571,8 @@ def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Litera
         return raw or {}
     
     default_modes = {
-        k: _normalize_execution_mode(v)
-        for k, v in _resolve_context_modes(default_contexts).items()
+        key: _normalize_execution_mode(v, domain="default", context=key)
+        for key, v in _resolve_context_modes(default_contexts).items()
     }
 
     def _corresponds_domain(host: str, domain: str) -> bool:
@@ -582,7 +584,7 @@ def pipeline_execution_mode_for(url: str, *, context: str = "default") -> Litera
             continue
         if _corresponds_domain(host, domain):
             normalized = {
-                key: _normalize_execution_mode(value)
+                key: _normalize_execution_mode(value, domain=domain, context=key)
                 for key, value in _resolve_context_modes(contexts).items()
             }
             return (

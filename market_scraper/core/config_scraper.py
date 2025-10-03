@@ -1,9 +1,9 @@
 """ Configurações específicas do serviço de scraping (MarketScraper).
 
-Este módulo estende `shared.core.config_base.ConfigBase` com opções
-próprias do MarketScraper, centralizando parâmetros de cache, limitação
-de taxa, delays humanizados e rechecagens. Todos os valores podem ser
-configurados via variáveis de ambiente.
+O módulo estende ``ConfigBase`` com opções próprias do MarketScraper,
+centralizando parâmetros de cache, limitação de taxa, delays humanizados
+e rechecagens. Todos os valores podem ser configurados via variáveis
+de ambiente.
 """
 
 import os
@@ -13,12 +13,7 @@ from shared.core.config_base import ConfigBase
 __all__ = ["Settings", "settings"]
 
 class Settings(ConfigBase):
-    """ Conjunto de configurações do MarketScraper.
-
-    Herda de `ConfigBase` e carrega valores a partir de variáveis de
-    ambiente, definindo padrões seguros para desenvolvimento. Os campos
-    abaixo documentam a finalidade de cada parâmetro.
-    """
+    """ Conjunto de configurações do MarketScraper """
 
     #TTL base para o cache de scraping (segundos)
     CACHE_BASE_TTL: int = int(os.getenv("CACHE_BASE_TTL", str(3600)))  #Validade do cache
@@ -66,7 +61,7 @@ class Settings(ConfigBase):
     SCRAPER_HTTP_MAX_REDIRECTS: int = int(os.getenv("SCRAPER_HTTP_MAX_REDIRECTS", "3"))
     SCRAPER_HTTP_MAX_CONTENT_LENGTH: int = int(
         os.getenv("SCRAPER_HTTP_MAX_CONTENT_LENGTH", str(2_000_000))
-    ) #~2MB para evitar respostas gigantes
+    )
     SCRAPER_HTTP_MAX_CONNECTIONS: int = int(
         os.getenv("SCRAPER_HTTP_MAX_CONNECTIONS", "10")
     )

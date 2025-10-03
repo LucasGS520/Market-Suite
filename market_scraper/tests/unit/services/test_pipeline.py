@@ -46,6 +46,7 @@ async def test_pipeline_returns_first_success() -> None:
         "source": "exemplo.com",
     }
     assert len(outcome.steps) == 2
+    assert outcome.context is context
 
 @pytest.mark.asyncio
 async def test_pipeline_records_timeout(monkeypatch) -> None:
@@ -67,4 +68,20 @@ async def test_pipeline_global_timeout() -> None:
     pipeline = SynergicPipeline(steps=[step], step_timeout=1.0, pipeline_timeout=0.2)
     with pytest.raises(PipelineTimeoutError):
         await pipeline.run(context)
-        
+
+@pytest.mark.asyncio
+async def test_pipeline_context_initializes_shared_keys() -> None:
+    """ Verifica que o contexto compartilha metadados mínimos automaticamente """
+    context = PipelineContext(url="https://exemplo.com", source="exemplo.com", default_step_timeout=0.5)
+    step = DummyStep(StepResult.empty("sem dados"))
+    pipeline = SynergicPipeline(steps=[step], step_timeout=0.5, pipeline_timeout=1.5)
+
+    outcome = await pipeline.run(context)
+
+    assert outcome.status == "no_result"
+    assert context.data["url"] == context.url
+    assert context.data["source"] == context.source
+    assert context.data["domain"] == context.source
+    assert context.data["step_timeout"] == context.default_step_timeout
+    assert context.data["pipeline_timeout"] == pytest.approx(1.5)
+    
