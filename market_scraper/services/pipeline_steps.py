@@ -1,310 +1,136 @@
-from __future__ import annotations
+""" Estapas básicas para o pipeline sequencial do MarketScraper
 
-""" Etapas específicas para o ``SynergicPipeline`` de scraping
-
-Este módulo concentra implementações de ``PipelineStep`` que utilizam
-bibliotecas populares de scraping e parsing para extrair dados progressivamente.
-Cada etapa tenta obter ``name`` e ``current_price`` do HTML disponível no
-``shared_context``. Quando bem-sucedida, a etapa retorna um dicionário com
-``status`` igual a ``success`` e os dados extraídos em ``details``. A
-validação do conteúdo e o controle de fallback ficam a cargo do ``SynergicPipeline``.
+O foco é cobrir os casos estáticos mais comuns: baixar o HTML 
+sincronamente e tentar extrair os campos essenciais com parsers
+leves. Cada etapa retorna ``StepResult`` para o ``SynergicPipeline``
+controlar fallback e métricas.
 """
 
+from __future__ import annotations
+
 from typing import Any
-import asyncio
 
-from requests_html import HTMLSession
-import requests
-import mechanicalsoup
+import httpx
+import structlog
 
-from .synergic_pipeline import PipelineStep
 from market_scraper.parsers import (
-    parse_with_extruct,
-    parse_with_parsel,
+    parse_generic_html,
     parse_with_beautifulsoup,
-    parse_with_requests_html,
-    parse_with_selectorlib,
+    parse_with_extruct,
 )
+from market_scraper.services.synergic_pipeline import PipelineContext, PipelineStep, StepResult
 
-TimeoutConfig = float | tuple[float, float] | None
 
-def _normalize_timeout(value: Any) -> TimeoutConfig:
-    """ Normaliza valores de timeout recebidos por configuração ou contexto """
-    if value is None:
+logger = structlog.get_logger("pipeline_steps")
+
+async def download_html(url: str, *, timeout: float) -> str:
+    """ Baixa o HTML usando ``httpx`` respeitando o tempo limite informado """
+    headers = {"User-Agent": "marketsuite-scraper/1.0", "Accept": "text/html"}
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        response = await client.get(url, headers=headers)
+        response.raise_for_status()
+        return response.text
+
+class FetchHTMLStep(PipelineStep):
+    """ Obtém o HTML bruto e o disponibiliza no contexto compartilhado """
+    def __init__(self, *, timeout: float | None = None) -> None:
+        super().__init__(name="fetch_html", timeout=timeout)
+
+    async def run(self, context: PipelineContext) -> StepResult:
+        if context.html:
+            return StepResult.success(message="HTML já presente no contexto")
+        
+        timeout_value = self.timeout if self.timeout is not None else context.default_step_timeout
+        html = await download_html(context.url, timeout=timeout_value)
+        context.set_html(html)
+        return StepResult.success(
+            message="HTML baixado com sucesso",
+        )
+    
+def _normalize_payload(raw: dict[str, Any] | None, context: PipelineContext) -> dict[str, Any] | None:
+    """ Garante que o payload possui os campos esperados e valores preenchidos """
+    if not raw:
         return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    if isinstance(value, (list, tuple)) and len(value) == 2:
-        first = _normalize_timeout(value[0])
-        second = _normalize_timeout(value[1])
-        if isinstance(first, (int, float)) and isinstance(second, (int, float)):
-            return float(first), float(second)
-    return None
-
-def _resolve_timeout(shared_context: dict[str, Any], fallback: TimeoutConfig, *keys: str) -> TimeoutConfig:
-    """ Busca o timeout definido no contexto compartilhado respeitando prioridades """
-    normalized_fallback = _normalize_timeout(fallback)
-    if not keys:
-        return normalized_fallback
     
-    check_keys = list(dict.fromkeys([*keys, *(f"{key}_timeout" for key in keys)]))
+    name = (raw.get("name") or "").strip()
+    price = (raw.get("current_price") or "").strip()
+    if not name or not price:
+        return None
+    return {
+        "name": name,
+        "current_price": price,
+        "url": raw.get("url") or context.url,
+        "source": raw.get("source") or context.source,
+    }
 
-    timeouts = shared_context.get("timeouts")
-    if isinstance(timeouts, dict):
-        for key in check_keys:
-            candidate = _normalize_timeout(timeouts.get(key))
-            if candidate is not None:
-                return candidate
-            
-    for key in check_keys:
-        candidate = _normalize_timeout(shared_context.get(key))
-        if candidate is not None:
-            return candidate
+class JsonLdParserStep(PipelineStep):
+    """ Tenta extrair dados estruturados com a biblioteca ``extruct`` """
+    def __init__(self) -> None:
+        super().__init__(name="json_ld_parser")
+
+    async def run(self, context: PipelineContext) -> StepResult:
+        if not context.html:
+            return StepResult.empty("HTML não disponível para extração estruturada")
         
-    return normalized_fallback
-
-class MechanicalSoupLoginStep(PipelineStep):
-    """ Realiza login leve utilizando ``MechanicalSoup`` com timeout configurável """
-    def __init__(
-        self,
-        *,
-        login_url: str | None = None,
-        username: str | None = None,
-        password: str | None = None,
-        form_selector: str = "form",
-        username_field: str = "username",
-        password_field: str = "password",
-        timeout: TimeoutConfig = 10.0,
-    ) -> None:
-        """ Inicializa a etapa permitindo configurar credenciais e limite de tempo """
-        self.login_url = login_url
-        self.username = username
-        self.password = password
-        self.form_selector = form_selector
-        self.username_field = username_field
-        self.password_field = password_field
-        self.timeout = timeout
-
-    def should_run(self, shared_context: dict[str, Any]) -> bool:
-        """ Executa apenas quando não existem cookies válidos no contexto """
-        if shared_context.get("cookies"):
-            return False
-        url = self.login_url or shared_context.get("login_url")
-        user = self.username or shared_context.get("username")
-        pwd = self.password or shared_context.get("password")
-        return bool(url and user and pwd)
-
-    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
-        url = self.login_url or shared_context.get("login_url")
-        user = self.username or shared_context.get("username")
-        pwd = self.password or shared_context.get("password")
-        if not url or not user or not pwd:
-            return {"status": "error"}
-        
-        timeout_value = _resolve_timeout(shared_context, self.timeout, "mechanical_soup_login", "mechanical_soup")
-
-        def _login() -> mechanicalsoup.StatefulBrowser:
-            browser = mechanicalsoup.StatefulBrowser()
-            open_kwargs: dict[str, Any] = {}
-            if timeout_value is not None:
-                open_kwargs["timeout"] = timeout_value
-            browser.open(url, **open_kwargs)
-            try:
-                browser.select_form(self.form_selector)
-                browser[self.username_field] = user
-                browser[self.password_field] = pwd
-                submit_kwargs: dict[str, Any] = {}
-                if timeout_value is not None:
-                    submit_kwargs["timeout"] = timeout_value
-                browser.submit_selected(**submit_kwargs)
-            except Exception:
-                #Mesmo se o formulário não estiver presente, retorna o browser
-                pass
-            return browser
-        
-        try:
-            browser = await asyncio.to_thread(_login)
-        except requests.exceptions.Timeout:
-            return {
-                "status": "timeout",
-                "detail": "Tempo limite ao realizar login com MechanicalSoup",
-            }
-        shared_context["cookies"] = browser.get_cookiejar()
-        return {
-            "status": "success",
-            "shared_context": {"cookies": shared_context["cookies"]}
-        }
-    
-class ExtructExtractionStep(PipelineStep):
-    """ Extrai dados estruturados com ``extruct`` respeitando timeout configurável """
-    def __init__(self, *, timeout: TimeoutConfig = 8.0) -> None:
-        """ Define tempo limite padrão para baixar o HTML antes da extração """
-        self.timeout = timeout
-
-    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
-        html = shared_context.get("html")
-        if html is None:
-            url = shared_context.get("url")
-            if not url:
-                return {"status": "error"}
-            
-            timeout_value = _resolve_timeout(shared_context, self.timeout, "extruct", "extruct_extraction")
-            
-            def _get() -> str:
-                request_kwargs: dict[str, Any] = {"cookies": shared_context.get("cookies")}
-                if timeout_value is not None:
-                    request_kwargs["timeout"] = timeout_value
-                resp = requests.get(url, **request_kwargs)
-                resp.raise_for_status()
-                return resp.text
-
-            try:
-                html = await asyncio.to_thread(_get)
-            except requests.exceptions.Timeout:
-                return {
-                    "status": "timeout",
-                    "detail": "Tempo limite ao baixar HTML para extruct",
-                }            
-            shared_context["html"] = html
-
-        details = parse_with_extruct(html, shared_context.get("url"))
-        return {
-            "status": "success",
-            "details": details,
-            "extraction_method": self.__class__.__name__,
-        }
-    
-class ParselExtractionStep(PipelineStep):
-    """ Coleta usando ``Parsel`` / ``lxml`` """
-    def should_run(self, shared_context: dict[str, Any]) -> bool:
-        """ Evita execução quando não há HTML disponível """
-        return bool(shared_context.get("html"))
-
-    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
-        html = shared_context.get("html")
-        if not html:
-            return {"status": "error"}
-        details = parse_with_parsel(html, shared_context.get("url"))
-        return {
-            "status": "success",
-            "details": details,
-            "extraction_method": self.__class__.__name__,
-        }
-    
-class BeautifulSoupExtractionStep(PipelineStep):
-    """ Realiza extração simples com ``BeautifulSoup`` """
-    def should_run(self, shared_context: dict[str, Any]) -> bool:
-        """ Executa apenas quando o HTML já foi carregado no contexto """
-        return bool(shared_context.get("html"))
-
-    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
-        html = shared_context.get("html")
-        if not html:
-            return {"status": "error"}
-        details = parse_with_beautifulsoup(html, shared_context.get("url"))
-        return {
-            "status": "success",
-            "details": details,
-            "extraction_method": self.__class__.__name__,
-        }
-    
-class RequestsHTMLRenderStep(PipelineStep):
-    """ Renderiza JavaScript leve com ``requests-html`` permitindo timeout configurável """
-    def __init__(self, *, timeout: TimeoutConfig = 8.0) -> None:
-        """ Define tempo limite padrão para a requisição e rederização do HTML """
-        self.timeout = timeout
-
-    def should_run(self, shared_context: dict[str, Any]) -> bool:
-        """ Evita renderização quando o HTML já está presente """
-        return not shared_context.get("html")
-
-    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
-        url = shared_context.get("url")
-        if not url:
-            return {"status": "error"}
-        
-        timeout_value = _resolve_timeout(shared_context, self.timeout, "requestshtml", "requests_html")
-        
-        def _render() -> str:
-            session = HTMLSession()
-            try:
-                requests_kwargs: dict[str, Any] = {"cookies": shared_context.get("cookies")}
-                if timeout_value is not None:
-                    requests_kwargs["timeout"] = timeout_value
-                resp = session.get(url, **requests_kwargs)
-                resp.raise_for_status()
-                render_timeout: float | None
-                if isinstance(timeout_value, tuple):
-                    render_timeout = timeout_value[1]
-                else:
-                    render_timeout = timeout_value
-                render_kwargs: dict[str, Any] = {"reload": False}
-                if render_timeout is not None:
-                    render_kwargs["timeout"] = render_timeout
-                resp.html.render(**render_kwargs)
-                return resp.html.html
-            finally:
-                session.close()
-
-        try:
-            html = await asyncio.to_thread(_render)
-        except requests.exceptions.Timeout:
-            return {
-                "status": "timeout",
-                "detail": "Tempo limite ao baixar ou renderizar HTML com Requests-HTML",
-            }
-        shared_context["html"] = html
-        shared_updates: dict[str, Any] = {"html": html}
-
-        details = parse_with_requests_html(html, shared_context.get("url"))
-        return {
-            "status": "success",
-            "details": details,
-            "shared_context": shared_updates,
-            "extraction_method": self.__class__.__name__,
-        }
-    
-class SelectorLibExtractionStep(PipelineStep):
-    """ Aplica ``selectorlib`` para páginas customizadas """
-    def __init__(self, *, template_path: str | None = None) -> None:
-        self.template_path = template_path
-
-    def should_run(self, shared_context: dict[str, Any]) -> bool:
-        """ Executa somente quando há HTML e template definido """
-        return bool(shared_context.get("html") and (self.template_path or shared_context.get("selectorlib_template")))
-
-    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
-        html = shared_context.get("html")
-        template = self.template_path or shared_context.get("selectorlib_template")
-        if not html or not template:
-            return {"status": "error"}
-        
-        try:
-            details = await asyncio.to_thread(
-                parse_with_selectorlib,
-                html,
-                shared_context.get("url"),
-                template_path=template,
+        parsed = parse_with_extruct(context.html, context.url)
+        payload = _normalize_payload(parsed, context)
+        if payload:
+            return StepResult.success(
+                payload=payload,
+                message="Metadados estruturados encontrados",
             )
-        except ValueError:
-            return {"status": "error"}
-        
-        return {
-            "status": "success",
-            "details": details,
-            "extraction_method": self.__class__.__name__,
-        }
+        return StepResult.empty("Metadados estruturados ausentes ou incompletos")
     
+class HtmlMetadataParserStep(PipelineStep):
+    """ Analisa metatags e estrutura básica com BeautifulSoup """
+    def __init__(self) -> None:
+        super().__init__(name="html_metadata_parser")
+
+    async def run(self, context: PipelineContext) -> StepResult:
+        if not context.html:
+            return StepResult.empty("HTML indisponível para extração com BeautifulSoup")
+        
+        parsed = parse_with_beautifulsoup(context.html, context.url)
+        payload = _normalize_payload(parsed, context)
+        if payload:
+            return StepResult.success(
+                payload=payload,
+                message="Metadados HTML encontrados",
+            )
+        return StepResult.empty("Metadados HTML ausentes ou incompletos")
+
+class GenericFallbackParserStep(PipelineStep):
+    """ Utiliza heurísticas genéricas baseadas em seletores comuns """
+    def __init__(self) -> None:
+        super().__init__(name="generic_fallback_parser")
+
+    async def run(self, context: PipelineContext) -> StepResult:
+        if not context.html:
+            return StepResult.empty("HTML indisponível para heurísticas genéricas")
+        
+        parsed = parse_generic_html(context.html, context.url)
+        payload = _normalize_payload(parsed, context)
+        if payload:
+            return StepResult.success(
+                payload=payload,
+                message="Heurísticas genéricas aplicadas",
+            )
+        return StepResult.empty("Heurísticas genéricas não encontraram dados")
+    
+def default_pipeline_steps() -> list[PipelineStep]:
+    """ Retorna a sequência padrão de etapas do pipeline enxuto """
+    return [
+        FetchHTMLStep(),
+        JsonLdParserStep(),
+        HtmlMetadataParserStep(),
+        GenericFallbackParserStep(),
+    ]
+
 __all__ = [
-    "MechanicalSoupLoginStep",
-    "ExtructExtractionStep",
-    "ParselExtractionStep",
-    "BeautifulSoupExtractionStep",
-    "RequestsHTMLRenderStep",
-    "SelectorLibExtractionStep",
+    "FetchHTMLStep",
+    "JsonLdParserStep",
+    "HtmlMetadataParserStep",
+    "GenericFallbackParserStep",
+    "default_pipeline_steps",
+    "download_html",
 ]

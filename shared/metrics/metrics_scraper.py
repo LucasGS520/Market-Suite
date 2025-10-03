@@ -8,6 +8,32 @@ completa sobre o comportamento do scraper.
 from prometheus_client import Counter, Gauge, Histogram
 
 
+#Métricas específicas do pipeline reduzido do scraper
+SCRAPER_STEP_SUCCESS_TOTAL = Counter(
+    "scraper_step_success_total",
+    "Total de execuções bem-sucedidas por etapa do pipeline do scraper",
+    ["step", "source"],
+)
+
+SCRAPER_STEP_LATENCY_SECONDS = Histogram(
+    "scraper_step_latency_seconds",
+    "Latência das etapas do pipeline do scraper (segundos)",
+    ["step"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
+
+SCRAPER_STEP_FALLBACK_TOTAL = Counter(
+    "scraper_step_fallback_total",
+    "Total de vezes que uma etapa precisou recorrer ao fallback",
+    ["step", "source"],
+)
+
+SCRAPER_NO_RESULT_TOTAL = Counter(
+    "scraper_no_result_total",
+    "Execuções que não retornaram um payload válido ao final do pipeline",
+    ["source"],
+)
+
 SCRAPING_LATENCY_SECONDS = Histogram(
     "scraping_latency_seconds",
     "Tempo gasto em scraping de produto (segundos)",
@@ -217,4 +243,8 @@ __all__ = [
     "SCRAPER_CACHE_LATENCY_SECONDS",
     "SCRAPER_CACHE_LOCAL_SIZE",
     "SCRAPER_CACHE_LOCK_TOTAL",
+    "SCRAPER_STEP_SUCCESS_TOTAL",
+    "SCRAPER_STEP_LATENCY_SECONDS",
+    "SCRAPER_STEP_FALLBACK_TOTAL",
+    "SCRAPER_NO_RESULT_TOTAL",
 ]

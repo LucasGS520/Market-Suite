@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 
 #Importação relativa para execução como pacote
 from .routes import routes_health, routes_scraper
-from .services import domain_policy
 
 #Instância principal do aplicativo FastAPI
 app = FastAPI(title="MarketScraper")
@@ -29,11 +28,6 @@ app.include_router(routes_health.router)
 #Disponibiliza o endpoint com dois prefixos por compatibilidade ("/scraper" e "/scrape")
 app.include_router(routes_scraper.router, prefix="/scraper")
 app.include_router(routes_scraper.router, prefix="/scrape")
-
-@app.on_event("startup")
-async def validate_domain_policy() -> None:
-    """ Valida o arquivo ``domain_policy`` logo no boot para falha rápida """
-    domain_policy.ensure_config_loaded_or_raise()
 
 #A variável `app` é exposta para uso pelo Uvicorn
 __all__ = ["app"]

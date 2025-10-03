@@ -1,86 +1,98 @@
-""" Rotas HTTP para parsing de produtos
-
-Permite a serviços enviar uma URL e receber os dados do anúncio sem persistência. 
-"""
+""" Define as rotas responsáveis por acionar o pipeline de scraping """
 
 from __future__ import annotations
 
-from decimal import Decimal
-from uuid import UUID
-from urllib.parse import urlparse
-
-from fastapi import APIRouter, Body, HTTPException, Response, status
+from fastapi import APIRouter, Body, status
+from fastapi.responses import JSONResponse
 import structlog
 
-from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
-from shared.schemas.schemas_scraper import ScraperRequest, ScraperResponse
-from shared.utils.logging_utils import sanitize_log_data
-
-from market_scraper.services.services_scraper_common import scrape_product_common_async
+from market_scraper.schemas.parse import ErrorResponse, ParseRequest, ParserResponse
+from market_scraper.services.services_scraper_common import run_pipeline
+from market_scraper.services.synergic_pipeline import PipelineTimeoutError
 from market_scraper.utils.price import parse_price_str
-from market_scraper.utils.url_validation import check_url_compatibility
+from market_scraper.utils.url_validation import UrlIssue, check_url_compatibility, normalize_product_url
 
 
-#Logger estruturado para acompanhar as requisições do scraper
-logger = structlog.get_logger(__name__)
+logger = structlog.get_logger("routes_scraper")
 
-#Roteador sem prefixo; caminhos base definidos na aplicação principal
 router = APIRouter(tags=["scraper"])
 
-@router.post("/parse", response_model=ScraperResponse)
-async def parse_endpoint(payload: ScraperRequest = Body(..., example={"url": "https://www.mercadolivre.com.br/MLB-1", "product_type": "monitored"})) -> ScraperResponse:
-    """ Executa o scraping e retorna apenas os dados parseados
-
-    Valida o corpo e o domínio; responde 304 quando não há
-    mudanças ou informa bloqueios do marketplace.
-    """
-    incompatibility = check_url_compatibility(str(payload.url))
-    if incompatibility:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=incompatibility,
-        )
-
-    if payload.product_type == "monitored":
-        base_payload = MonitoredProductCreateScraping(
-            name_identification="temp",
-            product_url=payload.url,
-            target_price=Decimal("0"),
-        )
-    else:
-        base_payload = CompetitorProductCreateScraping(
-            monitored_product_id=UUID(int=0),
-            product_url=payload.url,
-        )
-
-    result = await scrape_product_common_async(
-        url=str(payload.url),
-        user_id=payload.user_id or UUID(int=0),
-        payload=base_payload,
-        product_type=payload.product_type,
+def _http_error(issue: UrlIssue, *, status_code: int) -> JSONResponse:
+    """ Cria uma resposta JSON padronizada para os erros do endpoint """
+    logger.warning(
+        "parse_error", 
+        code=issue.code, 
+        message=issue.message
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content={"message": issue.message, "code": issue.code}
     )
 
-    #Quando o serviço indica que o conteúdo não foi modificado, responde com 304
-    if result.get("status") == "NOT_MODIFIED":
-        return Response(status_code=status.HTTP_304_NOT_MODIFIED)
-
-    details = result.get("details")
-    if not details:
-        #Registra o resultado retornado pelo serviço quando o scraping falha
-        message = result.get("detail") or result.get("message") or "Não foi possível extrair dados do produto"
-        logger.error("scrape_failed", status=result.get("status"), detail=sanitize_log_data(message), url=sanitize_log_data(str(payload.url)))
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=message,
+@router.post(
+    "/parse",
+    response_model=ParserResponse,
+    responses={
+        400: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        504: {"model": ErrorResponse},
+    },
+)
+async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
+    """ Executa o pipeline sequencial e retorna payload padronizado """
+    try:
+        normalized_url = normalize_product_url(payload.url)
+    except ValueError as exc:
+        return _http_error(
+            UrlIssue(code="invalid_url", message=str(exc)), status_code=status.HTTP_400_BAD_REQUEST
         )
+    
+    compatibility = check_url_compatibility(normalized_url)
+    if compatibility:
+        return _http_error(
+            compatibility,
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        #Mantém a execução encapsulada para registrar métricas e facilitar o controle de timeouts
+        outcome = await run_pipeline(normalized_url)
+    except PipelineTimeoutError as exc:
+        issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline execedido")
+        return _http_error(
+            issue,
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT
+        )
+    
+    if outcome.status != "success" or not outcome.payload:
+        issue = UrlIssue(code="no_result", message="Não foi possível extrair dados do produto")
+        return _http_error(
+            issue,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+    
+    payload = outcome.payload
 
-    parsed = urlparse(str(payload.url))
-    #Extrai o hostname; usa ``netloc`` como fallback para identificar marketplace
-    marketplace = parsed.hostname or parsed.netloc
-
-    return ScraperResponse(
-        name=details.get("name"),
-        #Converte strings de preço para ``Decimal`` garantindo precisão
-        current_price=parse_price_str(details.get("current_price"), str(payload.url)),
-        marketplace=marketplace,
+    try:
+        price = parse_price_str(payload.get("current_price"), normalized_url)
+    except ValueError as exc:
+        issue = UrlIssue(code="invalid_price", message=str(exc))
+        return _http_error(
+            issue,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+    
+    response = ParserResponse(
+        name=payload.get("name", ""),
+        current_price=price,
+        url=payload.get("url", normalized_url),
+        source=payload.get("source", outcome.context.source),
     )
+    logger.info(
+        "parse_success",
+        url=response.url,
+        source=response.source,
+    )
+    return response
+
+__all__ = ["router"]

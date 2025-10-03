@@ -1,30 +1,36 @@
-""" Camada de serviços que orquestra lógica de negócio
+""" Facilita acesso às principais funções e classes do serviço """
 
-Este pacote expõe funções utilitárias para scraping e demais
-operações de suporte à aplicação principal. Também disponibiliza
-as etapas e pipelines sinérgicos definidos para coleta multilayer.
-"""
-
-from .services_scraper_common import scrape_product_common, scrape_product_common_async
+from .services_scraper_common import build_context, create_pipeline, run_pipeline
 from .pipeline_steps import (
-    MechanicalSoupLoginStep,
-    ExtructExtractionStep,
-    ParselExtractionStep,
-    BeautifulSoupExtractionStep,
-    RequestsHTMLRenderStep,
-    SelectorLibExtractionStep,
+    FetchHTMLStep,
+    GenericFallbackParserStep,
+    HtmlMetadataParserStep,
+    JsonLdParserStep,
+    default_pipeline_steps,
 )
-from .synergic_pipeline import SynergicPipeline
+from .synergic_pipeline import (
+    PipelineContext,
+    PipelineOutcome,
+    PipelineTimeoutError,
+    SynergicPipeline,
+    StepExecution,
+    StepResult,
+)
 
 
 __all__ = [
-    "scrape_product_common", 
-    "scrape_product_common_async",
-    "MechanicalSoupLoginStep",
-    "ExtructExtractionStep",
-    "ParselExtractionStep",
-    "BeautifulSoupExtractionStep",
-    "RequestsHTMLRenderStep",
-    "SelectorLibExtractionStep",
+    "build_context",
+    "create_pipeline",
+    "run_pipeline",
+    "FetchHTMLStep",
+    "GenericFallbackParserStep",
+    "HtmlMetadataParserStep",
+    "JsonLdParserStep",
+    "default_pipeline_steps",
+    "PipelineContext",
+    "PipelineOutcome",
+    "PipelineTimeoutError",
     "SynergicPipeline",
+    "StepExecution",
+    "StepResult",
 ]

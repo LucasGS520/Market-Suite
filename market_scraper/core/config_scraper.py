@@ -52,5 +52,15 @@ class Settings(ConfigBase):
         os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200")
     )  #Base para reagendamentos
 
+    #Tempo padrão máximo para cada etapa do pipeline (segundos)
+    SCRAPER_STEP_TIMEOUT_SECONDS: float = float(
+        os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "3.0")
+    )
+
+    #Tempo máximo global para execução do pipeline (segundos)
+    SCRAPER_PIPELINE_TIMEOUT_SECONDS: float = float(
+        os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "12.0")
+    )
+
 #Instância única de settings para a aplicação
 settings = Settings()
