@@ -69,14 +69,16 @@ async def run_pipeline(
 
     try:
         outcome = await pipeline.run(context)
-    except PipelineTimeoutError:
+    except PipelineTimeoutError as exc:
         logger.error(
-            "pipeline_completed", 
+            "pipeline_timeout", 
             url=url,
-            status=outcome.status
+            timeout=pipeline_timeout or settings.SCRAPER_PIPELINE_TIMEOUT_SECONDS,
         )
-        return outcome
-    
+        raise
+        
+    return outcome
+
 __all__ = [
     "create_pipeline",
     "build_context",

@@ -62,5 +62,21 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "12.0")
     )
 
+    #Limites de segurança para downloads HTTP do scraper
+    SCRAPER_HTTP_MAX_REDIRECTS: int = int(os.getenv("SCRAPER_HTTP_MAX_REDIRECTS", "3"))
+    SCRAPER_HTTP_MAX_CONTENT_LENGTH: int = int(
+        os.getenv("SCRAPER_HTTP_MAX_CONTENT_LENGTH", str(2_000_000))
+    ) #~2MB para evitar respostas gigantes
+    SCRAPER_HTTP_MAX_CONNECTIONS: int = int(
+        os.getenv("SCRAPER_HTTP_MAX_CONNECTIONS", "10")
+    )
+    SCRAPER_HTTP_MAX_KEEPALIVE: int = int(os.getenv("SCRAPER_HTTP_MAX_KEEPALIVE", "5"))
+    SCRAPER_HTTP_TIMEOUT_CONNECT: float = float(
+        os.getenv("SCRAPER_HTTP_TIMEOUT_CONNECT", "3.0")
+    )
+    SCRAPER_HTTP_TIMEOUT_READ: float = float(os.getenv("SCRAPER_HTTP_TIMEOUT_READ", "3.0"))
+    SCRAPER_HTTP_TIMEOUT_WRITE: float = float(os.getenv("SCRAPER_HTTP_TIMEOUT_WRITE", "3.0"))
+    SCRAPER_HTTP_TIMEOUT_POOL: float = float(os.getenv("SCRAPER_HTTP_TIMEOUT_POOL", "3.0"))
+
 #Instância única de settings para a aplicação
 settings = Settings()

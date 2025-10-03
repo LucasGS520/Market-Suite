@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from market_scraper.main import app
 from market_scraper.services import pipeline_steps
+from market_scraper.utils import url_validation
 
 
 client = TestClient(app)
@@ -26,6 +27,7 @@ def test_scraper_parse(monkeypatch) -> None:
         return FIXTURE_PATH.read_text(encoding="utf-8")
     
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+    monkeypatch.setattr(url_validation, "resolve_public_addresses", lambda host: ["203.0.113.10"])
 
     payload = {"url": "mercadolivre.com.br/MLB-999"}
     response = client.post("/scrape/parse", json=payload)

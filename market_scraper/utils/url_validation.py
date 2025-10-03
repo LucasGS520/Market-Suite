@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from ipaddress import ip_address
 from typing import Callable, Dict
 from urllib.parse import urlparse, urlunparse
 
-from market_scraper.utils.http_utils import extract_hostname
+from market_scraper.utils.http_utils import ( 
+    HostResolutionError,
+    extract_hostname,
+    resolve_public_address,
+)
 from shared.utils.ml_url import canonicalize_ml_url
 
 
@@ -73,10 +78,31 @@ def check_url_compatibility(url: str) -> UrlIssue | None:
     host = extract_hostname(url)
     if not host:
         return UrlIssue(code="invalid_url", message="URL inválida ou malformada")
+    
+    public_issue = _ensure_public_endpoint(host)
+    if public_issue:
+        return public_issue
+    
     if not _is_supported_marketplace(host):
         return UrlIssue(code="unsupported_marketplace", message="Marketplace ainda não suportado")
     if not _is_product_page(url):
         return UrlIssue(code="not_a_product", message="A URL informada não corresponde a um produto")
+    return None
+
+def _ensure_public_endpoint(host: str) -> UrlIssue | None:
+    """ Confere se o host aponta para endereços públicos válidos """
+    try:
+        ip_obj = ip_address(host)
+    except ValueError:
+        try:
+            resolve_public_address(host)
+        except HostResolutionError as exc:
+            return UrlIssue(code="blocked_host", message=str(exc))
+        return None
+    
+    if not ip_obj.is_global:
+        return UrlIssue(code="blocked_host", message="Endereços privados não são permitidos")
+    
     return None
 
 __all__ = [

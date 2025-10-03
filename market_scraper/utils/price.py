@@ -29,8 +29,10 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
     
     if isinstance(raw, Decimal):
         return raw
-    if isinstance(raw, (int, float)):
+    if isinstance(raw, (int)):
         return Decimal(raw)
+    if isinstance(raw, float):
+        return Decimal(str(raw))
     
     raw_text = str(raw).strip()
     if not raw_text:

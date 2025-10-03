@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 import structlog
 
+from market_scraper.core.config_scraper import settings
 from market_scraper.parsers import (
     parse_generic_html,
     parse_with_beautifulsoup,
@@ -24,11 +25,34 @@ from market_scraper.services.synergic_pipeline import PipelineContext, PipelineS
 logger = structlog.get_logger("pipeline_steps")
 
 async def download_html(url: str, *, timeout: float) -> str:
-    """ Baixa o HTML usando ``httpx`` respeitando o tempo limite informado """
+    """ Baixa o HTML usando ``httpx`` com limites rígidos de segurança """
     headers = {"User-Agent": "marketsuite-scraper/1.0", "Accept": "text/html"}
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    
+    client_timeout = httpx.Timeout(
+        connect=settings.SCRAPER_HTTP_TIMEOUT_CONNECT,
+        read=settings.SCRAPER_HTTP_TIMEOUT_CONNECT,
+        write=settings.SCRAPER_HTTP_TIMEOUT_WRITE,
+        pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
+    )
+    limits = httpx.Limits(
+        max_connections=settings.SCRAPER_HTTP_MAX_CONNECTIONS,
+        max_keepalive_connections=settings.SCRAPER_HTTP_MAX_KEEPALIVE,
+    )
+
+    async with httpx.AsyncClient(
+        timeout=client_timeout,
+        follow_redirects=True,
+        limits=limits,
+        max_redirects=settings.SCRAPER_HTTP_MAX_REDIRECTS,
+    ) as client:
         response = await client.get(url, headers=headers)
         response.raise_for_status()
+
+        content = response.content
+        if len(content) > settings.SCRAPER_HTTP_MAX_CONTENT_LENGTH:
+            raise ValueError("Resposta excedeu o tamanho máximo permitido")
+
+        #Retornamos o texto decodificado após validar o tamanho bruto para evitar ataques de payload gigante
         return response.text
 
 class FetchHTMLStep(PipelineStep):

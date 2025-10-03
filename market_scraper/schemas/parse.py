@@ -18,7 +18,7 @@ class ParseRequest(BaseModel):
         """ Remove espaços extras para padronizar o processamento """
         return value.strip()
 
-class ParseResponse(BaseModel):
+class ParserResponse(BaseModel):
     """ Define o payload mínimo retornado após o sucesso do pipeline """
 
     name: str = Field(..., description="Nome identificado do produto")
@@ -35,6 +35,6 @@ class ErrorResponse(BaseModel):
 
 __all__ = [
     "ParseRequest",
-    "ParseResponse",
+    "ParserResponse",
     "ErrorResponse",
 ]
