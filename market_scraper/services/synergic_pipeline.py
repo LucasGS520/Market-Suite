@@ -25,6 +25,7 @@ from shared.utils.logging_utils import sanitize_log_data
 
 
 #Logger estruturado para acompanhamento dos eventos do pipeline
+#Convenção: logs do pipeline sempre carregam os campos ``domain``, ``result`` e ``duration_ms``
 logger = structlog.get_logger("scraper_pipeline")
 
 @dataclass
@@ -167,9 +168,11 @@ class SynergicPipeline:
                     logger.warning(
                         "step_timeout",
                         step=step.name,
-                        duration=duration,
+                        duration_ms=int(duration * 1000),
                         timeout=timeout_value,
-                        url=context.url,
+                        url=sanitize_log_data(context.url),
+                        domain=context.source,
+                        result=result_label,
                     )
                     continue
                 except Exception as exc:
@@ -189,8 +192,10 @@ class SynergicPipeline:
                     logger.exception(
                         "step_error",
                         step=step.name,
-                        duration=duration,
-                        url=context.url,
+                        duration_ms=int(duration * 1000),
+                        url=sanitize_log_data(context.url),
+                        domain=context.source,
+                        result=result_label,
                         error=sanitize_log_data(str(exc)),
                     )
                     continue
@@ -225,7 +230,8 @@ class SynergicPipeline:
                         message=result.message,
                     )
                 )
-            
+
+        pipeline_start = perf_counter()    
         try:
             await asyncio.wait_for(_run_sequence(), timeout=self._pipeline_timeout)
         except asyncio.TimeoutError as exc:
@@ -233,8 +239,11 @@ class SynergicPipeline:
             logger.error(
                 "pipeline_timeout",
                 timeout=self._pipeline_timeout,
-                url=context.url,
+                url=sanitize_log_data(context.url),
                 step_count=len(self._steps),
+                duration_ms=int((perf_counter() - pipeline_start) * 1000),
+                domain=context.source,
+                result=final_result_label,
             )
             SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
             raise PipelineTimeoutError("Tempo limite do pipeline excedido") from exc
