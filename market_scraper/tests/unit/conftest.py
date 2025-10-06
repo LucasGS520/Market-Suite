@@ -228,17 +228,6 @@ def patch_rate_limiter(monkeypatch):
     async_fake = AsyncFakeRedis(fake_redis)
 
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("market_scraper.utils.rate_limiter.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("market_scraper.utils.circuit_breaker.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr(
-        "market_scraper.utils.cache_adapter.redis.Redis.from_url",
-        lambda *a, **k: async_fake,
-    )
-    monkeypatch.setattr("market_scraper.utils.robots_txt.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr(
-        "market_scraper.utils.robots_txt.requests.get",
-        lambda *a, **k: type("Resp", (), {"status_code": 200, "text": ""})()
-    )
 
     class DummyCircuitBreaker:
         def allow_request(self, *a, **k):

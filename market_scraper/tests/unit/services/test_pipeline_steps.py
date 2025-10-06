@@ -69,5 +69,9 @@ async def test_html_metadata_parser_uses_meta_tags(context) -> None:
     step = HtmlMetadataParserStep()
     result = await step.run(context)
     assert result.status == "success"
+    assert result.message == "Metadados HTML extraídos com sucesso"
+    assert result.payload["name"] == "Produto"
     assert result.payload["current_price"] == "99.90"
+    assert context.data["name"] == "Produto"
+    assert context.data["current_price"] == "99.90"
     

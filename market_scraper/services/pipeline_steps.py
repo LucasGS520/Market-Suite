@@ -185,7 +185,8 @@ class HtmlMetadataParserStep(_BaseParserStep):
         super().__init__(
             name="html_metadata_parser",
             parser=parse_with_beautifulsoup,
-            success_message="Metadados HTML ausentes ou inválidos",
+            success_message="Metadados HTML extraídos com sucesso",
+            empty_message="Metadados HTML ausentes ou inválidos",
             missing_html_message="HTML indisponível para extração com BeautifulSoup",
         )
 
