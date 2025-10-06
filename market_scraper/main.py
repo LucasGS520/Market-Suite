@@ -35,7 +35,8 @@ app.include_router(routes_scraper.router, prefix="/scrape")
 async def metrics_endpoint() -> Response:
     """ Expõe as métricas do ``DEFAULT_REGISTRY`` para coleta pelo Prometheus """
     payload = generate_latest(REGISTRY)
-    return Response(content=payload, media_type=CONTENT_TYPE_LATEST)
+    #Retornamos a resposta diretamente para respeitar o contrato esperado pelo Prometheus
+    return Response(payload, media_type=CONTENT_TYPE_LATEST)
 
 #A variável `app` é exposta para uso pelo Uvicorn
 __all__ = ["app"]

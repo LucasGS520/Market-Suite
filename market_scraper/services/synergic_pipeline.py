@@ -249,10 +249,20 @@ class SynergicPipeline:
             raise PipelineTimeoutError("Tempo limite do pipeline excedido") from exc
         
         if status != "success":
-            if last_result_label in {"empty": "success"}:
+            #Mapeia o último estado observado para um rótulo padronizado de resultado final
+            if last_result_label in {"empty", "success", "no_result"}:
                 final_result_label = "no_result"
-            else:
+            elif last_result_label in {"timeout", "error"}:
                 final_result_label = last_result_label
+            else:
+                final_result_label = "error"
+                logger.warning(
+                    "unknow_result_label",
+                    last_result=last_result_label,
+                    domain=context.source,
+                    url=sanitize_log_data(context.url),
+                    result=final_result_label,
+                )
             SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
             
         return PipelineOutcome(

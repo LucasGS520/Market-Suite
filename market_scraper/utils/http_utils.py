@@ -75,9 +75,15 @@ def resolve_public_address(host: str) -> list[str]:
     
     return sorted(addresses)
 
+def resolve_public_addresses(host: str) -> list[str]:
+    """ Expõe um alias em plural para compatibilidade com código e testes """
+    #Mantemos o comportamento único para evitar duplicar lógica de resolução DNS
+    return resolve_public_address(host)
+
 __all__ = [
     "HostResolutionError",
     "extract_hostname",
     "parse_retry_after",
     "resolve_public_address",
+    "resolve_public_addresses",
 ]

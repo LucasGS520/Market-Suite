@@ -54,8 +54,8 @@ def _reset_pipeline_metrics() -> None:
 def _patch_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Evita resoluções DNS reais durante os testes de integração """
     fake_dns = lambda host: ["198.51.100.10"]
-    monkeypatch.setattr(http_utils, "resolve_public_address", fake_dns)
-    monkeypatch.setattr(url_validation, "resolve_public_address", fake_dns)
+    monkeypatch.setattr(http_utils, "resolve_public_addresses", fake_dns)
+    monkeypatch.setattr(url_validation, "resolve_public_addresses", fake_dns)
 
 def test_parse_returns_payload_from_json_ld(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante sucesso quando a página contém JSON-LD válido """

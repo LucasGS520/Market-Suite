@@ -10,7 +10,7 @@ from urllib.parse import urlparse, urlunparse
 from market_scraper.utils.http_utils import (
     HostResolutionError,
     extract_hostname,
-    resolve_public_address,
+    resolve_public_addresses as http_resolve_public_addresses,
 )
 from shared.utils.ml_url import canonicalize_ml_url
 
@@ -91,8 +91,9 @@ def check_url_compatibility(url: str) -> UrlIssue | None:
     return None
 
 def resolve_public_addresses(host: str) -> list[str]:
-    """ Mantém compatibilidade com testes que utilizam plural no nome """
-    return resolve_public_address(host)
+    """ Mantém o alias padronizado para uso em testes e chamadas legadas """
+    #Delegamos para o utilitário compartilhado para preservar a regra única de validação
+    return http_resolve_public_addresses(host)
 
 def _ensure_public_endpoint(host: str) -> UrlIssue | None:
     """ Confere se o host aponta para endereços públicos válidos """
@@ -100,7 +101,7 @@ def _ensure_public_endpoint(host: str) -> UrlIssue | None:
         ip_obj = ip_address(host)
     except ValueError:
         try:
-            resolve_public_address(host)
+            resolve_public_addresses(host)
         except HostResolutionError as exc:
             return UrlIssue(code="blocked_host", message=str(exc))
         return None
