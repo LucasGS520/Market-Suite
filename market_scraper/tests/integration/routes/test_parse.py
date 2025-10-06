@@ -21,10 +21,10 @@ from shared.metrics.metrics_scraper import (
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
 FIXTURES = {
-    "amazon": FIXTURE_ROOT / "amazon_com_br" / "product_jsonld.html",
-    "mercadolivre": FIXTURE_ROOT / "mercadolivre_com_br" / "product_static.html",
-    "magazineluiza": FIXTURE_ROOT / "magazineluiza_com_br" / "product_js_only.html",
-} 
+    "amazon": FIXTURE_ROOT / "amazon" / "product_jsonld.html",
+    "mercadolivre": FIXTURE_ROOT / "mercadolivre" / "product_static.html",
+    "magazineluiza": FIXTURE_ROOT / "magazineluiza" / "product_js_only.html",
+}
 
 def _load_html(fixture_key: str) -> str:
     """ Lê o HTML de teste associado ao domínio informado """
