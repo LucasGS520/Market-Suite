@@ -12,32 +12,32 @@ from prometheus_client import Counter, Gauge, Histogram
 SCRAPER_STEP_SUCCESS_TOTAL = Counter(
     "scraper_step_success_total",
     "Total de execuções bem-sucedidas por etapa do pipeline do scraper",
-    ["step", "source"],
+    ["step", "domain", "result"],
 )
 
 SCRAPER_STEP_LATENCY_SECONDS = Histogram(
     "scraper_step_latency_seconds",
     "Latência das etapas do pipeline do scraper (segundos)",
-    ["step"],
+    ["step", "domain", "result"],
     buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
 SCRAPER_STEP_FALLBACK_TOTAL = Counter(
     "scraper_step_fallback_total",
     "Total de vezes que uma etapa precisou recorrer ao fallback",
-    ["step", "source"],
+    ["step", "domain", "result"],
 )
 
 SCRAPER_STEP_INVALID_TOTAL = Counter(
     "scraper_step_invalid_total",
     "Total de resultados descartados por invalidação de qualidade",
-    ["step", "source"],
+    ["step", "domain", "result"],
 )
 
 SCRAPER_NO_RESULT_TOTAL = Counter(
     "scraper_no_result_total",
     "Execuções que não retornaram um payload válido ao final do pipeline",
-    ["source"],
+    ["domain", "result"],
 )
 
 SCRAPING_LATENCY_SECONDS = Histogram(

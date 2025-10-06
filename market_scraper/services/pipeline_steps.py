@@ -53,7 +53,10 @@ def _run_parser_with_validation(
         logger.warning(
             "parser_execution_error",
             step=step_name,
-            url=context.url,
+            domain=context.source,
+            duration_ms=0.0,
+            result="error",
+            url=sanitize_log_data(context.url),
             error=sanitize_log_data(str(exc)),
         )
         return False, None

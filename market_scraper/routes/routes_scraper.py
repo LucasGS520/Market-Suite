@@ -6,6 +6,8 @@ from fastapi import APIRouter, Body, status
 from fastapi.responses import JSONResponse
 import structlog
 
+from shared.utils.logging_utils import sanitize_log_data
+
 from market_scraper.schemas.parse import ErrorResponse, ParseRequest, ParserResponse
 from market_scraper.services.services_scraper_common import run_pipeline
 from market_scraper.services.synergic_pipeline import PipelineTimeoutError
@@ -90,7 +92,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
     )
     logger.info(
         "parse_success",
-        url=response.url,
+        url=sanitize_log_data(response.url),
         source=response.source,
     )
     return response

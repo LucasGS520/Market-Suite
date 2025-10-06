@@ -13,7 +13,12 @@ from market_scraper.utils import url_validation
 
 
 client = TestClient(app)
-FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "html" / "sample_product.html"
+FIXTURE_PATH = (
+    Path(__file__).resolve().parents[1] 
+    / "fixtures" 
+    / "mercadolivre" 
+    / "product_static.html"
+)
 
 def test_health_ping() -> None:
     """ Verifica se o endpoint de saúde responde com status ok """
@@ -33,5 +38,6 @@ def test_scraper_parse(monkeypatch) -> None:
     response = client.post("/scrape/parse", json=payload)
     assert response.status_code == 200
     body = response.json()
-    assert body["name"] == "Produto Genérico"
-    assert Decimal(body["current_price"]) == Decimal("199.90")
+    assert body["name"] == "Console Retro Game"
+    assert Decimal(body["current_price"]) == Decimal("549.90")
+    assert body["source"] == "produto.mercadolivre.com.br"

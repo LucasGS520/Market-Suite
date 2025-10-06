@@ -12,6 +12,8 @@ from typing import Optional
 
 import structlog
 
+from shared.utils.logging_utils import sanitize_log_data
+
 from market_scraper.core.config_scraper import settings
 from market_scraper.services.pipeline_steps import default_pipeline_steps
 from market_scraper.services.synergic_pipeline import (
@@ -71,8 +73,8 @@ async def run_pipeline(
         outcome = await pipeline.run(context)
     except PipelineTimeoutError as exc:
         logger.error(
-            "pipeline_timeout", 
-            url=url,
+            "pipeline_timeout",
+            url=sanitize_log_data(url),
             timeout=pipeline_timeout or settings.SCRAPER_PIPELINE_TIMEOUT_SECONDS,
         )
         raise
