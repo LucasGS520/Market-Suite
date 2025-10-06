@@ -28,7 +28,7 @@ def _first_text(element) -> str:
         return element.attrs.get("content", "").strip()
     return element.text.strip()
 
-def parse_with_requests_html(html: str, url: str | None = None) -> dict[str, str]:
+def parse_with_requests_html(html: str, url: str | None = None) -> dict[str, str] | None:
     """ Extrai campos básicos a partir de conteúdo renderizado com ``requests-html`` 
     
     Parâmetros
@@ -41,7 +41,8 @@ def parse_with_requests_html(html: str, url: str | None = None) -> dict[str, str
     Retorna
     -------
     dict[str, str]
-        Estrutura contendo ``name``, ``current_price`` e ``url`` da página analisada.
+        Estrutura contendo ``name``, ``current_price``, ``url`` e ``source`` da página analisada
+        ou ``None`` quando os dados obrigatórios não são encontrados.
     """
     document = HTML(html=html, url=url)
 
@@ -65,10 +66,14 @@ def parse_with_requests_html(html: str, url: str | None = None) -> dict[str, str
         if price:
             break
 
+    if not name or not price:
+        return None
+
     return {
         "name": name,
         "current_price": price,
         "url": url or "",
+        "source": "",
     }
 
 

@@ -22,7 +22,7 @@ import json
 from parsel import Selector
 
 
-def parse_with_parsel(html: str, url: str | None = None) -> dict[str, str]:
+def parse_with_parsel(html: str, url: str | None = None) -> dict[str, str] | None:
     """ Realiza a extração de campos básicos utilizando a ``Parsel``
 
     Parâmetros
@@ -36,7 +36,8 @@ def parse_with_parsel(html: str, url: str | None = None) -> dict[str, str]:
     Retorna
     -------
     dict[str, str] 
-        Dicionário padronizado com ``name``, ``current_price`` e ``url``
+        Dicionário padronizado com ``name``, ``current_price``, ``url`` e ``source``
+        ou ``None`` quando os dados obrigatórios não são encontrados.
     """
     selector = Selector(text=html)
 
@@ -73,10 +74,16 @@ def parse_with_parsel(html: str, url: str | None = None) -> dict[str, str]:
     if not price:
         price = selector.css("span.price::text").get(default="")
 
+    name = name.strip()
+    price = price.strip()
+    if not name or not price:
+        return None
+
     return {
-        "name": name.strip(),
-        "current_price": price.strip(),
+        "name": name,
+        "current_price": price,
         "url": url or "",
+        "source": "",
     }
 
 

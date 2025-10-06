@@ -3,7 +3,8 @@
 Cada módulo implementa extrações específicas utilizando bibliotecas
 distintas (BeautifulSoup, Parsel, Extruct, Requests-HTML, SelectorLib).
 Todos recebem HTML bruto (e opcionalmente a URL original) e retornam
-um dicionário padronizado com ``name``, ``current_price`` e ``url``.
+um dicionário padronizado com ``name``, ``current_price``, ``url`` e ``source``
+quando os dados essenciais são encontrados. Caso contrário retornam ``None``.
 O pipeline e as estratégias apenas orquestram esses parsers.
 """
 

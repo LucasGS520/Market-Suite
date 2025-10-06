@@ -43,7 +43,7 @@ def parse_with_selectorlib(
     extractor: Extractor | None = None,
     *,
     template_path: str | Path | None = None,
-) -> dict[str, str]:
+) -> dict[str, str] | None:
     """ Extrai campos padronizados utilizando um template SelectorLib
     
     Parâmetros
@@ -61,7 +61,8 @@ def parse_with_selectorlib(
     Retorno
     -------
     dict[str, str]
-        Dicionário com as chaves padronizadas ``name``, ``current_price`` e ``url``.
+        Dicionário com as chaves padronizadas ``name``, ``current_price``, ``url`` e ``source``
+        ou ``None`` quando os dados obrigatórios não são encontrados.
 
     Exceções
     ---------
@@ -78,10 +79,14 @@ def parse_with_selectorlib(
     name = str(data.get("name") or data.get("title") or "").strip()
     price = str(data.get("current_price") or data.get("price") or "").strip()
 
+    if not name or not price:
+        return None
+
     return {
         "name": name,
         "current_price": price,
         "url": url or "",
+        "source": "",
     }
 
 __all__ = ["load_selectorlib_extractor", "parse_with_selectorlib"]

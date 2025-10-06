@@ -1,28 +1,77 @@
-""" Estapas básicas para o pipeline sequencial do MarketScraper
+""" Etapas básicas para o pipeline sequencial do MarketScraper
 
-O foco é cobrir os casos estáticos mais comuns: baixar o HTML 
-sincronamente e tentar extrair os campos essenciais com parsers leves
-leves. Cada etapa retorna ``StepResult`` para o ``SynergicPipeline``
-controlar fallback e métricas.
+O módulo concentra a execução linear das etapas responsáveis por baixar
+HTML e extrair o payload mínimo. Cada ``PipelineStep`` descreve quais
+chaves do ``shared_context`` consome e quais atualiza, reduzindo efeitos
+colaterais e facilitando testes.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, Mapping
 
 import httpx
 import structlog
+
+from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.core.config_scraper import settings
 from market_scraper.parsers import (
     parse_generic_html,
     parse_with_beautifulsoup,
     parse_with_extruct,
+    parse_with_requests_html,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext, PipelineStep, StepResult
+from market_scraper.utils.validator import DataQualityValidator
 
 
 logger = structlog.get_logger("pipeline_steps")
+ParserCallable = Callable[[str, str], Mapping[str, Any] | None]
+_validator = DataQualityValidator()
+
+def _update_shared_payload(context: PipelineContext, payload: Mapping[str, str]) -> None:
+    """ Atualiza o ``shared_context`` apenas com campos oficializados pelo contrato """
+    #Os parsers nunca modificam o contexto diretamente; concentra aqui as atualizações
+    context.data["name"] = payload["name"]
+    context.data["current_price"] = payload["current_price"]
+    context.data["url"] = payload["url"]
+    context.data["source"] = payload["source"]
+    context.data["payload"] = dict(payload)
+
+def _run_parser_with_validation(
+    *,
+    parser: ParserCallable,
+    context: PipelineContext,
+    step_name: str,
+) -> tuple[bool, dict[str, str] | None]:
+    """ Executa parser, valida resultado e sincroniza o ``shared_context`` """
+    html = context.html or ""
+    try:
+        raw_payload = parser(html, context.url)
+    except Exception as exc:
+        logger.warning(
+            "parser_execution_error",
+            step=step_name,
+            url=context.url,
+            error=sanitize_log_data(str(exc)),
+        )
+        return False, None
+    
+    if not raw_payload:
+        return False, None
+    
+    validated = _validator.validate(
+        step_name=step_name,
+        payload=raw_payload,
+        url=context.url,
+        source=context.source,
+    )
+    if not validated:
+        return False, None
+    
+    _update_shared_payload(context, validated)
+    return True, validated
 
 async def download_html(url: str, *, timeout: float) -> str:
     """ Baixa o HTML usando ``httpx`` com limites rígidos de segurança """
@@ -57,7 +106,11 @@ async def download_html(url: str, *, timeout: float) -> str:
         return response.text
 
 class FetchHTMLStep(PipelineStep):
-    """ Obtém o HTML bruto e o disponibiliza no contexto compartilhado """
+    """ Obtém o HTML bruto e o disponibiliza no contexto compartilhado 
+    
+    Consome: ``context.url``
+    Produz: ``context.html``
+    """
     def __init__(self, *, timeout: float | None = None) -> None:
         super().__init__(name="fetch_html", timeout=timeout)
 
@@ -72,90 +125,127 @@ class FetchHTMLStep(PipelineStep):
             message="HTML baixado com sucesso",
         )
     
-def _normalize_payload(raw: dict[str, Any] | None, context: PipelineContext) -> dict[str, Any] | None:
-    """ Garante que o payload possui os campos esperados e valores preenchidos """
-    if not raw:
-        return None
+class _BaseParserStep(PipelineStep):
+    """ Implementa o fluxo padrão para etapas de parsing 
     
-    name = (raw.get("name") or "").strip()
-    price = (raw.get("current_price") or "").strip()
-    if not name or not price:
-        return None
-    return {
-        "name": name,
-        "current_price": price,
-        "url": raw.get("url") or context.url,
-        "source": raw.get("source") or context.source,
-    }
-
-class JsonLdParserStep(PipelineStep):
-    """ Tenta extrair dados estruturados com a biblioteca ``extruct`` """
-    def __init__(self) -> None:
-        super().__init__(name="json_ld_parser")
+    Consome: ``context.html`` e ``context.url``
+    Produz: ``context.data['name']``, ``context.data['current_price']``, ``context.data['url']`` e ``context.data['source']``
+    """
+    def __init__(
+        self,
+        *,
+        name: str,
+        parser: ParserCallable,
+        success_message: str,
+        empty_message: str,
+        missing_html_message: str,
+        timeout: float | None = None,
+    ) -> None:
+        super().__init__(name=name, timeout=timeout)
+        self._parser = parser
+        self._success_message = success_message
+        self._empty_message = empty_message
+        self._missing_html_message = missing_html_message
 
     async def run(self, context: PipelineContext) -> StepResult:
         if not context.html:
-            return StepResult.empty("HTML não disponível para extração estruturada")
+            return StepResult.empty(self._missing_html_message)
         
-        parsed = parse_with_extruct(context.html, context.url)
-        payload = _normalize_payload(parsed, context)
-        if payload:
-            return StepResult.success(
-                payload=payload,
-                message="Metadados estruturados encontrados",
-            )
-        return StepResult.empty("Metadados estruturados ausentes ou incompletos")
+        ok, payload = _run_parser_with_validation(
+            parser=self._parser,
+            context=context,
+            step_name=self.name,
+        )
+        if ok and payload:
+            return StepResult.success(payload=payload, message=self._success_message)
+        return StepResult.empty(self._empty_message)
     
-class HtmlMetadataParserStep(PipelineStep):
-    """ Analisa metatags e estrutura básica com BeautifulSoup """
+class JsonLdParserStep(_BaseParserStep):
+    """ Tenta extrair dados estruturados em JSON-LD
+    
+    Consome: ``context.html``
+    Produz: ``context.data['payload']`` com dados validados
+    """
     def __init__(self) -> None:
-        super().__init__(name="html_metadata_parser")
+        super().__init__(
+            name="json_ld_parser",
+            parser=parse_with_extruct,
+            success_message="Metadados estruturados encontrados",
+            empty_message="Metadados estruturados ausentes ou incompletos",
+            missing_html_message="HTML indisponível para extração de dados estruturados",
+        )
 
-    async def run(self, context: PipelineContext) -> StepResult:
-        if not context.html:
-            return StepResult.empty("HTML indisponível para extração com BeautifulSoup")
-        
-        parsed = parse_with_beautifulsoup(context.html, context.url)
-        payload = _normalize_payload(parsed, context)
-        if payload:
-            return StepResult.success(
-                payload=payload,
-                message="Metadados HTML encontrados",
-            )
-        return StepResult.empty("Metadados HTML ausentes ou incompletos")
-
-class GenericFallbackParserStep(PipelineStep):
-    """ Utiliza heurísticas genéricas baseadas em seletores comuns """
+class HtmlMetadataParserStep(_BaseParserStep):
+    """ Analisa metatags e estrutura básica em BeautifulSoup 
+    
+    Consome: ``context.html``
+    Produz: ``context.data['payload']``
+    """
     def __init__(self) -> None:
-        super().__init__(name="generic_fallback_parser")
+        super().__init__(
+            name="html_metadata_parser",
+            parser=parse_with_beautifulsoup,
+            success_message="Metadados HTML ausentes ou inválidos",
+            missing_html_message="HTML indisponível para extração com BeautifulSoup",
+        )
 
-    async def run(self, context: PipelineContext) -> StepResult:
-        if not context.html:
-            return StepResult.empty("HTML indisponível para heurísticas genéricas")
-        
-        parsed = parse_generic_html(context.html, context.url)
-        payload = _normalize_payload(parsed, context)
-        if payload:
-            return StepResult.success(
-                payload=payload,
-                message="Heurísticas genéricas aplicadas",
-            )
-        return StepResult.empty("Heurísticas genéricas não encontraram dados")
+class GenericFallbackParserStep(_BaseParserStep):
+    """ Aplica heurísticas genéricas quando as demais estapas falham 
+    
+    Consome: ``context.html``
+    Produz: ``context.data['payload']``
+    """
+    def __init__(self) -> None:
+        super().__init__(
+            name="generic_fallback_parser",
+            parser=parse_generic_html,
+            success_message="Heurísticas genéricas aplicadas",
+            empty_message="Heurísticas genéricas não encontraram dados",
+            missing_html_message="HTML indisponível para heurísticas genéricas",
+        )
+
+class RequestsHtmlParserStep(_BaseParserStep):
+    """ Utiliza Requests-HTML para interpretar páginas com markup dinâmico
+    
+    Consome: ``context.html``
+    Produz: ``context.data['payload']``
+    """
+    def __init__(
+        self,
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        super().__init__(
+            name="requests_html_parser",
+            parser=parse_with_requests_html,
+            success_message="Dados extraídos com Requests-HTML",
+            empty_message="Requests-HTML não encontrou dados",
+            missing_html_message="HTML indisponível para Requests-HTML",
+            timeout=timeout,
+        )
     
 def default_pipeline_steps() -> list[PipelineStep]:
     """ Retorna a sequência padrão de etapas do pipeline enxuto """
-    return [
+    steps: list[PipelineStep] = [
         FetchHTMLStep(),
         JsonLdParserStep(),
         HtmlMetadataParserStep(),
-        GenericFallbackParserStep(),
     ]
+    if settings.SCRAPER_ENABLE_REQUESTS_HTML:
+        steps.append(
+            RequestsHtmlParserStep(
+                timeout=settings.SCRAPER_REQUESTS_HTML_TIMEOUT_SECONDS,
+            )
+        )
+    steps.append(GenericFallbackParserStep())
+    return steps
 
 __all__ = [
     "FetchHTMLStep",
     "JsonLdParserStep",
     "HtmlMetadataParserStep",
     "GenericFallbackParserStep",
+    "RequestsHtmlParserStep",
     "default_pipeline_steps",
     "download_html",
 ]

@@ -24,7 +24,7 @@ def _clean_text(value: str | None) -> str:
     """ Normaliza strings removendo espaços extras """
     return value.strip() if value else ""
 
-def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str]:
+def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str] | None:
     """ Extrai nome e preço utilizando `BeautifulSoup`
     
     Parâmetros
@@ -37,7 +37,8 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
     Retorna
     -------
     dict[str, str]
-        Dicionário com os campos ``name``, ``current_price`` e ``url``
+        Dicionário com os campos ``name``, ``current_price``, ``url`` e ``source``
+        ou ``None`` quando os valores obrigatórios estão ausentes.
     """
     soup = BeautifulSoup(html, "lxml")
 
@@ -78,10 +79,14 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
         if price:
             break
 
+    if not name or not price:
+        return None
+
     return {
         "name": name,
         "current_price": price,
         "url": url or "",
+        "source": "",
     }
 
 

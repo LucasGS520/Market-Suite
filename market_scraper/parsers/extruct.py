@@ -5,7 +5,8 @@ from __future__ import annotations
 O módulo encapsula o uso da ``extruct`` para ler metadados estruturados
 presentes no HTML de páginas de produtos. A interface exposta segue o 
 padrão adotado no restante das estratégias do projeto, retornando um 
-``dict`` com ``name``, ``current_price`` e ``url``.
+``dict`` com ``name``, ``current_price``, ``url`` e ``source`` quando
+os dados obrigatórios são encontrados.
 
 Exemplo
 -------
@@ -41,10 +42,10 @@ def _first_item(sequence: Iterable[Any]) -> Any:
             return item
     return None
 
-def parse_with_extruct(html: str, url: str | None = None) -> dict[str, str]:
+def parse_with_extruct(html: str, url: str | None = None) -> dict[str, str] | None:
     """ Extrai nome e preço a partir dos dados estruturados presentes no HTML
-    
-    Parêmetros
+
+    Parâmetros
     ----------
     html: str
         Conteúdo HTML bruto que contém scripts JSON-LD, Microdata ou OpenGraph
@@ -55,8 +56,8 @@ def parse_with_extruct(html: str, url: str | None = None) -> dict[str, str]:
     Retorno
     -------
     dict[str, str]
-        Dicionário padronizado com ``name``, ``current_price`` e ``url``
-        Caso nenhuma informação seja encontrada, valores vazios são retornados.
+        Dicionário padronizado com ``name``, ``current_price``, ``url`` e ``source``.
+        Quando os dados obrigatórios não são encontrados, retorna ``None``.
     """
     data = extract_structured_data(html, url)
 
@@ -101,10 +102,14 @@ def parse_with_extruct(html: str, url: str | None = None) -> dict[str, str]:
             name = name or _as_text(og_map.get("og:title"))
             price = price or _as_text(og_map.get("product:price:amount"))
 
+    if not name or not price:
+        return None
+
     return {
-        "name": name, 
+        "name": name,
         "current_price": price,
         "url": url or "",
+        "source": "",
     }
 
 

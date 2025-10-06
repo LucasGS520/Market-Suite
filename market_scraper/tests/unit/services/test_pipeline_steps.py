@@ -44,7 +44,9 @@ async def test_jsonld_parser_extracts_payload(context) -> None:
     result = await step.run(context)
     assert result.status == "success"
     assert result.payload["name"] == "Produto"
-
+    assert result.payload["current_price"] == "50.00"
+    assert context.data["name"] == "Produto"
+ 
 @pytest.mark.asyncio
 async def test_generic_fallback_handles_missing_data(context) -> None:
     """ Confirma que a heurística retorna status vazio quando nada é encontrado """
@@ -67,5 +69,5 @@ async def test_html_metadata_parser_uses_meta_tags(context) -> None:
     step = HtmlMetadataParserStep()
     result = await step.run(context)
     assert result.status == "success"
-    assert result.payload["current_price"].startswith("R$")
+    assert result.payload["current_price"] == "99.90"
     

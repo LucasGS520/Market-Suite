@@ -7,7 +7,7 @@ from ipaddress import ip_address
 from typing import Callable, Dict
 from urllib.parse import urlparse, urlunparse
 
-from market_scraper.utils.http_utils import ( 
+from market_scraper.utils.http_utils import (
     HostResolutionError,
     extract_hostname,
     resolve_public_address,
@@ -79,15 +79,20 @@ def check_url_compatibility(url: str) -> UrlIssue | None:
     if not host:
         return UrlIssue(code="invalid_url", message="URL inválida ou malformada")
     
+    if not _is_supported_marketplace(host):
+        return UrlIssue(code="unsupported_marketplace", message="Marketplace ainda não suportado")
+    
     public_issue = _ensure_public_endpoint(host)
     if public_issue:
         return public_issue
     
-    if not _is_supported_marketplace(host):
-        return UrlIssue(code="unsupported_marketplace", message="Marketplace ainda não suportado")
     if not _is_product_page(url):
         return UrlIssue(code="not_a_product", message="A URL informada não corresponde a um produto")
     return None
+
+def resolve_public_addresses(host: str) -> list[str]:
+    """ Mantém compatibilidade com testes que utilizam plural no nome """
+    return resolve_public_address(host)
 
 def _ensure_public_endpoint(host: str) -> UrlIssue | None:
     """ Confere se o host aponta para endereços públicos válidos """
@@ -106,7 +111,8 @@ def _ensure_public_endpoint(host: str) -> UrlIssue | None:
     return None
 
 __all__ = [
-    "UrlIssue", 
-    "normalize_product_url", 
+    "UrlIssue",
+    "normalize_product_url",
     "check_url_compatibility",
+    "resolve_public_addresses",
 ]

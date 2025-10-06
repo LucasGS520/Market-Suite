@@ -28,6 +28,12 @@ SCRAPER_STEP_FALLBACK_TOTAL = Counter(
     ["step", "source"],
 )
 
+SCRAPER_STEP_INVALID_TOTAL = Counter(
+    "scraper_step_invalid_total",
+    "Total de resultados descartados por invalidação de qualidade",
+    ["step", "source"],
+)
+
 SCRAPER_NO_RESULT_TOTAL = Counter(
     "scraper_no_result_total",
     "Execuções que não retornaram um payload válido ao final do pipeline",
@@ -246,5 +252,6 @@ __all__ = [
     "SCRAPER_STEP_SUCCESS_TOTAL",
     "SCRAPER_STEP_LATENCY_SECONDS",
     "SCRAPER_STEP_FALLBACK_TOTAL",
+    "SCRAPER_STEP_INVALID_TOTAL",
     "SCRAPER_NO_RESULT_TOTAL",
 ]

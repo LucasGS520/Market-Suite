@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+from selectorlib import Extractor
+
+from market_scraper.parsers import (
+    parse_generic_html,
+    parse_with_beautifulsoup,
+    parse_with_extruct,
+    parse_with_parsel,
+    parse_with_requests_html,
+    parse_with_selectorlib,
+)
+
+
+def test_parse_generic_html_returns_payload() -> None:
+    html = """
+    <html>
+        <head>
+            <meta property="og:title" content="Produto" />
+            <meta itemprop="price" content="123.45" />
+        </head>
+    </html>
+    """
+    result = parse_generic_html(html, "https://exemplo.com/item")
+    assert result == {
+        "name": "Produto",
+        "current_price": "R$ 123,45",
+        "url": "https://exemplo.com/item",
+        "source": "",
+    }
+
+def test_parse_generic_html_returns_none_when_missing() -> None:
+    html = "<html><body><p>sem preço</p></body></html>"
+    assert parse_generic_html(html, "https://exemplo.com/item") is None
+
+def test_parse_with_extruct_handles_json_ld() -> None:
+    html = """
+    <html>
+        <head>
+            <script type="application/ld+json">
+                {"@type": "Product", "name": "Console", "offers": {"price": "2999.00"}}
+            </script>
+        </head>
+    </html>
+    """
+    result = parse_with_extruct(html, "https://exemplo.com/console")
+    assert result == {
+        "name": "Console",
+        "current_price": "2999.00",
+        "url": "https://exemplo.com/console",
+        "source": "",
+    }
+
+def test_parse_with_beautifulsoup_extracts_meta_tags() -> None:
+    html = """
+    <html>
+        <head>
+            <meta property="og:title" content="Livro" />
+            <meta property="product:price:amount" content="59.90" />
+        </head>
+    </html>
+    """
+    result = parse_with_beautifulsoup(html, "https://exemplo.com/livro")
+    assert result == {
+        "name": "Livro",
+        "current_price": "59.90",
+        "url": "https://exemplo.com/livro",
+        "source": "",
+    }
+
+def test_parse_with_parsel_uses_selectors() -> None:
+    html = """
+    <html>
+        <head>
+            <meta property="og:title" content="Tablet" />
+            <meta itemprop="price" content="1999.90" />
+        </head>
+    </html>
+    """
+    result = parse_with_parsel(html, "https://exemplo.com/tablet")
+    assert result == {
+        "name": "Tablet",
+        "current_price": "1999.90",
+        "url": "https://exemplo.com/tablet",
+        "source": "",
+    }
+
+def test_parse_with_requests_html_recovers_basic_fields() -> None:
+    html = """
+    <html>
+        <head>
+            <meta property='og:title' content='Câmera' />
+        </head>
+        <body>
+            <span class='price'>R$ 1.500,00</span>
+        </body>
+    </html>
+    """
+    result = parse_with_requests_html(html, "https://exemplo.com/camera")
+    assert result == {
+        "name": "Câmera",
+        "current_price": "R$ 1.500,00",
+        "url": "https://exemplo.com/camera",
+        "source": "",
+    }
+
+def test_parse_with_selectorlib_uses_extractor(tmp_path) -> None:
+    template = tmp_path / "template.yml"
+    template.write_text(
+        "name:\n  css: title\n  type: Text\ncurrent_price:\n  css: span.price\n  type: Text\n",
+        encoding="utf-8",
+    )
+    extractor = Extractor.from_yaml_file(str(template))
+    html = """
+    <html>
+        <head><title>Headset</title></head>
+        <body><span class='price'>249.90</span></body>
+    </html>
+    """
+    result = parse_with_selectorlib(html, "https://exemplo.com/headset", extractor=extractor)
+    assert result == {
+        "name": "Headset",
+        "current_price": "249.90",
+        "url": "https://exemplo.com/headset",
+        "source": "",
+    }
+    

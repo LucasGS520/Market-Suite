@@ -57,6 +57,12 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "12.0")
     )
 
+    #Controle da etapa opcional baseada em requests-html
+    SCRAPER_ENABLE_REQUESTS_HTML: bool = os.getenv("SCRAPER_ENABLE_REQUESTS_HTML", "0") == "1"
+    SCRAPER_REQUESTS_HTML_TIMEOUT_SECONDS: float = float(
+        os.getenv("SCRAPER_REQUESTS_HTML_TIMEOUT_SECONDS", "6.0")
+    )
+
     #Limites de segurança para downloads HTTP do scraper
     SCRAPER_HTTP_MAX_REDIRECTS: int = int(os.getenv("SCRAPER_HTTP_MAX_REDIRECTS", "3"))
     SCRAPER_HTTP_MAX_CONTENT_LENGTH: int = int(

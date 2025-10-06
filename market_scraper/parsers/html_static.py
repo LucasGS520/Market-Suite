@@ -55,15 +55,19 @@ def _extract_text(soup: BeautifulSoup, selector: str, attribute: str | None = No
         return (element.get("content") or "").strip()
     return element.get_text(strip=True)
 
-def _assemble_result(name: str, price: str, currency: str, url: str) -> dict[str, str]:
-    """ Normaliza os campos e monta o dicionário de saída """
+def _assemble_result(name: str, price: str, currency: str, url: str) -> dict[str, str] | None:
+    """ Normaliza os campos e monta o dicionário de saída padronizado """
+    formatted_price = _format_price(price, currency)
+    if not name or not formatted_price:
+        return None
     return {
-        "name": name or "",
-        "current_price": _format_price(price, currency),
+        "name": name,
+        "current_price": formatted_price,
         "url": url,
+        "source": "",
     }
 
-def parse_generic_html(html: str, url: str) -> dict[str, str]:
+def parse_generic_html(html: str, url: str) -> dict[str, str] | None:
     """ Realiza uma extração genérica de nome e preço a partir da página 
     
     A extração utiliza exclusivamente seletores CSS via BeautifulSoup com o
@@ -117,7 +121,7 @@ def parse_generic_html(html: str, url: str) -> dict[str, str]:
 
     return _assemble_result(name, price, currency, url)
 
-def parse_meli_html(html: str, url: str) -> dict[str, str]:
+def parse_meli_html(html: str, url: str) -> dict[str, str] | None:
     """ Extrai informações básicas das páginas do Mercado Livre 
     
     A leitura do HTML utiliza apenas BeautifulSoup com o parser ``lxml`` e 
@@ -166,7 +170,7 @@ def parse_meli_html(html: str, url: str) -> dict[str, str]:
     )
     return _assemble_result(name, price, currency, url)
 
-def parse_amazon_html(html: str, url: str) -> dict[str, str]:
+def parse_amazon_html(html: str, url: str) -> dict[str, str] | None:
     """ Captura nome e preço em páginas da Amazon Brasil 
     
     Nenhuma etapa adicional é executada além da análise do HTML por meio de
@@ -205,7 +209,7 @@ def parse_amazon_html(html: str, url: str) -> dict[str, str]:
 
     return _assemble_result(name, whole, currency, url)
 
-def parse_magalu_html(html: str, url: str) -> dict[str, str]:
+def parse_magalu_html(html: str, url: str) -> dict[str, str] | None:
     """ Extrai dados essenciais das páginas do Magazine Luiza 
     
     O parser faz uso exclusivo do BeautifulSoup configurado com ``lxml`` para

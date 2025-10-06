@@ -31,12 +31,11 @@ def test_parse_endpoint_returns_payload(monkeypatch) -> None:
     response = client.post("/scrape/parse", json={"url": "mercadolivre.com.br/MLB-123"})
     assert response.status_code == 200
     body = response.json()
-    assert body == {
-        "name": "Produto Genérico",
-        "current_price": "R$ 199.90",
-        "url": "https://produto.mercadolivre.com.br/MLB-123",
-        "source": "produto.mercadolivre.com.br",
-    }
+    assert body["name"] == "Produto Genérico"
+    assert body["url"] == "https://produto.mercadolivre.com.br/MLB-123"
+    assert body["source"] == "produto.mercadolivre.com.br"
+    assert body["current_price"] == "199.90"
+
 
 def test_parse_endpoint_invalid_url() -> None:
     """ Valida o retorno padronizado para URLs inválidas """

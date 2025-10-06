@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 
 def _normalize_raw_price(raw: str) -> str:
@@ -47,4 +47,10 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
     except InvalidOperation as exc:
         raise ValueError(f"Preço inválido em {url}: {raw_text}") from exc
     
-__all__ = ["parse_price_str"]
+def format_decimal_to_str(value: Decimal) -> str:
+    """ Formata ``Decimal`` com duas casas decimais para resposta padronizada """
+    #Centraliza a formatação para manter arredondamento consistente
+    quantized = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return format(quantized, "f")
+
+__all__ = ["parse_price_str", "format_decimal_to_str"]
