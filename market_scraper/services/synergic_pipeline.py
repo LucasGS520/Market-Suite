@@ -137,11 +137,14 @@ class SynergicPipeline:
         executions: list[StepExecution] = []
         payload: dict[str, Any] | None = None
         status: Literal["success", "no_result", "timeout", "error"] = "no_result"
+        #Controle de rótulos garante consistência entre métricas de etapa e do pipeline
+        last_result_label: str = "no_result"
+        final_result_label: str = "no_result"
         context.data.setdefault("pipeline_timeout", self._pipeline_timeout)
         context.data.setdefault("step_timeout", context.default_step_timeout)
 
         async def _run_sequence() -> None:
-            nonlocal payload, status
+            nonlocal payload, status, last_result_label
             for step in self._steps:
                 timeout_value = step.timeout if step.timeout is not None else context.default_step_timeout
                 start = perf_counter()
@@ -149,6 +152,7 @@ class SynergicPipeline:
                     result = await asyncio.wait_for(step.run(context), timeout=timeout_value)
                 except asyncio.TimeoutError:
                     duration = perf_counter() - start
+                    result_label = "timeout"
                     executions.append(
                         StepExecution(
                             name=step.name,
@@ -157,8 +161,9 @@ class SynergicPipeline:
                             message="Tempo limite da etapa excedido",
                         )
                     )
-                    SCRAPER_STEP_LATENCY_SECONDS.labels(step.name).observe(duration)
-                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source).inc()
+                    SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
+                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
+                    last_result_label = result_label
                     logger.warning(
                         "step_timeout",
                         step=step.name,
@@ -169,6 +174,7 @@ class SynergicPipeline:
                     continue
                 except Exception as exc:
                     duration = perf_counter() - start
+                    result_label = "error"
                     executions.append(
                         StepExecution(
                             name=step.name,
@@ -177,8 +183,9 @@ class SynergicPipeline:
                             message="Falha interna na etapa",
                         )
                     )
-                    SCRAPER_STEP_LATENCY_SECONDS.labels(step.name).observe(duration)
-                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source).inc()
+                    SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
+                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
+                    last_result_label = result_label
                     logger.exception(
                         "step_error",
                         step=step.name,
@@ -189,10 +196,12 @@ class SynergicPipeline:
                     continue
 
                 duration = perf_counter() - start
-                SCRAPER_STEP_LATENCY_SECONDS.labels(step.name).observe(duration)
+                result_label = result.status
+                SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
+                last_result_label = result_label
 
                 if result.status == "success":
-                    SCRAPER_STEP_SUCCESS_TOTAL.labels(step.name, context.source).inc()
+                    SCRAPER_STEP_SUCCESS_TOTAL.labels(step.name, context.source, result_label).inc()
                     executions.append(
                         StepExecution(
                             name=step.name,
@@ -207,7 +216,7 @@ class SynergicPipeline:
                         return
                     continue
                 
-                SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source).inc()
+                SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
                 executions.append(
                     StepExecution(
                         name=step.name,
@@ -220,17 +229,22 @@ class SynergicPipeline:
         try:
             await asyncio.wait_for(_run_sequence(), timeout=self._pipeline_timeout)
         except asyncio.TimeoutError as exc:
+            final_result_label = "timeout"
             logger.error(
                 "pipeline_timeout",
                 timeout=self._pipeline_timeout,
                 url=context.url,
                 step_count=len(self._steps),
             )
-            SCRAPER_NO_RESULT_TOTAL.labels(context.source).inc()
+            SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
             raise PipelineTimeoutError("Tempo limite do pipeline excedido") from exc
         
         if status != "success":
-            SCRAPER_NO_RESULT_TOTAL.labels(context.source).inc()
+            if last_result_label in {"empty": "success"}:
+                final_result_label = "no_result"
+            else:
+                final_result_label = last_result_label
+            SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
             
         return PipelineOutcome(
             status=status,
