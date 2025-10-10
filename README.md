@@ -72,38 +72,36 @@ para coletar informações dos anúncios.
 - Métricas de API, filas e notificações ficam disponíveis para observabilidade.
 
 ## Serviço ``market_scraper``
-O `market_scraper` é o serviço especializado em coletar dados de anúncios. Ele processa uma URL recebida, respeitando limites de acesso e retornando informações estruturadas para os demais módulos.
+O `market_scraper` é o serviço especializado em coletar dados de anúncios. Ele processa uma URL recebida, respeita regras de segurança (robots.txt e bloqueios de SSRF) e retorna um payload padronizado para os demais módulos.
 
-Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML estático consulte [`market_scraper/README.md`](market_scraper/README.md).
+Para detalhes operacionais consulte também [`market_scraper/README.md`](market_scraper/README.md).
 
-### Fluxo unificado de scraping
-- Todas as requisições passam exclusivamente pelo `SynergicPipeline`, que coordena as etapas declaradas no arquivo `domain_policy.yaml`.
-- A política de domínio define **quais etapas** serão executadas, **em qual ordem** e **qual modo de execução** (`sequential`, `parallel` ou `conditional`).
-- Cada etapa atualiza o `shared_context`, um dicionário mutável utilizado para compartilhar HTML bruto, dados estruturados e metadados entre as etapas subsequentes.
-- Métricas e logs estruturados são emitidos por etapa, permitindo rastrear latência, sucessos, fallbacks e bloqueios no Prometheus e no Loki.
+### Pipeline mínimo de scraping
+- Todas as requisições passam por um pipeline sequencial definido em `market_scraper/services/pipeline_steps.py`.
+- A sequência padrão cumpre o requisito mínimo (`FetchHTML` → `JSON‑LD` → `HTML meta` → `fallback genérico`) e registra métricas de latência/sucesso por etapa.
+- O `shared_context` do pipeline armazena URL normalizada, HTML, domínio de origem e o payload validado, permitindo que cada etapa opere de forma independente.
+- A etapa `FetchHTMLStep` valida `robots.txt`, consulta cache local/Redis (quando configurado) e aplica limites de timeout com `httpx`.
 
 ### Componentes principais
-- **main.py** - instancia a aplicação FastAPI e registra rotas de saúde e de scraping.
-- **routes/** - expõe as rotas ``/health/ping`` e ``/scrape/parse`` (também acessível por ``/scraper/parse``).
-- utiliza o contrato ``ScraperRequest`` e ``ScraperResponse`` definido em ``shared/schemas/schemas_scraper.py`` para padronizar requisições e respostas.
-- **services/** - executa o fluxo de scraping controlando rate limiting, circuit breaker, cache inteligente e a orquestração do `SynergiPipeline`.
-- **services/pipeline_steps.py** - catálogo de etapas reutilizáveis; cada classe herda de `PipelineStep` e implementa o método `run` recebendo e atualizando o `shared_context`.
-- **utils/** - reúne utilitários auxiliares para o fluxo de scraping.
-- **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço, incluindo cenários que validam a seleção de etapas via YAML.
-- **archive/** - guarda implementações antigas como `domain_policy.py` e `domain_policy.yaml` para consulta histórica sem impactar o pipeline enxuto.
+- **main.py** – instancia a aplicação FastAPI e registra rotas de saúde, scraping e métricas.
+- **routes/** – expõe ``/health/ping`` e ``/scraper/parse`` (alias ``/scrape/parse``) com o contrato `ParseRequest`/`ParserResponse` definido em ``shared/schemas/schemas_scraper.py``.
+- **services/services_scraper_common.py** – cria o pipeline enxuto e aplica timeouts configuráveis antes de repassar o resultado à rota.
+- **services/pipeline_steps.py** – define as etapas `FetchHTMLStep`, `JsonLdParserStep`, `HtmlMetadataParserStep` e `GenericFallbackParserStep`.
+- **parsers/** – implementa transformações para JSON‑LD, metatags HTML e heurísticas genéricas.
+- **utils/** – reúne utilitários compartilhados como validação de URL/SSRF, tratamento de preços, cache simples, respeito ao robots.txt e métricas.
+- **tests/** – cobre unidade e integração do pipeline mínimo, incluindo cenários de URL inválida, ausência de preço e bloqueio por robots.
+- **archive/** – mantém os arquivos `domain_policy.py` e `domain_policy.yaml` para referência histórica; eles não participam do pipeline atual.
 
-#### Camada de utilitários consolidados
-- `market_scraper/utils` concentra helpers puros e reutilizáveis. Esses módulos não mantêm estado compartilhado e podem ser importados diretamente pelas etapas do pipeline.
-- `market_scraper/utils_controllers` abriga componentes com estado ou dependências externas. Utilize-os quando a regra precisar coordenar múltiplos utilitários ou expor métricas.
-- `market_scraper/utils_controllers/configuration` oferece loaders com hot-reload; derive novos loaders a partir dele para manter comportamento consistente.
-- Testes dedicados garantem regressão: ``pytest market_scraper/tests/unit/utils -q`` cobre helpers puros, enquanto ``pytest market_scraper/tests/unit/utils_controllers -q`` valida controllers e loaders configuráveis. 
-
-Os parsers de HTML e dados estruturados residem em `market_scraper/parsers`, cada módulo responsável apenas por transformar o HTML bruto em um dicionário padronizado. Os `SynergicPipeline` concentra toda a orquestração e fallback, evitando estratégias isoladas.
+### Configurações essenciais
+- `market_scraper/core/config_scraper.py` concentra variáveis controladas por ambiente como `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` e limites de requisições HTTP (`SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_HTTP_MAX_*`).
+- O cache básico é habilitado via `SCRAPER_CACHE_ENABLED` e respeita o TTL `SCRAPER_CACHE_TTL_SECONDS`. O backend padrão (`SCRAPER_CACHE_BACKEND=memory`) utiliza um dicionário protegido por lock; o valor `redis` permanece reservado para futura expansão usando as credenciais compartilhadas (`REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`).
+- Todos os serviços reutilizam o `.env.common` para dados de infraestrutura. Configure `market_scraper/.env.market_scraper` quando precisar sobrescrever timeouts, TTLs ou o backend de cache.
 
 ### Papel na arquitetura
-- Recebe requisições HTTP do ``market_alert`` ou de outros consumidores.
-- Executa scraping exclusivamente por meio do pipeline configurado, garantindo consistência e flexibilidade via YAML.
-- Em caso de bloqueios ou CAPTCHA, tenta recuperar o acesso e retorna error claros quando necessário, registrando métricas por etapa.
+- Recebe requisições HTTP do ``market_alert`` ou de consumidores internos.
+- Valida URL, marketplace suportado e disponibilidade pública antes de iniciar o download.
+- Respeita robots.txt, aplica cache básico e expõe métricas (`SCRAPER_STRATEGY_TOTAL`, `SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_ROBOTS_CHECKS_TOTAL`, entre outras) para acompanhamento no Prometheus.
+- Em caso de falhas, retorna códigos conhecidos (`invalid_url`, `unsupported_marketplace`, `unsupported_by_robots`, `no_result`, `pipeline_timeout`).
 
 ## Módulo compartilhado ``shared``
 O diretório ``shared`` concentra componentes reutilizáveis que dão suporte aos demais serviços.
@@ -225,43 +223,33 @@ SCRAPER_SERVICE_URL=http://url_serviço_de_scraping
 
 ### Exemplo de ``.env.market_scraper``
 ```env
-REDIS_PASSWORD=senha
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=
 
-CACHE_BASE_TTL=3600
-
-ETAG_CACHE_TTL=86400
-SIG_CACHE_TTL=86400
-
-SCRAPER_CACHE_ENABLED=True
-SCRAPER_CACHE_TTL_SECONDS=3600
+# Cache básico por URL
+SCRAPER_CACHE_ENABLED=1
 SCRAPER_CACHE_BACKEND=memory
+SCRAPER_CACHE_TTL_SECONDS=3600
 
 SCRAPER_STEP_TIMEOUT_SECONDS=8.0
 SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
+
+# Limites HTTP defensivos
+SCRAPER_HTTP_MAX_REDIRECTS=3
 SCRAPER_HTTP_MAX_CONTENT_LENGTH=2000000
+SCRAPER_HTTP_MAX_CONNECTIONS=10
+SCRAPER_HTTP_MAX_KEEPALIVE=5
 
-SCRAPER_STRATEGIES=playwright
-
-HUMAN_AVG_WPM=200
-HUMAN_BASE_DELAY=1.0
-HUMAN_FATIGUE_MIN=0.5
-HUMAN_FATIGUE_MAX=2.0
-
-THROTTLE_RATE=0.2
-THROTTLE_CAPACITY=3
-
-JITTER_MIN=2.0
-JITTER_MAX=7.0
-
-MONITORED_RATE_LIMIT=100
-COMPETITOR_SERVICE_RATE_LIMIT=200
-
-RATE_LIMIT_WINDOW=3600
-
-PLAYWRIGHT_HEADLESS=1
-PLAYWRIGHT_TIMEOUT=30000
-
+SCRAPER_HTTP_TIMEOUT_CONNECT=3.0
+SCRAPER_HTTP_TIMEOUT_READ=3.0
+SCRAPER_HTTP_TIMEOUT_WRITE=3.0
+SCRAPER_HTTP_TIMEOUT_POOL=3.0
 ```
+## Recursos arquivados
+- `market_scraper/archive/domain_policy.py` e `market_scraper/archive/domain_policy.yaml` armazenam a versão anterior baseada em políticas dinâmicas por domínio. Para reativá-los, mova os arquivos de volta para `market_scraper/services`, ajuste os imports do pipeline e reabilite o carregamento de políticas conforme indicado nos comentários internos.
+- Demais utilitários legados permanecem preservados no diretório `market_scraper/archive/` e só devem ser restaurados caso o pipeline mínimo deixe de atender a um marketplace específico.
 
 ## Execução
 Para levantar todo o ambiente com banco de dados, Redis e serviços auxiliares utilize:

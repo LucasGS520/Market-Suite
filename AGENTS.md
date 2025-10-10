@@ -31,6 +31,13 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 - Como Manter o AGENTS.md Atualizado: rotina de revisão do documento.
 - Checklist de Cobertura Essencial: verificação rápida antes de releases.
 
+## Atualização rápida — Market Scraper enxuto
+- A rota ativa para scraping é `POST /scraper/parse` (alias `/scrape/parse`) utilizando `ParserResponse` como contrato.
+- O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py`.
+- `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
+- O cache padrão é em memória (`SCRAPER_CACHE_BACKEND=memory`). Defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_*` somente quando o adaptador Redis dedicado for reinstalado.
+- `robots.txt` é respeitado antes do download; erros retornam `unsupported_by_robots` e registram métricas (`SCRAPER_ROBOTS_CHECKS_TOTAL`).
+
 ## Visão Geral da Arquitetura e Serviços
 Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resumo operacional para agentes.
 
@@ -49,62 +56,29 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - Função: agenda execuções periódicas (rechecagem de produtos, coleta/limpeza de métricas e caches).
 - Tarefas agendadas comuns: `collect_celery_metrics`, `cleanup_cache`, `recheck_monitored_products`, `recheck_competitor_products`.
 - Comunicação: publica jobs nas filas do Celery (broker Redis).
-- Novo Módulo `SynergicPipeline` (`market_scraper/services/synergic_pipeline.py`) permite montar pipelines de etapas compartilhando contexto, configuráveis por domínio em `domain_policy.yaml` (chaves `pipeline_steps` e `pipeline_policies`).
+- O `SynergicPipeline` (`market_scraper/services/synergic_pipeline.py`) executa o pipeline sequencial padrão (definido em `services/pipeline_steps.py`). As políticas dinâmicas por domínio estão arquivadas junto ao antigo `domain_policy.yaml`.
 -  Para agentes: ajuste cron/intervalos nas configurações do Celery; evite criar rotinas paralelas conflitantes.
 
 ### Serviço de Scraping — `market_scraper`
-- **Função:** microserviço FastAPI que recebe uma URL e retorna JSON leve (ex: `name`, `current_price`, `marketplace`).Nenhum dado é persistido localmente.
-- **Comunicação:** recebe HTTP da API/worker; aplica rate limiting, consulta cache inteligente e executa o ``SynergicPipeline`` antes de devolver a resposta.
-- **Referências essenciais:** `market_scraper/services/domain_policy.py`, `market_scraper/services/synergic_pipeline.py`, `shared/metrics/metrics_scraper.py` e `market_scraper/README.md`.
+- **Função:** microserviço FastAPI que recebe uma URL e retorna JSON leve (`name`, `current_price`, `url`, `source`). Nenhum dado é persistido localmente.
+- **Comunicação:** recebe HTTP da API/Worker, executa o `SynergicPipeline` com as etapas sequenciais padrão e responde seguindo o contrato `ParseResponse`.
+- **Referências essenciais:** `market_scraper/services/pipeline_steps.py`, `market_scraper/services/services_scraper_common.py`, `market_scraper/utils/robots.py`, `market_scraper/utils/cache.py`, `shared/metrics/metrics_scraper.py` e `market_scraper/README.md`
 
-#### Configurações centralizada (`domain_policy.yaml`)
-- O arquivo padrão está em `market_scraper/services/domain_policy.yaml`. Pode ser substituído via `DOMAIN_POLICY_FILE`.
-- Hot reload opcional (`DOMAIN_POLICY_HOT_RELOAD=1`) facilita ajustes em ambientes de desenvolvimento.
+#### Pipeline padrão e fallback
+- Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep`.
+- `FetchHTMLStep` normaliza URL, verifica `robots.txt`, consulta cache e baixa o HTML com `httpx` respeitando timeouts.
+- Cada parser valida o payload com `DataQualityValidator`; quando nenhum retorna resultado válido o endpoint responde com `no_result`.
+- Métricas principais: `SCRAPER_STRATEGY_TOTAL`, `SCRAPING_LATENCY_SECONDS`, `SCRAPER_FALLBACK_TOTAL` e `SCRAPER_ROBOTS_CHECKS_TOTAL`.
 
-> **Boa prática**: sempre garantir que cada item cadastrado em `strategies` ou `pipeline_steps` possua uma classe válida no código. Estratégias/etapas deconhecidas são silenciosamente ignoradas pelo loader.
+#### Validação, cache e segurança
+- `market_scraper/utils/url_validation.py` garante que a URL pertença aos marketplaces suportados e bloqueia hosts privados (SSRF).
+- `market_scraper/utils/http_utils.py` resolve endereços públicos antes de permitir o download.
+- `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host e devolve `unsupported_by_robots` quando o acesso é negado.
+- Cache padrão em memória controlado por `SCRAPER_CACHE_ENABLED` e `SCRAPER_CACHE_TTL_SECONDS`. O backend Redis permanece opcional aguardando reativação do adaptador dedicado (`SCRAPER_CACHE_BACKEND=redis`).
 
-#### Fluxo operacional e fallback
-```mermaid
-flowchart LR
-    A[POST /scrape/parse] --> B{Cache válido?}
-    B -- Sim --> C[]
-    B -- Não --> D[Carregar domain_policy.yaml]
-    D --> E[Montar lista de estratégias e pipeline steps]
-    E --> F[Executar SynergicPipeline (sequencial/parallel/conditional)]
-    F --> G{Status OK?}
-    G -- Sim --> H[]
-    H --> I[]
-    I --> J[Responder]
-    G -- Não --> K[SCRAPER_FALLBACK_TOTAL++ & logs estruturados]
-    K --> F
-```
-
-- **Prioridade:** o YAML ordena estratégias e etapas por domínio/contexto.
-- **Paralelismo:** usar `execution_mode="parallel"` apenas quando a política justificar. Monitorar o histograma de latência (`SCRAPING_LATENCY_SECONDS`).
-- **Timeouts:** cada etapa deve implementar regras próprias de timeout, pois o pipeline não cancela automaticamente tarefas travadas.
-
-#### Contexto compartilhado e instrumentação
-```mermaid
-flowchart TD
-    subgraph Contexto
-        C1[shared_context]
-    end
-    Step1[Etapa leve] -->|atualiza| C1
-    Step2[Etapa pesada] -->|consulta| C1
-    C1 --> Cache[]
-    Step1 & Step2 --> Metrics[[Prometheus (metrics_scraper)]]
-```
-
-- **shared_context:** dicionário mutável compartilhado entre etapas. Use chaves nominais (`html_raw`, `json_ld`, `cookies_rotated`).
-- **cache:** o `IntelligentCacheManager` opera com TTL, ETag e assinatura (`SIG_CACHE_TTL`). Verificar se a chave segue o padrão `<domínio>|<url-normalizada>`.
-- **Métricas principais:**
-  - `SCRAPER_STRATEGY_TOTAL` (labels: classe, status).
-  - `SCRAPER_FALLBACK_TOTAL` (contador global de fallback).
-  - `SCRAPING_LATENCY_SECONDS` (histograma por etapa).
-  - `SCRAPER_RATE_LIMIT_REQUESTS_TOTAL` (labels: host, result) e `SCRAPER_RATE_LIMIT_MODE` (gauge para modo ativo/passivo)
-  - `SCRAPER_CACHE_LOOKUPS_TOTAL` (labels: backend, outcome) + `SCRAPER_CACHE_LATENCY_SECONDS` para acompanhar hits, misses e expirações
-  - `SCRAPER_CACHE_LOCAL_SIZE` (gauge com volume atual do cache local)
-  - Complementares: `SCRAPER_HTTP_BLOCKED_TOTAL` quando importado por rotas específicas.
+#### Contexto compartilhado e métricas
+- O `PipelineContext` expõe `url`, `source`, `html` e `data` (payload final). Atualize apenas chaves documentadas (`name`, `current_price`, `url`, `source`, `payload`).
+- Métricas ficam em `shared/metrics/metrics_scraper.py`. Sempre reutilize contadores existentes antes de criar novos.
 
 #### Consolidação dos utilitários do `market_scraper`
 - `market_scraper/utils/` mantém helpers puros (sem estado compartilhado). Esses módulos podem ser importados diretamente pelas etapas do pipeline sem depender de configuração global.
@@ -112,24 +86,22 @@ flowchart TD
 - `shared/utils` continua sendo a fonte para rotinas verdadeiramente compartilhadas. Sempre avalie se o helper pertence á camada comum antes de criar novos módulos no scraper.
 
 **Boas práticas ao criar/editar utilitários:**
-- Comente e escreva docstrings em protuguês explicando entradas, saídas e efeitos colaterais.
-- Prefira funções puras em `utils/`; quando precisar manter estado ou coordenar múltiplos utilitários, promova a regra para um controller em `utils_controllers/`.
-- Exponha métricas existentes em vez de criar novas duplicadas. Bloqueios de robots/HTTP incrementam `SCRAPER_HTTP_BLOCKED_TOTAL`, status agregados usam `SCRAPER_URL_STATUS_TOTAL` e rotinas de ritmo devem acionar `SCRAPER_RATE_LIMIT_REQUESTS_TOTAL`
-- Sempre que um controller depender de arquivos externos, acrescente variáveis de ambiente correspondentes e decreva o comportamento no `README.md`/`AGENTS.md`
+- `market_scraper/utils/` armazena helpers puros (cache, robots, validação de URL, parsing de preço).
+- `market_scraper/utils_controllers/` concentra componentes com estado (loaders/config). Avalie se o utilitário realmente precisa de estado antes de adicioná-lo aqui.
+- `shared/utils` continua a fonte para funcionalidades cross-service (Redis, logging, normalização de URL). Prefira mover lógicas genéricas para lá.
 
 **Testes de regressão dos utilitários:**
 - `pytest market_scraper/tests/unit/utils -q`
-- `pytest market_scraper/tests/unit/utils_controllers -q`
-- Módulos que utilizam hot-reload possuem fixtures dedicadas (`tmp_path`, `monkeypatch`) para simular alterações em disco; reutilize-as para garantir cobertura.
+- `pytest market_scraper/tests/unit/services -q`
+- `pytest market_scraper/tests/integration/routes/test_parse.py -q`
+- Utilize fixtures em `market_scraper/tests/fixtures/` para simular respostas de marketplaces e Redis quando necessário.
 
-#### Checklist para novas estratégias ou etapas
-1. Criar a classe herdando de `ScrapingStrategy` ou `PipelineStep`.
-2. Registrar no YAML (`strategies` ou `pipeline_steps`) e definir a ordem desejada.
-3. Incluir testes unitários/integrados:
-  - `pytest market_scraper/tests/unit/services/test_domain_policy.py -k <nome>`.
-  - `pytest market_scraper/tests/integration/routes/test_strategy_selection.py` para validar seleção e fallback.
-4. Documentar requisitos de ambiente (cookies, headers, credenciais) no README/AGENTS.
-5. Publicar métricas adicionais se necessário (ex.: contador customizado dentro da etapa).
+#### Checklist para novas etapas do pipeline
+1. Criar a classe herdando de `PipelineStep` em `market_scraper/services/pipeline_steps.py` (ou módulo dedicado).
+2. Registrar a etapa na função `default_pipeline_steps()` na posição desejada.
+3. Adicionar testes unitários cobrindo a etapa isolada e integração via `test_parse.py` quando afetar o fluxo final.
+4. Atualizar documentação (`market_scraper/README.md`, `README.md` e esta seção) descrevendo a nova etapa e métricas.
+5. Revisar variáveis de ambiente/timeouts necessários e adicionar às instruções de configuração.
 
 #### Segurança, compliance e limites
 - Respeitar `robots.txt` antes de ativar novas políticas.
@@ -141,7 +113,7 @@ flowchart TD
 - Ativar dashboards específicos no Grafana acompanhando `SCRAPER_FALLBACK_TOTAL` vs. taxa de sucesso.
 - Criar alertas no Prometheus quando `SCRAPING_LATENCY_SECONDS{le="5"}` sair da meta definida no README.
 - Para diagnósticos rápidos, habilitar logs nível `debug` apenas em ambientes controlados {`structlog` com `contextvars`}.
-- Sempre registrar no PR alterações no YAML e nas métricas acompanhadas.
+- Sempre registrar no PR alterações no pipeline (`pipeline_steps.py`), configurações e métricas acompanhadas.
 
 ### Utilitários Compartilhados — `shared`
 - Para agentes: reutilizar utilitários em novas tarefas/estratégias; evitar duplicar lógica existente.
@@ -195,7 +167,7 @@ flowchart TD
 
 - Boas práticas para agentes (autoajuste):
   - Use `SCRAPER_HTTP_BLOCKED_TOTAL` e `SCRAPER_CIRCUIT_STATE` para acionar backoff e rotação de UA/cookies.
-  - Ajuste cadência via `DomainPaceController` e `RateLimiter` quando `http_request_latency_seconds` ou `api_errors_total` aumentarem.
+  - Ajuste cadência revisando `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` e parâmetros de cache quando `SCRAPING_LATENCY_SECONDS` ou `SCRAPER_FALLBACK_TOTAL` indicarem degradação.
   - Condicione rechecagens com `AdaptiveRecheckManager` considerando `SCRAPER_RETRY_TOTAL` e variação recente de preço.
 
 - Referências rápidas (FastAPI + Prometheus):

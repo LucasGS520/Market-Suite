@@ -22,7 +22,7 @@ def context() -> PipelineContext:
         default_step_timeout=0.5,
     )
 
-@pytest.mark.asyncio
+@pytest.fixture(autouse=True)
 def clear_cache() -> None:
     """ Garante isolamento limpando o cache em memória entre os testes """
     cache.clear()
