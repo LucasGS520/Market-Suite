@@ -22,7 +22,6 @@ PyYAML==6.0.2
 selectorlib==0.16.0
 redis==6.1.0
 requests==2.32.3
-requests-html==0.10.0
 streamlit==1.45.1
 structlog==25.3.0
 tenacity==9.1.2

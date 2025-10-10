@@ -1,3 +1,5 @@
+""" Testa parsers estáticos e de dados estruturados do scraper """
+
 from __future__ import annotations
 
 from selectorlib import Extractor
@@ -7,7 +9,6 @@ from market_scraper.parsers import (
     parse_with_beautifulsoup,
     parse_with_extruct,
     parse_with_parsel,
-    parse_with_requests_html,
     parse_with_selectorlib,
 )
 
@@ -82,25 +83,6 @@ def test_parse_with_parsel_uses_selectors() -> None:
         "name": "Tablet",
         "current_price": "1999.90",
         "url": "https://exemplo.com/tablet",
-        "source": "",
-    }
-
-def test_parse_with_requests_html_recovers_basic_fields() -> None:
-    html = """
-    <html>
-        <head>
-            <meta property='og:title' content='Câmera' />
-        </head>
-        <body>
-            <span class='price'>R$ 1.500,00</span>
-        </body>
-    </html>
-    """
-    result = parse_with_requests_html(html, "https://exemplo.com/camera")
-    assert result == {
-        "name": "Câmera",
-        "current_price": "R$ 1.500,00",
-        "url": "https://exemplo.com/camera",
         "source": "",
     }
 

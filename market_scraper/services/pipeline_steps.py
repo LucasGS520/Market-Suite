@@ -20,7 +20,6 @@ from market_scraper.parsers import (
     parse_generic_html,
     parse_with_beautifulsoup,
     parse_with_extruct,
-    parse_with_requests_html,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext, PipelineStep, StepResult
 from market_scraper.utils.validator import DataQualityValidator
@@ -207,26 +206,6 @@ class GenericFallbackParserStep(_BaseParserStep):
             empty_message="Heurísticas genéricas não encontraram dados",
             missing_html_message="HTML indisponível para heurísticas genéricas",
         )
-
-class RequestsHtmlParserStep(_BaseParserStep):
-    """ Utiliza Requests-HTML para interpretar páginas com markup dinâmico
-    
-    Consome: ``context.html``
-    Produz: ``context.data['payload']``
-    """
-    def __init__(
-        self,
-        *,
-        timeout: float | None = None,
-    ) -> None:
-        super().__init__(
-            name="requests_html_parser",
-            parser=parse_with_requests_html,
-            success_message="Dados extraídos com Requests-HTML",
-            empty_message="Requests-HTML não encontrou dados",
-            missing_html_message="HTML indisponível para Requests-HTML",
-            timeout=timeout,
-        )
     
 def default_pipeline_steps() -> list[PipelineStep]:
     """ Retorna a sequência padrão de etapas do pipeline enxuto """
@@ -236,7 +215,7 @@ def default_pipeline_steps() -> list[PipelineStep]:
         HtmlMetadataParserStep(),
         GenericFallbackParserStep(),
     ]
-    #Mantemos a sequência fixa para cumprir pipeline mínimo definido (HTML -> JSON-LD -> Metatags -> Heurísticas genéricas)
+    #Mantemos a ordem fixa para cumprir pipeline mínimo definido
     return steps
 
 __all__ = [
