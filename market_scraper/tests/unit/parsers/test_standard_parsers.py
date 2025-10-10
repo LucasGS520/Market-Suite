@@ -24,7 +24,7 @@ def test_parse_generic_html_returns_payload() -> None:
         "name": "Produto",
         "current_price": "R$ 123,45",
         "url": "https://exemplo.com/item",
-        "source": "",
+        "source": "generic_html",
     }
 
 def test_parse_generic_html_returns_none_when_missing() -> None:
@@ -46,7 +46,7 @@ def test_parse_with_extruct_handles_json_ld() -> None:
         "name": "Console",
         "current_price": "2999.00",
         "url": "https://exemplo.com/console",
-        "source": "",
+        "source": "structured_data",
     }
 
 def test_parse_with_beautifulsoup_extracts_meta_tags() -> None:
@@ -63,7 +63,24 @@ def test_parse_with_beautifulsoup_extracts_meta_tags() -> None:
         "name": "Livro",
         "current_price": "59.90",
         "url": "https://exemplo.com/livro",
-        "source": "",
+        "source": "html_metadata",
+    }
+
+def test_parse_with_beautifulsoup_cleans_currency_symbols() -> None:
+    html = """
+    <html>
+        <body>
+            <h1>Console</h1>
+            <span class="price">R$ 5.999,90</span>
+        </body>
+    </html>
+    """
+    result = parse_with_beautifulsoup(html, "https://exemplo.com/console")
+    assert result == {
+        "name": "Console",
+        "current_price": "5.999,90",
+        "url": "https://exemplo.com/console",
+        "source": "html_metadata",
     }
 
 def test_parse_with_parsel_uses_selectors() -> None:

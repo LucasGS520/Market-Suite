@@ -5,8 +5,8 @@ from __future__ import annotations
 O módulo oferece utilitários focados em coletar nome e preço a partir
 de HTML estático utilizando apenas BeautifulSoup com o parser ``lxml``.
 Todas as funções expõem a mesma interface, retornando um dicionário com 
-``name```, ``current_price`` e ``url``. Não existem fallbacks, tentativas
-qualquer lógica de fallback ou orquestração.
+``name```, ``current_price`` e ``url``. Não existem fallbacks, ou orquestrações
+adicionais; o retorno é pensado para ser validado pelo ``DataQualityValidator``.
 """
 
 import re
@@ -14,6 +14,9 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from bs4 import BeautifulSoup
+
+
+GENERIC_HTML_SOURCE = "generic_html"
 
 def _normalize_price(value: Optional[str]) -> Optional[Decimal]:
     """ Converte uma string de preço para ``Decimal`` quando possível """
@@ -64,7 +67,7 @@ def _assemble_result(name: str, price: str, currency: str, url: str) -> dict[str
         "name": name,
         "current_price": formatted_price,
         "url": url,
-        "source": "",
+        "source": GENERIC_HTML_SOURCE,
     }
 
 def parse_generic_html(html: str, url: str) -> dict[str, str] | None:

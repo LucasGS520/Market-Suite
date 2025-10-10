@@ -2,10 +2,11 @@ from __future__ import annotations
 
 """ Funções de parsing utilizando BeautifulSoup
 
-O objetivo do módulo é oferecer um ponto único para extração simples 
+O objetivo do módulo é oferecer um ponto único para extração simples
 de nome e preço a partir de HTML estático. Ele funcionna como complemento
 ao ``html_static.py`` e matém a mesma interface das demais bibliotecas
-de parsing utilizadas no projeto.
+de parsing utilizadas no projeto. As saídas são preparadas para que o 
+``DataQualityValidator`` consiga interpretar os valores sem ambuiguidades.
 
 Exemplo
 -------
@@ -17,12 +18,22 @@ Exemplo
 {'name': 'Notebook ABC', 'current_price': 'R$ 5.999,90', 'url': 'https://loja.test/notebook'}
 """
 
+import re
+
 from bs4 import BeautifulSoup
 
+HTML_METADATA_SOURCE = "html_metadata"
 
 def _clean_text(value: str | None) -> str:
     """ Normaliza strings removendo espaços extras """
     return value.strip() if value else ""
+
+def _clean_price_text(value: str | None) -> str:
+    """ Remove símbolos extras mantendo apenas números, vírgulas e pontos """
+    if not value:
+        return ""
+    cleaned = re.sub(r"[^0-9,.-]", "", value)
+    return cleaned.strip()
 
 def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str] | None:
     """ Extrai nome e preço utilizando `BeautifulSoup`
@@ -44,7 +55,7 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
 
     name_candidates = [
         ("meta", {"property": "og:title"}),
-        ("meta", {"name": "tittle"}),
+        ("meta", {"name": "title"}),
         ("h1", {}),
         ("title", {}),
     ]
@@ -73,9 +84,9 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
         if not element:
             continue
         if element.name == "meta":
-            price = _clean_text(element.get("content"))
+            price = _clean_price_text(element.get("content"))
         else:
-            price = _clean_text(element.get_text())
+            price = _clean_price_text(element.get_text())
         if price:
             break
 
@@ -86,7 +97,7 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
         "name": name,
         "current_price": price,
         "url": url or "",
-        "source": "",
+        "source": HTML_METADATA_SOURCE,
     }
 
 

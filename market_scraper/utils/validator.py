@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 import structlog
 
@@ -12,6 +13,31 @@ from market_scraper.utils.price import format_decimal_to_str, parse_price_str
 
 
 logger = structlog.get_logger("data_quality_validator")
+
+def _normalize_url(raw_url: Any, fallback: str) -> str:
+    """ Padroniza URL de saída priorizando o valor válido do contexto """
+    if isinstance(raw_url, str):
+        candidate = raw_url.strip()
+        if candidate:
+            return candidate
+    return fallback
+
+def _normalize_source(raw_source: Any, fallback: str) -> str:
+    """ Garante que a origem represente um domínio válido """
+    condidate = ""
+    if isinstance(raw_source, str):
+        candidate = raw_source.strip()
+    elif raw_source is not None:
+        candidate = str(raw_source).strip()
+
+    if candidate:
+        parsed = urlparse(candidate)
+        hostname = parsed.hostname or parsed.netloc
+        if hostname:
+            return hostname
+        if " " not in candidate and "." in candidate:
+            return candidate
+    return fallback
 
 class DataQualityValidator:
     """ Aplica regras mínimas para garantir que o payload contenha dados úteis """
@@ -45,8 +71,8 @@ class DataQualityValidator:
         normalized_payload = {
             "name": name,
             "current_price": format_decimal_to_str(price_decimal),
-            "url": str(payload.get("url") or url).strip() or url,
-            "source": str(payload.get("source") or source).strip() or source,
+            "url": _normalize_url(payload.get("url"), url),
+            "source": _normalize_source(payload.get("source"), source),
         }
         return normalized_payload
     

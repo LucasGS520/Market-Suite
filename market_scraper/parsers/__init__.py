@@ -9,7 +9,6 @@ from .html_static import (
 from .extruct import parse_with_extruct
 from .parsel import parse_with_parsel
 from .beautifulsoup import parse_with_beautifulsoup
-from .selectorlib import load_selectorlib_extractor, parse_with_selectorlib
 
 __all__ = [
     "parse_generic_html",
