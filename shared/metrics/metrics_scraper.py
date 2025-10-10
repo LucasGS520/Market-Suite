@@ -199,6 +199,12 @@ SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
     ["backend", "outcome"],
 )
 
+SCRAPER_ROBOTS_CHECKS_TOTAL = Counter(
+    "scraper_robots_checks_total",
+    "Total de verificações realizadas contra o robots.txt por resultado",
+    ["outcome"],
+)
+
 SCRAPER_CACHE_LATENCY_SECONDS = Histogram(
     "scraper_cache_latency_seconds",
     "Latência das operações do cache inteligente do scraper (segundos)",
