@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from selectorlib import Extractor
-
 from market_scraper.parsers import (
     parse_generic_html,
     parse_with_beautifulsoup,
     parse_with_extruct,
     parse_with_parsel,
-    parse_with_selectorlib,
 )
 
 
@@ -83,27 +80,6 @@ def test_parse_with_parsel_uses_selectors() -> None:
         "name": "Tablet",
         "current_price": "1999.90",
         "url": "https://exemplo.com/tablet",
-        "source": "",
-    }
-
-def test_parse_with_selectorlib_uses_extractor(tmp_path) -> None:
-    template = tmp_path / "template.yml"
-    template.write_text(
-        "name:\n  css: title\n  type: Text\ncurrent_price:\n  css: span.price\n  type: Text\n",
-        encoding="utf-8",
-    )
-    extractor = Extractor.from_yaml_file(str(template))
-    html = """
-    <html>
-        <head><title>Headset</title></head>
-        <body><span class='price'>249.90</span></body>
-    </html>
-    """
-    result = parse_with_selectorlib(html, "https://exemplo.com/headset", extractor=extractor)
-    assert result == {
-        "name": "Headset",
-        "current_price": "249.90",
-        "url": "https://exemplo.com/headset",
         "source": "",
     }
     

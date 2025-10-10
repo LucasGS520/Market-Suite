@@ -134,7 +134,6 @@ requests==2.32.3
 requests-toolbelt==1.0.0
 rpds-py==0.25.1
 rsa==4.9.1
-selectorlib==0.16.0
 setuptools==80.9.0
 simple-websocket==1.1.0
 six==1.17.0

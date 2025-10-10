@@ -19,6 +19,4 @@ __all__ = [
     "parse_with_extruct",
     "parse_with_parsel",
     "parse_with_beautifulsoup",
-    "load_selectorlib_extractor",
-    "parse_with_selectorlib",
 ]

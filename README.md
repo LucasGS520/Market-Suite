@@ -87,10 +87,10 @@ Para uma visão detalhada da arquitetura de scraping leve baseada em JSON e HTML
 - **routes/** - expõe as rotas ``/health/ping`` e ``/scrape/parse`` (também acessível por ``/scraper/parse``).
 - utiliza o contrato ``ScraperRequest`` e ``ScraperResponse`` definido em ``shared/schemas/schemas_scraper.py`` para padronizar requisições e respostas.
 - **services/** - executa o fluxo de scraping controlando rate limiting, circuit breaker, cache inteligente e a orquestração do `SynergiPipeline`.
-- **services/domain_policy.py** - carrega o `domain_policy.yaml`, aplica hot reload opcional e constrói as etapas do pipeline para cada domínio/contexto suportado.
 - **services/pipeline_steps.py** - catálogo de etapas reutilizáveis; cada classe herda de `PipelineStep` e implementa o método `run` recebendo e atualizando o `shared_context`.
 - **utils/** - reúne utilitários auxiliares para o fluxo de scraping.
 - **tests/** - contém testes unitários, de integração e de performance para garantir robustez do serviço, incluindo cenários que validam a seleção de etapas via YAML.
+- **archive/** - guarda implementações antigas como `domain_policy.py` e `domain_policy.yaml` para consulta histórica sem impactar o pipeline enxuto.
 
 #### Camada de utilitários consolidados
 - `market_scraper/utils` concentra helpers puros e reutilizáveis. Esses módulos não mantêm estado compartilhado e podem ser importados diretamente pelas etapas do pipeline.

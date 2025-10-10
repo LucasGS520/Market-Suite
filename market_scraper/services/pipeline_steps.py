@@ -239,7 +239,6 @@ __all__ = [
     "JsonLdParserStep",
     "HtmlMetadataParserStep",
     "GenericFallbackParserStep",
-    "RequestsHtmlParserStep",
     "default_pipeline_steps",
     "download_html",
 ]
