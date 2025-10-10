@@ -77,7 +77,7 @@ def _get_parser(host: str, robots_url: str) -> robotparser.RobotFileParser | Non
 
 def is_allowed(url: str, user_agent: str = "marketsuite-scraper") -> bool:
     """ Retorna ``True`` quando o robots.txt autoriza o user-agent para a URL """
-    normalized_url, host_key, robots_url = _prepare_urls(url)
+    normalized_url, robots_url, host_key = _prepare_urls(url)
     parser = _get_parser(host_key, robots_url)
 
     if parser is None:

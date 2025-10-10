@@ -22,6 +22,7 @@ from market_scraper.parsers import (
     parse_with_extruct,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext, PipelineStep, StepResult
+from market_scraper.utils import cache, robots
 from market_scraper.utils.validator import DataQualityValidator
 
 
@@ -120,9 +121,24 @@ class FetchHTMLStep(PipelineStep):
         if context.html:
             return StepResult.success(message="HTML já presente no contexto")
         
+        #Validação de robots.txt ocorre antes de qualquer tentativa de download para respeitar políticas públicas dos sites
+        if not robots.is_allowed(context.url):
+            return StepResult.failure(message="blocked_by_robots")
+        
+        cached_html: str | None = None
+        if settings.SCRAPER_CACHE_ENABLED:
+            #A checagem de cache evita round-trips denecessários mantendo métricas de hit/miss atualizadas
+            cached_html = cache.get(context.url)
+            if cached_html is not None:
+                context.set_html(cached_html)
+                return StepResult.success(message="html_from_cache")
+
         timeout_value = self.timeout if self.timeout is not None else context.default_step_timeout
         html = await download_html(context.url, timeout=timeout_value)
         context.set_html(html)
+        if settings.SCRAPER_CACHE_ENABLED:
+            #Armazenamos o HTML recém obtido para acelerar futuras requisições
+            cache.set(context.url, html, settings.SCRAPER_CACHE_TTL_SECONDS)
         return StepResult.success(
             message="HTML baixado com sucesso",
         )

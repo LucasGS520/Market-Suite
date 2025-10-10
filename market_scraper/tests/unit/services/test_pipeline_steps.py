@@ -1,3 +1,5 @@
+""" Testes unitários para as etapas básicas do pipeline do scraper """
+
 from __future__ import annotations
 
 import pytest
@@ -9,6 +11,7 @@ from market_scraper.services.pipeline_steps import (
     JsonLdParserStep,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext
+from market_scraper.utils import cache
 
 
 @pytest.fixture
@@ -20,6 +23,11 @@ def context() -> PipelineContext:
     )
 
 @pytest.mark.asyncio
+def clear_cache() -> None:
+    """ Garante isolamento limpando o cache em memória entre os testes """
+    cache.clear()
+
+@pytest.mark.asyncio
 async def test_fetch_html_reuses_existing_content(context) -> None:
     """ Quando o HTML já está no contexto a etapa deve evitar download """
     context.set_html("<html></html>")
@@ -27,6 +35,85 @@ async def test_fetch_html_reuses_existing_content(context) -> None:
     result = await step.run(context)
     assert result.status == "success"
     assert "já presente" in (result.message or "")
+
+@pytest.mark.asyncio
+async def test_fetch_html_respects_robots_block(
+    monkeypatch: pytest.MonkeyPatch, context
+) -> None:
+    """ Valida que bloqueios definidos em robots.txt encerram a etapa imediatamente """
+
+    async def unexpected_download(*_: object, **__: object) -> str:
+        raise AssertionError("Download não deveria ser chamado quando robots bloqueia")
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.robots.is_allowed",
+        lambda url: False,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.download_html",
+        unexpected_download,
+    )
+
+    step = FetchHTMLStep()
+    result = await step.run(context)
+
+    assert result.status == "error"
+    assert result.message == "blocked_by_robots"
+    assert context.html is None
+
+@pytest.mark.asyncio
+async def test_fetch_html_uses_cache_when_available(
+    monkeypatch: pytest.MonkeyPatch, context
+) -> None:
+    """ Confirma que HTML em cache evita novo download e preserva métricas de hit """
+
+    cache.set(context.url, "<html>cache</html>", ttl_seconds=60)
+
+    async def unexpected_download(*_: object, **__: object) -> str:
+        raise AssertionError("Download não deveria ocorrer em hit de cache")
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.robots.is_allowed",
+        lambda url: True,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.download_html",
+        unexpected_download,
+    )
+
+    step = FetchHTMLStep()
+    result = await step.run(context)
+
+    assert result.status == "success"
+    assert result.message == "html_from_cache"
+    assert context.html == "<html>cache</html>"
+
+@pytest.mark.asyncio
+async def test_fetch_html_downloads_and_caches_on_miss(
+    monkeypatch: pytest.MonkeyPatch, context
+) -> None:
+    """ Garante download controlado e armazenamento do HTML quando cache falha """
+
+    async def fake_download(url: str, *, timeout: float) -> str:
+        assert timeout == context.default_step_timeout
+        return "<html>novo</html>"
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.robots.is_allowed",
+        lambda url: True,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.download_html",
+        fake_download,
+    )
+
+    step = FetchHTMLStep()
+    result = await step.run(context)
+
+    assert result.status == "success"
+    assert result.message == "HTML baixado com sucesso"
+    assert context.html == "<html>novo</html>"
+    assert cache.get(context.url) == "<html>novo</html>"
 
 @pytest.mark.asyncio
 async def test_jsonld_parser_extracts_payload(context) -> None:
