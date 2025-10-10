@@ -234,14 +234,9 @@ def default_pipeline_steps() -> list[PipelineStep]:
         FetchHTMLStep(),
         JsonLdParserStep(),
         HtmlMetadataParserStep(),
+        GenericFallbackParserStep(),
     ]
-    if settings.SCRAPER_ENABLE_REQUESTS_HTML:
-        steps.append(
-            RequestsHtmlParserStep(
-                timeout=settings.SCRAPER_REQUESTS_HTML_TIMEOUT_SECONDS,
-            )
-        )
-    steps.append(GenericFallbackParserStep())
+    #Mantemos a sequência fixa para cumprir pipeline mínimo definido (HTML -> JSON-LD -> Metatags -> Heurísticas genéricas)
     return steps
 
 __all__ = [

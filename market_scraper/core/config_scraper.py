@@ -1,9 +1,9 @@
-""" Configurações específicas do serviço de scraping (MarketScraper).
+""" Define parâmetros de configuração do serviço MarketScraper.
 
-O módulo estende ``ConfigBase`` com opções próprias do MarketScraper,
-centralizando parâmetros de cache, limitação de taxa, delays humanizados
-e rechecagens. Todos os valores podem ser configurados via variáveis
-de ambiente.
+O módulo estende ``ConfigBase`` com opções próprias do MarketScraper e
+centraliza ajustes de cache, limites de taxa, atrasos humanizados e timeouts.
+Todos os valores podem ser controlados via variáveis de ambiente para
+facilitar tunning em diferentes ambientes.
 """
 
 import os
@@ -13,7 +13,7 @@ from shared.core.config_base import ConfigBase
 __all__ = ["Settings", "settings"]
 
 class Settings(ConfigBase):
-    """ Conjunto de configurações do MarketScraper """
+    """ Agrupa valores padrão e tunáveis do MarketScraper """
 
     #TTL base para o cache de scraping (segundos)
     CACHE_BASE_TTL: int = int(os.getenv("CACHE_BASE_TTL", str(3600)))  #Validade do cache
@@ -47,20 +47,27 @@ class Settings(ConfigBase):
         os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200")
     )  #Base para reagendamentos
 
+    #Controle geral de cache do pipeline simplificado
+    SCRAPER_CACHE_ENABLED: bool = os.getenv("SCRAPER_CACHE_ENABLED", "1").lower() in {
+        "1",
+        "True",
+        "true",
+        "on",
+        "yes",
+    }
+    SCRAPER_CACHE_TTL_SECONDS: int = int(
+        os.getenv("SCRAPER_CACHE_TTL_SECONDS", str(3600))
+    ) #TTL padrão por URL (segundos)
+    SCRAPER_CACHE_BACKEND: str = os.getenv("SCRAPER_CACHE_BACKEND", "memory")  #Backend de cache (memory, redis)
+
     #Tempo padrão máximo para cada etapa do pipeline (segundos)
     SCRAPER_STEP_TIMEOUT_SECONDS: float = float(
-        os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "3.0")
+        os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "8.0")
     )
 
     #Tempo máximo global para execução do pipeline (segundos)
     SCRAPER_PIPELINE_TIMEOUT_SECONDS: float = float(
-        os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "12.0")
-    )
-
-    #Controle da etapa opcional baseada em requests-html
-    SCRAPER_ENABLE_REQUESTS_HTML: bool = os.getenv("SCRAPER_ENABLE_REQUESTS_HTML", "0") == "1"
-    SCRAPER_REQUESTS_HTML_TIMEOUT_SECONDS: float = float(
-        os.getenv("SCRAPER_REQUESTS_HTML_TIMEOUT_SECONDS", "6.0")
+        os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "20.0")
     )
 
     #Limites de segurança para downloads HTTP do scraper
