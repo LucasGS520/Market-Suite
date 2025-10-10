@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from market_scraper.utils import robots
-from shared.metrics.metrics_scraper import SCRAPER_ROBOTS_CHECKS_TOTAL
+from shared.metrics.metrics_scraper import SCRAPER_ROBOTS_CHECK_TOTAL
 
 
 class DummyRobotParser:
@@ -38,7 +38,7 @@ def test_is_allowed_returns_true_when_robot_permits(monkeypatch: pytest.MonkeyPa
         "RobotFileParser",
         lambda: DummyRobotParser(allowed=True),
     )
-    allowed_metric = SCRAPER_ROBOTS_CHECKS_TOTAL.labels(outcome="allowed")
+    allowed_metric = SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="allowed")
     before = allowed_metric._value.get()  # type: ignore[attr-defined]
 
     assert robots.is_allowed("https://example.com/produto") is True
@@ -54,7 +54,7 @@ def test_is_allowed_returns_false_when_robot_blocks(monkeypatch: pytest.MonkeyPa
         "RobotFileParser",
         lambda: DummyRobotParser(allowed=False),
     )
-    disallowed_metric = SCRAPER_ROBOTS_CHECKS_TOTAL.labels(outcome="disallowed")
+    disallowed_metric = SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="disallowed")
     before = disallowed_metric._value.get()  # type: ignore[attr-defined]
 
     assert robots.is_allowed("https://blocked.com/item") is False
@@ -71,7 +71,7 @@ def test_is_allowed_defaults_to_true_on_fetch_error(monkeypatch: pytest.MonkeyPa
         "RobotFileParser",
         lambda: DummyRobotParser(raise_error=True),
     )
-    error_metric = SCRAPER_ROBOTS_CHECKS_TOTAL.labels(outcome="error")
+    error_metric = SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error")
     before = error_metric._value.get()  # type: ignore[attr-defined]
 
     assert robots.is_allowed("https://unstable.com/p") is True

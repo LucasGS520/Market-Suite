@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import structlog
 
-from shared.metrics.metrics_scraper import SCRAPER_ROBOTS_CHECKS_TOTAL
+from shared.metrics.metrics_scraper import SCRAPER_ROBOTS_CHECK_TOTAL
 
 
 logger = structlog.get_logger(__name__)
@@ -82,7 +82,7 @@ def is_allowed(url: str, user_agent: str = "marketsuite-scraper") -> bool:
 
     if parser is None:
         #Em caso de erro optamos por permitir seguindo recomendação do requisito
-        SCRAPER_ROBOTS_CHECKS_TOTAL.labels(outcome="error").inc()
+        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
         return True
     
     try:
@@ -95,11 +95,11 @@ def is_allowed(url: str, user_agent: str = "marketsuite-scraper") -> bool:
             user_agent=user_agent,
             error=str(exc),
         )
-        SCRAPER_ROBOTS_CHECKS_TOTAL.labels(outcome="error").inc()
+        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
         return True
     
     outcome = "allowed" if allowed else "disallowed"
-    SCRAPER_ROBOTS_CHECKS_TOTAL.labels(outcome=outcome).inc()
+    SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome=outcome).inc()
 
     if not allowed:
         #Registramos no log para facilitar diagnóstico em produção

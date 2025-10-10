@@ -12,10 +12,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from shared.metrics.metrics_scraper import (
-    SCRAPER_CACHE_LOCAL_SIZE,
-    SCRAPER_CACHE_LOOKUPS_TOTAL,
-)
+from shared.metrics.metrics_scraper import SCRAPER_CACHE_LOOKUPS_TOTAL, SCRAPER_CACHE_SIZE
 
 
 #Futuro: Adptar para Redis quando necessário
@@ -32,8 +29,6 @@ class _InMemoryCache:
         """ Inicializa estrutura interna e lock para sincronização de acesso """
         self._data: dict[str, _CacheEntry] = {}
         self._lock = threading.Lock()
-        #Mantemos labels fixo para o backend e facilitar monitoramento
-        self._backend_label = "memory"
 
     def get(self, url: str) -> Optional[str]:
         """ Recupera valor se não expirado e registra métricas de hit/miss """
@@ -41,21 +36,15 @@ class _InMemoryCache:
         with self._lock:
             entry = self._data.get(url)
             if entry is None:
-                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
-                    backend=self._backend_label, outcome="miss"
-                ).inc()
+                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(outcome="miss").inc()
                 return None
             if entry.expires_at < now:
                 #Removemos ao expirar para evitar crescimento descontrolado
                 self._data.pop(url, None)
-                SCRAPER_CACHE_LOCAL_SIZE.set(len(self._data))
-                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
-                    backend=self._backend_label, outcome="miss"
-                ).inc()
+                SCRAPER_CACHE_SIZE.set(len(self._data))
+                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(outcome="miss").inc()
                 return None
-            SCRAPER_CACHE_LOOKUPS_TOTAL.labels(
-                backend=self._backend_label, outcome="hit"
-            ).inc()
+            SCRAPER_CACHE_LOOKUPS_TOTAL.labels(outcome="hit").inc()
             return entry.value
         
     def set(self, url: str, html: str, ttl_seconds: int) -> None:
@@ -64,19 +53,19 @@ class _InMemoryCache:
         with self._lock:
             #Substituimos qualquer valor anterior para simplificar atualizações
             self._data[url] = _CacheEntry(value=html, expires_at=expires_at)
-            SCRAPER_CACHE_LOCAL_SIZE.set(len(self._data))
+            SCRAPER_CACHE_SIZE.set(len(self._data))
 
     def invalidate(self, url: str) -> None:
         """ Remove entrada específica caso exista no cache local """
         with self._lock:
             self._data.pop(url, None)
-            SCRAPER_CACHE_LOCAL_SIZE.set(len(self._data))
+            SCRAPER_CACHE_SIZE.set(len(self._data))
 
     def clear(self) -> None:
         """ Limpa todo o conteúdo aramzenado para cenários de manutenção """
         with self._lock:
             self._data.clear()
-            SCRAPER_CACHE_LOCAL_SIZE.set(0)
+            SCRAPER_CACHE_SIZE.set(0)
 
 #Instância única para atender funções utilitárias do módulo
 _CACHE = _InMemoryCache()

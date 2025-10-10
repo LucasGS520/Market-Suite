@@ -27,7 +27,7 @@ Cada etapa registra métricas de latência e resultado (`success`, `empty`, `fai
 O cache padrão utiliza um dicionário em memória protegido por lock (`market_scraper/utils/cache.py`). Principais características:
 
 - Controlado por `SCRAPER_CACHE_ENABLED` (habilitado por padrão) e TTL configurado por `SCRAPER_CACHE_TTL_SECONDS`.
-- Métricas: `SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_LOCAL_SIZE`, `SCRAPER_CACHE_LATENCY_SECONDS` e `SCRAPER_CACHE_LOCK_TOTAL`.
+- Métricas: `SCRAPER_CACHE_LOOKUPS_TOTAL` (hits/misses) e `SCRAPER_CACHE_SIZE` (entradas em memória).
 - Para ambientes com Redis, defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB` e `REDIS_PASSWORD` no `.env.common` ou `.env.market_scraper`. O backend `redis` permanece reservado para quando o adaptador dedicado for reativado; mantenha `memory` enquanto essa integração estiver indisponível.
 
 ## Configurações relevantes (`market_scraper/core/config_scraper.py`)
@@ -62,10 +62,11 @@ SCRAPER_HTTP_TIMEOUT_POOL=3.0
 ## Métricas expostas
 As métricas estão em `shared/metrics/metrics_scraper.py`. Destaques:
 
-- `SCRAPER_STRATEGY_TOTAL` – contador por etapa e resultado.
-- `SCRAPING_LATENCY_SECONDS` – histograma de latência por etapa.
-- `SCRAPER_FALLBACK_TOTAL` – total de quedas para heurísticas genéricas.
-- `SCRAPER_ROBOTS_CHECKS_TOTAL` – contagem de checagens de robots (`allowed`, `disallowed`, `error`).
+- `SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_STEP_FALLBACK_TOTAL` e `SCRAPER_STEP_INVALID_TOTAL` – contadores por etapa/resultado.
+- `SCRAPER_STEP_LATENCY_SECONDS` – histograma de latência das etapas do pipeline.
+- `SCRAPER_NO_RESULT_TOTAL` – contagem de execuções que terminaram sem payload válido.
+- `SCRAPING_LATENCY_SECONDS` – histograma de latência agregado por fonte.
+- `SCRAPER_ROBOTS_CHECK_TOTAL` – contagem de checagens de robots (`allowed`, `disallowed`, `error`).
 - Métricas de cache listadas acima.
 
 Para visualizar, acesse `GET /metrics` ou configure o Prometheus via `docker-compose`.

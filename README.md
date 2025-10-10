@@ -100,7 +100,7 @@ Para detalhes operacionais consulte também [`market_scraper/README.md`](market_
 ### Papel na arquitetura
 - Recebe requisições HTTP do ``market_alert`` ou de consumidores internos.
 - Valida URL, marketplace suportado e disponibilidade pública antes de iniciar o download.
-- Respeita robots.txt, aplica cache básico e expõe métricas (`SCRAPER_STRATEGY_TOTAL`, `SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_ROBOTS_CHECKS_TOTAL`, entre outras) para acompanhamento no Prometheus.
+- Respeita robots.txt, aplica cache básico e expõe métricas (`SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_ROBOTS_CHECK_TOTAL`, entre outras) para acompanhamento no Prometheus.
 - Em caso de falhas, retorna códigos conhecidos (`invalid_url`, `unsupported_marketplace`, `unsupported_by_robots`, `no_result`, `pipeline_timeout`).
 
 ## Módulo compartilhado ``shared``

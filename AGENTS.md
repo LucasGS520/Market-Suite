@@ -36,7 +36,7 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 - O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py`.
 - `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
 - O cache padrão é em memória (`SCRAPER_CACHE_BACKEND=memory`). Defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_*` somente quando o adaptador Redis dedicado for reinstalado.
-- `robots.txt` é respeitado antes do download; erros retornam `unsupported_by_robots` e registram métricas (`SCRAPER_ROBOTS_CHECKS_TOTAL`).
+- `robots.txt` é respeitado antes do download; erros retornam `unsupported_by_robots` e registram métricas (`SCRAPER_ROBOTS_CHECK_TOTAL`).
 
 ## Visão Geral da Arquitetura e Serviços
 Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resumo operacional para agentes.
@@ -68,7 +68,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep`.
 - `FetchHTMLStep` normaliza URL, verifica `robots.txt`, consulta cache e baixa o HTML com `httpx` respeitando timeouts.
 - Cada parser valida o payload com `DataQualityValidator`; quando nenhum retorna resultado válido o endpoint responde com `no_result`.
-- Métricas principais: `SCRAPER_STRATEGY_TOTAL`, `SCRAPING_LATENCY_SECONDS`, `SCRAPER_FALLBACK_TOTAL` e `SCRAPER_ROBOTS_CHECKS_TOTAL`.
+- Métricas principais: `SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_STEP_FALLBACK_TOTAL` e `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 #### Validação, cache e segurança
 - `market_scraper/utils/url_validation.py` garante que a URL pertença aos marketplaces suportados e bloqueia hosts privados (SSRF).
@@ -110,7 +110,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - Evitar armazenar tokens/sessões em arquivos temporários; usar apenas o cache in-memory controlado.
 
 #### Observabilidade de regressões
-- Ativar dashboards específicos no Grafana acompanhando `SCRAPER_FALLBACK_TOTAL` vs. taxa de sucesso.
+- Ativar dashboards específicos no Grafana acompanhando `SCRAPER_STEP_FALLBACK_TOTAL` vs. taxa de sucesso.
 - Criar alertas no Prometheus quando `SCRAPING_LATENCY_SECONDS{le="5"}` sair da meta definida no README.
 - Para diagnósticos rápidos, habilitar logs nível `debug` apenas em ambientes controlados {`structlog` com `contextvars`}.
 - Sempre registrar no PR alterações no pipeline (`pipeline_steps.py`), configurações e métricas acompanhadas.
@@ -142,7 +142,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
     - Tarefas: `CELERY_TASKS_TOTAL` (com status), `CELERY_TASK_DURATION_SECONDS`.
   - Celery Beat: servidor embutido Prometheus em `market_alert/beat_with_metrics.py:8` (porta 8001). Coleta periódica:
     - Filas/Workers/Redis: `CELERY_QUEUE_LENGTH`, `CELERY_WORKERS_TOTAL`, `CELERY_WORKER_CONCURRENCY`, `REDIS_MEMORY_USAGE_BYTES`, `REDIS_QUEUE_MESSAGES` em `market_alert/tasks/metrics_tasks.py:1`.
-  - Scraper: utiliza contadores/histogramas em `shared/metrics/metrics_scraper.py:1` (ex.: `SCRAPING_LATENCY_SECONDS`, `SCRAPER_HTTP_BLOCKED_TOTAL`, `SCRAPER_STRATEGY_TOTAL`). Exposição HTTP dedicada não está ativa por padrão; as métricas aparecem quando importadas por serviços com endpoint `/metrics`.
+    - Scraper: utiliza contadores/histogramas em `shared/metrics/metrics_scraper.py:1` (ex.: `SCRAPING_LATENCY_SECONDS`, `SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_CACHE_LOOKUPS_TOTAL`). Exposição HTTP dedicada não está ativa por padrão; as métricas aparecem quando importadas por serviços com endpoint `/metrics`.
 
 - Coleta de logs estruturados:
   - API e Worker logam em JSON via `structlog` (incrementa `LOG_ENTRIES_TOTAL`).
@@ -166,8 +166,8 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
   - Redis: `redis_memory_usage_bytes` com headroom > 20%; filas sem picos contínuos.
 
 - Boas práticas para agentes (autoajuste):
-  - Use `SCRAPER_HTTP_BLOCKED_TOTAL` e `SCRAPER_CIRCUIT_STATE` para acionar backoff e rotação de UA/cookies.
-  - Ajuste cadência revisando `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` e parâmetros de cache quando `SCRAPING_LATENCY_SECONDS` ou `SCRAPER_FALLBACK_TOTAL` indicarem degradação.
+ - Use `SCRAPER_CACHE_LOOKUPS_TOTAL` e `SCRAPER_ROBOTS_CHECK_TOTAL` para correlacionar quedas de desempenho com bloqueios do site.
+ - Ajuste cadência revisando `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` e parâmetros de cache quando `SCRAPING_LATENCY_SECONDS` ou `SCRAPER_STEP_FALLBACK_TOTAL` indicarem degradação.
   - Condicione rechecagens com `AdaptiveRecheckManager` considerando `SCRAPER_RETRY_TOTAL` e variação recente de preço.
 
 - Referências rápidas (FastAPI + Prometheus):
