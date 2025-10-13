@@ -1,56 +1,95 @@
-""" Garante funcionamento básico do cache em memória do scraper """
+""" Valida comportamento do cache em memória com LRU/TTL instrumentado """
 
 from __future__ import annotations
 
+import importlib
 import time
+from collections.abc import Callable
 
-from market_scraper.utils import cache
-from shared.metrics.metrics_scraper import SCRAPER_CACHE_SIZE
+import pytest
+from shared.metrics.metrics_scraper import (
+    SCRAPER_CACHE_EVICTIONS_TOTAL,
+    SCRAPER_CACHE_HIT_RATE,
+    SCRAPER_CACHE_LOOKUPS_TOTAL,
+    SCRAPER_CACHE_SIZE,
+)
+
+@pytest.fixture()
+def cache_factory(monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
+    """ Recarrega módulo de cache respeitando configs controladas nos testes """
+    def _reload(ttl_seconds: int = 60, max_entries: int = 10) -> None:
+        from market_scraper.core import config_scraper
+
+        monkeypatch.setenv("SCRAPER_CACHE_BACKEND", "memory")
+        monkeypatch.setenv("SCRAPER_CACHE_TTL_SECONDS", str(ttl_seconds))
+        monkeypatch.setenv("SCRAPER_CACHE_MAX_ENTRIES", str(max_entries))
+        monkeypatch.setattr(config_scraper.settings, "SCRAPER_CACHE_BACKEND", "memory")
+        monkeypatch.setattr(config_scraper.settings, "SCRAPER_CACHE_TTL_SECONDS", ttl_seconds)
+        monkeypatch.setattr(config_scraper.settings, "SCRAPER_CACHE_MAX_ENTRIES", max_entries)
+        module = importlib.reload(importlib.import_module("market_scraper.utils.cache"))
+        module.clear()
+        SCRAPER_CACHE_SIZE.set(0)
+        SCRAPER_CACHE_HIT_RATE.set(0)
+
+    return _reload
 
 
 def setup_function() -> None:
-    """ Limpa cache entre testes para evitar interferências cruzadas """
-    cache.clear()
+    """ Reseta métricas globais usadas no asserts de cada caso de teste """
+    SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="capacity")._value.set(0)
+    SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired")._value.set(0)
+    SCRAPER_CACHE_LOOKUPS_TOTAL.labels(outcome="hit")._value.set(0)
+    SCRAPER_CACHE_LOOKUPS_TOTAL.labels(outcome="miss")._value.set(0)
 
-def test_set_and_get_return_value() -> None:
-    """ Confere se ``set`` seguido de ``get`` retorna HTML salvo """
-    cache.set("https://exemplo.com/produto", "<html>...</html>", ttl_seconds=30)
+def test_set_and_get_return_value(cache_factory: Callable[[], None]) -> None:
+    """ Confere se ``set`` seguido de ``get`` retorna o HTML armazenado """
+    cache_factory()
+    from market_scraper.utils import cache
+
+    cache.set("https://exemplo.com/produto", "<html>...</html>", ttl_seconds=60)
     assert cache.get("https://exemplo.com/produto") == "<html>...</html>"
+    assert SCRAPER_CACHE_HIT_RATE._value.get() == 1.0
 
-def test_get_respects_ttl_expiration() -> None:
-    """ Valida que itens expiram após o TTL informado """
+def test_get_respects_ttl_expiration(cache_factory: Callable[[], None]) -> None:
+    """ Garante que itens expiram naturalmente após o TTL configurado"""
+    cache_factory(ttl_seconds=1)
+    from market_scraper.utils import cache
+
     cache.set("https://exemplo.com/promo", "<html>promo</html>", ttl_seconds=1)
     time.sleep(1.1)
-    #Aguarda ligeiramente acima do TTL garantindo expiração natural
-    assert cache.get("https://exemplo.com/promo") is None
 
-def test_invalidate_removes_entry() -> None:
+    assert cache.get("https://exemplo.com/promo") is None
+    assert SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired")._value.get() == 1.0
+
+def test_invalidate_removes_entry(cache_factory: Callable[[], None]) -> None:
     """ Assegura que ``invalidate`` elimina itens específicos do cache """
+    cache_factory()
+    from market_scraper.utils import cache
+
     cache.set("https://exemplo.com/item", "<html>item</html>", ttl_seconds=30)
     cache.invalidate("https://exemplo.com/item")
     assert cache.get("https://exemplo.com/item") is None
     
-def test_set_triggers_cleanup_for_expired_entries() -> None:
-    """ Garante que ``set`` descarta itens expirados e atualiza gauge """
-    urls = [f"https://exemplo.com/pagina-{idx}" for idx in range(3)]
-    for url in urls:
-        cache.set(url, "<html>conteudo</html>", ttl_seconds=1)
+def test_capacity_eviction_updates_metric(cache_factory: Callable[[], None]) -> None:
+    """ Valida que excesso de itens dispara eviction LRU e métrica dedicada """
+    cache_factory(max_entries=2)
+    from market_scraper.utils import cache
 
-    time.sleep(1.1)
+    cache.set("https://exemplo.com/a", "<html>a</html>", ttl_seconds=60)
+    cache.set("https://exemplo.com/b", "<html>b</html>", ttl_seconds=60)
+    cache.set("https://exemplo.com/c", "<html>c</html>", ttl_seconds=60)
 
-    #Ajustamos o intervalo para zero garantindo que a próxima escrita dispare a limpeza
-    old_interval = cache._CACHE._cleanup_interval_seconds
-    old_last_cleanup = cache._CACHE._last_cleanup
+    assert SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="capacity")._value.get() == 1.0
+    assert SCRAPER_CACHE_SIZE._value.get() == 2.0
 
-    cache._CACHE._cleanup_interval_seconds = 0
-    cache._CACHE._last_cleanup = 0
+def test_hit_rate_metric_tracks_hits_and_misses(cache_factory: Callable[[], None]) -> None:
+    """ Confirma cálculo de taxa de acerto a partir de hits e misses """
+    cache_factory()
+    from market_scraper.utils import cache
 
-    try:
-        cache.set("https://exemplo.com/novo", "<html>novo</html>", ttl_seconds=30)
+    cache.set("https://exemplo.com/acerto", "<html>ok</html>", ttl_seconds=60)
+    assert cache.get("https://exemplo.com/acerto") == "<html>ok</html>"
+    assert cache.get("https://exemplo.com/erro") is None
 
-        assert list(cache._CACHE._data.keys()) == ["https://exemplo.com/novo"]
-        assert SCRAPER_CACHE_SIZE._value.get() == 1.0
-    finally:
-        cache._CACHE._cleanup_interval_seconds = old_interval
-        cache._CACHE._last_cleanup = old_last_cleanup
-        
+    assert SCRAPER_CACHE_HIT_RATE._value.get() == pytest.approx(0.5)
+    

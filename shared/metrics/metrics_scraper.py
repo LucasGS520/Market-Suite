@@ -69,6 +69,17 @@ SCRAPER_CACHE_SIZE = Gauge(
     "Quantidade de entradas ativas no cache básico do scraper",
 )
 
+SCRAPER_CACHE_EVICTIONS_TOTAL = Counter(
+    "scraper_cache_evictions_total",
+    "Total de itens removidos do cache básico do scraper por motivo",
+    ["reason"],
+)
+
+SCRAPER_CACHE_HIT_RATE = Gauge(
+    "scraper_cache_hit_rate",
+    "Taxa de acerto observada no cache básico do scraper",
+)
+
 SCRAPER_ROBOTS_CHECK_TOTAL = Counter(
     "scraper_robots_check_total",
     "Total de verificações realizadas contra o robots.txt por resultado",
@@ -96,6 +107,8 @@ __all__ = [
     "SCRAPER_HEAD_FAILURES_TOTAL",
     "SCRAPER_CACHE_LOOKUPS_TOTAL",
     "SCRAPER_CACHE_SIZE",
+    "SCRAPER_CACHE_EVICTIONS_TOTAL",
+    "SCRAPER_CACHE_HIT_RATE",
     "SCRAPER_ROBOTS_CHECK_TOTAL",
     "SCRAPING_SUSPENDED_FLAG",
     "SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS",
