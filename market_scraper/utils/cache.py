@@ -25,10 +25,29 @@ class _CacheEntry:
 class _InMemoryCache:
     """ Implementa dicionário protegido por lock para armazenar HTML por URL """
     
-    def __init__(self) -> None:
-        """ Inicializa estrutura interna e lock para sincronização de acesso """
+    def __init__(self, cleanup_interval_seconds: float = 5.0) -> None:
+        """ Inicializa estrutura interna, lock e parâmetros de limpeza periódica """
         self._data: dict[str, _CacheEntry] = {}
         self._lock = threading.Lock()
+        self._cleanup_interval_seconds = cleanup_interval_seconds
+        self._last_cleanup = time.monotonic()
+
+    def _cleanup_if_needed(self, now: float) -> None:
+        """ Remove entradas expiradas quando o intervalo mínimo entre limpezas passar """
+        if now - self._last_cleanup < self._cleanup_interval_seconds:
+            return
+        
+        #Percorremos uma cópia das chaves para evitar RuntimeError durante remoções
+        expired_urls = [url for url, entry in self._data.items() if entry.expires_at < now]
+        if not expired_urls:
+            self._last_cleanup = now
+            return
+        
+        for url in expired_urls:
+            self._data.pop(url, None)
+
+        SCRAPER_CACHE_SIZE.set(len(self._data))
+        self._last_cleanup = now
 
     def get(self, url: str) -> Optional[str]:
         """ Recupera valor se não expirado e registra métricas de hit/miss """
@@ -49,8 +68,11 @@ class _InMemoryCache:
         
     def set(self, url: str, html: str, ttl_seconds: int) -> None:
         """ Armazena HTML associado à URL respeitando o TTL informado """
-        expires_at = time.monotonic() + max(ttl_seconds, 0)
+        now = time.monotonic()
+        expires_at = now + max(ttl_seconds, 0)
         with self._lock:
+            #Executamos limpeza sob demanda para evitar acúmulo de itens expirados
+            self._cleanup_if_needed(now)
             #Substituimos qualquer valor anterior para simplificar atualizações
             self._data[url] = _CacheEntry(value=html, expires_at=expires_at)
             SCRAPER_CACHE_SIZE.set(len(self._data))
