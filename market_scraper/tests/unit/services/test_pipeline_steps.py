@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from market_scraper.services.pipeline_steps import (
@@ -11,6 +13,7 @@ from market_scraper.services.pipeline_steps import (
     JsonLdParserStep,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext
+from market_scraper.core.config_scraper import settings
 from market_scraper.utils import cache
 
 
@@ -45,9 +48,13 @@ async def test_fetch_html_respects_robots_block(
     async def unexpected_download(*_: object, **__: object) -> str:
         raise AssertionError("Download não deveria ser chamado quando robots bloqueia")
 
+    async def fake_is_allowed(url: str, *, timeout: float | None = None) -> bool:
+        assert timeout == context.default_step_timeout
+        return False
+
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.robots.is_allowed",
-        lambda url: False,
+        fake_is_allowed,
     )
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.download_html",
@@ -72,9 +79,13 @@ async def test_fetch_html_uses_cache_when_available(
     async def unexpected_download(*_: object, **__: object) -> str:
         raise AssertionError("Download não deveria ocorrer em hit de cache")
 
+    async def fake_is_allowed(url: str, *, timeout: float | None = None) -> bool:
+        assert timeout == context.default_step_timeout
+        return True
+
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.robots.is_allowed",
-        lambda url: True,
+        fake_is_allowed,
     )
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.download_html",
@@ -98,9 +109,13 @@ async def test_fetch_html_downloads_and_caches_on_miss(
         assert timeout == context.default_step_timeout
         return "<html>novo</html>"
 
+    async def fake_is_allowed(url: str, *, timeout: float | None = None) -> bool:
+        assert timeout == context.default_step_timeout
+        return True
+
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.robots.is_allowed",
-        lambda url: True,
+        fake_is_allowed,
     )
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.download_html",
@@ -114,6 +129,38 @@ async def test_fetch_html_downloads_and_caches_on_miss(
     assert result.message == "HTML baixado com sucesso"
     assert context.html == "<html>novo</html>"
     assert cache.get(context.url) == "<html>novo</html>"
+
+@pytest.mark.asyncio
+async def test_fetch_html_timeout_when_robots_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Valida que o timeout configurado limita atrasos causados pela leitura de robots.txt """
+    step_timeout = 0.2
+    monkeypatch.setattr(settings, "SCRAPER_STEP_TIMEOUT_SECONDS", step_timeout)
+    slow_context = PipelineContext(
+        url="https://exemplo.com/produto",
+        source="exemplo.com",
+        default_step_timeout=step_timeout,
+    )
+
+    async def slow_is_allowed(url: str, *, timeout: float | None = None) -> bool:
+        assert timeout == step_timeout
+        await asyncio.sleep(step_timeout + 0.1)
+        return True
+    
+    async def unexpected_download(*_: object, **__: object) -> str:
+        raise AssertionError("Download não deve ocorrer após timeout de robots")
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.robots.is_allowed",
+        slow_is_allowed,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.download_html",
+        unexpected_download,
+    )
+
+    step = FetchHTMLStep()
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(step.run(slow_context), timeout=step_timeout)
 
 @pytest.mark.asyncio
 async def test_jsonld_parser_extracts_payload(context) -> None:
