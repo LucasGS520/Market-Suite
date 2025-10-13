@@ -2,10 +2,4 @@
 
 from __future__ import annotations
 
-__all__ = [
-    "pace_control_settings",
-    "session_identity_settings",
-]
-
-from .pace_control_config import settings as pace_control_settings
-from .session_identity_config import settings as session_identity_settings
+__all__: list[str] = []
