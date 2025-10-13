@@ -60,6 +60,15 @@ class Settings(ConfigBase):
     ) #TTL padrão por URL (segundos)
     SCRAPER_CACHE_BACKEND: str = os.getenv("SCRAPER_CACHE_BACKEND", "memory")  #Backend de cache (memory, redis)
 
+    SCRAPER_CACHE_MAX_ENTRIES: int = int(
+        os.getenv("SCRAPER_CACHE_MAX_ENTRIES", "5000")
+    ) #Limita o número de itens mantidos em memória
+
+    SCRAPER_CACHE_ENVICTION_POLICY: str = os.getenv(
+        "SCRAPER_CACHE_ENVICTION_POLICY", 
+        "lru",
+    ) #Define a política de remoção; flags que controlam comportamento futuro
+
     #Tempo padrão máximo para cada etapa do pipeline (segundos)
     SCRAPER_STEP_TIMEOUT_SECONDS: float = float(
         os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "8.0")
@@ -85,6 +94,30 @@ class Settings(ConfigBase):
     SCRAPER_HTTP_TIMEOUT_READ: float = float(os.getenv("SCRAPER_HTTP_TIMEOUT_READ", "3.0"))
     SCRAPER_HTTP_TIMEOUT_WRITE: float = float(os.getenv("SCRAPER_HTTP_TIMEOUT_WRITE", "3.0"))
     SCRAPER_HTTP_TIMEOUT_POOL: float = float(os.getenv("SCRAPER_HTTP_TIMEOUT_POOL", "3.0"))
+
+    #Novos ajustes para robustez dos utilitários (mantém compatibilidade da API pública)
+    SCRAPER_ROBOTS_FALLBACK: str = os.getenv("SCRAPER_ROBOTS_FALLBACK", "allow") #Permite fallback configurável para robots.txt
+    SCRAPER_HTTP_RETRIES: int = int(os.getenv("SCRAPER_HTTP_RETRIES", "2")) #Quantidade padrão de tentativas extras
+    SCRAPER_HTTP_RETRY_BACKOFF_BASE: float = float(
+        os.getenv("SCRAPER_HTTP_RETRY_BACKOFF_BASE", "0.5")
+    ) #Base do backoff exponencial para downloads
+    SCRAPER_DNS_TIMEOUT: float = float(
+        os.getenv("SCRAPER_DNS_TIMEOUT", "2")
+    ) #Timeout da resolução DNS para evitar bloqueios longos
+    SCRAPER_USE_PRICE_PARSER: bool = os.getenv("SCRAPER_USE_PRICE_PARSER", "0").lower() in {
+        "1",
+        "True",
+        "true",
+        "on",
+        "yes",
+    } #Flag para habilitar integração opcional com price-parser
+    SCRAPER_SINGLEFLIGHT_ENABLED: bool = os.getenv("SCRAPER_SINGLEFLIGHT_ENABLED", "1").lower() in {
+        "1",
+        "True",
+        "true",
+        "on",
+        "yes",
+    } #Flag para habilitar coalescing de downloads simultâneos
 
 #Instância única de settings para a aplicação
 settings = Settings()

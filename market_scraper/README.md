@@ -34,20 +34,47 @@ O cache padrão utiliza um dicionário em memória protegido por lock (`market_s
 - `SCRAPER_STEP_TIMEOUT_SECONDS` / `SCRAPER_PIPELINE_TIMEOUT_SECONDS` – limites de tempo do pipeline.
 - `SCRAPER_HTTP_TIMEOUT_CONNECT`, `SCRAPER_HTTP_TIMEOUT_READ`, `SCRAPER_HTTP_TIMEOUT_WRITE`, `SCRAPER_HTTP_TIMEOUT_POOL` – controle fino de timeouts `httpx`.
 - `SCRAPER_HTTP_MAX_REDIRECTS`, `SCRAPER_HTTP_MAX_CONNECTIONS`, `SCRAPER_HTTP_MAX_KEEPALIVE`, `SCRAPER_HTTP_MAX_CONTENT_LENGTH` – limites defensivos.
-- `SCRAPER_CACHE_ENABLED`, `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_BACKEND` – configuração do cache.
+- `SCRAPER_CACHE_ENABLED`, `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_BACKEND`, `SCRAPER_CACHE_MAX_ENTRIES`, `SCRAPER_CACHE_EVICTION_POLICY` - configuração detalhada do cache em memória ou Redis.
+- `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE` - controle de novas tentativas com backoff exponencial leve para downloads.
+- `SCRAPER_ROBOTS_FALLBACK` - define a política padrão quando o robots parser falha (`allow` ou `block`).
+- `SCRAPER_DNS_TIMEOUT` - timeout máximo para resolução DNS.
+- `SCRAPER_USE_PRICE_PARSER`, `SCRAPER_SINGLEFLIGHT_ENABLED` - flags para novas estratégias do pipeline.
 - Demais variáveis herdadas de `shared.core.config_base.ConfigBase` (Redis, observabilidade, etc.) são definidas em `.env.common`.
 
 ### Arquivo `.env.market_scraper`
 Use este arquivo para sobrescrever valores padrão. Exemplo:
 
 ```env
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=
+
+#Backend e limites de Cache básico por URL
 SCRAPER_CACHE_ENABLED=1
 SCRAPER_CACHE_BACKEND=memory
 SCRAPER_CACHE_TTL_SECONDS=3600
+SCRAPER_CACHE_MAX_ENTRIES=5000
+SCRAPER_CACHE_ENVICTION_POLICY=lru
+
+#Estratégias de robots.txt e fallback seguro
+SCRAPER_ROBOTS_FALLBACK=allow
+
+#Controle de tentativas HTTP e backoff
+SCRAPER_HTTP_RETRIES=2
+SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
 
 SCRAPER_STEP_TIMEOUT_SECONDS=8.0
 SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
 
+#Timeout de resolução DNS para evitar bloqueios longos
+SCRAPER_DNS_TIMEOUT=2
+
+#Estratégias opcionais do pipelie
+SCRAPER_USE_PRICE_PARSER=0
+SCRAPER_SINGLEFLIGHT_ENABLED=1
+
+# Limites HTTP defensivos
 SCRAPER_HTTP_MAX_REDIRECTS=3
 SCRAPER_HTTP_MAX_CONTENT_LENGTH=2000000
 SCRAPER_HTTP_MAX_CONNECTIONS=10
