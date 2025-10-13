@@ -1,3 +1,5 @@
+""" Testes para o validator de dados do scraper """
+
 from decimal import Decimal
 
 from shared.metrics.metrics_scraper import SCRAPER_STEP_INVALID_TOTAL
@@ -44,6 +46,33 @@ def test_validator_replaces_non_domain_source() -> None:
         url="https://exemplo.com/produto",
         source="exemplo.com",
     )
+    assert result == {
+        "name": "Produto",
+        "current_price": "100.00",
+        "url": "https://exemplo.com/produto",
+        "source": "exemplo.com",
+    }
+
+def test_validator_uses_fallback_when_source_missing() -> None:
+    """ Garante que payloads sem origem utilizem o fallback informado """
+    validator = DataQualityValidator()
+    payload = {
+        "name": "Produto",
+        "current_price": "99.99",
+        "url": "https://exemplo.com/produto",
+    }
+    result = validator.validate(
+        step_name="json_ld_parser",
+        payload=payload,
+        url="https://exemplo.com/produto",
+        source="exemplo.com",
+    )
+    assert result == {
+        "name": "Produto",
+        "current_price": "99.99",
+        "url": "https://exemplo.com/produto",
+        "source": "exemplo.com",
+    }
 
 def test_validator_uses_hostname_from_source_url() -> None:
     validator = DataQualityValidator()
