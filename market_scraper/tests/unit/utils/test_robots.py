@@ -73,7 +73,7 @@ async def test_is_allowed_defaults_to_true_on_fetch_error(
     async def fake_get_parser(host: str, robots_url: str, *, timeout: float) -> DummyRobotParser | None:
         return None
     
-    monkeypatch.setattr(robots, "get_parser", fake_get_parser)
+    monkeypatch.setattr(robots, "_get_parser", fake_get_parser)
     error_metric = SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error")
     before = error_metric._value.get()  # type: ignore[attr-defined]
 
@@ -81,4 +81,3 @@ async def test_is_allowed_defaults_to_true_on_fetch_error(
 
     after = error_metric._value.get()  # type: ignore[attr-defined]
     assert after == before + 1
-    

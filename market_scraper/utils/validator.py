@@ -24,7 +24,7 @@ def _normalize_url(raw_url: Any, fallback: str) -> str:
 
 def _normalize_source(raw_source: Any, fallback: str) -> str:
     """ Garante que a origem represente um domínio válido """
-    condidate = ""
+    candidate = ""
     #Inicializamos o valor para evitar erros quando a origem não estiver presente no payload
     if isinstance(raw_source, str):
         candidate = raw_source.strip()
