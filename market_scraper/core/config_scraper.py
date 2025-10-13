@@ -118,6 +118,9 @@ class Settings(ConfigBase):
         "on",
         "yes",
     } #Flag para habilitar coalescing de downloads simultâneos
+    SCRAPER_SINGLEFLIGHT_LOCK_TTL: float = float(
+        os.getenv("SCRAPER_SINGLEFLIGHT_LOCK_TTL", "15.0")
+    ) #TTL dos locks do sinlgeflight para evitar retenções indefinidas
 
 #Instância única de settings para a aplicação
 settings = Settings()

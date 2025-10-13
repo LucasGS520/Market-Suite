@@ -15,6 +15,11 @@ from market_scraper.services.pipeline_steps import (
 from market_scraper.services.synergic_pipeline import PipelineContext
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils import cache
+from market_scraper.utils import singleflight
+from shared.metrics.metrics_scraper import (
+    SCRAPER_SINGLEFLIGHT_CALLS_TOTAL,
+    SCRAPER_SINGLEFLIGHT_WAIT_SECONDS,
+)
 
 
 @pytest.fixture
@@ -161,6 +166,72 @@ async def test_fetch_html_timeout_when_robots_hangs(monkeypatch: pytest.MonkeyPa
     step = FetchHTMLStep()
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(step.run(slow_context), timeout=step_timeout)
+
+@pytest.mark.asyncio
+async def test_fetch_html_singleflight_avoids_duplicate_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ Confere que apenas um download efetivo acontece quando múltiplos contextos usam a mesma URL """
+    await singleflight.reset()
+    cache.clear()
+
+    monkeypatch.setattr(settings, "SCRAPER_CACHE_ENABLED", False)
+    monkeypatch.setattr(settings, "SCRAPER_SINGLEFLIGHT_ENABLED", True)
+
+    for role in ("leader", "follower"):
+        for outcome in ("success", "error"):
+            SCRAPER_SINGLEFLIGHT_CALLS_TOTAL.labels(role=role, outcome=outcome)._value.set(0)
+    follower_histogram = SCRAPER_SINGLEFLIGHT_WAIT_SECONDS.labels(role="follower")
+    follower_histogram._sum.set(0.0)
+    initial_count = next(
+        sample.value for sample in follower_histogram._samples() if sample.name == "_count"
+    )
+
+    call_counter = 0
+
+    async def fake_download(url: str, *, timeout: float) -> str:
+        nonlocal call_counter
+        call_counter += 1
+        await asyncio.sleep(0.05)
+        return "<html>novo</html>"
+    
+    async def always_allowed(url: str, *, timeout: float | None = None) -> bool:
+        return True
+    
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.download_html",
+        fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.robots.is_allowed",
+        always_allowed,
+    )
+
+    contexts = [
+        PipelineContext(
+            url="https://exemplo.com/produto",
+            source="exemplo.com",
+            default_step_timeout=1.0,
+        )
+        for _ in range(5)
+    ]
+
+    step = FetchHTMLStep()
+    results = await asyncio.gather(*(step.run(ctx) for ctx in contexts))
+
+    assert call_counter == 1
+    assert all(result.status == "success" for result in results)
+    assert all(ctx.html == "<html>novo</html>" for ctx in contexts)
+    assert (
+        SCRAPER_SINGLEFLIGHT_CALLS_TOTAL.labels(role="leader", outcome="success")._value.get() == 1
+    )
+    assert (
+        SCRAPER_SINGLEFLIGHT_CALLS_TOTAL.labels(role="follower", outcome="success")._value.get() == 4
+    )
+    final_count = next(
+        sample.value for sample in follower_histogram._samples() if sample.name == "_count"
+    )
+    assert final_count == initial_count + 4
 
 @pytest.mark.asyncio
 async def test_jsonld_parser_extracts_payload(context) -> None:

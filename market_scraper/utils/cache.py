@@ -87,7 +87,7 @@ class _InstrumentedTTLCache(TTLCache):
 class InMemoryTTLCacheAdapter:
     """ Adapter em memória com LRU/TTL e instrumentação de métricas """
     def __init__(self, max_entries: int, default_ttl_seconds: int) -> None:
-        self.cache = _InstrumentedTTLCache(max_entries, default_ttl_seconds)
+        self._cache = _InstrumentedTTLCache(max_entries, default_ttl_seconds)
         self._cache.configure_eviction_callback(self._record_eviction)
         self._lock = threading.RLock()
         self._hits = 0
@@ -150,7 +150,8 @@ def _build_cache_adapter() -> CacheAdapter:
     if backend != "memory":
         raise ValueError(f"Backend de cache '{backend}' não suportado nesta etapa")
     return InMemoryTTLCacheAdapter(
-        max_entries=settings.SCRAPER_CACHE_TTL_SECONDS,
+        max_entries=settings.SCRAPER_CACHE_MAX_ENTRIES,
+        default_ttl_seconds=settings.SCRAPER_CACHE_TTL_SECONDS,
     )
 
 _CACHE_ADAPTER = _build_cache_adapter()

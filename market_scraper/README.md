@@ -39,6 +39,7 @@ O cache padrão utiliza um dicionário em memória protegido por lock (`market_s
 - `SCRAPER_ROBOTS_FALLBACK` - define a política padrão quando o robots parser falha (`allow` ou `block`).
 - `SCRAPER_DNS_TIMEOUT` - timeout máximo para resolução DNS.
 - `SCRAPER_USE_PRICE_PARSER`, `SCRAPER_SINGLEFLIGHT_ENABLED` - flags para novas estratégias do pipeline.
+- `SCRAPER_SINGLEFLIGHT_LOCK_TTL` - TTL dos locks do singleflight para reciclar entradas travadas.
 - Demais variáveis herdadas de `shared.core.config_base.ConfigBase` (Redis, observabilidade, etc.) são definidas em `.env.common`.
 
 ### Arquivo `.env.market_scraper`
@@ -73,6 +74,7 @@ SCRAPER_DNS_TIMEOUT=2
 #Estratégias opcionais do pipelie
 SCRAPER_USE_PRICE_PARSER=0
 SCRAPER_SINGLEFLIGHT_ENABLED=1
+SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
 
 # Limites HTTP defensivos
 SCRAPER_HTTP_MAX_REDIRECTS=3
@@ -94,6 +96,7 @@ As métricas estão em `shared/metrics/metrics_scraper.py`. Destaques:
 - `SCRAPER_NO_RESULT_TOTAL` – contagem de execuções que terminaram sem payload válido.
 - `SCRAPING_LATENCY_SECONDS` – histograma de latência agregado por fonte.
 - `SCRAPER_ROBOTS_CHECK_TOTAL` – contagem de checagens de robots (`allowed`, `disallowed`, `error`).
+- `SCRAPER_SINGLEFLIGHT_CALLS_TOTAL`, `SCRAPER_SINGLEFLIGHT_WAIT_SECONDS` - acompanham coalescing de downloads e tempo de espera.
 - Métricas de cache listadas acima.
 
 Para visualizar, acesse `GET /metrics` ou configure o Prometheus via `docker-compose`.

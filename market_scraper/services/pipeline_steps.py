@@ -22,7 +22,7 @@ from market_scraper.parsers import (
     parse_with_extruct,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext, PipelineStep, StepResult
-from market_scraper.utils import cache, robots
+from market_scraper.utils import cache, robots, singleflight
 from market_scraper.utils.validator import DataQualityValidator
 
 
@@ -136,7 +136,15 @@ class FetchHTMLStep(PipelineStep):
                 context.set_html(cached_html)
                 return StepResult.success(message="html_from_cache")
 
-        html = await download_html(context.url, timeout=timeout_value)
+        async def _download() -> str:
+            """ Encapsula o download respeitando timeout da etapa para coalescing """
+            return await download_html(context.url, timeout=timeout_value)
+        
+        if settings.SCRAPER_SINGLEFLIGHT_ENABLED:
+            #O singleflight garante que somente um download efetivo ocorra por URL
+            html = await singleflight.coalesce(context.url, _download)
+        else:
+            html = await _download()
         context.set_html(html)
         if settings.SCRAPER_CACHE_ENABLED:
             #Armazenamos o HTML recém obtido para acelerar futuras requisições

@@ -86,6 +86,19 @@ SCRAPER_ROBOTS_CHECK_TOTAL = Counter(
     ["outcome"],
 )
 
+SCRAPER_SINGLEFLIGHT_CALLS_TOTAL = Counter(
+    "scraper_singleflight_calls_total",
+    "Total de chamadas coordenadas pelo singleflight por papel e resultado",
+    ["role", "outcome"],
+)
+
+SCRAPER_SINGLEFLIGHT_WAIT_SECONDS = Histogram(
+    "scraper_singleflight_wait_seconds",
+    "Tempo de espera de participantes singleflight antes de reutilizar o download",
+    ["role"],
+    buckets=[0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0],
+)
+
 SCRAPING_SUSPENDED_FLAG = Gauge(
     "scraping_suspended_flag",
     "Flag de suspensão global de scraping controlado via Redis",
@@ -110,6 +123,8 @@ __all__ = [
     "SCRAPER_CACHE_EVICTIONS_TOTAL",
     "SCRAPER_CACHE_HIT_RATE",
     "SCRAPER_ROBOTS_CHECK_TOTAL",
+    "SCRAPER_SINGLEFLIGHT_CALLS_TOTAL",
+    "SCRAPER_SINGLEFLIGHT_WAIT_SECONDS",
     "SCRAPING_SUSPENDED_FLAG",
     "SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS",
     "SCRAPER_STEP_SUCCESS_TOTAL",
