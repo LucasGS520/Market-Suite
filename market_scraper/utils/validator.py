@@ -79,7 +79,12 @@ class DataQualityValidator:
     
     def _register_invalid(self, step_name: str, domain: str, reason: str) -> None:
         """ Registra métrica e log estruturado para depuração """
-        SCRAPER_STEP_INVALID_TOTAL.labels(step_name, domain, reason).inc()
+        #Utilizamos labels nomeados para evitar erros em futuras mudanças de ordem
+        SCRAPER_STEP_INVALID_TOTAL.labels(
+            step=step_name, 
+            domain=domain,
+            result=reason,
+        ).inc()
         logger.warning(
             "step_invalid_result",
             step=step_name,

@@ -28,12 +28,19 @@ class _InMemoryCache:
     def __init__(self, cleanup_interval_seconds: float = 5.0) -> None:
         """ Inicializa estrutura interna, lock e parâmetros de limpeza periódica """
         self._data: dict[str, _CacheEntry] = {}
-        self._lock = threading.Lock()
+        #Usamos RLock para suportar chamadas reentrantes de limpeza
+        self._lock = threading.RLock()
         self._cleanup_interval_seconds = cleanup_interval_seconds
         self._last_cleanup = time.monotonic()
 
-    def _cleanup_if_needed(self, now: float) -> None:
+    def _cleanup_if_needed(self, now: float, *, _lock_acquired: bool = False) -> None:
         """ Remove entradas expiradas quando o intervalo mínimo entre limpezas passar """
+        if not _lock_acquired:
+            #Garantimos exclusão mútua quando chamado de fora do contexto protegido
+            with self._lock:
+                self._cleanup_if_needed(now, _lock_acquired=True)
+            return
+
         if now - self._last_cleanup < self._cleanup_interval_seconds:
             return
         
@@ -72,8 +79,8 @@ class _InMemoryCache:
         expires_at = now + max(ttl_seconds, 0)
         with self._lock:
             #Executamos limpeza sob demanda para evitar acúmulo de itens expirados
-            self._cleanup_if_needed(now)
-            #Substituimos qualquer valor anterior para simplificar atualizações
+            self._cleanup_if_needed(now, _lock_acquired=True)
+            #Substituímos qualquer valor anterior para simplificar atualizações
             self._data[url] = _CacheEntry(value=html, expires_at=expires_at)
             SCRAPER_CACHE_SIZE.set(len(self._data))
 
