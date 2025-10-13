@@ -36,6 +36,7 @@ def _http_error(issue: UrlIssue, *, status_code: int) -> JSONResponse:
     response_model=ParserResponse,
     responses={
         400: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
         504: {"model": ErrorResponse},
     },
@@ -66,6 +67,17 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
             status_code=status.HTTP_504_GATEWAY_TIMEOUT
         )
     
+    #Identifica se alguma etapa encerrou por causa do robots.txt e devolve o código especializado
+    if any(step.message == "unsupported_by_robots" for step in outcome.steps):
+        issue = UrlIssue(
+            code="unsupported_by_robots",
+            message="O acesso à URL foi bloqueado pelas regras do robots.txt",
+        )
+        return _http_error(
+            issue,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     if outcome.status != "success" or not outcome.payload:
         issue = UrlIssue(code="no_result", message="Não foi possível extrair dados do produto")
         return _http_error(

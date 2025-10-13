@@ -125,7 +125,8 @@ class FetchHTMLStep(PipelineStep):
 
         #Validação de robots.txt ocorre antes de qualquer tentativa de download para respeitar políticas públicas dos sites
         if not await robots.is_allowed(context.url, timeout=timeout_value):
-            return StepResult.failure(message="blocked_by_robots")
+            #Ajuste de código de falha alinhado com documentação pública do serviço
+            return StepResult.failure(message="unsupported_by_robots")
         
         cached_html: str | None = None
         if settings.SCRAPER_CACHE_ENABLED:

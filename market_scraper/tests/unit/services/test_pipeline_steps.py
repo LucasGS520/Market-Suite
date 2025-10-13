@@ -65,7 +65,7 @@ async def test_fetch_html_respects_robots_block(
     result = await step.run(context)
 
     assert result.status == "error"
-    assert result.message == "blocked_by_robots"
+    assert result.message == "unsupported_by_robots"
     assert context.html is None
 
 @pytest.mark.asyncio
