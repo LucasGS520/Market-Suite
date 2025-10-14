@@ -124,6 +124,9 @@ class Settings(ConfigBase):
     SCRAPER_SINGLEFLIGHT_LOCK_TTL: float = float(
         os.getenv("SCRAPER_SINGLEFLIGHT_LOCK_TTL", "15.0")
     ) #TTL dos locks do sinlgeflight para evitar retenções indefinidas
+    SCRAPER_PRICE_TOLERANCE: float = float(
+        os.getenv("SCRAPER_PRICE_TOLERANCE", "0.0")
+    ) #Tolerância percentual opcional para aceitar preços aproximados
 
 #Instância única de settings para a aplicação
 settings = Settings()

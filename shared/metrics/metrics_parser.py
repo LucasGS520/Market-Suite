@@ -22,6 +22,13 @@ PARSER_FAILURE_TOTAL = Counter(
     ["library"]
 )
 
+#Contador de ativações de fallback por biblioteca secundária
+PARSER_FALLBACK_TOTAL = Counter(
+    "parser_fallback_total",
+    "Total de vezes em que um fallback de parsing foi acionado",
+    ["library"],
+)
+
 #Histrograma de duração do parsing por biblioteca
 PARSER_DURATION_SECONDS = Histogram(
     "parser_duration_seconds",
@@ -33,4 +40,5 @@ __all__ = [
     "PARSER_SUCCESS_TOTAL",
     "PARSER_FAILURE_TOTAL",
     "PARSER_DURATION_SECONDS",
+    "PARSER_FALLBACK_TOTAL",
 ]

@@ -41,6 +41,7 @@ O cache padrão utiliza um dicionário em memória protegido por lock (`market_s
 - `SCRAPER_DNS_CACHE_TTL` - tempo em segundos que uma resolução DNS permanece em cache.
 - `SCRAPER_USE_PRICE_PARSER`, `SCRAPER_SINGLEFLIGHT_ENABLED` - flags para novas estratégias do pipeline.
 - `SCRAPER_SINGLEFLIGHT_LOCK_TTL` - TTL dos locks do singleflight para reciclar entradas travadas.
+- `SCRAPER_PRICE_TOLERANCE` - tolerância percentual opcional para aceitar preços aproximados.
 - Demais variáveis herdadas de `shared.core.config_base.ConfigBase` (Redis, observabilidade, etc.) são definidas em `.env.common`.
 
 ### Arquivo `.env.market_scraper`
@@ -88,6 +89,7 @@ SCRAPER_HTTP_TIMEOUT_CONNECT=3.0
 SCRAPER_HTTP_TIMEOUT_READ=3.0
 SCRAPER_HTTP_TIMEOUT_WRITE=3.0
 SCRAPER_HTTP_TIMEOUT_POOL=3.0
+SCRAPER_PRICE_TOLERANCE=0.0
 ```
 
 ## Métricas expostas

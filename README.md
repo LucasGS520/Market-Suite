@@ -246,6 +246,7 @@ SCRAPER_HTTP_TIMEOUT_CONNECT=3.0
 SCRAPER_HTTP_TIMEOUT_READ=3.0
 SCRAPER_HTTP_TIMEOUT_WRITE=3.0
 SCRAPER_HTTP_TIMEOUT_POOL=3.0
+SCRAPER_PRICE_TOLERANCE=0.0
 ```
 ## Recursos arquivados
 - `market_scraper/archive/domain_policy.py` e `market_scraper/archive/domain_policy.yaml` armazenam a versão anterior baseada em políticas dinâmicas por domínio. Para reativá-los, mova os arquivos de volta para `market_scraper/services`, ajuste os imports do pipeline e reabilite o carregamento de políticas conforme indicado nos comentários internos.

@@ -1,4 +1,4 @@
-""" Testes para o validator de dados do scraper """
+""" Testes para o validator de qualidade dos parsers """
 
 from decimal import Decimal
 
@@ -107,3 +107,33 @@ def test_validator_records_invalid_price() -> None:
     after = _metric_value("html_metadata_parser", "exemplo.com", "price_invalid")
     assert result is None
     assert after == before + Decimal(1)
+
+def test_validator_records_domain_from_full_source() -> None:
+    validator = DataQualityValidator()
+    before = _metric_value("html_metadata_parser", "loja.teste.com", "price_invalid")
+    result = validator.validate(
+        step_name="html_metadata_parser",
+        payload={"name": "Produto", "current_price": "abc", "url": ""},
+        url="https://exemplo.com/produto",
+        source="https://loja.teste.com/oferta",
+    )
+    after = _metric_value("html_metadata_parser", "loja.teste.com", "price_invalid")
+    assert result is None
+    assert after == before + Decimal(1)
+
+def test_validator_accepts_approximate_price_with_tolerance() -> None:
+    validator = DataQualityValidator(price_tolerance=Decimal("0.25"))
+    payload = {
+        "name": "Produto",
+        "current_price": "R$ 100,00 - R$ 110,00",
+        "url": "https://exemplo.com/produto",
+    }
+    result = validator.validate(
+        step_name="json_ld_parser",
+        payload=payload,
+        url="https://exemplo.com/produto",
+        source="exemplo.com",
+    )
+    assert result is not None
+    assert result["current_price"] == "100.00"
+    
