@@ -18,7 +18,7 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_CACHE_SIZE,
 )
 
-class DummyRedis:
+class _DummyRedis:
     """ Simula clente Redis básico usando etruturas em memória para testes """
     def __init__(self) -> None:
         self.store: dict[str, str] = {}
@@ -158,6 +158,16 @@ def test_get_respects_ttl_expiration(cache_factory: Callable[[], None]) -> None:
     assert cache.get("https://exemplo.com/promo") is None
     assert SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired")._value.get() == 1.0
 
+def test_set_accepts_custom_ttl(cache_factory: Callable[[], None]) -> None:
+    """ Confirma que cada escrita pode definir TTL menor que o padrão global """
+    cache_factory(ttl_seconds=60)
+    from market_scraper.utils import cache
+
+    cache.set("https://exemplo.com/custom", "<html>custom</html>", ttl_seconds=1)
+    time.sleep(1.1)
+
+    assert cache.get("https://exemplo.com/custom") is None
+
 def test_invalidate_removes_entry(cache_factory: Callable[[], None]) -> None:
     """ Assegura que ``invalidate`` elimina itens específicos do cache """
     cache_factory()
@@ -268,4 +278,3 @@ def test_redis_backend_records_errors(monkeypatch: pytest.MonkeyPatch, cache_fac
         SCRAPER_CACHE_REDIS_ERRORS_TOTAL.labels(operation="set")._value.get()
         == 1.0
     )
-    

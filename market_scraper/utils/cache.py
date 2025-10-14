@@ -75,11 +75,12 @@ class _InstrumentedTTLCache(TTLCache):
     def set_with_ttl(self, key: str, value: str, ttl_seconds: int) -> None:
         """ Replica ``__setitem__`` permitindo TTL individual por chave """
         ttl_seconds = max(ttl_seconds, 0)
-        with self.timer as current_time:
-            expired = super().expire(current_time)
-            if expired and self._on_enviction is not None:
-                self._on_enviction(len(expired), "expired")
-            Cache.__setitem__(self, key, value)
+        current_time = self.timer()
+        #Evita tratar ``timer`` como context manager, pois é função simples
+        expired = super().expire(current_time)
+        if expired and self._on_enviction is not None:
+            self._on_enviction(len(expired), "expired")
+        Cache.__setitem__(self, key, value)
         try:
             link = self._TTLCache__getlink(key)
         except KeyError:
