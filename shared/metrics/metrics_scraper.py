@@ -80,6 +80,19 @@ SCRAPER_CACHE_HIT_RATE = Gauge(
     "Taxa de acerto observada no cache básico do scraper",
 )
 
+SCRAPER_DNS_RESOLVE_DURATION_SECONDS = Histogram(
+    "scraper_dns_resolve_duration_seconds",
+    "Latência para resolver hosts antes de efetuar downloads HTTP",
+    ["outcome"],
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0],
+)
+
+SCRAPER_DNS_BLOCKED_TOTAL = Counter(
+    "scraper_dns_blocked_total",
+    "Total de resoluções DNS bloqueadas por motivo de segurança",
+    ["reason"],
+)
+
 SCRAPER_ROBOTS_CHECK_TOTAL = Counter(
     "scraper_robots_check_total",
     "Total de verificações realizadas contra o robots.txt por resultado",
@@ -135,6 +148,8 @@ __all__ = [
     "SCRAPER_CACHE_SIZE",
     "SCRAPER_CACHE_EVICTIONS_TOTAL",
     "SCRAPER_CACHE_HIT_RATE",
+    "SCRAPER_DNS_RESOLVE_DURATION_SECONDS",
+    "SCRAPER_DNS_BLOCKED_TOTAL",
     "SCRAPER_ROBOTS_CHECK_TOTAL",
     "SCRAPER_SINGLEFLIGHT_CALLS_TOTAL",
     "SCRAPER_SINGLEFLIGHT_WAIT_SECONDS",

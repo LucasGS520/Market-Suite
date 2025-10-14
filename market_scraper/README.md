@@ -38,6 +38,7 @@ O cache padrão utiliza um dicionário em memória protegido por lock (`market_s
 - `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE` - controle de novas tentativas com backoff exponencial leve para downloads.
 - `SCRAPER_ROBOTS_FALLBACK` - define a política padrão quando o robots parser falha (`allow` ou `block`).
 - `SCRAPER_DNS_TIMEOUT` - timeout máximo para resolução DNS.
+- `SCRAPER_DNS_CACHE_TTL` - tempo em segundos que uma resolução DNS permanece em cache.
 - `SCRAPER_USE_PRICE_PARSER`, `SCRAPER_SINGLEFLIGHT_ENABLED` - flags para novas estratégias do pipeline.
 - `SCRAPER_SINGLEFLIGHT_LOCK_TTL` - TTL dos locks do singleflight para reciclar entradas travadas.
 - Demais variáveis herdadas de `shared.core.config_base.ConfigBase` (Redis, observabilidade, etc.) são definidas em `.env.common`.
@@ -70,6 +71,7 @@ SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
 
 #Timeout de resolução DNS para evitar bloqueios longos
 SCRAPER_DNS_TIMEOUT=2
+SCRAPER_DNS_CACHE_TTL=120
 
 #Estratégias opcionais do pipelie
 SCRAPER_USE_PRICE_PARSER=0

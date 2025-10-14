@@ -104,6 +104,9 @@ class Settings(ConfigBase):
     SCRAPER_DNS_TIMEOUT: float = float(
         os.getenv("SCRAPER_DNS_TIMEOUT", "2")
     ) #Timeout da resolução DNS para evitar bloqueios longos
+    SCRAPER_DNS_CACHE_TTL: float = float(
+        os.getenv("SCRAPER_DNS_CACHE_TTL", "120")
+    ) #TTL do cache de DNS para reduzir consultas repetidas
     SCRAPER_USE_PRICE_PARSER: bool = os.getenv("SCRAPER_USE_PRICE_PARSER", "0").lower() in {
         "1",
         "True",
