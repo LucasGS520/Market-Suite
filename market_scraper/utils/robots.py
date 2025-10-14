@@ -182,16 +182,29 @@ async def is_allowed(
     *,
     timeout: float | None = None,
 ) -> bool:
-    """ Retorna ``True`` quando o robots.txt autoriza o user-agent para a URL """
+    """ Retorna ``True`` quando o robots.txt autoriza ou quando fallback permite """
     normalized_url, robots_url, host_key = _prepare_urls(url)
     timeout_value = timeout if timeout is not None else settings.SCRAPER_STEP_TIMEOUT_SECONDS
     parser = await _get_parser(host_key, robots_url, timeout=timeout_value)
 
+    fallback_policy = settings.SCRAPER_ROBOTS_FALLBACK.lower().strip()
+
     if parser is None:
-        #Em caso de erro optamos por permitir seguindo recomendação do requisito
-        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
-        return True
-    
+        #Política de fallback "allow" segue permissiva, "block" nega por segurança
+        if fallback_policy == "allow":
+            SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
+            return True
+        
+        logger.info(
+            "robots_fallback_blocked",
+            host=host_key,
+            url=normalized_url,
+            reason="parser_unavailable",
+            policy=fallback_policy,
+        )
+        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="disallowed").inc()
+        return False
+
     try:
         allowed = parser.can_fetch(user_agent, normalized_url)
     except Exception as exc:
@@ -202,8 +215,19 @@ async def is_allowed(
             user_agent=user_agent,
             error=str(exc),
         )
-        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
-        return True
+        if fallback_policy == "allow":
+            SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
+            return True
+        
+        logger.info(
+            "robots_fallback_blocked",
+            host=host_key,
+            url=normalized_url,
+            reason="can_fetch_error",
+            policy=fallback_policy,
+        )
+        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="disallowed").inc()
+        return False
     
     outcome = "allowed" if allowed else "disallowed"
     SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome=outcome).inc()
