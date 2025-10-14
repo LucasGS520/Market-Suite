@@ -187,5 +187,5 @@ __all__ = [
     "RetryableHTTPError",
     "build_retrying_operation",
     "run_with_retries",
-    "_raises_for_retryable_response",
+    "_raise_for_retryable_response",
 ]
