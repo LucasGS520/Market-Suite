@@ -44,5 +44,4 @@ def test_fallback_selectolax_recupera_dados(monkeypatch: pytest.MonkeyPatch) -> 
     dados = extract_structured_data(html, "https://exemplo.com")
     assert dados["json-ld"][0]["name"] == "Produto Fallback"
     assert dados["microdata"][0]["properties"]["name"] == "Produto Microdata"
-    assert dados["opengraph"][0]["od:title"] == "Produto OG"
-    
+    assert dados["opengraph"][0]["og:title"] == "Produto OG"
