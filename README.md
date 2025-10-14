@@ -94,7 +94,7 @@ Para detalhes operacionais consulte também [`market_scraper/README.md`](market_
 
 ### Configurações essenciais
 - `market_scraper/core/config_scraper.py` concentra variáveis controladas por ambiente como `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` e limites de requisições HTTP (`SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_HTTP_MAX_*`).
-- O cache básico é habilitado via `SCRAPER_CACHE_ENABLED` e respeita o TTL `SCRAPER_CACHE_TTL_SECONDS`. O backend padrão (`SCRAPER_CACHE_BACKEND=memory`) utiliza um dicionário protegido por lock; o valor `redis` permanece reservado para futura expansão usando as credenciais compartilhadas (`REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`).
+- O cache básico é habilitado via `SCRAPER_CACHE_ENABLED` e respeita o TTL `SCRAPER_CACHE_TTL_SECONDS`. O backend padrão (`SCRAPER_CACHE_BACKEND=memory`) utiliza um dicionário protegido por lock; o valor `redis` ativa o adapter dedicado com pool de conexões, chaves sanitizadas e métrica de erros (`SCRAPER_CACHE_REDIS_ERRORS_TOTAL`) usando as credenciais compartilhadas (`REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`).
 - Todos os serviços reutilizam o `.env.common` para dados de infraestrutura. Configure `market_scraper/.env.market_scraper` quando precisar sobrescrever timeouts, TTLs ou o backend de cache.
 
 ### Papel na arquitetura
@@ -223,18 +223,39 @@ SCRAPER_SERVICE_URL=http://url_serviço_de_scraping
 
 ### Exemplo de ``.env.market_scraper``
 ```env
+#Para usar Redis como backend compartilhado
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
 REDIS_PASSWORD=
 
-# Cache básico por URL
-SCRAPER_CACHE_ENABLED=1
+#Backend de cache: memory ou redis
 SCRAPER_CACHE_BACKEND=memory
+
+#Backend e limites de Cache básico por URL
+SCRAPER_CACHE_ENABLED=1
 SCRAPER_CACHE_TTL_SECONDS=3600
+SCRAPER_CACHE_MAX_ENTRIES=5000
+SCRAPER_CACHE_ENVICTION_POLICY=lru
+
+#Estratégias de robots.txt e fallback seguro
+SCRAPER_ROBOTS_FALLBACK=allow
+
+#Controle de tentativas HTTP e backoff
+SCRAPER_HTTP_RETRIES=2
+SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
 
 SCRAPER_STEP_TIMEOUT_SECONDS=8.0
 SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
+
+#Timeout de resolução DNS para evitar bloqueios longos
+SCRAPER_DNS_TIMEOUT=2
+SCRAPER_DNS_CACHE_TTL=120
+
+#Estratégias opcionais do pipeline
+SCRAPER_USE_PRICE_PARSER=0
+SCRAPER_SINGLEFLIGHT_ENABLED=1
+SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
 
 # Limites HTTP defensivos
 SCRAPER_HTTP_MAX_REDIRECTS=3
@@ -247,6 +268,7 @@ SCRAPER_HTTP_TIMEOUT_READ=3.0
 SCRAPER_HTTP_TIMEOUT_WRITE=3.0
 SCRAPER_HTTP_TIMEOUT_POOL=3.0
 SCRAPER_PRICE_TOLERANCE=0.0
+
 ```
 ## Recursos arquivados
 - `market_scraper/archive/domain_policy.py` e `market_scraper/archive/domain_policy.yaml` armazenam a versão anterior baseada em políticas dinâmicas por domínio. Para reativá-los, mova os arquivos de volta para `market_scraper/services`, ajuste os imports do pipeline e reabilite o carregamento de políticas conforme indicado nos comentários internos.

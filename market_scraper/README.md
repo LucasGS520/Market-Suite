@@ -28,7 +28,7 @@ O cache padrão utiliza um dicionário em memória protegido por lock (`market_s
 
 - Controlado por `SCRAPER_CACHE_ENABLED` (habilitado por padrão) e TTL configurado por `SCRAPER_CACHE_TTL_SECONDS`.
 - Métricas: `SCRAPER_CACHE_LOOKUPS_TOTAL` (hits/misses) e `SCRAPER_CACHE_SIZE` (entradas em memória).
-- Para ambientes com Redis, defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB` e `REDIS_PASSWORD` no `.env.common` ou `.env.market_scraper`. O backend `redis` permanece reservado para quando o adaptador dedicado for reativado; mantenha `memory` enquanto essa integração estiver indisponível.
+- Para ambientes com Redis, defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB` e `REDIS_PASSWORD` no `.env.common` ou `.env.market_scraper`. O adapter Redis utiliza pool de conexões, nomes de chave com hash para evitar vazamento de URLs e expõe `SCRAPER_CACHE_REDIS_ERRORS_TOTAL` para acompanhar falhas do backend.
 
 ## Configurações relevantes (`market_scraper/core/config_scraper.py`)
 - `SCRAPER_STEP_TIMEOUT_SECONDS` / `SCRAPER_PIPELINE_TIMEOUT_SECONDS` – limites de tempo do pipeline.
@@ -48,14 +48,17 @@ O cache padrão utiliza um dicionário em memória protegido por lock (`market_s
 Use este arquivo para sobrescrever valores padrão. Exemplo:
 
 ```env
+#Para usar Redis como backend compartilhado
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
 REDIS_PASSWORD=
 
+#Backend de cache: memory ou redis
+SCRAPER_CACHE_BACKEND=memory
+
 #Backend e limites de Cache básico por URL
 SCRAPER_CACHE_ENABLED=1
-SCRAPER_CACHE_BACKEND=memory
 SCRAPER_CACHE_TTL_SECONDS=3600
 SCRAPER_CACHE_MAX_ENTRIES=5000
 SCRAPER_CACHE_ENVICTION_POLICY=lru
@@ -74,7 +77,7 @@ SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
 SCRAPER_DNS_TIMEOUT=2
 SCRAPER_DNS_CACHE_TTL=120
 
-#Estratégias opcionais do pipelie
+#Estratégias opcionais do pipeline
 SCRAPER_USE_PRICE_PARSER=0
 SCRAPER_SINGLEFLIGHT_ENABLED=1
 SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
@@ -90,6 +93,7 @@ SCRAPER_HTTP_TIMEOUT_READ=3.0
 SCRAPER_HTTP_TIMEOUT_WRITE=3.0
 SCRAPER_HTTP_TIMEOUT_POOL=3.0
 SCRAPER_PRICE_TOLERANCE=0.0
+
 ```
 
 ## Métricas expostas

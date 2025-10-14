@@ -80,6 +80,12 @@ SCRAPER_CACHE_HIT_RATE = Gauge(
     "Taxa de acerto observada no cache básico do scraper",
 )
 
+SCRAPER_CACHE_REDIS_ERRORS_TOTAL = Counter(
+    "scraper_cache_redis_errors_total",
+    "Total de erros do backend Redis do cache básico do scraper por operação",
+    ["operation"],
+)
+
 SCRAPER_PRICE_PARSER_USAGE_TOTAL = Counter(
     "scraper_price_parser_usage_total",
     "Total de usos do price-parser para interpretar preços por resultado",
@@ -154,6 +160,7 @@ __all__ = [
     "SCRAPER_CACHE_SIZE",
     "SCRAPER_CACHE_EVICTIONS_TOTAL",
     "SCRAPER_CACHE_HIT_RATE",
+    "SCRAPER_CACHE_REDIS_ERRORS_TOTAL",
     "SCRAPER_PRICE_PARSER_USAGE_TOTAL",
     "SCRAPER_DNS_RESOLVE_DURATION_SECONDS",
     "SCRAPER_DNS_BLOCKED_TOTAL",
