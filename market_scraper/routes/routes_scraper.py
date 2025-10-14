@@ -71,7 +71,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
     if any(step.message == "unsupported_by_robots" for step in outcome.steps):
         issue = UrlIssue(
             code="unsupported_by_robots",
-            message="O acesso à URL foi bloqueado pelas regras do robots.txt",
+            message="O acesso à URL foi bloqueado pelas regras de robots.txt",
         )
         return _http_error(
             issue,
