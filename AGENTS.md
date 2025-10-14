@@ -36,6 +36,7 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 - O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py` e utilizam singleflight + retries com backoff para reduzir stampede e respeitar `Retry-After`.
 - `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
 - O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_*` quando precisar compartilhar cache; a API pública continua `get`/`set`/`invalidate`/`clear`.
+- Flags essenciais ficam explícitas no `.env.market_scraper`: cache em memória, retries HTTP (`2`), parser de robots `urllib` e singleflight ativo. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout.
 - `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é configurável via `SCRAPER_ROBOTS_FALLBACK` (`allow`/`block`). Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 ## Visão Geral da Arquitetura e Serviços
@@ -75,6 +76,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - `market_scraper/utils/http_utils.py` resolve endereços públicos com cache/timeout configuráveis (`SCRAPER_DNS_CACHE_TTL`, `SCRAPER_DNS_TIMEOUT`) e bloqueia IPs privados antes do download.
 - `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host, aplica retries com backoff e devolve `unsupported_by_robots` quando o acesso é negado ou `SCRAPER_ROBOTS_FALLBACK` define bloqueio.
 - Cache padrão em memória usa LRU/TTL com métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). O backend Redis permanece opcional (`SCRAPER_CACHE_BACKEND=redis`) e compartilha a mesma API pública.
+- O arquivo `.env.market_scraper` está divido em "Configuração mínima" e "Flags avançadas"; mantenha os comentários desligados até precisar de Redis ou limites HTTP customizados.
 
 #### Contexto compartilhado e métricas
 - O `PipelineContext` expõe `url`, `source`, `html` e `data` (payload final). Atualize apenas chaves documentadas (`name`, `current_price`, `url`, `source`, `payload`).
