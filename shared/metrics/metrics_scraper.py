@@ -80,6 +80,12 @@ SCRAPER_CACHE_HIT_RATE = Gauge(
     "Taxa de acerto observada no cache básico do scraper",
 )
 
+SCRAPER_PRICE_PARSER_USAGE_TOTAL = Counter(
+    "scraper_price_parser_usage_total",
+    "Total de usos do price-parser para interpretar preços por resultado",
+    ["outcome"],
+)
+
 SCRAPER_DNS_RESOLVE_DURATION_SECONDS = Histogram(
     "scraper_dns_resolve_duration_seconds",
     "Latência para resolver hosts antes de efetuar downloads HTTP",
@@ -148,6 +154,7 @@ __all__ = [
     "SCRAPER_CACHE_SIZE",
     "SCRAPER_CACHE_EVICTIONS_TOTAL",
     "SCRAPER_CACHE_HIT_RATE",
+    "SCRAPER_PRICE_PARSER_USAGE_TOTAL",
     "SCRAPER_DNS_RESOLVE_DURATION_SECONDS",
     "SCRAPER_DNS_BLOCKED_TOTAL",
     "SCRAPER_ROBOTS_CHECK_TOTAL",
