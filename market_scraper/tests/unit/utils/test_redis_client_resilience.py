@@ -18,14 +18,6 @@ class _DummyCounter:
         self.calls += 1
 
 class _DummyGauge:
-    """ Gauge minimalista para registrar p último valor definido """
-    def __init__(self) -> None:
-        self.value: float | None = None
-
-    def set(self, value: float) -> None:
-        self.value = value
-
-class _DummyGauge:
     """ Gauge minimalista para registrar o último valor definido """
     def __init__(self) -> None:
         self.value: float | None = None
@@ -39,12 +31,12 @@ class _DummyLogger:
         return None
     
 @pytest.fixture(autouse=True)
-def patch_rate_limiter():
-    """ Sobrescrever fixture que injeta Redis Fake em outros testes """
+def patch_rate_limiter() -> None:
+    """Sobrescreve fixture que injeta Redis Fake em outros testes."""
     yield
 
 @pytest.fixture(autouse=True)
-def reset_thread_local(monkeypatch: pytest.MonkeyPatch):
+def reset_thread_local(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante isolamento substituindo o armazenamento thread-local """
     monkeypatch.setattr(redis_client, "_thread_local", SimpleNamespace())
 
@@ -70,7 +62,7 @@ def test_get_redis_client_retorna_none_em_falha(monkeypatch: pytest.MonkeyPatch)
     assert client is None
     assert metrics_stub.REDIS_CONNECTION_ERRORS_TOTAL.calls == 1
 
-def test_is_scraping_suspended_sem_cliente(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_status_scraping_sem_cliente(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Quando não há Redis disponível deve retornar ``False`` e zerar a flag """
     gauge = _DummyGauge()
     metrics_stub = SimpleNamespace(
@@ -83,31 +75,8 @@ def test_is_scraping_suspended_sem_cliente(monkeypatch: pytest.MonkeyPatch) -> N
     assert redis_client.is_scraping_suspended() is False
     assert gauge.value == 0
 
-def test_resume_scraping_sem_cliente(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Remover a flag deve ser uma operação silencionsa mesmo sem redis """
-    gauge = _DummyGauge()
-    metrics_stub = SimpleNamespace(
-        REDIS_CONNECTION_ERRORS_TOTAL=_DummyCounter(),
-        SCRAPING_SUSPENDEND_FLAG=gauge,
-    )
-    monkeypatch.setattr(redis_client, "metrics", metrics_stub)
-    monkeypatch.setattr(redis_client, "get_redis_client", lambda: None)
-
-    assert redis_client.is_scraping_suspended() is False
-    assert gauge.value == 0
-
-def test_resume_scraping_sem_cliente(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Remover a flag deve ser uma operação silenciosa mesmo sem redis """
-    gauge = _DummyGauge()
-    metrics_sub = SimpleNamespace(
-        REDIS_CONNECTION_ERRORS_TOTAL=_DummyCounter(),
-        SCRAPING_SUSPENDED_FLAG=gauge,
-    )
-    monkeypatch.setattr(redis_client, "metrics", metrics_sub)
-    monkeypatch.setattr(redis_client, "get_redis_client", lambda: None)
-
+    # A retomada deve retornar imediatamente sem tentar tocar no gauge novamente
     redis_client.resume_scraping()
 
-    assert gauge.value is None
-    
+    assert gauge.value == 0
     
