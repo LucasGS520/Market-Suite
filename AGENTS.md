@@ -33,10 +33,10 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 
 ## Atualização rápida — Market Scraper enxuto
 - A rota ativa para scraping é `POST /scraper/parse` (alias `/scrape/parse`) utilizando `ParserResponse` como contrato.
-- O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py`.
+- O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py` e utilizam singleflight + retries com backoff para reduzir stampede e respeitar `Retry-After`.
 - `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
-- O cache padrão é em memória (`SCRAPER_CACHE_BACKEND=memory`). Defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_*` somente quando o adaptador Redis dedicado for reinstalado.
-- `robots.txt` é respeitado antes do download; erros retornam `unsupported_by_robots` e registram métricas (`SCRAPER_ROBOTS_CHECK_TOTAL`).
+- O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_*` quando precisar compartilhar cache; a API pública continua `get`/`set`/`invalidate`/`clear`.
+- `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é configurável via `SCRAPER_ROBOTS_FALLBACK` (`allow`/`block`). Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 ## Visão Geral da Arquitetura e Serviços
 Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resumo operacional para agentes.
@@ -65,16 +65,16 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - **Referências essenciais:** `market_scraper/services/pipeline_steps.py`, `market_scraper/services/services_scraper_common.py`, `market_scraper/utils/robots.py`, `market_scraper/utils/cache.py`, `shared/metrics/metrics_scraper.py` e `market_scraper/README.md`
 
 #### Pipeline padrão e fallback
-- Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep`.
-- `FetchHTMLStep` normaliza URL, verifica `robots.txt`, consulta cache e baixa o HTML com `httpx` respeitando timeouts.
+- Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep` (com uso opcional do `price-parser`).
+- `FetchHTMLStep` normaliza URL, verifica `robots.txt`, consulta singleflight/cache e baixa o HTML com `httpx` usando retries com backoff (respeitando `Retry-After`).
 - Cada parser valida o payload com `DataQualityValidator`; quando nenhum retorna resultado válido o endpoint responde com `no_result`.
-- Métricas principais: `SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_STEP_FALLBACK_TOTAL` e `SCRAPER_ROBOTS_CHECK_TOTAL`.
+- Métricas principais: `SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_STEP_FALLBACK_TOTAL`, `SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_HTTP_RETRY_BACKOFF_SECONDS` e `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 #### Validação, cache e segurança
 - `market_scraper/utils/url_validation.py` garante que a URL pertença aos marketplaces suportados e bloqueia hosts privados (SSRF).
-- `market_scraper/utils/http_utils.py` resolve endereços públicos antes de permitir o download.
-- `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host e devolve `unsupported_by_robots` quando o acesso é negado.
-- Cache padrão em memória controlado por `SCRAPER_CACHE_ENABLED` e `SCRAPER_CACHE_TTL_SECONDS`. O backend Redis permanece opcional aguardando reativação do adaptador dedicado (`SCRAPER_CACHE_BACKEND=redis`).
+- `market_scraper/utils/http_utils.py` resolve endereços públicos com cache/timeout configuráveis (`SCRAPER_DNS_CACHE_TTL`, `SCRAPER_DNS_TIMEOUT`) e bloqueia IPs privados antes do download.
+- `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host, aplica retries com backoff e devolve `unsupported_by_robots` quando o acesso é negado ou `SCRAPER_ROBOTS_FALLBACK` define bloqueio.
+- Cache padrão em memória usa LRU/TTL com métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). O backend Redis permanece opcional (`SCRAPER_CACHE_BACKEND=redis`) e compartilha a mesma API pública.
 
 #### Contexto compartilhado e métricas
 - O `PipelineContext` expõe `url`, `source`, `html` e `data` (payload final). Atualize apenas chaves documentadas (`name`, `current_price`, `url`, `source`, `payload`).
@@ -82,11 +82,13 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 
 #### Consolidação dos utilitários do `market_scraper`
 - `market_scraper/utils/` mantém helpers puros (sem estado compartilhado). Esses módulos podem ser importados diretamente pelas etapas do pipeline sem depender de configuração global.
+- Módulos de rede (`http_retry.py`, `singleflight.py`, `http_utils.py`) expõem funções reutilizáveis com métricas; preserve a API pública e flags (`SCRAPER_HTTP_RETRIES`, `SCRAPER_SINGLEFLIGHT_ENABLED`, `SCRAPER_DNS_TIMEOUT`) ao criar novos usos.
 - `market_scraper/utils_controllers` concentra orquestradores com estado, evitando que cada etapa manipule diretamente recursos externos.
 - `shared/utils` continua sendo a fonte para rotinas verdadeiramente compartilhadas. Sempre avalie se o helper pertence á camada comum antes de criar novos módulos no scraper.
 
 **Boas práticas ao criar/editar utilitários:**
 - `market_scraper/utils/` armazena helpers puros (cache, robots, validação de URL, parsing de preço).
+- `market_scraper/utils/price.py` respeita a flag `SCRAPER_USE_PRICE_PARSER`; mantenha o fallback manual ao estender parsing.
 - `market_scraper/utils_controllers/` concentra componentes com estado (loaders/config). Avalie se o utilitário realmente precisa de estado antes de adicioná-lo aqui.
 - `shared/utils` continua a fonte para funcionalidades cross-service (Redis, logging, normalização de URL). Prefira mover lógicas genéricas para lá.
 
