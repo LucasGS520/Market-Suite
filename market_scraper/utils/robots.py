@@ -18,6 +18,12 @@ import structlog
 
 from market_scraper.core.config_scraper import settings
 from shared.metrics.metrics_scraper import SCRAPER_ROBOTS_CHECK_TOTAL
+from shared.utils.logging_utils import sanitize_log_data
+
+from market_scraper.utils.http_retry import (
+    RetryableHTTPError,
+    build_retrying_operation,
+)
 
 
 logger = structlog.get_logger(__name__)
@@ -76,20 +82,41 @@ async def _download_robots(robots_url: str, *, timeout: float) -> str | None:
         max_connections=settings.SCRAPER_HTTP_MAX_CONNECTIONS,
         max_keepalive_connections=settings.SCRAPER_HTTP_MAX_KEEPALIVE,
     )
-
-    try:
+ 
+    async def _execute_request() -> httpx.Response:
         async with httpx.AsyncClient(
             timeout=client_timeout,
             follow_redirects=True,
             limits=limits,
             max_redirects=settings.SCRAPER_HTTP_MAX_REDIRECTS,
         ) as client:
-            response = await client.get(robots_url, headers=_ROBOTS_HEADERS)
+            return await client.get(robots_url, headers=_ROBOTS_HEADERS)
+        
+    wrapped_operation = build_retrying_operation(
+        target="robots",
+        operation=_execute_request,
+    )
+
+    try:
+        response = await wrapped_operation()
+    except RetryableHTTPError as exc:
+        logger.warning(
+            "robots_fetch_retry_exhausted",
+            robots_url=sanitize_log_data(robots_url),
+            reason=exc.reason,
+        )
+        original = exc.__cause__
+        if original is not None:
+            logger.warning(
+                "robots_fetch_error", #Mantém label clássico para observabilidade
+                robots_url=sanitize_log_data(robots_url),
+                error=str(original),
+            )
+        return None
     except httpx.HTTPError as exc:
-        #Registro para facilitar diagnóstico sem impedir fluxo principal
         logger.warning(
             "robots_fetch_error",
-            robots_url=robots_url,
+            robots_url=sanitize_log_data(robots_url),
             error=str(exc),
         )
         return None
@@ -99,7 +126,7 @@ async def _download_robots(robots_url: str, *, timeout: float) -> str | None:
         #Protege contra payloads anormalmente grandes
         logger.warning(
             "robots_fetch_too_large",
-            robots_url=robots_url,
+            robots_url=sanitize_log_data(robots_url),
             size=len(content),
             max_size=settings.SCRAPER_HTTP_MAX_CONTENT_LENGTH,
         )

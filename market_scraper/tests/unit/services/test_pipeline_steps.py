@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from typing import Any
 
+import httpx
 import pytest
 
 from market_scraper.services.pipeline_steps import (
@@ -11,6 +14,7 @@ from market_scraper.services.pipeline_steps import (
     GenericFallbackParserStep,
     HtmlMetadataParserStep,
     JsonLdParserStep,
+    download_html,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext
 from market_scraper.core.config_scraper import settings
@@ -19,8 +23,133 @@ from market_scraper.utils import singleflight
 from shared.metrics.metrics_scraper import (
     SCRAPER_SINGLEFLIGHT_CALLS_TOTAL,
     SCRAPER_SINGLEFLIGHT_WAIT_SECONDS,
+    SCRAPER_HTTP_RETRIES_TOTAL,
+    SCRAPER_HTTP_RETRY_BACKOFF_SECONDS,
 )
 
+
+def _metric_value(metric: Any, sample_name: str, labels: dict[str, str]) -> float:
+    """ Retorna o valor atual do sample de métrica solicitado """
+    for collected in metric.collect():
+        for sample in collected.samples:
+            if sample.name == sample_name and all(
+                sample.labels.get(key) == value for key, value in labels.items()
+            ):
+                return float(sample.value)
+    return 0.0
+
+class DummyAsyncClient:
+    """ Cliente HTTP simplificado para controlar respostas nos testes """
+    def __init__(self, responses: Iterator[httpx.Response]) -> None:
+        self._responses = responses
+
+    async def __aenter__(self) -> "DummyAsyncClient":
+        return self
+    
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+    
+    async def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+        try:
+            return next(self._responses)
+        except StopIteration as exc:
+            raise AssertionError("Respostas insuficientes para o teste") from exc
+
+@pytest.mark.asyncio
+async def test_download_html_retries_on_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Confirma que respostas 429 respeitam Retry-After antes de nova tentativa """
+    url = "https://exemple.com/produto"
+    monkeypatch.setattr(settings, "SCRAPER_HTTP_RETRY_BACKOFF_BASE", 0.05)
+    responses = iter(
+        [
+            httpx.Response(
+                429,
+                headers={"Retry-After": "0.2"},
+                request=httpx.Request("GET", url),
+            ),
+            httpx.Response(200, text="<html>ok</html>", request=httpx.Request("GET", url)),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(responses),
+    )
+
+    counter_before = _metric_value(
+        SCRAPER_HTTP_RETRIES_TOTAL,
+        "scraper_http_retries_total",
+        {"target": "html", "reason": "too_many_requests"},
+    )
+    histogram_before = _metric_value(
+        SCRAPER_HTTP_RETRY_BACKOFF_SECONDS,
+        "scraper_http_retry_backoff_seconds_sum",
+        {"target": "html", "reason": "too_many_requests"},
+    )
+
+    html = await download_html(url, timeout=1.0)
+
+    assert html == "<html>ok</html>"
+
+    counter_after = _metric_value(
+        SCRAPER_HTTP_RETRIES_TOTAL,
+        "scraper_http_retries_total",
+        {"target": "html", "reason": "too_many_requests"},
+    )
+    histogram_after = _metric_value(
+        SCRAPER_HTTP_RETRY_BACKOFF_SECONDS,
+        "scraper_http_retry_backoff_seconds_sum",
+        {"target": "html", "reason": "too_many_requests"},
+    )
+
+    assert counter_after - counter_before == pytest.approx(1.0)
+    assert pytest.approx(histogram_after - histogram_before, rel=0.2) == 0.2
+
+@pytest.mark.asyncio
+async def test_download_html_retries_on_server_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante backoff exponencial quando a origem responde com erro 5xx """
+    url = "https://example.com/produto"
+    monkeypatch.setattr(settings, "SCRAPER_HTTP_RETRY_BACKOFF_BASE", 0.05)
+    responses = iter(
+        [
+            httpx.Response(502, request=httpx.Request("GET", url)),
+            httpx.Response(200, text="<html>ok</html>", request=httpx.Request("GET", url)),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(responses),
+    )
+
+    counter_before = _metric_value(
+        SCRAPER_HTTP_RETRIES_TOTAL,
+        "scraper_http_retries_total",
+        {"target": "html", "reason": "server_error"},
+    )
+    histogram_before = _metric_value(
+        SCRAPER_HTTP_RETRY_BACKOFF_SECONDS,
+        "scraper_http_retry_backoff_seconds_sum",
+        {"target": "html", "reason": "server_error"},
+    )
+
+    html = await download_html(url, timeout=1.0)
+
+    assert html == "<html>ok</html>"
+
+    counter_after = _metric_value(
+        SCRAPER_HTTP_RETRIES_TOTAL,
+        "scraper_http_retries_total",
+        {"target": "html", "reason": "server_error"},
+    )
+    histogram_after = _metric_value(
+        SCRAPER_HTTP_RETRY_BACKOFF_SECONDS,
+        "scraper_http_retry_backoff_seconds_sum",
+        {"target": "html", "reason": "server_error"},
+    )
+
+    assert counter_after - counter_before == pytest.approx(1.0)
+    assert pytest.approx(histogram_after - histogram_before, rel=0.2) == 0.05
 
 @pytest.fixture
 def context() -> PipelineContext:

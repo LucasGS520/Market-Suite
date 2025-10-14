@@ -23,6 +23,10 @@ from market_scraper.parsers import (
 )
 from market_scraper.services.synergic_pipeline import PipelineContext, PipelineStep, StepResult
 from market_scraper.utils import cache, robots, singleflight
+from market_scraper.utils.http_retry import(
+    RetryableHTTPError,
+    build_retrying_operation,
+)
 from market_scraper.utils.validator import DataQualityValidator
 
 
@@ -92,21 +96,32 @@ async def download_html(url: str, *, timeout: float) -> str:
         max_keepalive_connections=settings.SCRAPER_HTTP_MAX_KEEPALIVE,
     )
 
-    async with httpx.AsyncClient(
-        timeout=client_timeout,
-        follow_redirects=True,
-        limits=limits,
-        max_redirects=settings.SCRAPER_HTTP_MAX_REDIRECTS,
-    ) as client:
-        response = await client.get(url, headers=headers)
-        response.raise_for_status()
+    async def _execute_request() -> httpx.Response:
+        async with httpx.AsyncClient(
+            timeout=client_timeout,
+            follow_redirects=True,
+            limits=limits,
+            max_redirects=settings.SCRAPER_HTTP_MAX_REDIRECTS,
+        ) as client:
+            return await client.get(url, headers=headers)
+        
+    wrapped_operation = build_retrying_operation(target="html", operation=_execute_request)
 
-        content = response.content
-        if len(content) > settings.SCRAPER_HTTP_MAX_CONTENT_LENGTH:
-            raise ValueError("Resposta excedeu o tamanho máximo permitido")
+    try:
+        response = await wrapped_operation()
+    except RetryableHTTPError as exc:
+        if exc.__cause__ is not None:
+            raise exc.__cause__
+        raise httpx.HTTPError("Falha ao baixar HTML após retries") from exc
+    
+    response.raise_for_status()
 
-        #Retornamos o texto decodificado após validar o tamanho bruto para evitar ataques de payload gigante
-        return response.text
+    content = response.content
+    if len(content) > settings.SCRAPER_HTTP_MAX_CONTENT_LENGTH:
+        raise ValueError("Resposta excedeu o tamanho máximo permitido")
+    
+    #Retornamos o texto decodificado após validar o tamanho bruto para evitar ataques de payload gigante
+    return response.text
 
 class FetchHTMLStep(PipelineStep):
     """ Obtém o HTML bruto e o disponibiliza no contexto compartilhado 

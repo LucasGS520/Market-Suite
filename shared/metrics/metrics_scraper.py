@@ -99,6 +99,19 @@ SCRAPER_SINGLEFLIGHT_WAIT_SECONDS = Histogram(
     buckets=[0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0],
 )
 
+SCRAPER_HTTP_RETRIES_TOTAL = Counter(
+    "scraper_http_retries_total",
+    "Total de tentativas extras realizadas durante downloads HTTP do scraper",
+    ["target", "reason"],
+)
+
+SCRAPER_HTTP_RETRY_BACKOFF_SECONDS = Histogram(
+    "scraper_http_retry_backoff_seconds",
+    "Tempo de espera aplicado antes de novas tentativas de download HTTP",
+    ["target", "reason"],
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
+)
+
 SCRAPING_SUSPENDED_FLAG = Gauge(
     "scraping_suspended_flag",
     "Flag de suspensão global de scraping controlado via Redis",
@@ -125,6 +138,8 @@ __all__ = [
     "SCRAPER_ROBOTS_CHECK_TOTAL",
     "SCRAPER_SINGLEFLIGHT_CALLS_TOTAL",
     "SCRAPER_SINGLEFLIGHT_WAIT_SECONDS",
+    "SCRAPER_HTTP_RETRIES_TOTAL",
+    "SCRAPER_HTTP_RETRY_BACKOFF_SECONDS",
     "SCRAPING_SUSPENDED_FLAG",
     "SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS",
     "SCRAPER_STEP_SUCCESS_TOTAL",
