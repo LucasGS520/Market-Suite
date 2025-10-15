@@ -1,9 +1,10 @@
 """ Coordena chamadas concorrentes para o mesmo recurso evitando duplicação 
 
-O utilitário aplica o padrão singleflight para que apenas uma corrotina 
+O utilitário aplica o padrão singleflight para que apenas uma corrotina
 execute o download enquanto as demais aguardam o resultado compartilhado.
-Além disso, registra métricas de participação e tempo de espera para
-monitorar impactos de carga.
+Esse desenho reduz carga sob explosões de requisições e, em cenários de alta
+contenção, garante que as requisições concorrentes aproveitem o mesmo
+resultado até um limite de tempo configurado.
 """
 
 from __future__ import annotations
@@ -39,7 +40,6 @@ class _SingleFlightEntry:
         loop = asyncio.get_running_loop()
         self.future: asyncio.Future[Any] = loop.create_future()
         self.created_at: float = time.monotonic()
-        self.waiters: int = 0
 
     def is_stale(self, *, now: float, ttl: float) -> bool:
         """ Indica se a entrada excedeu o TTL configurado e deve ser reciclada """
@@ -127,21 +127,20 @@ class AsyncSingleFlight:
 
             if entry is None:
                 entry = _SingleFlightEntry()
-                entry.waiters = 1 
                 self._entries[key] = entry
                 return entry, True
             
-            entry.waiters += 1
             return entry, False
         
     async def _release_entry(self, key: str, entry: _SingleFlightEntry) -> None:
-        """ Reduz contadores e rmeove entradas quando não há mais interessados """
+        """ Recicla a entrada associada após concluir a operação compartilhada """
+        if not entry.future.done():
+            return
+        
         async with self._entries_lock:
-            entry.waiters = max(entry.waiters - 1, 0)
-            if entry.waiters == 0:
-                current = self._entries.get(key)
-                if current is entry:
-                    self._entries.pop(key, None)
+            current = self._entries.get(key)
+            if current is entry:
+                self._entries.pop(key, None)
 
 _singleflight = AsyncSingleFlight(lock_ttl=settings.SCRAPER_SINGLEFLIGHT_LOCK_TTL)
 
