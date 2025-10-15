@@ -75,6 +75,13 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_PRICE_TOLERANCE", "0.0")
     ) #Tolerância percentual para comparação de preços
 
+    SCRAPER_DNS_TIMEOUT: float = float(
+        os.getenv("SCRAPER_DNS_TIMEOUT", "2.0")
+    ) #Tempo limite das resoluções DNS seguras
+    SCRAPER_DNS_CACHE_TTL: float = float(
+        os.getenv("SCRAPER_DNS_CACHE_TTL", "120.0")
+    ) #Tempo em segundos que respostas DNS permanecem em cache
+
 
 #Instância única de settings para a aplicação
 settings = Settings()

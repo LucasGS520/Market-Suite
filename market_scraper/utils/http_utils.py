@@ -11,15 +11,10 @@ import ipaddress
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Optional
-
-try:
-    import dns.exception
-    import dns.resolver
-except Exception: #Respeitamos ambientes sem dnspython e aplicamos fallback
-    dns = None  #type: ignore
 
 import structlog
 
@@ -32,7 +27,7 @@ from shared.metrics.metrics_scraper import (
 
 logger = structlog.get_logger(__name__)
 
-#Cache de DNS simples potegido por lock para reduzir round-trips repetidos
+#Cache de DNS simples potegido por lock para reduzir round-trips repetidos e evitar condições de corrida entre threads do pipeline
 _DNS_CACHE: dict[str, tuple[float, list[str]]] = {}
 _DNS_CACHE_LOCK = threading.Lock()
 
@@ -69,10 +64,10 @@ class HostResolutionError(Exception):
 def resolve_public_address(host: str) -> list[str]:
     """ Resolve o host e garante que todos os IPs pertencem a faixas públicas
     
-    A resolução utiliza ``dnspython`` quando disponível para aplicar timeout
-    determinístico; caso contrário, ``socket.getaddrinfo`` é executado em
-    *threadpool* com o mesmo limite. Os resultados são cacheados por um TTL
-    configurável para reduzir a latência em chamdas subsequentes.
+    A estratégia é determinística: executamos ``socket.getaddrinfo`` dentro de
+    um *threadpool* respeitando ``SCRAPER_DNS_TIMEOUT``. Os resultados validados
+    são cacheados por ``SCRAPER_DNS_CACHE_TTL`` segundos para mitigar 
+    *latency spikes* sem acumular caminhos alternativos.
     """
     if not host:
         raise HostResolutionError("Host vazio não resolvido")
@@ -115,16 +110,14 @@ def resolve_public_address(host: str) -> list[str]:
     return validated
 
 def resolve_public_addresses(host: str) -> list[str]:
-        """ Alias plural que mantém compatibilidade com código legado """
-        #Mantemos o comportamento único para evitar duplicar lógica de resolução DNS
-        return resolve_public_address(host)
+    """ Alias plural que mantém compatibilidade com código legado """
+    #Mantemos o comportamento único para evitar duplicar lógica de resolução DNS
+    return resolve_public_address(host)
 
 def _resolve_host_records(host: str) -> list[str]:
     """ Executa a resolução DNS considerando tempo limite configurável """
     timeout = float(getattr(settings, "SCRAPER_DNS_TIMEOUT", 2.0))
     try:
-        if dns is not None:
-            return _resolve_with_dnspython(host, timeout)
         return _resolve_with_socket(host, timeout)
     except HostResolutionError:
         raise
@@ -135,51 +128,25 @@ def _resolve_host_records(host: str) -> list[str]:
             reason=str(exc),
         )
         raise HostResolutionError(f"Falha ao resolver host: {host}") from exc
-  
-def _resolve_with_dnspython(host: str, timeout: float) -> list[str]:
-    """ Resolve registros A/AAAA utilizando dnspython com timeout explícito """
-    resolver = dns.resolver.Resolver()
-    resolver.lifetime = timeout
-    resolver.timeout = timeout
-
-    records: list[str] = []
-    for record_type in ("A", "AAAA"):
-        try:
-            answers = resolver.resolve(host, record_type, lifetime=timeout)
-        except (
-            dns.resolver.NoAnswer,
-            dns.resolver.NXDOMAIN,
-            dns.resolver.NoNameservers,
-        ): 
-            continue
-        except dns.exception.Timeout as exc:
-            raise HostResolutionError(f"Timeout ao resolver host: {host}") from exc
-        
-        for answer in answers:
-            records.append(answer.to_text())
-
-    return records
 
 def _resolve_with_socket(host: str, timeout: float) -> list[str]:
-        """ Executa ``socket.getaddrinfo`` em thread separada respeitando timeout """
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-
-        def _worker() -> list[str]:
-            try:
-                addrinfo = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-            except socket.gaierror as exc:
-                raise HostResolutionError(f"Falha ao resolver host: {host}") from exc
-            
-            return [sockaddr[0] for *_rest, sockaddr in addrinfo if sockaddr]
+    """ Executa ``socket.getaddrinfo`` em thread separada respeitando timeout """
+    def _worker() -> list[str]:
+        try:
+            addrinfo = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+        except socket.gaierror as exc:
+            raise HostResolutionError(f"Falha ao resolver host: {host}") from exc
         
-        #Executor local garante liberação imediata sem reter threads ativas.
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_worker)
-            try:
-                return future.result(timeout=timeout)
-            except FuturesTimeout as exc:
-                future.cancel()
-                raise HostResolutionError(f"Timeout ao resolver host: {host}") from exc
+        return [sockaddr[0] for *_rest, sockaddr in addrinfo if sockaddr]
+    
+    #Executor local garante liberação imediata sem reter threads ativas
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_worker)
+        try:
+            return future.result(timeout=timeout)
+        except FuturesTimeout as exc:
+            future.cancel()
+            raise HostResolutionError(f"Timeout ao resolver host: {host}") from exc
 
 def _validate_public_addresses(host: str, addresses: list[str]) -> list[str]:
     """ Valida se todos os IPs são globais antes de liberar o host """
