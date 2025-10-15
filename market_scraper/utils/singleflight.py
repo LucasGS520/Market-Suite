@@ -36,9 +36,19 @@ logger = structlog.get_logger("singleflight")
 
 class _SingleFlightEntry:
     """ Controla o estado compartilhado de uma chamada singleflight """
+    
     def __init__(self) -> None:
-        loop = asyncio.get_running_loop()
-        self.future: asyncio.Future[Any] = loop.create_future()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                #Em cenários de testes síncronos, apenas ``get_event_loop`` pode devolver loop configurado
+                loop = asyncio.get_event_loop()
+            except RuntimeError as fallback_error:
+                raise RuntimeError(
+                    "AsyncSingleFlight requer um loop de eventos ativo; execute chamadas dentro de corrotinas."
+                ) from fallback_error
+        self.future = loop.create_future()
         self.created_at: float = time.monotonic()
 
     def is_stale(self, *, now: float, ttl: float) -> bool:
@@ -46,7 +56,11 @@ class _SingleFlightEntry:
         return (now - self.created_at) > ttl
     
 class AsyncSingleFlight:
-    """ Orquestra execução única por chave para corrotinas assíncronas """
+    """ Orquestra execução única por chave para corrotinas assíncronas 
+    
+    Deve ser usada somente dentro de um contexto assíncrono já associado a um
+    loop de eventos ativos para manter a coordenação das futures compartilhadas.
+    """
     def __init__(self, *, lock_ttl: float) -> None:
         self._entries: dict[str, _SingleFlightEntry] = {}
         self._entries_lock = asyncio.Lock()
