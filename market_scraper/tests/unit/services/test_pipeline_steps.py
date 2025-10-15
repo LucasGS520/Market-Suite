@@ -304,9 +304,6 @@ async def test_fetch_html_singleflight_avoids_duplicate_downloads(
     await singleflight.reset()
     cache.clear()
 
-    monkeypatch.setattr(settings, "SCRAPER_CACHE_ENABLED", False)
-    monkeypatch.setattr(settings, "SCRAPER_SINGLEFLIGHT_ENABLED", True)
-
     for role in ("leader", "follower"):
         for outcome in ("success", "error"):
             SCRAPER_SINGLEFLIGHT_CALLS_TOTAL.labels(role=role, outcome=outcome)._value.set(0)

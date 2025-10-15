@@ -143,27 +143,21 @@ class FetchHTMLStep(PipelineStep):
             #Ajuste de código de falha alinhado com documentação pública do serviço
             return StepResult.failure(message="unsupported_by_robots")
         
-        cached_html: str | None = None
-        if settings.SCRAPER_CACHE_ENABLED:
-            #A checagem de cache evita round-trips denecessários mantendo métricas de hit/miss atualizadas
-            cached_html = cache.get(context.url)
-            if cached_html is not None:
-                context.set_html(cached_html)
-                return StepResult.success(message="html_from_cache")
+        #A checagem de cache evita roud-trips desnecessários mantendo métricas de hit/miss atualizadas
+        cached_html: str | None = cache.get(context.url)
+        if cached_html is not None:
+            context.set_html(cached_html)
+            return StepResult.success(message="html_from_cache")
 
         async def _download() -> str:
             """ Encapsula o download respeitando timeout da etapa para coalescing """
             return await download_html(context.url, timeout=timeout_value)
         
-        if settings.SCRAPER_SINGLEFLIGHT_ENABLED:
-            #O singleflight garante que somente um download efetivo ocorra por URL
-            html = await singleflight.coalesce(context.url, _download)
-        else:
-            html = await _download()
+        #O singleflight garante que somente um download efetivo ocorra por URL
+        html = await singleflight.coalesce(context.url, _download)
         context.set_html(html)
-        if settings.SCRAPER_CACHE_ENABLED:
-            #Armazenamos o HTML recém obtido para acelerar futuras requisições
-            cache.set(context.url, html, settings.SCRAPER_CACHE_TTL_SECONDS)
+        #Armazenamos o HTML recém obtido para acelerar futuras requisições
+        cache.set(context.url, html, settings.SCRAPER_CACHE_TTL_SECONDS)
         return StepResult.success(
             message="HTML baixado com sucesso",
         )

@@ -1,9 +1,9 @@
 """ Conversão e manipulação de valores monetários 
 
 O módulo prioriza estratégias robustas para interpretar diferentes 
-formatos de preços mantendo ``Decimal`` como tipo canônico. A integração
-com o ``price-parser`` é opcional e controlada por flag, garantindo
-compatibilidade com o restante do pipeline.
+formatos de preços mantendo ``Decimal`` como tipo canônico. o 
+``price-parser`` é utilizado sempre como primeira tentativa para
+uniformizar o parsing e registrar métricas de adoção.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from price_parser import Price
 
-from market_scraper.core.config_scraper import settings
 from shared.metrics.metrics_scraper import SCRAPER_PRICE_PARSER_USAGE_TOTAL
 
 def _normalize_raw_price(raw: str) -> str:
@@ -31,10 +30,11 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
     """ Converte diferentes formatos de preço em ``Decimal`` 
     
     Aceita strings com símbolos brasileiros (``R$``), números simples ou
-    objetos ``Decimal``. Quando habilitado, tenta primeiro interpretar o
-    valor usando ``price-parser`` para lidar com formatos mais complexos e
-    registra o resultado em métricas. mantém o comportamento anterior
-    levantando ``ValueError`` quando conteúdo não pode ser interpretado.
+    objetos ``Decimal``. Sempre tenta primeiro interpretar o valor usando
+    ``price-parser`` para lidar com formatos mais complexos e registra o
+    resultado em métricas, mantendo o fallback manual para garantir
+    robustez. Lança ``ValueError`` quando conteúdo não pode ser
+    interpretado.
     """
     if raw is None:
         raise ValueError(f"Preço não encontrado na página {url}")
@@ -50,24 +50,22 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
     if not raw_text:
         raise ValueError(f"Preço não encontrado na página {url}")
     
-    if settings.SCRAPER_USE_PRICE_PARSER:
-        #Utiliza price-parser antes do fallback manual para cobrir formatos avançados
-        try:
-            parsed_price = Price.fromstring(raw_text)
-        except Exception: #price-parser pode lançar erros internos em entradas incomuns
-            SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="error").inc()
-        else:
-            if parsed_price and parsed_price.amount is not None:
-                try:
-                    candidate = Decimal(str(parsed_price.amount))
-                except InvalidOperation:
-                    SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="invalid_amount").inc()
-                else:
-                    SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="parsed").inc()
-                    return candidate
-            
+    try:
+        parsed_price = Price.fromstring(raw_text)
+    except Exception:
+        SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="error").inc()
+    else:
+        if parsed_price and parsed_price.amount is not None:
+            try:
+                candidate = Decimal(str(parsed_price.amount))
+            except InvalidOperation:
+                SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="invalid_amount").inc()
             else:
-                SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="missing_amount").inc()
+                SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="parsed").inc()
+                return candidate
+            
+        else:
+            SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="missing_amount").inc()
 
     normalized = _normalize_raw_price(raw_text)
     if not normalized:

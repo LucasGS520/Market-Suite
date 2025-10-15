@@ -2,7 +2,6 @@ from decimal import Decimal
 
 import pytest
 
-from market_scraper.core.config_scraper import settings
 from market_scraper.utils.price import format_decimal_to_str, parse_price_str
 from shared.metrics.metrics_scraper import SCRAPER_PRICE_PARSER_USAGE_TOTAL
 
@@ -40,8 +39,7 @@ def _get_price_parser_metric(outcome: str) -> float:
                 return sample.value
     return 0.0
 
-def test_parse_price_str_uses_price_parser_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "SCRAPER_USE_PRICE_PARSER", True)
+def test_parse_price_str_uses_price_parser(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Parsed:
         amount = "321.45"
 
@@ -54,8 +52,7 @@ def test_parse_price_str_uses_price_parser_when_enabled(monkeypatch: pytest.Monk
     assert value == Decimal("321.45")
     assert after == pytest.approx(before + 1)
 
-def test_parse_price_str_fallbacks_when_price_parser_missing_amount(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "SCRAPER_USE_PRICE_PARSER", True)
+def test_parse_price_str_fallbacks_when_missing_amount(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Parsed:
         amount = None
 

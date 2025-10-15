@@ -14,7 +14,7 @@ O fluxo é sequencial e definido em `market_scraper/services/pipeline_steps.py`:
 1. **FetchHTMLStep** – normaliza a URL, consulta o singleflight para evitar downloads duplicados, valida `robots.txt`, bloqueia SSRF (hosts privados) e baixa o HTML com `httpx` usando retries com backoff. Ao sucesso, o HTML é salvo no contexto compartilhado e no cache configurado.
 2. **JsonLdParserStep** – tenta extrair dados estruturados (`application/ld+json`).
 3. **HtmlMetadataParserStep** – analisa metatags e elementos semânticos com BeautifulSoup.
-4. **GenericFallbackParserStep** – aplica heurísticas genéricas no HTML para obter nome e preço, incluindo o uso opcional do `price-parser` quando habilitado.
+4. **GenericFallbackParserStep** – aplica heurísticas genéricas no HTML para obter nome e preço, utilizando `price-parser` como primeira estratégia textual.
 
 Cada etapa registra métricas de latência e resultado (`success`, `empty`, `failure`). O pipeline completo respeita `SCRAPER_STEP_TIMEOUT_SECONDS` por etapa e `SCRAPER_PIPELINE_TIMEOUT_SECONDS` como teto global. Retries adicionais seguem `SCRAPER_HTTP_RETRIES` e `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, aplicando o cabeçalho `Retry-After` sempre que presente.
 
@@ -26,29 +26,26 @@ Cada etapa registra métricas de latência e resultado (`success`, `empty`, `fai
 ## Cache resiliente
 O cache padrão utiliza `cachetools.TTLCache` com bloqueios internos (`market_scraper/utils/cache.py`). Principais características:
 
-- Controlado por `SCRAPER_CACHE_ENABLED` (habilitado por padrão) e TTL configurado por `SCRAPER_CACHE_TTL_SECONDS`.
-- Limite máximo de entradas (`SCRAPER_CACHE_MAX_ENTRIES`) com política LRU e suporte a TTL individual por item. Evictions são contabilizadas em `SCRAPER_CACHE_EVICTIONS_TOTAL` e o tamanho atual em `SCRAPER_CACHE_SIZE`.
-- Métricas de hits/misses atualizadas em `SCRAPER_CACHE_LOOKUPS_TOTAL` e `SCRAPER_CACHE_HIT_RATE`.
-- Para ambientes com Redis, defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB` e `REDIS_PASSWORD` no `.env.common` ou `.env.market_scraper`. O adapter Redis utiliza pool de conexões, nomes de chave com hash para evitar vazamento de URLs e expõe `SCRAPER_CACHE_REDIS_ERRORS_TOTAL`.
-- A API pública (`get`, `set`, `invalidate`, `clear`) permanece inalterada, permitindo alternar o backend por variável de ambiente sem alterações no pipeline.
+- O cache em memória com LRU/TTL é utilizado sempre e respeita o TTL configurado por `SCRAPER_CACHE_TTL_SECONDS`.
+- O limite máximo de entradas (`SCRAPER_CACHE_MAX_ENTRIES`) mantém política LRU e suporte a TTL individual por item. Evictions são contabilizadas em `SCRAPER_CACHE_EVICTIONS_TOTAL` e o tamanho atual em `SCRAPER_CACHE_SIZE`.
+- Métricas de hits/misses são atualizadas em `SCRAPER_CACHE_LOOKUPS_TOTAL` e `SCRAPER_CACHE_HIT_RATE`.
 
 ## Camada de utilitários reforçada
 - **Retries HTTP** (`market_scraper/utils/http_retry.py`): centraliza tentativas extras para downloads de HTML e `robots.txt`, respeitando `Retry-After`, aplicando backoff exponencial e registrando métricas (`SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_HTTP_RETRY_BACKOFF_SECONDS`).
-- **Singleflight** (`market_scraper/utils/singleflight.py`): reduz stampede de downloads concorrentes agrupando chamadas por URL quando `SCRAPER_SINGLEFLIGHT_ENABLED=1`, com métricas de espera e participação.
+- **Singleflight** (`market_scraper/utils/singleflight.py`): reduz stampede de downloads concorrentes agrupando chamadas por URL, com métricas de espera e participação sempre ativas.
 - **DNS seguro** (`market_scraper/utils/http_utils.py`): restringe IPs privados, reutiliza resoluções em cache e falha rapidamente quando o host não é público.
-- **Parsing de preço** (`market_scraper/utils/price.py`): adiciona integração opcional com `price-parser` habilitada por `SCRAPER_USE_PRICE_PARSER`, mantendo o fallback manual e contabilizando resultados em `SCRAPER_PRICE_PARSER_USAGE_TOTAL`.
+- **Parsing de preço** (`market_scraper/utils/price.py`): utiliza o `price-parser` como primeira estratégia e mantém fallback manual, contabilizando resultados em `SCRAPER_PRICE_PARSER_USAGE_TOTAL`.
 - **Robots configurável** (`market_scraper/utils/robots.py`): suporta parser alternativo com retries, cache local e fallback configurável (`allow` ou `block`).
 
 ## Configurações relevantes (`market_scraper/core/config_scraper.py`)
 - `SCRAPER_STEP_TIMEOUT_SECONDS` / `SCRAPER_PIPELINE_TIMEOUT_SECONDS` – limites de tempo do pipeline.
 - `SCRAPER_HTTP_TIMEOUT_CONNECT`, `SCRAPER_HTTP_TIMEOUT_READ`, `SCRAPER_HTTP_TIMEOUT_WRITE`, `SCRAPER_HTTP_TIMEOUT_POOL` – controle fino de timeouts `httpx`.
 - `SCRAPER_HTTP_MAX_REDIRECTS`, `SCRAPER_HTTP_MAX_CONNECTIONS`, `SCRAPER_HTTP_MAX_KEEPALIVE`, `SCRAPER_HTTP_MAX_CONTENT_LENGTH` – limites defensivos.
-- `SCRAPER_CACHE_ENABLED`, `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_BACKEND`, `SCRAPER_CACHE_MAX_ENTRIES`, `SCRAPER_CACHE_ENVICTION_POLICY` - configuração detalhada do cache em memória ou Redis.
+- `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES` - controle do cache em memória com LRU/TTL.
 - `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE` - controle de novas tentativas com backoff exponencial leve para downloads.
 - `SCRAPER_ROBOTS_FALLBACK` - define a política padrão quando o robots parser falha (`allow` ou `block`).
 - `SCRAPER_DNS_TIMEOUT` - timeout máximo para resolução DNS.
 - `SCRAPER_DNS_CACHE_TTL` - tempo em segundos que uma resolução DNS permanece em cache.
-- `SCRAPER_USE_PRICE_PARSER`, `SCRAPER_SINGLEFLIGHT_ENABLED` - flags para novas estratégias do pipeline.
 - `SCRAPER_SINGLEFLIGHT_LOCK_TTL` - TTL dos locks do singleflight para reciclar entradas travadas.
 - `SCRAPER_PRICE_TOLERANCE` - tolerância percentual opcional para aceitar preços aproximados.
 - Demais variáveis herdadas de `shared.core.config_base.ConfigBase` (Redis, observabilidade, etc.) são definidas em `.env.common`.
@@ -58,35 +55,19 @@ Use este arquivo para sobrescrever valores padrão. Exemplo:
 
 ```env
 # Configurações essenciais — mantêm o pipeline padrão previsível
-SCRAPER_CACHE_BACKEND=memory
-SCRAPER_CACHE_ENABLED=1
 SCRAPER_CACHE_TTL_SECONDS=3600
 SCRAPER_CACHE_MAX_ENTRIES=5000
 
 SCRAPER_STEP_TIMEOUT_SECONDS=8.0
 SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
 
-SCRAPER_ROBOTS_PARSER=urllib
 SCRAPER_ROBOTS_FALLBACK=allow
 
 SCRAPER_HTTP_RETRIES=2
 SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
 
-SCRAPER_USE_PRICE_PARSER=0
-SCRAPER_SINGLEFLIGHT_ENABLED=1
 SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
 SCRAPER_PRICE_TOLERANCE=0.0
-
-# --- Adapters opcionais ---
-# Para Redis, habilite o backend e configure credenciais no .env.common
-#SCRAPER_CACHE_BACKEND=redis
-#REDIS_HOST=redis
-#REDIS_PORT=6379
-#REDIS_DB=0
-#REDIS_PASSWORD=
-
-# Para usar parsers alternativos de robots defina explicitamente
-#SCRAPER_ROBOTS_PARSER=reppy
 
 # Ajustes de rede raramente necessários — mantenha comentado para seguir o padrão
 #SCRAPER_HTTP_MAX_REDIRECTS=3
@@ -112,8 +93,8 @@ As métricas estão em `shared/metrics/metrics_scraper.py`. Destaques:
 - `SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_HTTP_RETRY_BACKOFF_SECONDS` – acompanham novas tentativas de download e tempo de espera aplicado.
 - `SCRAPER_DNS_RESOLVE_DURATION_SECONDS`, `SCRAPER_DNS_BLOCKED_TOTAL` – observabilidade da camada DNS segura.
 - `SCRAPER_SINGLEFLIGHT_CALLS_TOTAL`, `SCRAPER_SINGLEFLIGHT_WAIT_SECONDS` – acompanham coalescing de downloads e tempo de espera.
-- `SCRAPER_PRICE_PARSER_USAGE_TOTAL` – monitora adoção e falhas do `price-parser`.
-- Métricas de cache listadas acima (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`, `SCRAPER_CACHE_SIZE`, `SCRAPER_CACHE_REDIS_ERRORS_TOTAL`).
+- `SCRAPER_PRICE_PARSER_USAGE_TOTAL` – monitora o uso do `price-parser` e cenários de fallback.
+- Métricas de cache listadas acima (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`, `SCRAPER_CACHE_SIZE`).
 
 Para visualizar, acesse `GET /metrics` ou configure o Prometheus via `docker-compose`.
 
@@ -131,12 +112,12 @@ Execute os testes dedicados ao scraper:
 pytest market_scraper -q
 ```
 
-O pacote inclui fixtures para simular Redis, respostas HTTP e HTML de marketplaces.
+O pacote inclui fixtures para simular respostas HTTP e HTML de marketplaces.
 
 ## Recursos arquivados
 - `market_scraper/archive/domain_policy.py` e `market_scraper/archive/domain_policy.yaml` preservam a versão antiga baseada em políticas declarativas. Para reativá-la, mova os arquivos para `market_scraper/services/`, atualize os imports e reintroduza o carregamento dinâmico antes de registrar as etapas no pipeline.
 - Outros componentes legados removidos do fluxo mínimo devem permanecer arquivados até que haja um requisito explícito para retomá-los.
 
 ## Próximos passos
-- Implementar backend Redis definitivo para o cache de HTML.
+- Monitorar o comportamento do cache em memória e avaliar se um backend compartilhado será necessário futuramente.
 - Expandir a lista de marketplaces suportados conforme novas regras forem consolidadas.

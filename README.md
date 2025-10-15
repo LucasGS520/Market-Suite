@@ -94,8 +94,8 @@ Para detalhes operacionais consulte também [`market_scraper/README.md`](market_
 
 ### Configurações essenciais
 - `market_scraper/core/config_scraper.py` concentra variáveis controladas por ambiente como `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` e limites de requisições HTTP (`SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_HTTP_MAX_*`).
-- O cache básico é habilitado via `SCRAPER_CACHE_ENABLED` e respeita o TTL `SCRAPER_CACHE_TTL_SECONDS`. O backend padrão (`SCRAPER_CACHE_BACKEND=memory`) utiliza um dicionário protegido por lock; o valor `redis` ativa o adapter dedicado com pool de conexões, chaves sanitizadas e métrica de erros (`SCRAPER_CACHE_REDIS_ERRORS_TOTAL`) usando as credenciais compartilhadas (`REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`).
-- Todos os serviços reutilizam o `.env.common` para dados de infraestrutura. Configure `market_scraper/.env.market_scraper` quando precisar sobrescrever timeouts, TTLs ou o backend de cache.
+- O cache básico utiliza `cachetools.TTLCache` em memória, respeita o TTL `SCRAPER_CACHE_TTL_SECONDS` e registra métricas de hits, misses e evictions para observabilidade.
+- Todos os serviços reutilizam o `.env.common` para dados de infraestrutura. Configure `market_scraper/.env.market_scraper` quando precisar sobrescrever timeouts, TTLs ou limites de rede do scraper.
 
 ### Papel na arquitetura
 - Recebe requisições HTTP do ``market_alert`` ou de consumidores internos.
@@ -224,35 +224,19 @@ SCRAPER_SERVICE_URL=http://url_serviço_de_scraping
 ### Exemplo de ``.env.market_scraper``
 ```env
 # Configurações essenciais — mantêm o pipeline padrão previsível
-SCRAPER_CACHE_BACKEND=memory
-SCRAPER_CACHE_ENABLED=1
 SCRAPER_CACHE_TTL_SECONDS=3600
 SCRAPER_CACHE_MAX_ENTRIES=5000
 
 SCRAPER_STEP_TIMEOUT_SECONDS=8.0
 SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
 
-SCRAPER_ROBOTS_PARSER=urllib
 SCRAPER_ROBOTS_FALLBACK=allow
 
 SCRAPER_HTTP_RETRIES=2
 SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
 
-SCRAPER_USE_PRICE_PARSER=0
-SCRAPER_SINGLEFLIGHT_ENABLED=1
 SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
 SCRAPER_PRICE_TOLERANCE=0.0
-
-# --- Adapters opcionais ---
-# Para Redis, habilite o backend e configure credenciais no .env.common
-#SCRAPER_CACHE_BACKEND=redis
-#REDIS_HOST=redis
-#REDIS_PORT=6379
-#REDIS_DB=0
-#REDIS_PASSWORD=
-
-# Para usar parsers alternativos de robots defina explicitamente
-#SCRAPER_ROBOTS_PARSER=reppy
 
 # Ajustes de rede raramente necessários — mantenha comentado para seguir o padrão
 #SCRAPER_HTTP_MAX_REDIRECTS=3

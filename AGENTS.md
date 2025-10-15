@@ -35,8 +35,8 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 - A rota ativa para scraping é `POST /scraper/parse` (alias `/scrape/parse`) utilizando `ParserResponse` como contrato.
 - O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py` e utilizam singleflight + retries com backoff para reduzir stampede e respeitar `Retry-After`.
 - `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
-- O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Defina `SCRAPER_CACHE_BACKEND=redis` e configure `REDIS_*` quando precisar compartilhar cache; a API pública continua `get`/`set`/`invalidate`/`clear`.
-- Flags essenciais ficam explícitas no `.env.market_scraper`: cache em memória, retries HTTP (`2`), parser de robots `urllib` e singleflight ativo. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout.
+- O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Os limites são ajustados por `SCRAPER_CACHE_TTL_SECONDS` e `SCRAPER_CACHE_MAX_ENTRIES`.
+- Parâmetros essenciais ficam explícitos no `.env.market_scraper`: TTL e tamanho do cache em memória, retries HTTP (`2`), política de fallback de robots (`allow`) e TTL dos locks de singleflight. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout.
 - `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é configurável via `SCRAPER_ROBOTS_FALLBACK` (`allow`/`block`). Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 ## Visão Geral da Arquitetura e Serviços
@@ -66,7 +66,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - **Referências essenciais:** `market_scraper/services/pipeline_steps.py`, `market_scraper/services/services_scraper_common.py`, `market_scraper/utils/robots.py`, `market_scraper/utils/cache.py`, `shared/metrics/metrics_scraper.py` e `market_scraper/README.md`
 
 #### Pipeline padrão e fallback
-- Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep` (com uso opcional do `price-parser`).
+- Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep`, utilizando `price-parser` como primeira heurística textual.
 - `FetchHTMLStep` normaliza URL, verifica `robots.txt`, consulta singleflight/cache e baixa o HTML com `httpx` usando retries com backoff (respeitando `Retry-After`).
 - Cada parser valida o payload com `DataQualityValidator`; quando nenhum retorna resultado válido o endpoint responde com `no_result`.
 - Métricas principais: `SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_STEP_FALLBACK_TOTAL`, `SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_HTTP_RETRY_BACKOFF_SECONDS` e `SCRAPER_ROBOTS_CHECK_TOTAL`.
@@ -75,8 +75,8 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - `market_scraper/utils/url_validation.py` garante que a URL pertença aos marketplaces suportados e bloqueia hosts privados (SSRF).
 - `market_scraper/utils/http_utils.py` resolve endereços públicos com cache/timeout configuráveis (`SCRAPER_DNS_CACHE_TTL`, `SCRAPER_DNS_TIMEOUT`) e bloqueia IPs privados antes do download.
 - `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host, aplica retries com backoff e devolve `unsupported_by_robots` quando o acesso é negado ou `SCRAPER_ROBOTS_FALLBACK` define bloqueio.
-- Cache padrão em memória usa LRU/TTL com métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). O backend Redis permanece opcional (`SCRAPER_CACHE_BACKEND=redis`) e compartilha a mesma API pública.
-- O arquivo `.env.market_scraper` está divido em "Configuração mínima" e "Flags avançadas"; mantenha os comentários desligados até precisar de Redis ou limites HTTP customizados.
+- Cache padrão em memória usa LRU/TTL com métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Não há backend alternativo carregado por padrão.
+- O arquivo `.env.market_scraper` lista apenas parâmetros de tuning (TTL, limites de cache e timeouts); mantenha os comentários desligados até ajustar limites HTTP específicos.
 
 #### Contexto compartilhado e métricas
 - O `PipelineContext` expõe `url`, `source`, `html` e `data` (payload final). Atualize apenas chaves documentadas (`name`, `current_price`, `url`, `source`, `payload`).
@@ -84,13 +84,13 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 
 #### Consolidação dos utilitários do `market_scraper`
 - `market_scraper/utils/` mantém helpers puros (sem estado compartilhado). Esses módulos podem ser importados diretamente pelas etapas do pipeline sem depender de configuração global.
-- Módulos de rede (`http_retry.py`, `singleflight.py`, `http_utils.py`) expõem funções reutilizáveis com métricas; preserve a API pública e flags (`SCRAPER_HTTP_RETRIES`, `SCRAPER_SINGLEFLIGHT_ENABLED`, `SCRAPER_DNS_TIMEOUT`) ao criar novos usos.
+- Módulos de rede (`http_retry.py`, `singleflight.py`, `http_utils.py`) expõem funções reutilizáveis com métricas; preserve a API pública e parâmetros numéricos (`SCRAPER_HTTP_RETRIES`, `SCRAPER_DNS_TIMEOUT`) ao criar novos usos.
 - `market_scraper/utils_controllers` concentra orquestradores com estado, evitando que cada etapa manipule diretamente recursos externos.
 - `shared/utils` continua sendo a fonte para rotinas verdadeiramente compartilhadas. Sempre avalie se o helper pertence á camada comum antes de criar novos módulos no scraper.
 
 **Boas práticas ao criar/editar utilitários:**
 - `market_scraper/utils/` armazena helpers puros (cache, robots, validação de URL, parsing de preço).
-- `market_scraper/utils/price.py` respeita a flag `SCRAPER_USE_PRICE_PARSER`; mantenha o fallback manual ao estender parsing.
+- `market_scraper/utils/price.py` utiliza o `price-parser` como primeira estratégia antes do fallback manual.
 - `market_scraper/utils_controllers/` concentra componentes com estado (loaders/config). Avalie se o utilitário realmente precisa de estado antes de adicioná-lo aqui.
 - `shared/utils` continua a fonte para funcionalidades cross-service (Redis, logging, normalização de URL). Prefira mover lógicas genéricas para lá.
 
