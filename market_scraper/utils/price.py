@@ -27,7 +27,7 @@ def _normalize_raw_price(raw: str) -> str:
     return cleaned
 
 def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
-    """ Converte diferentes formatos de preço em ``Decimal`` 
+    """ Converte diferentes formatos de preço em ``Decimal``
     
     Aceita strings com símbolos brasileiros (``R$``), números simples ou
     objetos ``Decimal``. Sempre tenta primeiro interpretar o valor usando
@@ -72,9 +72,12 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
         raise ValueError(f"Preço não encontrado na página {url}")
 
     try:
-        return Decimal(normalized)
+        parsed = Decimal(normalized)
     except InvalidOperation as exc:
         raise ValueError(f"Preço inválido em {url}: {raw_text}") from exc
+    #Registramos explicitamente quando o fallback manual foi necessário
+    SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="fallback").inc()
+    return parsed
     
 def format_decimal_to_str(value: Decimal) -> str:
     """ Formata ``Decimal`` com duas casas decimais para resposta padronizada """
