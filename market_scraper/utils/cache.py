@@ -14,6 +14,7 @@ import time
 from typing import Callable, Optional
 
 from cachetools import Cache, TTLCache
+import structlog
 
 from market_scraper.core.config_scraper import settings
 from shared.metrics.metrics_scraper import (
@@ -28,6 +29,8 @@ class _InstrumentedTTLCache(TTLCache):
     def __init__(self, maxsize: int, ttl: int) -> None:
         super().__init__(maxsize=maxsize, ttl=ttl, timer=time.monotonic)
         self._on_eviction: Optional[Callable[[int, str], None]] = None
+        #Marca se o fallback já foi sinalizado para evitar logs repetitivos
+        self._fallback_warning_emitted = False
 
     def configure_eviction_callback(self, callback: Callable[[int, str], None]) -> None:
         """ Associa callback invocado sempre que ocorrer uma remoção """
@@ -60,21 +63,46 @@ class _InstrumentedTTLCache(TTLCache):
         if removed > 0 and self._on_eviction is not None:
             self._on_eviction(removed, "expired")
         Cache.__setitem__(self, key, value)
+        #Ajusta manualmente o link para suportar TTL customizado, cai para comportamento padrão se API interna de cachetools mudar
         try:
             link = self._TTLCache__getlink(key)
         except KeyError:
-            links = self._TTLCache__links
+            try:
+                links = self._TTLCache__links
+            except AttributeError as error:
+                self._log_private_api_warning(error)
+                return removed
             link = TTLCache._Link(key)
             links[key] = link
+        except AttributeError as error:
+            self._log_private_api_warning(error)
+            return removed
         else:
             link.unlink()
-        root = self._TTLCache__root
-        prev = root.prev
-        link.expires = current_time + ttl_seconds
-        link.next = root
-        link.prev = prev
-        prev.next = root.prev = link
+        try:
+            root = self._TTLCache__root
+        except AttributeError as error:
+            self._log_private_api_warning(error)
+            return removed
+        try:
+            prev = root.prev
+            link.expires = current_time + ttl_seconds
+            link.next = root
+            link.prev = prev
+            prev.next = root.prev = link
+        except Exception as error:
+            self._log_private_api_warning(error)
+            return removed
         return removed
+    
+    def _log_private_api_warning(self, error: Exception) -> None:
+        """ Notifica que o cachetools mudou a API interna e ativa fallback padrão """
+        if not self._fallback_warning_emitted:
+            structlog.get_logger(__name__).warning(
+                "cachetools_private_api_unavailable",
+                error=str(error),
+            )
+            self._fallback_warning_emitted = True
 
 class InMemoryTTLCacheAdapter:
     """ Adapter em memória com LRU/TTL e instrumentação de métricas """
