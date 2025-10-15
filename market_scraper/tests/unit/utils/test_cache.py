@@ -102,3 +102,25 @@ def test_hit_rate_metric_tracks_hits_and_misses(cache_factory: Callable[[], None
     assert cache.get("https://exemplo.com/erro") is None
 
     assert SCRAPER_CACHE_HIT_RATE._value.get() == pytest.approx(0.5)
+
+def test_clear_resets_metrics_and_restarts_hit_rate(cache_factory: Callable[[], None]) -> None:
+    """ Valida reinicialização completa de métricas após limpeza manual """
+    cache_factory()
+    from market_scraper.utils import cache
+
+    cache.set("https://exemplo.com/hit", "<html>hit</html>", ttl_seconds=60)
+    assert cache.get("https://exemplo.com/hit") == "<html>hit</html>"
+    assert cache.get("https://exemplo.com/miss") is None
+
+    assert SCRAPER_CACHE_HIT_RATE._value.get() == pytest.approx(0.5)
+
+    cache.clear()
+
+    assert SCRAPER_CACHE_SIZE._value.get() == 0.0
+    assert SCRAPER_CACHE_HIT_RATE._value.get() == 0.0
+
+    cache.set("https://exemplo.com/novo", "<html>novo</html>", ttl_seconds=60)
+    assert cache.get("https://exemplo.com/novo") == "<html>novo</html>"
+
+    assert SCRAPER_CACHE_HIT_RATE._value.get() == 1.0
+    

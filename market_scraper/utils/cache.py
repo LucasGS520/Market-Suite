@@ -129,6 +129,10 @@ class InMemoryTTLCacheAdapter:
         """ Limpa completamente o cache em memória para manutenção """
         with self._lock:
             self._cache.clear()
+            #Reinicia contadores para que métricas representem estado vazio
+            self._hits = 0
+            self._misses = 0
+            self._update_hit_rate()
             SCRAPER_CACHE_SIZE.set(0)
 
 _CACHE_ADAPTER = InMemoryTTLCacheAdapter(
