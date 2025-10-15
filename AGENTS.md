@@ -37,7 +37,7 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 - `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
 - O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Os limites são ajustados por `SCRAPER_CACHE_TTL_SECONDS` e `SCRAPER_CACHE_MAX_ENTRIES`.
 - Parâmetros essenciais ficam explícitos no `.env.market_scraper`: TTL e tamanho do cache em memória, retries HTTP (`2`), política de fallback de robots (`allow`) e TTL dos locks de singleflight. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout.
-- `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é configurável via `SCRAPER_ROBOTS_FALLBACK` (`allow`/`block`). Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
+- `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é fixa e permissiva (allow) para manter disponibilidade. Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 ## Visão Geral da Arquitetura e Serviços
 Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resumo operacional para agentes.
@@ -74,7 +74,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 #### Validação, cache e segurança
 - `market_scraper/utils/url_validation.py` garante que a URL pertença aos marketplaces suportados e bloqueia hosts privados (SSRF).
 - `market_scraper/utils/http_utils.py` resolve endereços públicos com cache/timeout configuráveis (`SCRAPER_DNS_CACHE_TTL`, `SCRAPER_DNS_TIMEOUT`) e bloqueia IPs privados antes do download.
-- `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host, aplica retries com backoff e devolve `unsupported_by_robots` quando o acesso é negado ou `SCRAPER_ROBOTS_FALLBACK` define bloqueio.
+- `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host, aplica retries com backoff, devolve `unsupported_by_robots` quando o acesso é negado e assume fallback permissivo documentado em falhas de download/parse.
 - Cache padrão em memória usa LRU/TTL com métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Não há backend alternativo carregado por padrão.
 - O arquivo `.env.market_scraper` lista apenas parâmetros de tuning (TTL, limites de cache e timeouts); mantenha os comentários desligados até ajustar limites HTTP específicos.
 

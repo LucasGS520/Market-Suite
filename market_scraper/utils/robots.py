@@ -2,7 +2,9 @@
 
 O módulo valida o acesso com ``robots.txt`` de forma assíncrona reaproveitando
 limites de rede definidos nas configurações globais. O cache interno reduz
-round-trips desnecessários enquanto preserva métricas de sucesso e erro.
+round-trips desnecessários enquanto preserva métricas de sucesso e erro. Em
+caso de instabilidade do arquivo, a política operacional é permissiva (allow)
+para evitar falhas cascata no pipeline.
 """
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
-from market_scraper.core.config_scraper import settings
 from shared.metrics.metrics_scraper import SCRAPER_ROBOTS_CHECK_TOTAL
 from shared.utils.logging_utils import sanitize_log_data
 
@@ -24,6 +25,7 @@ from market_scraper.utils.http_retry import (
     RetryableHTTPError,
     build_retrying_operation,
 )
+from market_scraper.core.config_scraper import settings
 
 
 logger = structlog.get_logger(__name__)
@@ -187,23 +189,16 @@ async def is_allowed(
     timeout_value = timeout if timeout is not None else settings.SCRAPER_STEP_TIMEOUT_SECONDS
     parser = await _get_parser(host_key, robots_url, timeout=timeout_value)
 
-    fallback_policy = settings.SCRAPER_ROBOTS_FALLBACK.lower().strip()
-
     if parser is None:
-        #Política de fallback "allow" segue permissiva, "block" nega por segurança
-        if fallback_policy == "allow":
-            SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
-            return True
-        
+        #Fallback permissivo documentado para manter serviço disponível mesmo em falhas temporárias
+        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
         logger.info(
-            "robots_fallback_blocked",
+            "robots_fallback_allow",
             host=host_key,
             url=normalized_url,
             reason="parser_unavailable",
-            policy=fallback_policy,
         )
-        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="disallowed").inc()
-        return False
+        return True
 
     try:
         allowed = parser.can_fetch(user_agent, normalized_url)
@@ -215,19 +210,9 @@ async def is_allowed(
             user_agent=user_agent,
             error=str(exc),
         )
-        if fallback_policy == "allow":
-            SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
-            return True
-        
-        logger.info(
-            "robots_fallback_blocked",
-            host=host_key,
-            url=normalized_url,
-            reason="can_fetch_error",
-            policy=fallback_policy,
-        )
-        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="disallowed").inc()
-        return False
+        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
+        #Fallback permanece permissivo para garantir disponibilidade do pipeline
+        return True
     
     outcome = "allowed" if allowed else "disallowed"
     SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome=outcome).inc()

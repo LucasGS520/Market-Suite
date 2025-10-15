@@ -230,8 +230,6 @@ SCRAPER_CACHE_MAX_ENTRIES=5000
 SCRAPER_STEP_TIMEOUT_SECONDS=8.0
 SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
 
-SCRAPER_ROBOTS_FALLBACK=allow
-
 SCRAPER_HTTP_RETRIES=2
 SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
 
@@ -251,6 +249,14 @@ SCRAPER_PRICE_TOLERANCE=0.0
 #SCRAPER_DNS_CACHE_TTL=120
 
 ```
+
+> Política de fallback do robots.txt: o serviço assume comportamento permissivo
+> quando o arquivo não pode ser baixado ou interpretado. Essa decisão mantém o
+> pipeline funcional mesmo em cenários de instabilidade externa. Para adotar um
+> bloqueio conservador, atualize `market_scraper/utils/robots.py` substituindo o
+> retorno `True` em falhas por `False`, gere uma nova imagem do serviço e realize
+> rollout com monitoramento próximo das métricas `SCRAPER_ROBOTS_CHECK_TOTAL`.
+
 ## Recursos arquivados
 - `market_scraper/archive/domain_policy.py` e `market_scraper/archive/domain_policy.yaml` armazenam a versão anterior baseada em políticas dinâmicas por domínio. Para reativá-los, mova os arquivos de volta para `market_scraper/services`, ajuste os imports do pipeline e reabilite o carregamento de políticas conforme indicado nos comentários internos.
 - Demais utilitários legados permanecem preservados no diretório `market_scraper/archive/` e só devem ser restaurados caso o pipeline mínimo deixe de atender a um marketplace específico.

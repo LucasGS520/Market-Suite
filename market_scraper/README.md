@@ -21,7 +21,7 @@ Cada etapa registra métricas de latência e resultado (`success`, `empty`, `fai
 ## Validação de URLs e segurança
 - Apenas marketplaces listados em `market_scraper/utils/url_validation.py` são aceitos (Mercado Livre, Amazon Brasil e Magazine Luiza).
 - O módulo `market_scraper/utils/http_utils.py` evita SSRF resolvendo o host para endereços públicos, recusando IPs privados/loopback e aplicando cache com TTL e timeout configuráveis (`SCRAPER_DNS_CACHE_TTL`, `SCRAPER_DNS_TIMEOUT`). Métricas acompanham resoluções bem-sucedidas, bloqueios e falhas (`SCRAPER_DNS_RESOLVE_DURATION_SECONDS`, `SCRAPER_DNS_BLOCKED_TOTAL`).
-- O utilitário `market_scraper/utils/robots.py` reutiliza `robots.txt` por host durante uma hora, aplica retries com backoff e respeita a política definida em `SCRAPER_ROBOTS_FALLBACK` quando o parser falha. Se o site negar acesso, a etapa `FetchHTMLStep` retorna `unsupported_by_robots` e incrementa `SCRAPER_ROBOTS_CHECK_TOTAL` com o label `disallowed`.
+- O utilitário `market_scraper/utils/robots.py` reutiliza `robots.txt` por host durante uma hora, aplica retries com backoff e, diante de falhas de download ou parse, adota fallback permissivo documentado. Se o site negar acesso explicitamente, a etapa `FetchHTMLStep` retorna `unsupported_by_robots` e incrementa `SCRAPER_ROBOTS_CHECK_TOTAL` com o label `disallowed`.
 
 ## Cache resiliente
 O cache padrão utiliza `cachetools.TTLCache` com bloqueios internos (`market_scraper/utils/cache.py`). Principais características:
@@ -35,7 +35,7 @@ O cache padrão utiliza `cachetools.TTLCache` com bloqueios internos (`market_sc
 - **Singleflight** (`market_scraper/utils/singleflight.py`): reduz stampede de downloads concorrentes agrupando chamadas por URL, com métricas de espera e participação sempre ativas.
 - **DNS seguro** (`market_scraper/utils/http_utils.py`): restringe IPs privados, reutiliza resoluções em cache e falha rapidamente quando o host não é público.
 - **Parsing de preço** (`market_scraper/utils/price.py`): utiliza o `price-parser` como primeira estratégia e mantém fallback manual, contabilizando resultados em `SCRAPER_PRICE_PARSER_USAGE_TOTAL`.
-- **Robots configurável** (`market_scraper/utils/robots.py`): suporta parser alternativo com retries, cache local e fallback configurável (`allow` ou `block`).
+- **Robots permissivo** (`market_scraper/utils/robots.py`): utiliza apenas `urllib.robotparser`, mantém cache local com TTL e fallback permissivo quando o arquivo não é acessível.
 
 ## Configurações relevantes (`market_scraper/core/config_scraper.py`)
 - `SCRAPER_STEP_TIMEOUT_SECONDS` / `SCRAPER_PIPELINE_TIMEOUT_SECONDS` – limites de tempo do pipeline.
@@ -43,7 +43,6 @@ O cache padrão utiliza `cachetools.TTLCache` com bloqueios internos (`market_sc
 - `SCRAPER_HTTP_MAX_REDIRECTS`, `SCRAPER_HTTP_MAX_CONNECTIONS`, `SCRAPER_HTTP_MAX_KEEPALIVE`, `SCRAPER_HTTP_MAX_CONTENT_LENGTH` – limites defensivos.
 - `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES` - controle do cache em memória com LRU/TTL.
 - `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE` - controle de novas tentativas com backoff exponencial leve para downloads.
-- `SCRAPER_ROBOTS_FALLBACK` - define a política padrão quando o robots parser falha (`allow` ou `block`).
 - `SCRAPER_DNS_TIMEOUT` - timeout máximo para resolução DNS.
 - `SCRAPER_DNS_CACHE_TTL` - tempo em segundos que uma resolução DNS permanece em cache.
 - `SCRAPER_SINGLEFLIGHT_LOCK_TTL` - TTL dos locks do singleflight para reciclar entradas travadas.
@@ -60,8 +59,6 @@ SCRAPER_CACHE_MAX_ENTRIES=5000
 
 SCRAPER_STEP_TIMEOUT_SECONDS=8.0
 SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
-
-SCRAPER_ROBOTS_FALLBACK=allow
 
 SCRAPER_HTTP_RETRIES=2
 SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
@@ -81,6 +78,15 @@ SCRAPER_PRICE_TOLERANCE=0.0
 #SCRAPER_DNS_TIMEOUT=2
 #SCRAPER_DNS_CACHE_TTL=120
 ```
+
+### Política de fallback do robots.txt
+- Comportamento padrão: fallback permissivo (`allow`) quando `robots.txt` não pode ser obtido ou interpretado. Métrica `SCRAPER_ROBOTS_CHECK_TOTAL` registra o label `error` nesses casos.
+- Justificativa: evita quedas em massa do pipeline quando sites retornam erros intermitentes ou bloqueiam a leitura do arquivo.
+- Runbook para política conservadora (`block`):
+  1. Ajustar `market_scraper/utils/robots.py` para retornar `False` nos blocos de fallback, conforme comentários do arquivo.
+  2. Executar `pytest market_scraper/tests/unit/utils/test_robots.py` para validar as métricas e o novo comportamento.
+  3. Gerar imagem/container atualizado, aplicar rollout gradual e monitorar `SCRAPER_ROBOTS_CHECK_TOTAL` (labels `disallowed` e `error`) por domínio.
+  4. Se houver regressões relevantes, reverter o commit ou reinstaurar o fallback permissivo seguindo o mesmo fluxo.
 
 ## Métricas expostas
 As métricas estão em `shared/metrics/metrics_scraper.py`. Destaques:

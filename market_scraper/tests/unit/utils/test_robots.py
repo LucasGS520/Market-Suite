@@ -102,15 +102,14 @@ async def test_is_allowed_returns_false_when_robot_blocks(
 
 
 @pytest.mark.asyncio
-async def test_is_allowed_fallback_allow_retains_permissive_behavior(
+async def test_is_allowed_retains_permissive_behavior_when_parser_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ Confere fallback permissivo quando a política explícita for ``allow`` """
+    """ Confere fallback permissivo em indisponibilidade do parser """
     async def fake_get_parser(host: str, robots_url: str, *, timeout: float) -> DummyRobotParser | None:
         return None
     
     monkeypatch.setattr(robots, "_get_parser", fake_get_parser)
-    monkeypatch.setattr(robots.settings, "SCRAPER_ROBOTS_FALLBACK", "allow")
 
     error_metric = SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error")
     before = error_metric._value.get()  # type: ignore[attr-defined]
@@ -119,29 +118,6 @@ async def test_is_allowed_fallback_allow_retains_permissive_behavior(
 
     after = error_metric._value.get()  # type: ignore[attr-defined]
     assert after == before + 1
-
-@pytest.mark.asyncio
-async def test_is_allowed_fallback_block_denies_when_parser_missing(
-    monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
-) -> None:
-    """ Verifica que a política ``block`` nega acesso e registra a métrica correta """
-
-    async def fake_get_parser(host: str, robots_url: str, *, timeout: float) -> DummyRobotParser | None:
-        return None
-
-    monkeypatch.setattr(robots, "_get_parser", fake_get_parser)
-    monkeypatch.setattr(robots.settings, "SCRAPER_ROBOTS_FALLBACK", "block")
-
-    disallowed_metric = SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="disallowed")
-    before = disallowed_metric._value.get()  # type: ignore[attr-defined]
-
-    assert await robots.is_allowed("https://unstable.com/p") is False
-
-    after = disallowed_metric._value.get()  # type: ignore[attr-defined]
-    assert after == before + 1
-    captured = capfd.readouterr()
-    assert "robots_fallback_blocked" in captured.out or "robots_fallback_blocked" in captured.err
 
 @pytest.mark.asyncio
 async def test_download_robots_respects_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
