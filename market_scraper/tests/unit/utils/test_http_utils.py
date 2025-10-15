@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -53,8 +54,11 @@ def test_resolve_public_address_uses_cache(monkeypatch):
 
     from market_scraper.utils import http_utils
 
-    original_ttl = http_utils.settings.SCRAPER_DNS_CACHE_TTL
-    http_utils.settings.SCRAPER_DNS_CACHE_TTL = 60
+    fake_settings = SimpleNamespace(
+        SCRAPER_DNS_CACHE_TTL=60,
+        SCRAPER_DNS_TIMEOUT=getattr(http_utils.settings, "SCRAPER_DNS_TIMEOUT", 2.0),
+    )
+    monkeypatch.setattr(http_utils, "settings", fake_settings)
 
     calls: list[str] = []
 
@@ -67,11 +71,8 @@ def test_resolve_public_address_uses_cache(monkeypatch):
         _fake_resolver,
     )
 
-    try:
-        first = resolve_public_address("example.com")
-        second = resolve_public_address("example.com")
-    finally:
-        http_utils.settings.SCRAPER_DNS_CACHE_TTL = original_ttl
+    first = resolve_public_address("example.com")
+    second = resolve_public_address("example.com")
 
     assert first == ["8.8.8.8"]
     assert second == ["8.8.8.8"]

@@ -59,7 +59,6 @@ class DummyAsyncClient:
 async def test_download_html_retries_on_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Confirma que respostas 429 respeitam Retry-After antes de nova tentativa """
     url = "https://exemple.com/produto"
-    monkeypatch.setattr(settings, "SCRAPER_HTTP_RETRY_BACKOFF_BASE", 0.05)
     responses = iter(
         [
             httpx.Response(

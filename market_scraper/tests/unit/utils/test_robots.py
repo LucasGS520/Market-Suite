@@ -124,7 +124,6 @@ async def test_download_robots_respects_retry_after(monkeypatch: pytest.MonkeyPa
     """Garante que robots.txt é refeito após Retry-After válido"""
 
     robots_url = "https://example.com/robots.txt"
-    monkeypatch.setattr(robots.settings, "SCRAPER_HTTP_RETRY_BACKOFF_BASE", 0.05)
     responses = iter(
         [
             httpx.Response(

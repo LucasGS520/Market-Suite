@@ -15,7 +15,7 @@ from typing import Awaitable, Callable, Optional
 import httpx
 import structlog
 from tenacity import RetryCallState, retry, retry_if_exception_type, stop_after_attempt
-from tenacity.wait import wait_base, wait_exponential
+from tenacity.wait import wait_base
 
 from market_scraper.core.config_scraper import settings
 from shared.metrics.metrics_scraper import (
@@ -37,17 +37,28 @@ class RetryableHTTPError(Exception):
     status_code: Optional[int] = None
     retry_after: Optional[float] = None
 
+def _compute_wait_seconds(*, retry_state: RetryCallState, multiplier: float) -> float:
+    """ Calcula o tempo de espera aplicando Retry-After quando disponível """
+    attempt_index = max(retry_state.attempt_number - 1, 0)
+    base_wait = max(0.0, multiplier) * (2 ** attempt_index)
+
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if isinstance(exc, RetryableHTTPError) and exc.retry_after is not None:
+        #Retry-After prevalece quando informado pelo servidor de destino
+        return exc.retry_after
+    
+    return base_wait
+
 class _WaitRetryAfter(wait_base):
-    """ Combina backoff exponencial com respeito ao cabeçalho Retry-After """
+    """ Combina backoff exponencial simples com prioridade ao Retry-After """
     def __init__(self, *, multiplier: float) -> None:
-        self._base_wait = wait_exponential(multiplier=multiplier)
+        self._multiplier = multiplier
 
     def __call__(self, retry_state: RetryCallState) -> float:
-        base_wait = self._base_wait(retry_state)
-        exc = retry_state.outcome.exception() if retry_state.outcome else None
-        if isinstance(exc, RetryableHTTPError) and exc.retry_after is not None:
-            return max(base_wait, exc.retry_after)
-        return base_wait
+        return _compute_wait_seconds(
+            retry_state=retry_state,
+            multiplier=self._multiplier,
+        )
     
 def _parse_retry_after(header_value: Optional[str]) -> Optional[float]:
     """ Traduz o cabeçalho ``Retry-After`` em segundos de espera quando válido """
@@ -86,14 +97,21 @@ def _categorize_reason(status_code: Optional[int]) -> str:
         return "server_error"
     return "network_error"
 
-def _before_sleep_factory(target: str) -> Callable[[RetryCallState], None]:
+def _before_sleep_factory(
+    *,
+    target: str,
+    multiplier: float,
+) -> Callable[[RetryCallState], None]:
     """ Registra métricas e logs antes de aguardar uma nova tentativa """
     def _before_sleep(retry_state: RetryCallState) -> None:
         exc = retry_state.outcome.exception() if retry_state.outcome else None
         if not isinstance(exc, RetryableHTTPError):
             return
 
-        wait_seconds = getattr(retry_state, "upcoming_sleep", 0.0) or 0.0
+        wait_seconds = _compute_wait_seconds(
+            retry_state=retry_state,
+            multiplier=multiplier,
+        )
 
         SCRAPER_HTTP_RETRIES_TOTAL.labels(
             target=target,
@@ -116,15 +134,14 @@ def _before_sleep_factory(target: str) -> Callable[[RetryCallState], None]:
 def _build_retry_decorator(*, target: str) -> Callable[[Callable[..., Awaitable[httpx.Response]]], Callable[..., Awaitable[httpx.Response]]]:
     """ Monta o decorador de retry reutilizando configurações globais """
     attempts = max(1, settings.SCRAPER_HTTP_RETRIES + 1)
-    wait_strategy = _WaitRetryAfter(
-        multiplier=max(0.0, settings.SCRAPER_HTTP_RETRY_BACKOFF_BASE)
-    )
+    multiplier = max(0.0, settings.SCRAPER_HTTP_RETRY_BACKOFF_BASE)
+    wait_strategy = _WaitRetryAfter(multiplier=multiplier)
 
     return retry(
         retry=retry_if_exception_type(RetryableHTTPError),
         stop=stop_after_attempt(attempts),
         wait=wait_strategy,
-        before_sleep=_before_sleep_factory(target),
+        before_sleep=_before_sleep_factory(target=target, multiplier=multiplier),
         reraise=True,
     )
 
