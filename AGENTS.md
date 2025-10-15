@@ -33,10 +33,10 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 
 ## Atualização rápida — Market Scraper enxuto
 - A rota ativa para scraping é `POST /scraper/parse` (alias `/scrape/parse`) utilizando `ParserResponse` como contrato.
-- O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py` e utilizam singleflight + retries com backoff para reduzir stampede e respeitar `Retry-After`.
+- O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py` e utilizam singleflight permanente com retries simples (tenacity respeitando `Retry-After`).
 - `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
 - O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Os limites são ajustados por `SCRAPER_CACHE_TTL_SECONDS` e `SCRAPER_CACHE_MAX_ENTRIES`.
-- Parâmetros essenciais ficam explícitos no `.env.market_scraper`: TTL e tamanho do cache em memória, retries HTTP (`2`), política de fallback de robots (`allow`) e TTL dos locks de singleflight. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout.
+- Parâmetros essenciais ficam explícitos no `.env.market_scraper`: TTL e tamanho do cache em memória, retries HTTP (`2`), política de fallback de robots (`allow`) e TTL dos locks de singleflight. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout. Consulte `docs/runbook_scraper.md` para o passo a passo de deploy e rollback.
 - `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é fixa e permissiva (allow) para manter disponibilidade. Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 ## Visão Geral da Arquitetura e Serviços
@@ -67,14 +67,14 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 
 #### Pipeline padrão e fallback
 - Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep`, utilizando `price-parser` como primeira heurística textual.
-- `FetchHTMLStep` normaliza URL, verifica `robots.txt`, consulta singleflight/cache e baixa o HTML com `httpx` usando retries com backoff (respeitando `Retry-After`).
+- `FetchHTMLStep` normaliza URL, verifica `robots.txt`, consulta singleflight e o cache em memória antes de baixar o HTML com `httpx` usando retries simples (até duas tentativas extras respeitando `Retry-After`).
 - Cada parser valida o payload com `DataQualityValidator`; quando nenhum retorna resultado válido o endpoint responde com `no_result`.
 - Métricas principais: `SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_STEP_FALLBACK_TOTAL`, `SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_HTTP_RETRY_BACKOFF_SECONDS` e `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 #### Validação, cache e segurança
 - `market_scraper/utils/url_validation.py` garante que a URL pertença aos marketplaces suportados e bloqueia hosts privados (SSRF).
 - `market_scraper/utils/http_utils.py` resolve endereços públicos com cache/timeout configuráveis (`SCRAPER_DNS_CACHE_TTL`, `SCRAPER_DNS_TIMEOUT`) e bloqueia IPs privados antes do download.
-- `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host, aplica retries com backoff, devolve `unsupported_by_robots` quando o acesso é negado e assume fallback permissivo documentado em falhas de download/parse.
+- `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host, aplica retries simples, devolve `unsupported_by_robots` quando o acesso é negado e assume fallback permissivo documentado em falhas de download/parse.
 - Cache padrão em memória usa LRU/TTL com métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Não há backend alternativo carregado por padrão.
 - O arquivo `.env.market_scraper` lista apenas parâmetros de tuning (TTL, limites de cache e timeouts); mantenha os comentários desligados até ajustar limites HTTP específicos.
 
@@ -98,7 +98,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - `pytest market_scraper/tests/unit/utils -q`
 - `pytest market_scraper/tests/unit/services -q`
 - `pytest market_scraper/tests/integration/routes/test_parse.py -q`
-- Utilize fixtures em `market_scraper/tests/fixtures/` para simular respostas de marketplaces e Redis quando necessário.
+- Utilize fixtures em `market_scraper/tests/fixtures/` para simular respostas de marketplaces quando necessário.
 
 #### Checklist para novas etapas do pipeline
 1. Criar a classe herdando de `PipelineStep` em `market_scraper/services/pipeline_steps.py` (ou módulo dedicado).

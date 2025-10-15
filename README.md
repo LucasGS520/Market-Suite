@@ -80,7 +80,15 @@ Para detalhes operacionais consulte também [`market_scraper/README.md`](market_
 - Todas as requisições passam por um pipeline sequencial definido em `market_scraper/services/pipeline_steps.py`.
 - A sequência padrão cumpre o requisito mínimo (`FetchHTML` → `JSON‑LD` → `HTML meta` → `fallback genérico`) e registra métricas de latência/sucesso por etapa.
 - O `shared_context` do pipeline armazena URL normalizada, HTML, domínio de origem e o payload validado, permitindo que cada etapa opere de forma independente.
-- A etapa `FetchHTMLStep` valida `robots.txt`, consulta cache local/Redis (quando configurado) e aplica limites de timeout com `httpx`.
+- A etapa `FetchHTMLStep` valida `robots.txt`, aciona o cache em memória (LRU + TTL) e aplica limites de timeout com `httpx`.
+
+### Decisões operacionais do `market_scraper`
+- **Cache único em memória**: todo o serviço utiliza `cachetools.TTLCache` com política LRU. Os limites `SCRAPER_CACHE_TTL_SECONDS` e `SCRAPER_CACHE_MAX_ENTRIES` definem o comportamento e não há backends alternativos em produção.
+- **Singleflight permanente**: a deduplicação de downloads roda em todas as chamadas do `FetchHTMLStep`, reduzindo stampede quando vários workers consultam a mesma URL.
+- **Robots.txt permissivo em falhas**: o módulo `urllib.robotparser` é consultado antes de qualquer download; se o arquivo não puder ser obtido ou interpretado o acesso é liberado e o evento fica registrado nas métricas.
+- **Retries simples com tenacity**: o downloader usa até duas tentativas extras (`SCRAPER_HTTP_RETRIES`) respeitando cabeçalhos `Retry-After`, sem políticas paralelas de backoff.
+- **Validação de DNS obrigatória**: apenas endereços públicos são aceitos; falhas de resolução levantam `HostResolutionError` e encerram a requisição.
+- **Price parser único**: o `price-parser` processa todo texto relevante retornado pelos parsers, removendo a necessidade de estratégias alternadas.
 
 ### Componentes principais
 - **main.py** – instancia a aplicação FastAPI e registra rotas de saúde, scraping e métricas.
