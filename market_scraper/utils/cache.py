@@ -27,24 +27,24 @@ class _InstrumentedTTLCache(TTLCache):
     """ Estende ``TTLCache`` para registrar remoções e TTL por item """
     def __init__(self, maxsize: int, ttl: int) -> None:
         super().__init__(maxsize=maxsize, ttl=ttl, timer=time.monotonic)
-        self._on_enviction: Optional[Callable[[int, str], None]] = None
+        self._on_eviction: Optional[Callable[[int, str], None]] = None
 
     def configure_eviction_callback(self, callback: Callable[[int, str], None]) -> None:
         """ Associa callback invocado sempre que ocorrer uma remoção """
-        self._on_enviction = callback
+        self._on_eviction = callback
 
     def expire(self, time: Optional[float] = None):
         """ Remove itens expirados notificando o callback configurado """
         expired = super().expire(time)
-        if expired and self._on_enviction is not None:
-            self._on_enviction(len(expired), "expired")
+        if expired and self._on_eviction is not None:
+            self._on_eviction(len(expired), "expired")
         return expired
     
     def popitem(self):
         """ Remove item LRU e registra eviction por capacidade """
         item = super().popitem()
-        if self._on_enviction is not None:
-            self._on_enviction(1, "capacity")
+        if self._on_eviction is not None:
+            self._on_eviction(1, "capacity")
         return item
     
     def set_with_ttl(self, key: str, value: str, ttl_seconds: int) -> None:
@@ -53,8 +53,8 @@ class _InstrumentedTTLCache(TTLCache):
         current_time = self.timer()
         #Evita tratar ``timer`` como context manager, pois é função simples
         expired = super().expire(current_time)
-        if expired and self._on_enviction is not None:
-            self._on_enviction(len(expired), "expired")
+        if expired and self._on_eviction is not None:
+            self._on_eviction(len(expired), "expired")
         Cache.__setitem__(self, key, value)
         try:
             link = self._TTLCache__getlink(key)
