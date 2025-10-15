@@ -3,10 +3,10 @@ from __future__ import annotations
 """ Funções de parsing utilizando BeautifulSoup
 
 O objetivo do módulo é oferecer um ponto único para extração simples
-de nome e preço a partir de HTML estático. Ele funcionna como complemento
-ao ``html_static.py`` e matém a mesma interface das demais bibliotecas
+de nome e preço a partir de HTML estático. Ele funciona como complemento
+ao ``html_static.py`` e mantém a mesma interface das demais bibliotecas
 de parsing utilizadas no projeto. As saídas são preparadas para que o 
-``DataQualityValidator`` consiga interpretar os valores sem ambuiguidades.
+``DataQualityValidator`` consiga interpretar os valores sem ambiguidades.
 
 Exemplo
 -------
@@ -23,6 +23,25 @@ import re
 from bs4 import BeautifulSoup
 
 HTML_METADATA_SOURCE = "html_metadata"
+
+_NAME_SELECTORS = [
+    ("meta", {"property": "og:title"}),
+    ("meta", {"name": "title"}),
+    ("meta", {"itemprop": "name"}),
+    ("h1", {}),
+    ("title", {}),
+]
+
+_PRICE_SELECTORS = [
+    ("meta", {"itemprop": "price"}),
+    ("meta", {"property": "product:price:amount"}),
+    ("meta", {"name": "twitter:data1"}),
+    ("span", {"id": "price"}),
+    ("span", {"class": "price"}),
+    ("div", {"class": "price"}),
+    ("span", {"data-price": True}),
+    ("data", {"itemprop": "price"}),
+]
 
 def _clean_text(value: str | None) -> str:
     """ Normaliza strings removendo espaços extras """
@@ -53,14 +72,8 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
     """
     soup = BeautifulSoup(html, "lxml")
 
-    name_candidates = [
-        ("meta", {"property": "og:title"}),
-        ("meta", {"name": "title"}),
-        ("h1", {}),
-        ("title", {}),
-    ]
     name = ""
-    for tag, attrs in name_candidates:
+    for tag, attrs in _NAME_SELECTORS:
         element = soup.find(tag, attrs=attrs)
         if not element:
             continue
@@ -71,20 +84,15 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
         if name:
             break
 
-    price_selectors = [
-        ("meta", {"itemprop": "price"}),
-        ("meta", {"property": "product:price:amount"}),
-        ("span", {"id": "price"}),
-        ("span", {"class": "price"}),
-        ("div", {"class": "price"}),
-    ]
     price = ""
-    for tag, attrs in price_selectors:
+    for tag, attrs in _PRICE_SELECTORS:
         element = soup.find(tag, attrs=attrs)
         if not element:
             continue
         if element.name == "meta":
             price = _clean_price_text(element.get("content"))
+        elif element.name == "data":
+            price = _clean_price_text(element.get("value"))
         else:
             price = _clean_price_text(element.get_text())
         if price:
