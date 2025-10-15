@@ -60,6 +60,20 @@ def test_get_respects_ttl_expiration(cache_factory: Callable[[], None]) -> None:
 
     assert cache.get("https://exemplo.com/promo") is None
     assert SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired")._value.get() == 1.0
+    assert SCRAPER_CACHE_SIZE._value.get() == 0.0
+
+def test_get_updates_metrics_when_multiple_entries_expire(cache_factory: Callable[[], None]) -> None:
+    """ Confirma contagem correta de TTL ao expirar vários itens simultaneamente """
+    cache_factory(ttl_seconds=1)
+    from market_scraper.utils import cache
+
+    cache.set("https://exemplo.com/ttl1", "<html>1</html>", ttl_seconds=1)
+    cache.set("https://exemplo.com/ttl2", "<html>2</html>", ttl_seconds=1)
+    time.sleep(1.1)
+
+    assert cache.get("https://exemplo.com/ttl1") is None
+    assert SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired")._value.get() == 2.0
+    assert SCRAPER_CACHE_SIZE._value.get() == 0.0
 
 def test_set_accepts_custom_ttl(cache_factory: Callable[[], None]) -> None:
     """ Confirma que cada escrita pode definir TTL menor que o padrão global """
@@ -70,6 +84,21 @@ def test_set_accepts_custom_ttl(cache_factory: Callable[[], None]) -> None:
     time.sleep(1.1)
 
     assert cache.get("https://exemplo.com/custom") is None
+
+def test_set_updates_metrics_when_expired_entries_are_cleaned(
+    cache_factory: Callable[[], None]
+) -> None:
+    """ Garante que ``set`` registra remoções de TTL anteriores à nova escrita """
+    cache_factory(ttl_seconds=1)
+    from market_scraper.utils import cache
+
+    cache.set("https://exemplo.com/antigo", "<html>antigo</html>", ttl_seconds=1)
+    time.sleep(1.1)
+
+    cache.set("https://exemplo.com/novo", "<html>novo</html>", ttl_seconds=60)
+
+    assert SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired")._value.get() == 1.0
+    assert SCRAPER_CACHE_SIZE._value.get() == 1.0
 
 def test_invalidate_removes_entry(cache_factory: Callable[[], None]) -> None:
     """ Assegura que ``invalidate`` elimina itens específicos do cache """
@@ -123,4 +152,3 @@ def test_clear_resets_metrics_and_restarts_hit_rate(cache_factory: Callable[[], 
     assert cache.get("https://exemplo.com/novo") == "<html>novo</html>"
 
     assert SCRAPER_CACHE_HIT_RATE._value.get() == 1.0
-    

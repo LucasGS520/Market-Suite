@@ -33,12 +33,14 @@ class _InstrumentedTTLCache(TTLCache):
         """ Associa callback invocado sempre que ocorrer uma remoção """
         self._on_eviction = callback
 
-    def expire(self, time: Optional[float] = None):
+    def expire(self, time: Optional[float] = None) -> int:
         """ Remove itens expirados notificando o callback configurado """
-        expired = super().expire(time)
-        if expired and self._on_eviction is not None:
-            self._on_eviction(len(expired), "expired")
-        return expired
+        before = Cache.__len__(self)
+        super().expire(time)
+        removed = before - Cache.__len__(self)
+        if removed > 0 and self._on_eviction is not None:
+            self._on_eviction(removed, "expired")
+        return removed
     
     def popitem(self):
         """ Remove item LRU e registra eviction por capacidade """
@@ -47,14 +49,16 @@ class _InstrumentedTTLCache(TTLCache):
             self._on_eviction(1, "capacity")
         return item
     
-    def set_with_ttl(self, key: str, value: str, ttl_seconds: int) -> None:
-        """ Replica ``__setitem__`` permitindo TTL individual por chave """
+    def set_with_ttl(self, key: str, value: str, ttl_seconds: int) -> int:
+        """ Replica ``__setitem__`` permitindo TTL individual e retorna expirados """
         ttl_seconds = max(ttl_seconds, 0)
         current_time = self.timer()
-        #Evita tratar ``timer`` como context manager, pois é função simples
-        expired = super().expire(current_time)
-        if expired and self._on_eviction is not None:
-            self._on_eviction(len(expired), "expired")
+        #Evita tratar ``time`` como context manager, função simples
+        before = Cache.__len__(self)
+        super().expire(current_time)
+        removed = before - Cache.__len__(self)
+        if removed > 0 and self._on_eviction is not None:
+            self._on_eviction(removed, "expired")
         Cache.__setitem__(self, key, value)
         try:
             link = self._TTLCache__getlink(key)
@@ -70,6 +74,7 @@ class _InstrumentedTTLCache(TTLCache):
         link.next = root
         link.prev = prev
         prev.next = root.prev = link
+        return removed
 
 class InMemoryTTLCacheAdapter:
     """ Adapter em memória com LRU/TTL e instrumentação de métricas """
@@ -84,7 +89,8 @@ class InMemoryTTLCacheAdapter:
 
     def _record_eviction(self, count: int, reason: str) -> None:
         """ Atualiza contadores quando itens são removidos do cache """
-        SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason=reason).inc(count)
+        if reason == "capacity":
+            SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason=reason).inc(count)
         SCRAPER_CACHE_SIZE.set(len(self._cache))
 
     def _update_hit_rate(self) -> None:
@@ -96,8 +102,10 @@ class InMemoryTTLCacheAdapter:
     def get(self, url: str) -> Optional[str]:
         """ Busca HTML armazenado registrando métricas de hit/miss """
         with self._lock:
-            expired = self._cache.expire()
-            if expired:
+            removed_by_ttl = self._cache.expire()
+            if removed_by_ttl > 0:
+                #Atualiza métricas manualmente porque o callback ignora remoções por TTL
+                SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired").inc(removed_by_ttl)
                 SCRAPER_CACHE_SIZE.set(len(self._cache))
             try:
                 value = self._cache[url]
@@ -115,7 +123,9 @@ class InMemoryTTLCacheAdapter:
     def set(self, url: str, html: str, ttl_seconds: int) -> None:
         """ Armazena HTML respeitando TTL informado e política LRU """
         with self._lock:
-            self._cache.set_with_ttl(url, html, ttl_seconds)
+            removed_by_ttl = self._cache.set_with_ttl(url, html, ttl_seconds)
+            if removed_by_ttl > 0:
+                SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired").inc(removed_by_ttl)
             SCRAPER_CACHE_SIZE.set(len(self._cache))
 
     def invalidate(self, url: str) -> None:
