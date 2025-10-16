@@ -38,6 +38,9 @@ from shared.metrics.metrics_scraper import (
 )
 
 _CLOUDSCRAPER_SNIPPET_MAX_BYTES = 512
+_BINARY_HEURISTIC_MIN_BYTES = 64
+_BINARY_HEURISTIC_NON_PRINTABLE_THRESHOLD = 0.35
+_PRINTABLE_EXTRA_BYTES = {9, 10, 13}
 
 logger = structlog.get_logger("pipeline_steps")
 ParserCallable = Callable[[str, str], Mapping[str, Any] | None]
@@ -208,7 +211,7 @@ def _log_client_error(*, response: httpx.Response, url: str, domain: str | None,
     )
 
 def _should_trigger_cloudscraper(*, response: httpx.Response, domain: str | None) -> bool:
-    """ Identifica sinais de Cloudflare ou domínios com fallback obrigatório """
+    """ Decide quando acionar o fallback do cloudscraper com base em heuristicas """
     if not settings.SCRAPER_USE_CLOUDSCRAPER_FALLBACK:
         return False
     
@@ -216,14 +219,53 @@ def _should_trigger_cloudscraper(*, response: httpx.Response, domain: str | None
     if normalized_domain in settings.SCRAPER_CLOUDSCRAPER_DOMAINS:
         return True
     
-    if response.status_code not in {403, 503}:
-        return False
+    status_code = response.status_code
+    snippet = _extract_response_snippet(response)
+    looks_like_binary = _response_seems_binary(response.content)
+
+    if status_code in {400, 403, 429, 503}:
+        #As respostas 400/429 do Mercado Livre costumam trazer payload comprimido/anti-bot
+        if status_code in {400, 429} and looks_like_binary:
+            return True
+        
+        if _contains_anti_bot_markers(snippet):
+            return True
+        
+        if status_code in {403, 503} and looks_like_binary:
+            return True
+        
+    if 400 <= status_code < 500 and looks_like_binary:
+        #Requisições bloqueadas por proteções sofisticadas costumam retornar 4xx com conteúdo binário
+        return True
     
-    #O trecho analisado é limitado em bytes para evitar custos desnecessários com payloads grandes
+    return False
+
+def _extract_response_snippet(response: httpx.Response) -> str:
+    """ Produz trecho legível da resposta limitado em bytes para análise rápida """
     raw_snippet = response.content[:_CLOUDSCRAPER_SNIPPET_MAX_BYTES]
     encoding = response.encoding or "utf-8"
-    snippet = raw_snippet.decode(encoding, errors="replace").lower()
-    return "cloudflare" in snippet or "checking your browser" in snippet or "attention required" in snippet
+    return raw_snippet.decode(encoding, errors="replace").lower()
+
+def _contains_anti_bot_markers(snippet: str) -> bool:
+    """ Busca palavras-chave comuns de bloqueios (Cloudflare e similares) """
+    return any(marker in snippet for marker in ("cloudflare", "checking your browser", "attention required"))
+
+def _response_seems_binary(content: bytes) -> bool:
+    """ Avalia se o payload possui alta proporção de bytes não imprimíveis """
+    if not content:
+        return False
+
+    sample = content[:_CLOUDSCRAPER_SNIPPET_MAX_BYTES]
+    if len(sample) < _BINARY_HEURISTIC_MIN_BYTES:
+        return False
+
+    printable = 0
+    for byte in sample:
+        if 32 <= byte <= 126 or byte in _PRINTABLE_EXTRA_BYTES:
+            printable += 1
+
+    non_printable_ratio = 1 - (printable / len(sample))
+    return non_printable_ratio >= _BINARY_HEURISTIC_NON_PRINTABLE_THRESHOLD
 
 async def _run_cloudscraper_fallback(
     *, url: str, headers: Mapping[str, str], timeout: float, domain: str | None
