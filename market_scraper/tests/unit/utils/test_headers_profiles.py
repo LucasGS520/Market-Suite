@@ -47,4 +47,3 @@ def test_compose_headers_referer_e_resposta_isolada() -> None:
     assert "Referer" not in headers_segunda_chamada
     headers_primeira_chamada["Accept"] = "alterado"
     assert headers_segunda_chamada["Accept"] == settings.SCRAPER_HEADERS_ACCEPT
-    

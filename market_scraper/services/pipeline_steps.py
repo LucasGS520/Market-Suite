@@ -8,10 +8,13 @@ colaterais e facilitando testes.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Callable, Mapping
+from urllib.parse import urlparse
 
 import httpx
 import structlog
+import cloudscraper
 
 from shared.utils.logging_utils import sanitize_log_data
 
@@ -22,12 +25,18 @@ from market_scraper.parsers import (
     parse_with_extruct,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext, PipelineStep, StepResult
-from market_scraper.utils import cache, robots, singleflight
+from market_scraper.utils import cache, robots, singleflight, ua_provider
+from market_scraper.utils.headers_profiles import compose_headers
 from market_scraper.utils.http_retry import(
     RetryableHTTPError,
     build_retrying_operation,
 )
 from market_scraper.utils.validator import DataQualityValidator
+from shared.metrics.metrics_scraper import (
+    SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
+    SCRAPER_HTTP_CLIENT_ERROR_TOTAL,
+    SCRAPER_UA_ROTATION_TOTAL,
+)
 
 
 logger = structlog.get_logger("pipeline_steps")
@@ -82,7 +91,15 @@ def _run_parser_with_validation(
 
 async def download_html(url: str, *, timeout: float) -> str:
     """ Baixa o HTML usando ``httpx`` com limites rígidos de segurança """
-    headers = {"User-Agent": "marketsuite-scraper/1.0", "Accept": "text/html"}
+    user_agent = ua_provider.get_user_agent(url)
+    domain = _extract_domain(url)
+    SCRAPER_UA_ROTATION_TOTAL.labels(
+        strategy=settings.SCRAPER_USER_AGENT_ROTATION_STRATEGY.lower(),
+        domain=domain or "unknown",
+    ).inc()
+
+    referer = _build_referer(url)
+    headers = compose_headers(user_agent, referer=referer)
     
     client_timeout = httpx.Timeout(
         timeout,
@@ -114,6 +131,26 @@ async def download_html(url: str, *, timeout: float) -> str:
             raise exc.__cause__
         raise httpx.HTTPError("Falha ao baixar HTML após retries") from exc
     
+    if 400 <= response.status_code < 500:
+        _log_client_error(response=response, url=url, domain=domain, user_agent=user_agent)
+
+        if _should_trigger_cloudscraper(response=response, domain=domain):
+            fallback_response = await _run_cloudscraper_fallback(
+                url=url,
+                headers=headers,
+                timeout=timeout,
+                domain=domain,
+            )
+            if fallback_response is not None:
+                response = fallback_response
+                if 400 <= response.status_code < 500:
+                    _log_client_error(
+                        response=response,
+                        url=url,
+                        domain=domain,
+                        user_agent=user_agent,
+                    )
+
     response.raise_for_status()
 
     content = response.content
@@ -122,6 +159,106 @@ async def download_html(url: str, *, timeout: float) -> str:
     
     #Retornamos o texto decodificado após validar o tamanho bruto para evitar ataques de payload gigante
     return response.text
+
+def _extract_domain(url: str) -> str | None:
+    """ Normaliza o domínio da URL para métricas e logs """
+    parsed = urlparse(url)
+    return parsed.hostname
+
+def _build_referer(url: str) -> str | None:
+    """ Monta Referer opcional baseado no template configurado """
+    template = settings.SCRAPER_HEADERS_REFERER_TEMPLATE
+    if not template:
+        return None
+    
+    domain = _extract_domain(url)
+    if not domain:
+        return None
+    
+    try:
+        return template.format(domain=domain, url=url)
+    except Exception:
+        #Quando o template é inválido evitamos quebrar o download e omitimos o header
+        logger.warning(
+            "referer_template_error",
+            template=sanitize_log_data(template),
+            url=sanitize_log_data(url),
+        )
+        return None
+    
+def _log_client_error(*, response: httpx.Response, url: str, domain: str | None, user_agent: str) -> None:
+    """ Registra contexto resumido de respostas 4xx para diagnóstico """
+    domain_label = domain or "unknown"
+    SCRAPER_HTTP_CLIENT_ERROR_TOTAL.labels(domain=domain_label, status=str(response.status_code)).inc()
+
+    body_excerpt = None
+    if settings.SCRAPER_LOG_4XX_BODY:
+        body_excerpt = sanitize_log_data(response.text[: settings.SCRAPER_LOG_4XX_MAX_BYTES])
+
+    logger.warning(
+        "http_client_error",
+        domain=domain_label,
+        url=sanitize_log_data(url),
+        status_code=response.status_code,
+        body_excerpt=body_excerpt,
+        user_agent=sanitize_log_data(user_agent),
+    )
+
+def _should_trigger_cloudscraper(*, response: httpx.Response, domain: str | None) -> bool:
+    """ Identifica sinais de Cloudflare ou domínios com fallback obrigatório """
+    if not settings.SCRAPER_USE_CLOUDSCRAPER_FALLBACK:
+        return False
+    
+    normalized_domain = (domain or "").lower()
+    if normalized_domain in settings.SCRAPER_CLOUDSCRAPER_DOMAINS:
+        return True
+    
+    if response.status_code not in {403, 503}:
+        return False
+    
+    snippet = response.text[:512].lower()
+    return "cloudflare" in snippet or "checking your browser" in snippet or "attention required" in snippet
+
+async def _run_cloudscraper_fallback(
+    *, url: str, headers: Mapping[str, str], timeout: float, domain: str | None
+) -> httpx.Response | None:
+    """ Executa fallback com cloudscraper respeitando singleflight e métricas """
+    async def _producer() -> httpx.Response:
+        return await _execute_cloudscraper_request(url=url, headers=headers, timeout=timeout)
+    
+    try:
+        response = await singleflight.coalesce(f"cloudscraper:{url}", _producer)
+    except Exception as exc:
+        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL.labels(
+            domain=(domain or "unknown"), outcome="error"
+        ).inc()
+        logger.warning(
+            "cloudscraper_fallback_error",
+            url=sanitize_log_data(url),
+            domain=domain or "unknown",
+            error=sanitize_log_data(str(exc)),
+        )
+        return None
+    
+    SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL.labels(
+        domain=(domain or "unknown"), outcome="success"
+    ).inc()
+    return response
+
+async def _execute_cloudscraper_request(
+    *, url: str, headers: Mapping[str, str], timeout: float
+) -> httpx.Response:
+    """ Executa requisição síncrona via cloudscraper dentro de executor """
+    loop = asyncio.get_running_loop()
+
+    def _run() -> tuple[int, dict[str, str], bytes]:
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(url, headers=dict(headers), timeout=timeout)
+        return response.status_code, dict(response.headers), response.content
+    
+    status_code, response_headers, content = await loop.run_in_executor(None, _run)
+    request = httpx.Request("GET", url, headers=headers)
+    return httpx.Response(status_code, headers=response_headers, content=content, request=request)
 
 class FetchHTMLStep(PipelineStep):
     """ Obtém o HTML bruto e o disponibiliza no contexto compartilhado 

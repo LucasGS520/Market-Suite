@@ -131,6 +131,24 @@ SCRAPER_HTTP_RETRY_BACKOFF_SECONDS = Histogram(
     buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
 )
 
+SCRAPER_HTTP_CLIENT_ERROR_TOTAL = Counter(
+    "scraper_http_client_error_total",
+    "Total de respostas 4xx observadas durante downloads HTML",
+    ["domain", "status"],
+)
+
+SCRAPER_UA_ROTATION_TOTAL = Counter(
+    "scraper_ua_rotation_total",
+    "Total de User-Agents atribuídos durante o download de HTML",
+    ["strategy", "domain"],
+)
+
+SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL = Counter(
+    "scraper_cloudscraper_fallback_total",
+    "Total de ativações do fallback com cloudscraper",
+    ["domain", "outcome"],
+)
+
 SCRAPING_SUSPENDED_FLAG = Gauge(
     "scraping_suspended_flag",
     "Flag de suspensão global de scraping controlado via Redis",
@@ -162,6 +180,9 @@ __all__ = [
     "SCRAPER_SINGLEFLIGHT_WAIT_SECONDS",
     "SCRAPER_HTTP_RETRIES_TOTAL",
     "SCRAPER_HTTP_RETRY_BACKOFF_SECONDS",
+    "SCRAPER_HTTP_CLIENT_ERROR_TOTAL",
+    "SCRAPER_UA_ROTATION_TOTAL",
+    "SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL",
     "SCRAPING_SUSPENDED_FLAG",
     "SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS",
     "SCRAPER_STEP_SUCCESS_TOTAL",

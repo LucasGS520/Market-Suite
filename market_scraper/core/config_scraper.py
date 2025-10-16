@@ -124,22 +124,50 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_FAKE_UA_FETCH_TIMEOUT_SECONDS", "2.0")
     )  #Tempo limite para obter UA do fake-useragent
 
-    SCRAPER_HEADER_ACCEPT: str = os.getenv(
-        "SCRAPER_HEADER_ACCEPT",
+    SCRAPER_HEADERS_ACCEPT: str = os.getenv(
+        "SCRAPER_HEADERS_ACCEPT",
         "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp," "image/apng,*/*;q=0.8",
     )  #Valor do header Accept padrão
-    SCRAPER_HEADER_ACCEPT_LANGUAGE: str = os.getenv(
-        "SCRAPER_HEADER_ACCEPT_LANGUAGE",
+    SCRAPER_HEADERS_ACCEPT_LANGUAGE: str = os.getenv(
+        "SCRAPER_HEADERS_ACCEPT_LANGUAGE",
         "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
     )  #Valor do header Accept-Language padrão
-    SCRAPER_HEADER_CONNECTION: str = os.getenv(
-        "SCRAPER_HEADER_CONNECTION",
+    SCRAPER_HEADERS_CONNECTION: str = os.getenv(
+        "SCRAPER_HEADERS_CONNECTION",
         "keep-alive",
     )  #Valor do header Connection padrão
-    SCRAPER_HEADER_REFERER_TEMPLATE: str | None = os.getenv(
-        "SCRAPER_HEADER_REFERER_TEMPLATE",
+    SCRAPER_HEADERS_REFERER_TEMPLATE: str | None = os.getenv(
+        "SCRAPER_HEADERS_REFERER_TEMPLATE",
         None,
     )  #Template opcional para construir Referer dinâmico
+
+    SCRAPER_LOG_4XX_BODY: bool = os.getenv("SCRAPER_LOG_4XX_BODY", "false").lower() in {
+        "1",
+        "True",
+        "true",
+        "yes",
+        "on",
+    } #Controla logging do corpo em respostas 4xx
+    SCRAPER_LOG_4XX_MAX_BYTES: int = int(
+        os.getenv("SCRAPER_LOG_4XX_MAX_BYTES", "512")
+    ) #Limite de bytes registrados do corpo 4xx
+
+    SCRAPER_USE_CLOUDSCRAPER_FALLBACK: bool = os.getenv(
+        "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", 
+        "true",
+    ).lower() in {"1", "True", "true", "yes", "on"}
+    SCRAPER_CLOUDSCRAPER_DOMAINS: Tuple[str, ...] = tuple(
+        sorted(
+            {
+                domain.strip().lower()
+                for domain in os.getenv("SCRAPER_CLOUDSCRAPER_DOMAINS", "").split(",")
+                if domain.strip()
+            }
+        )
+    ) #Domínios com fallback obrigatório
+    SCRAPER_CLOUDSCRAPER_TIMEOUT_SECONDS: float = float(
+        os.getenv("SCRAPER_CLOUDSCRAPER_TIMEOUT_SECONDS", "10.0")
+    ) #Timeout para chamadas sincronas do cloudscraper
 
 #Instância única de settings para a aplicação
 settings = Settings()
