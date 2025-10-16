@@ -3,11 +3,39 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
+import sys
 from collections.abc import Iterator
 from typing import Any
+from types import ModuleType, SimpleNamespace
 
 import httpx
 import pytest
+
+if "selectolax" not in sys.modules:
+    _selectolax_module = ModuleType("selectolax")
+    _selectolax_parser = ModuleType("selectolax.parser")
+    setattr(_selectolax_parser, "HTMLParser", object)
+    setattr(_selectolax_module, "parser", _selectolax_parser)
+    sys.modules["selectolax"] = _selectolax_module
+    sys.modules["selectolax.parser"] = _selectolax_parser
+
+if "price_parser" not in sys.modules:
+    _price_parser_module = ModuleType("price_parser")
+
+    class _DummyPrice:
+        """ Implementação mínima para emular interface de Price """
+
+        def __init__(self, amount: Any | None = None) -> None:
+            self.amount = amount
+
+        @classmethod
+        def fromstring(cls, raw: str) -> "_DummyPrice":
+            #Retornamos instância sem valor para forçar fallback manual nos testes
+            return cls(amount=None)
+
+    setattr(_price_parser_module, "Price", _DummyPrice)
+    sys.modules["price_parser"] = _price_parser_module
 
 from market_scraper.services.pipeline_steps import (
     FetchHTMLStep,
@@ -15,6 +43,7 @@ from market_scraper.services.pipeline_steps import (
     HtmlMetadataParserStep,
     JsonLdParserStep,
     download_html,
+    _execute_cloudscraper_request,
     _log_client_error,
     _should_trigger_cloudscraper,
 )
@@ -304,6 +333,96 @@ async def test_download_html_cloudscraper_respeita_http_retry(
 
     assert fallback_counter_after == pytest.approx(fallback_counter_before + 1)
     assert retry_counter_after == pytest.approx(retry_counter_before + 1)
+
+@pytest.mark.asyncio
+async def test_execute_cloudscraper_request_import_dinamico(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Valida que o fallback importa cloudscraper dinamicamente e monta resposta httpx """
+
+    url = "https://dinamico.com/produto"
+
+    class DummyResponse:
+        """ Resposta simplificada retornada pelo stub do cloudscraper """
+
+        def __init__(self) -> None:
+            self.status_code = 200
+            self.headers = {"X-Test": "1"}
+            self.content = b"<html>conteudo</html>"
+
+    class DummyScraper:
+        """ Simula cliente cloudscraper mantendo rastreio de chamadas """
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get(self, request_url: str, *, headers: dict[str, str], timeout: float) -> DummyResponse:
+            assert request_url == url
+            assert headers["User-Agent"] == "UA"
+            assert timeout == 1.5
+            self.calls += 1
+            return DummyResponse()
+
+    dummy_scraper = DummyScraper()
+    dummy_module = SimpleNamespace(create_scraper=lambda: dummy_scraper)
+    monkeypatch.setitem(sys.modules, "cloudscraper", dummy_module)
+
+    response = await _execute_cloudscraper_request(
+        url=url,
+        headers={"User-Agent": "UA"},
+        timeout=1.5,
+    )
+
+    assert isinstance(response, httpx.Response)
+    assert response.status_code == 200
+    assert response.headers["X-Test"] == "1"
+    assert response.text == "<html>conteudo</html>"
+    assert dummy_scraper.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_download_html_cloudscraper_dependencia_ausente(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Confirma que o fallback registra erro controlado quando cloudscraper não está disponível """
+
+    url = "https://ausente.com/produto"
+    initial_response = httpx.Response(
+        403,
+        text="Attention Required! | Cloudflare",
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(iter([initial_response])),
+    )
+    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", ("ausente.com",))
+    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
+
+    fallback_error_before = _metric_value(
+        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
+        "scraper_cloudscraper_fallback_total",
+        {"domain": "ausente.com", "outcome": "error"},
+    )
+
+    original_import = builtins.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object):
+        """ Simula ausência da dependência cloudscraper durante o fallback """
+
+        if name == "cloudscraper":
+            raise ImportError("cloudscraper não instalado")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await download_html(url, timeout=1.0)
+
+    fallback_error_after = _metric_value(
+        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
+        "scraper_cloudscraper_fallback_total",
+        {"domain": "ausente.com", "outcome": "error"},
+    )
+
+    assert fallback_error_after == pytest.approx(fallback_error_before + 1)
 
 @pytest.mark.asyncio
 async def test_download_html_retries_on_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:

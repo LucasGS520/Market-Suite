@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 
 import httpx
 import structlog
-import cloudscraper
 
 from shared.utils.logging_utils import sanitize_log_data
 
@@ -194,7 +193,7 @@ def _log_client_error(*, response: httpx.Response, url: str, domain: str | None,
 
     body_excerpt = None
     if settings.SCRAPER_LOG_4XX_BODY:
-        raw_excerpt = response.content[: settings.SCARPER_LOG_4XX_MAX_BYTES]
+        raw_excerpt = response.content[: settings.SCRAPER_LOG_4XX_MAX_BYTES]
         encoding = response.encoding or "utf-8"
         decoded_excerpt = raw_excerpt.decode(encoding, errors="replace")
         body_excerpt = sanitize_log_data(decoded_excerpt)
@@ -266,6 +265,19 @@ async def _execute_cloudscraper_request(
 ) -> httpx.Response:
     """ Executa requisição síncrona via cloudscraper dentro de executor """
     loop = asyncio.get_running_loop()
+
+    try:
+        #Importamos localmente para reduzir custo incial e permitir desativação opcional da dependência
+        import cloudscraper
+    except ImportError as exc:
+        domain = _extract_domain(url) or "unknown"
+        logger.warning(
+            "cloudscraper_dependency_missing",
+            url=sanitize_log_data(url),
+            domain=domain,
+            error=sanitize_log_data(str(exc)),
+        )
+        raise RuntimeError("Dependência cloudscraper indisponível") from exc
 
     def _run() -> tuple[int, dict[str, str], bytes]:
         scraper = cloudscraper.create_scraper()
