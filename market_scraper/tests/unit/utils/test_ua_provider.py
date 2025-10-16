@@ -20,6 +20,7 @@ def _reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "SCRAPER_FAKE_UA_CACHE_TTL_SECONDS", 10)
     monkeypatch.setattr(settings, "SCRAPER_FAKE_UA_CACHE_MAX_SIZE", 4)
     monkeypatch.setattr(settings, "SCRAPER_FAKE_UA_FETCH_TIMEOUT_SECONDS", 0.1)
+    monkeypatch.setattr(settings, "SCRAPER_USE_FAKE_USERAGENT", True)
 
     ua_provider.reset_provider_state()
 
@@ -98,3 +99,20 @@ def test_fake_user_agent_cache_reuses_value(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert first == second == "FAKE-UA"
     assert len(calls) == 1
+
+def test_fake_user_agent_disabled_skips_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Confere que não acionamos o fake-useragent quando a flag está desativada."""
+
+    monkeypatch.setattr(settings, "SCRAPER_USER_AGENT_STATIC_POOL", tuple())
+    monkeypatch.setattr(settings, "SCRAPER_USER_AGENT_DEFAULT", "DEFAULT-UA")
+    monkeypatch.setattr(settings, "SCRAPER_USE_FAKE_USERAGENT", False)
+    ua_provider.reset_provider_state()
+
+    def _unexpected_call() -> str:
+        raise AssertionError("fake-useragent não deve ser consultado")
+
+    monkeypatch.setattr(ua_provider, "_fetch_fake_user_agent_with_timeout", _unexpected_call)
+
+    ua = ua_provider.get_user_agent("https://bloqueado.com")
+    assert ua == "DEFAULT-UA"
+    

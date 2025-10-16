@@ -111,9 +111,13 @@ class Settings(ConfigBase):
         SCRAPER_USER_AGENT_STATIC_POOL[0] if SCRAPER_USER_AGENT_STATIC_POOL else _DEFAULT_UA_POOL[0],
     ) #UA padrão utilizado em fallbacks
     SCRAPER_USER_AGENT_ROTATION_STRATEGY: str = os.getenv(
-        "SCRAPER_USER_AGENT_ROTATION_STRATEGY", 
+        "SCRAPER_USER_AGENT_ROTATION_STRATEGY",
         "per_request",
     ) #Estratégia de rotação (per_request | per_session | per_domain)
+    SCRAPER_USE_FAKE_USERAGENT: bool = os.getenv(
+        "SCRAPER_USE_FAKE_USERAGENT",
+        "true",
+    ).lower() in {"1", "True", "true", "yes", "on"} #Controla uso do fake-useragent dinâmico
     SCRAPER_FAKE_UA_CACHE_TTL_SECONDS: int = int(
         os.getenv("SCRAPER_FAKE_UA_CACHE_TTL_SECONDS", "86400")
     ) #TTL do cache local do fake-useragent (segundos)

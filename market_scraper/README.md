@@ -82,6 +82,7 @@ SCRAPER_PRICE_TOLERANCE=0.0
 #SCRAPER_USER_AGENT_STATIC_POOL=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
 #SCRAPER_USER_AGENT_DEFAULT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
 #SCRAPER_USER_AGENT_ROTATION_STRATEGY=per_request
+#SCRAPER_USE_FAKE_USERAGENT=true
 #SCRAPER_FAKE_UA_CACHE_TTL_SECONDS=86400
 #SCRAPER_FAKE_UA_CACHE_MAX_SIZE=32
 #SCRAPER_FAKE_UA_FETCH_TIMEOUT_SECONDS=2.0
@@ -101,6 +102,8 @@ SCRAPER_PRICE_TOLERANCE=0.0
 #SCRAPER_CLOUDSCRAPER_DOMAINS=
 #SCRAPER_CLOUDSCRAPER_TIMEOUT_SECONDS=10.0
 ```
+
+> `SCRAPER_USE_FAKE_USERAGENT=false` desativa a biblioteca dinâmica e força uso do User-Agent padrão; utilize apenas para diagnósticos curtos.
 
 ### Política de fallback do robots.txt
 - Comportamento padrão: fallback permissivo (`allow`) quando `robots.txt` não pode ser obtido ou interpretado. Métrica `SCRAPER_ROBOTS_CHECK_TOTAL` registra o label `error` nesses casos.

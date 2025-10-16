@@ -127,6 +127,10 @@ def _next_user_agent() -> str:
     if ua:
         return ua
     
+    #Quando o fake-useragent está desativado retornamos diretamente o fallback
+    if not settings.SCRAPER_USE_FAKE_USERAGENT:
+        return settings.SCRAPER_USER_AGENT_DEFAULT
+    
     ua = _get_fake_user_agent()
     if ua:
         return ua
@@ -147,6 +151,9 @@ def _next_from_static_pool() -> Optional[str]:
     
 def _get_fake_user_agent() -> Optional[str]:
     """ Busca UA dinâmico com cache e tratamento de falhas silencioso """
+    if not settings.SCRAPER_USE_FAKE_USERAGENT:
+        return settings.SCRAPER_USER_AGENT_DEFAULT
+
     cache_key = "default"
     try:
         return _FAKE_UA_CACHE[cache_key]

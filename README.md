@@ -260,6 +260,7 @@ SCRAPER_PRICE_TOLERANCE=0.0
 #SCRAPER_USER_AGENT_STATIC_POOL=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
 #SCRAPER_USER_AGENT_DEFAULT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
 #SCRAPER_USER_AGENT_ROTATION_STRATEGY=per_request
+#SCRAPER_USE_FAKE_USERAGENT=true
 #SCRAPER_FAKE_UA_CACHE_TTL_SECONDS=86400
 #SCRAPER_FAKE_UA_CACHE_MAX_SIZE=32
 #SCRAPER_FAKE_UA_FETCH_TIMEOUT_SECONDS=2.0
@@ -289,7 +290,7 @@ SCRAPER_PRICE_TOLERANCE=0.0
 > rollout com monitoramento próximo das métricas `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 #### Variáveis recentes do ``market_scraper``
-- **Rotação de User-Agent** (`SCRAPER_USER_AGENT_*` e `SCRAPER_FAKE_UA_*`): usadas para alternar identificadores HTTP e reduzir bloqueios. Ajuste a estratégia ou reduza o pool somente após validar impacto nos painéis de falhas por domínio.
+- **Rotação de User-Agent** (`SCRAPER_USER_AGENT_*`, `SCRAPER_FAKE_UA_*`, `SCRAPER_USE_FAKE_USERAGENT`): usadas para alternar identificadores HTTP e reduzir bloqueios. Ajuste a estratégia ou reduza o pool somente após validar impacto nos painéis de falhas por domínio. Desabilitar o fake-useragent deve ser medida temporária para investigações e elimina o acesso à biblioteca externa.
 - **Headers padrão** (`SCRAPER_HEADERS_*`): preservam um conjunto realista de cabeçalhos. Alterações pontuais devem ser acompanhadas pelos contadores de sucesso por etapa (`SCRAPER_STEP_SUCCESS_TOTAL`).
 - **Diagnóstico de 4xx** (`SCRAPER_LOG_4XX_BODY`, `SCRAPER_LOG_4XX_MAX_BYTES`): habilite o log do corpo apenas durante incidentes e garanta rotação de logs.
 - **Fallback Cloudscraper** (`SCRAPER_USE_CLOUDSCRAPER_FALLBACK`, `SCRAPER_CLOUDSCRAPER_DOMAINS`, `SCRAPER_CLOUDSCRAPER_TIMEOUT_SECONDS`): mantém uma alternativa sincronizada para domínios protegidos por JavaScript. Desabilite apenas em investigações controladas, monitorando `SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL` e taxas 4xx.
