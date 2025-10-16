@@ -182,7 +182,7 @@ def _log_response_metadata(*, response: httpx.Response, url: str, domain: str | 
         url=sanitize_log_data(url),
         status_code=response.status_code,
         content_type=sanitize_log_data(response.headers.get("Content-Type")),
-        content_encoding=sanitize_log_data(response.headers.get("Content-Type")),
+        content_encoding=sanitize_log_data(response.headers.get("Content-Encoding")),
         user_agent=sanitize_log_data(user_agent),
     )
 
