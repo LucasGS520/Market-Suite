@@ -229,6 +229,9 @@ async def _run_cloudscraper_fallback(
     *, url: str, headers: Mapping[str, str], timeout: float, domain: str | None
 ) -> httpx.Response | None:
     """ Executa fallback com cloudscraper respeitando singleflight e métricas """
+    cloud_timeout = min(timeout, settings.SCRAPER_CLOUDSCRAPER_TIMEOUT_SECONDS)
+    #Limitamos explicitamente o timeout síncrono para evitar bloqueios além do previsto
+
     async def _producer() -> httpx.Response:
         #Aplica os mesmo retries progressivos do httpx principal para manter backoff e limites homogêneos
         wrapped_operation = build_retrying_operation(
@@ -236,7 +239,7 @@ async def _run_cloudscraper_fallback(
             operation=lambda: _execute_cloudscraper_request(
                 url=url,
                 headers=headers,
-                timeout=timeout,
+                cloud_timeout=cloud_timeout,
             ),
         )
         return await wrapped_operation()
@@ -261,9 +264,9 @@ async def _run_cloudscraper_fallback(
     return response
 
 async def _execute_cloudscraper_request(
-    *, url: str, headers: Mapping[str, str], timeout: float
+    *, url: str, headers: Mapping[str, str], cloud_timeout: float
 ) -> httpx.Response:
-    """ Executa requisição síncrona via cloudscraper dentro de executor """
+    """ Executa requisição síncrona via cloudscraper dentro de executor dedicado """
     loop = asyncio.get_running_loop()
 
     try:
@@ -281,7 +284,7 @@ async def _execute_cloudscraper_request(
 
     def _run() -> tuple[int, dict[str, str], bytes]:
         scraper = cloudscraper.create_scraper()
-        response = scraper.get(url, headers=dict(headers), timeout=timeout)
+        response = scraper.get(url, headers=dict(headers), timeout=cloud_timeout)
         return response.status_code, dict(response.headers), response.content
     
     status_code, response_headers, content = await loop.run_in_executor(None, _run)

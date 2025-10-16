@@ -368,7 +368,7 @@ async def test_execute_cloudscraper_request_import_dinamico(monkeypatch: pytest.
     response = await _execute_cloudscraper_request(
         url=url,
         headers={"User-Agent": "UA"},
-        timeout=1.5,
+        cloud_timeout=1.5,
     )
 
     assert isinstance(response, httpx.Response)
@@ -377,6 +377,42 @@ async def test_execute_cloudscraper_request_import_dinamico(monkeypatch: pytest.
     assert response.text == "<html>conteudo</html>"
     assert dummy_scraper.calls == 1
 
+@pytest.mark.asyncio
+async def test_download_html_cloudscraper_respeita_timeout_configurado(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ Valida que o fallback limita o timeout síncrono segundo configuração """
+
+    url = "https://tempo-controlado.com/produto"
+    initial_response = httpx.Response(
+        403,
+        text="Attention Required! | Cloudflare",
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(iter([initial_response])),
+    )
+    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", ("tempo-controlado.com",))
+    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
+    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_TIMEOUT_SECONDS", 0.4)
+
+    captured_timeout: list[float] = []
+
+    async def fake_execute(*, cloud_timeout: float, **_: object) -> httpx.Response:
+        captured_timeout.append(cloud_timeout)
+        return httpx.Response(200, text="<html>ok</html>", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps._execute_cloudscraper_request",
+        fake_execute,
+    )
+
+    html = await download_html(url, timeout=1.0)
+
+    assert html == "<html>ok</html>"
+    assert captured_timeout == [0.4], "Esperado uso do limite configurado"
 
 @pytest.mark.asyncio
 async def test_download_html_cloudscraper_dependencia_ausente(monkeypatch: pytest.MonkeyPatch) -> None:
