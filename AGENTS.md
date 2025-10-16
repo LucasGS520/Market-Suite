@@ -37,6 +37,7 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 - `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
 - O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Os limites são ajustados por `SCRAPER_CACHE_TTL_SECONDS` e `SCRAPER_CACHE_MAX_ENTRIES`.
 - Parâmetros essenciais ficam explícitos no `.env.market_scraper`: TTL e tamanho do cache em memória, retries HTTP (`2`), política de fallback de robots (`allow`) e TTL dos locks de singleflight. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout. Consulte `docs/runbook_scraper.md` para o passo a passo de deploy e rollback.
+- O fallback via Cloudscraper deve permanecer habilitado; utilize `SCRAPER_CLOUDSCRAPER_DOMAINS` somente quando métricas 4xx por domínio dispararem e registre qualquer alteração no painel dedicado (`scraper_cloudscraper_fallback_total`). Para diagnosticar incidentes, habilite temporariamente `SCRAPER_LOG_4XX_BODY` e siga o runbook para observabilidade.
 - `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é fixa e permissiva (allow) para manter disponibilidade. Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
 ## Visão Geral da Arquitetura e Serviços

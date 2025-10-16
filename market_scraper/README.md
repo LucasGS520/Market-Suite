@@ -77,6 +77,29 @@ SCRAPER_PRICE_TOLERANCE=0.0
 #SCRAPER_HTTP_TIMEOUT_POOL=3.0
 #SCRAPER_DNS_TIMEOUT=2
 #SCRAPER_DNS_CACHE_TTL=120
+
+# Rotação de User-Agent — personalize apenas mediante aprovação de rollout
+#SCRAPER_USER_AGENT_STATIC_POOL=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
+#SCRAPER_USER_AGENT_DEFAULT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36
+#SCRAPER_USER_AGENT_ROTATION_STRATEGY=per_request
+#SCRAPER_FAKE_UA_CACHE_TTL_SECONDS=86400
+#SCRAPER_FAKE_UA_CACHE_MAX_SIZE=32
+#SCRAPER_FAKE_UA_FETCH_TIMEOUT_SECONDS=2.0
+
+# Headers padrão — altere apenas para lidar com bloqueios específicos
+#SCRAPER_HEADERS_ACCEPT=text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8
+#SCRAPER_HEADERS_ACCEPT_LANGUAGE=pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7
+#SCRAPER_HEADERS_CONNECTION=keep-alive
+#SCRAPER_HEADERS_REFERER_TEMPLATE=
+
+# Observabilidade de respostas 4xx
+#SCRAPER_LOG_4XX_BODY=false
+#SCRAPER_LOG_4XX_MAX_BYTES=512
+
+# Fallback via Cloudscraper — manter habilitado por padrão
+#SCRAPER_USE_CLOUDSCRAPER_FALLBACK=true
+#SCRAPER_CLOUDSCRAPER_DOMAINS=
+#SCRAPER_CLOUDSCRAPER_TIMEOUT_SECONDS=10.0
 ```
 
 ### Política de fallback do robots.txt
