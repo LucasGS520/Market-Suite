@@ -21,7 +21,7 @@ __all__ = ["get_user_agent", "compose_headers", "reset_user_agent_state"]
 _POOL_LOCK = threading.Lock()
 _POOL_ITERATOR: Iterator[str] | None = None
 _DOMAIN_AFFINITY: Dict[str, str] = {}
-_SESSION_AFFINITY: Dict[int, str] = {}
+_SESSION_AFFINITY: Dict[str, str] = {}
 
 def _build_cycle() -> Iterator[str]:
     """ Gera um iterador infinito respeitando o pool configurado """
@@ -92,7 +92,8 @@ def get_user_agent(
                 return cached
             
             agent = _next_user_agent_unlocked()
-            _SESSION_AFFINITY[normalized_domain] = agent
+            #Mantemos o vínculo por domínio para reaproveitar o mesmo agente em chamadas subsequentes
+            _DOMAIN_AFFINITY[normalized_domain] = agent
             return agent
         
         return _next_user_agent_unlocked()
