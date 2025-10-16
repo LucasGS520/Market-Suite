@@ -4,7 +4,6 @@ cloudscraper==1.2.71
 cachetools==5.5.2
 dnspython==2.7.0
 extruct==0.15.0
-fake-useragent==2.2.0
 fastapi==0.115.12
 httpx==0.28.1
 httpx-cache==0.13.0

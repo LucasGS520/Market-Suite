@@ -143,12 +143,6 @@ SCRAPER_UA_ROTATION_TOTAL = Counter(
     ["strategy", "domain"],
 )
 
-SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL = Counter(
-    "scraper_cloudscraper_fallback_total",
-    "Total de ativações do fallback com cloudscraper",
-    ["domain", "outcome"],
-)
-
 SCRAPING_SUSPENDED_FLAG = Gauge(
     "scraping_suspended_flag",
     "Flag de suspensão global de scraping controlado via Redis",
@@ -182,7 +176,6 @@ __all__ = [
     "SCRAPER_HTTP_RETRY_BACKOFF_SECONDS",
     "SCRAPER_HTTP_CLIENT_ERROR_TOTAL",
     "SCRAPER_UA_ROTATION_TOTAL",
-    "SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL",
     "SCRAPING_SUSPENDED_FLAG",
     "SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS",
     "SCRAPER_STEP_SUCCESS_TOTAL",

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import builtins
 import sys
 from collections.abc import Iterator
 from typing import Any
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import httpx
 import pytest
@@ -43,16 +42,13 @@ from market_scraper.services.pipeline_steps import (
     HtmlMetadataParserStep,
     JsonLdParserStep,
     download_html,
-    _execute_cloudscraper_request,
     _log_client_error,
-    _should_trigger_cloudscraper,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils import cache
 from market_scraper.utils import singleflight
 from shared.metrics.metrics_scraper import (
-    SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
     SCRAPER_SINGLEFLIGHT_CALLS_TOTAL,
     SCRAPER_SINGLEFLIGHT_WAIT_SECONDS,
     SCRAPER_HTTP_RETRIES_TOTAL,
@@ -115,9 +111,14 @@ async def test_download_html_utiliza_headers_compostos(monkeypatch: pytest.Monke
         lambda **__: CaptureClient(),
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.ua_provider.get_user_agent",
+        "market_scraper.services.pipeline_steps.user_agents.get_user_agent",
         lambda *_args, **_kwargs: "UA-DE-TEXTO",
     )
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_ACCEPT", "text/html")
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_ACCEPT_LANGUAGE", "pt-BR")
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_CONNECTION", "keep-alive")
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_CACHE_CONTROL", "max-age=0")
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_ACCEPT_ENCODING", "gzip")
     monkeypatch.setattr(
         settings,
         "SCRAPER_HEADERS_REFERER_TEMPLATE",
@@ -131,6 +132,8 @@ async def test_download_html_utiliza_headers_compostos(monkeypatch: pytest.Monke
     assert captured_headers["Accept"] == settings.SCRAPER_HEADERS_ACCEPT
     assert captured_headers["Accept-Language"] == settings.SCRAPER_HEADERS_ACCEPT_LANGUAGE
     assert captured_headers["Connection"] == settings.SCRAPER_HEADERS_CONNECTION
+    assert captured_headers["Cache-Control"] == settings.SCRAPER_HEADERS_CACHE_CONTROL
+    assert captured_headers["Accept-Encoding"] == settings.SCRAPER_HEADERS_ACCEPT_ENCODING
     assert captured_headers["Referer"] == "https://exemplo.com.br/origem"
 
 @pytest.mark.asyncio
@@ -148,7 +151,6 @@ async def test_download_html_registra_corpo_em_erro_4xx(monkeypatch: pytest.Monk
         "market_scraper.services.pipeline_steps.httpx.AsyncClient",
         lambda **__: DummyAsyncClient(iter([response])),
     )
-    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", False)
     monkeypatch.setattr(settings, "SCRAPER_LOG_4XX_BODY", True)
     monkeypatch.setattr(settings, "SCRAPER_LOG_4XX_MAX_BYTES", 8)
 
@@ -166,16 +168,47 @@ async def test_download_html_registra_corpo_em_erro_4xx(monkeypatch: pytest.Monk
     assert logs, "Era esperado registro do erro 4xx"
     assert logs[0]["body_excerpt"] == "Checking"
 
+@pytest.mark.asyncio
+async def test_download_html_registra_headers_em_debug(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Confirma que o download registra cabeçalhos relevantes em nível debug """
+
+    url = "https://diagnostico.com/pagina"
+    response = httpx.Response(
+        200,
+        headers={"Content-Type": "text/html", "Content-Encoding": "identity"},
+        text="<html></html>",
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(iter([response])),
+    )
+
+    debug_logs: list[dict[str, object]] = []
+
+    def fake_debug(event: str, **kwargs: object) -> None:
+        if event == "http_download_metadata":
+            debug_logs.append(kwargs)
+
+    monkeypatch.setattr("market_scraper.services.pipeline_steps.logger.debug", fake_debug)
+
+    html = await download_html(url, timeout=1.0)
+
+    assert html == "<html></html>"
+    assert debug_logs, "Era esperado log em nível debug"
+    assert debug_logs[0]["content_type"] == "text/html"
+    assert debug_logs[0]["content_encoding"] == "identity"
+
 def test_log_client_error_trunca_e_decodifica_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Garante truncamento em bytes e decodificação tolerante ao registrar 4xx """
+    """ Garante truncamento em bytes e decodificações tolerante ao registrar 4xx """
 
     url = "https://exemplo.com/recurso"
     response = httpx.Response(
         403,
-        content=b"A" * 9 + b"\xffresto",  # byte inválido deve ser substituído
+        content=b"A" * 9 + b"\xffresto",
         request=httpx.Request("GET", url),
     )
-
     monkeypatch.setattr(settings, "SCRAPER_LOG_4XX_BODY", True)
     monkeypatch.setattr(settings, "SCRAPER_LOG_4XX_MAX_BYTES", 10)
 
@@ -191,274 +224,6 @@ def test_log_client_error_trunca_e_decodifica_payload(monkeypatch: pytest.Monkey
 
     assert logs, "Era esperado registro do erro 4xx"
     assert logs[0]["body_excerpt"] == "AAAAAAAAA�"
-
-
-def test_should_trigger_cloudscraper_usa_snippet_em_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Verifica que a detecção usa decodificação tolerante e respeita limites """
-
-    url = "https://bloqueado.com/pagina"
-    content = b"\xfe" + "CLOUDFLARE bloqueando acesso".encode()
-    response = httpx.Response(
-        403,
-        content=content,
-        request=httpx.Request("GET", url),
-    )
-
-    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
-    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", tuple())
-
-    assert _should_trigger_cloudscraper(response=response, domain="bloqueado.com") is True
-
-@pytest.mark.asyncio
-async def test_download_html_fallback_cloudscraper(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Garante fallback via cloudscraper quando sinais de Cloudflare aparecem """
-
-    url = "https://protegido.com/produto"
-    initial_response = httpx.Response(
-        403,
-        text="Attention Required! | Cloudflare",
-        request=httpx.Request("GET", url),
-    )
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
-        lambda **__: DummyAsyncClient(iter([initial_response])),
-    )
-    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", ("protegido.com",))
-    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
-
-    fallback_counter_before = _metric_value(
-        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
-        "scraper_cloudscraper_fallback_total",
-        {"domain": "protegido.com", "outcome": "success"},
-    )
-
-    calls = 0
-
-    async def fake_execute(**_: object) -> httpx.Response:
-        nonlocal calls
-        calls += 1
-        return httpx.Response(200, text="<html>fallback</html>", request=httpx.Request("GET", url))
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps._execute_cloudscraper_request",
-        fake_execute,
-    )
-
-    html = await download_html(url, timeout=1.0)
-
-    assert html == "<html>fallback</html>"
-    assert calls == 1
-
-    fallback_counter_after = _metric_value(
-        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
-        "scraper_cloudscraper_fallback_total",
-        {"domain": "protegido.com", "outcome": "success"},
-    )
-
-    assert fallback_counter_after == pytest.approx(fallback_counter_before + 1)
-
-@pytest.mark.asyncio
-async def test_download_html_cloudscraper_respeita_http_retry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """ Confirma que o fallback reaproveita retries quando enfrenta erros 5xx """
-
-    url = "https://retentativa.com/produto"
-    initial_response = httpx.Response(
-        403,
-        text="Checking your browser before accessing",
-        request=httpx.Request("GET", url),
-    )
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
-        lambda **__: DummyAsyncClient(iter([initial_response])),
-    )
-    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", ("retentativa.com",))
-    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
-
-    fallback_counter_before = _metric_value(
-        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
-        "scraper_cloudscraper_fallback_total",
-        {"domain": "retentativa.com", "outcome": "success"},
-    )
-    retry_counter_before = _metric_value(
-        SCRAPER_HTTP_RETRIES_TOTAL,
-        "scraper_http_retries_total",
-        {"target": "cloudscraper", "reason": "server_error"},
-    )
-
-    responses = iter(
-        [
-            httpx.Response(503, request=httpx.Request("GET", url)),
-            httpx.Response(
-                200,
-                text="<html>fallback-ok</html>",
-                request=httpx.Request("GET", url),
-            ),
-        ]
-    )
-
-    calls = 0
-
-    async def fake_execute(**_: object) -> httpx.Response:
-        nonlocal calls
-        calls += 1
-        try:
-            return next(responses)
-        except StopIteration as exc:
-            raise AssertionError("Fallback chamado mais vezes que o esperado") from exc
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps._execute_cloudscraper_request",
-        fake_execute,
-    )
-
-    html = await download_html(url, timeout=1.0)
-
-    assert html == "<html>fallback-ok</html>"
-    assert calls == 2, "Retries deveriam repetir a chamada do fallback"
-
-    fallback_counter_after = _metric_value(
-        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
-        "scraper_cloudscraper_fallback_total",
-        {"domain": "retentativa.com", "outcome": "success"},
-    )
-    retry_counter_after = _metric_value(
-        SCRAPER_HTTP_RETRIES_TOTAL,
-        "scraper_http_retries_total",
-        {"target": "cloudscraper", "reason": "server_error"},
-    )
-
-    assert fallback_counter_after == pytest.approx(fallback_counter_before + 1)
-    assert retry_counter_after == pytest.approx(retry_counter_before + 1)
-
-@pytest.mark.asyncio
-async def test_execute_cloudscraper_request_import_dinamico(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Valida que o fallback importa cloudscraper dinamicamente e monta resposta httpx """
-
-    url = "https://dinamico.com/produto"
-
-    class DummyResponse:
-        """ Resposta simplificada retornada pelo stub do cloudscraper """
-
-        def __init__(self) -> None:
-            self.status_code = 200
-            self.headers = {"X-Test": "1"}
-            self.content = b"<html>conteudo</html>"
-
-    class DummyScraper:
-        """ Simula cliente cloudscraper mantendo rastreio de chamadas """
-
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def get(self, request_url: str, *, headers: dict[str, str], timeout: float) -> DummyResponse:
-            assert request_url == url
-            assert headers["User-Agent"] == "UA"
-            assert timeout == 1.5
-            self.calls += 1
-            return DummyResponse()
-
-    dummy_scraper = DummyScraper()
-    dummy_module = SimpleNamespace(create_scraper=lambda: dummy_scraper)
-    monkeypatch.setitem(sys.modules, "cloudscraper", dummy_module)
-
-    response = await _execute_cloudscraper_request(
-        url=url,
-        headers={"User-Agent": "UA"},
-        cloud_timeout=1.5,
-    )
-
-    assert isinstance(response, httpx.Response)
-    assert response.status_code == 200
-    assert response.headers["X-Test"] == "1"
-    assert response.text == "<html>conteudo</html>"
-    assert dummy_scraper.calls == 1
-
-@pytest.mark.asyncio
-async def test_download_html_cloudscraper_respeita_timeout_configurado(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """ Valida que o fallback limita o timeout síncrono segundo configuração """
-
-    url = "https://tempo-controlado.com/produto"
-    initial_response = httpx.Response(
-        403,
-        text="Attention Required! | Cloudflare",
-        request=httpx.Request("GET", url),
-    )
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
-        lambda **__: DummyAsyncClient(iter([initial_response])),
-    )
-    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", ("tempo-controlado.com",))
-    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
-    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_TIMEOUT_SECONDS", 0.4)
-
-    captured_timeout: list[float] = []
-
-    async def fake_execute(*, cloud_timeout: float, **_: object) -> httpx.Response:
-        captured_timeout.append(cloud_timeout)
-        return httpx.Response(200, text="<html>ok</html>", request=httpx.Request("GET", url))
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps._execute_cloudscraper_request",
-        fake_execute,
-    )
-
-    html = await download_html(url, timeout=1.0)
-
-    assert html == "<html>ok</html>"
-    assert captured_timeout == [0.4], "Esperado uso do limite configurado"
-
-@pytest.mark.asyncio
-async def test_download_html_cloudscraper_dependencia_ausente(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Confirma que o fallback registra erro controlado quando cloudscraper não está disponível """
-
-    url = "https://ausente.com/produto"
-    initial_response = httpx.Response(
-        403,
-        text="Attention Required! | Cloudflare",
-        request=httpx.Request("GET", url),
-    )
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
-        lambda **__: DummyAsyncClient(iter([initial_response])),
-    )
-    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", ("ausente.com",))
-    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
-
-    fallback_error_before = _metric_value(
-        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
-        "scraper_cloudscraper_fallback_total",
-        {"domain": "ausente.com", "outcome": "error"},
-    )
-
-    original_import = builtins.__import__
-
-    def fake_import(name: str, *args: object, **kwargs: object):
-        """ Simula ausência da dependência cloudscraper durante o fallback """
-
-        if name == "cloudscraper":
-            raise ImportError("cloudscraper não instalado")
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.__import__", fake_import)
-
-    with pytest.raises(httpx.HTTPStatusError):
-        await download_html(url, timeout=1.0)
-
-    fallback_error_after = _metric_value(
-        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
-        "scraper_cloudscraper_fallback_total",
-        {"domain": "ausente.com", "outcome": "error"},
-    )
-
-    assert fallback_error_after == pytest.approx(fallback_error_before + 1)
 
 @pytest.mark.asyncio
 async def test_download_html_retries_on_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
