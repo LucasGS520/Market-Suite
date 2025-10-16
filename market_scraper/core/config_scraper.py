@@ -4,11 +4,16 @@ O módulo mantém apenas controles numéricos necessários para ajustar
 timeouts e limites do fluxo determinístico. Flags de alternância de
 implementação foram removidas para reduzir variabilidade operacional,
 mantendo comportamento documentado como único caminho suportado.
+
+As novas chaves relacionadas a headers e User-Agent foram adicionadas
+para centralizar o comportamento descrito na iniciativa de rotação de
+identidade do scraper, permitindo ajustes finos sem alterar o código.
 """
 
 from __future__ import annotations
 
 import os
+from typing import Tuple
 
 from shared.core.config_base import ConfigBase
 
@@ -82,6 +87,59 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_DNS_CACHE_TTL", "120.0")
     ) #Tempo em segundos que respostas DNS permanecem em cache
 
+    # ----- Configurações de headers e User-Agent -----
+    #Centralizamos valores realistas para reduzir bloqueios em sites comuns
+    _DEFAULT_UA_POOL: Tuple[str, ...] = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    )
+
+    SCRAPER_USER_AGENT_STATIC_POOL: Tuple[str, ...] = tuple(
+        ua.strip()
+        for ua in os.getenv("SCRAPER_USER_AGENT_STATIC_POOL", "||".join(_DEFAULT_UA_POOL)).split("||")
+        if ua.strip()
+    ) #Pool curado de User-Agents realistas
+    SCRAPER_USER_AGENT_DEFAULT: str = os.getenv(
+        "SCRAPER_USER_AGENT_DEFAULT",
+        SCRAPER_USER_AGENT_STATIC_POOL[0] if SCRAPER_USER_AGENT_STATIC_POOL else _DEFAULT_UA_POOL[0],
+    ) #UA padrão utilizado em fallbacks
+    SCRAPER_USER_AGENT_ROTATION_STRATEGY: str = os.getenv(
+        "SCRAPER_USER_AGENT_ROTATION_STRATEGY", 
+        "per_request",
+    ) #Estratégia de rotação (per_request | per_session | per_domain)
+    SCRAPER_FAKE_UA_CACHE_TTL_SECONDS: int = int(
+        os.getenv("SCRAPER_FAKE_UA_CACHE_TTL_SECONDS", "86400")
+    ) #TTL do cache local do fake-useragent (segundos)
+    SCRAPER_FAKE_UA_CACHE_MAX_SIZE: int = int(
+        os.getenv("SCRAPER_FAKE_UA_CACHE_MAX_SIZE", "32")
+    )  #Itens máximos do cache de UA dinâmicos
+    SCRAPER_FAKE_UA_FETCH_TIMEOUT_SECONDS: float = float(
+        os.getenv("SCRAPER_FAKE_UA_FETCH_TIMEOUT_SECONDS", "2.0")
+    )  #Tempo limite para obter UA do fake-useragent
+
+    SCRAPER_HEADER_ACCEPT: str = os.getenv(
+        "SCRAPER_HEADER_ACCEPT",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp," "image/apng,*/*;q=0.8",
+    )  #Valor do header Accept padrão
+    SCRAPER_HEADER_ACCEPT_LANGUAGE: str = os.getenv(
+        "SCRAPER_HEADER_ACCEPT_LANGUAGE",
+        "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    )  #Valor do header Accept-Language padrão
+    SCRAPER_HEADER_CONNECTION: str = os.getenv(
+        "SCRAPER_HEADER_CONNECTION",
+        "keep-alive",
+    )  #Valor do header Connection padrão
+    SCRAPER_HEADER_REFERER_TEMPLATE: str | None = os.getenv(
+        "SCRAPER_HEADER_REFERER_TEMPLATE",
+        None,
+    )  #Template opcional para construir Referer dinâmico
 
 #Instância única de settings para a aplicação
 settings = Settings()
