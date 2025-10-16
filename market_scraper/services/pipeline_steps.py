@@ -224,7 +224,16 @@ async def _run_cloudscraper_fallback(
 ) -> httpx.Response | None:
     """ Executa fallback com cloudscraper respeitando singleflight e métricas """
     async def _producer() -> httpx.Response:
-        return await _execute_cloudscraper_request(url=url, headers=headers, timeout=timeout)
+        #Aplica os mesmo retries progressivos do httpx principal para manter backoff e limites homogêneos
+        wrapped_operation = build_retrying_operation(
+            target="cloudscraper",
+            operation=lambda: _execute_cloudscraper_request(
+                url=url,
+                headers=headers,
+                timeout=timeout,
+            ),
+        )
+        return await wrapped_operation()
     
     try:
         response = await singleflight.coalesce(f"cloudscraper:{url}", _producer)

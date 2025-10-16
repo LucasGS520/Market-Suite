@@ -89,7 +89,7 @@ async def test_download_html_utiliza_headers_compostos(monkeypatch: pytest.Monke
     )
     monkeypatch.setattr(
         settings,
-        "SCRAPER_HEADER_REFERER_TEMPLATE",
+        "SCRAPER_HEADERS_REFERER_TEMPLATE",
         "https://{domain}/origem",
     )
 
@@ -183,6 +183,82 @@ async def test_download_html_fallback_cloudscraper(monkeypatch: pytest.MonkeyPat
     )
 
     assert fallback_counter_after == pytest.approx(fallback_counter_before + 1)
+
+@pytest.mark.asyncio
+async def test_download_html_cloudscraper_respeita_http_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ Confirma que o fallback reaproveita retries quando enfrenta erros 5xx """
+
+    url = "https://retentativa.com/produto"
+    initial_response = httpx.Response(
+        403,
+        text="Checking your browser before accessing",
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(iter([initial_response])),
+    )
+    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", ("retentativa.com",))
+    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
+
+    fallback_counter_before = _metric_value(
+        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
+        "scraper_cloudscraper_fallback_total",
+        {"domain": "retentativa.com", "outcome": "success"},
+    )
+    retry_counter_before = _metric_value(
+        SCRAPER_HTTP_RETRIES_TOTAL,
+        "scraper_http_retries_total",
+        {"target": "cloudscraper", "reason": "server_error"},
+    )
+
+    responses = iter(
+        [
+            httpx.Response(503, request=httpx.Request("GET", url)),
+            httpx.Response(
+                200,
+                text="<html>fallback-ok</html>",
+                request=httpx.Request("GET", url),
+            ),
+        ]
+    )
+
+    calls = 0
+
+    async def fake_execute(**_: object) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        try:
+            return next(responses)
+        except StopIteration as exc:
+            raise AssertionError("Fallback chamado mais vezes que o esperado") from exc
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps._execute_cloudscraper_request",
+        fake_execute,
+    )
+
+    html = await download_html(url, timeout=1.0)
+
+    assert html == "<html>fallback-ok</html>"
+    assert calls == 2, "Retries deveriam repetir a chamada do fallback"
+
+    fallback_counter_after = _metric_value(
+        SCRAPER_CLOUDSCRAPER_FALLBACK_TOTAL,
+        "scraper_cloudscraper_fallback_total",
+        {"domain": "retentativa.com", "outcome": "success"},
+    )
+    retry_counter_after = _metric_value(
+        SCRAPER_HTTP_RETRIES_TOTAL,
+        "scraper_http_retries_total",
+        {"target": "cloudscraper", "reason": "server_error"},
+    )
+
+    assert fallback_counter_after == pytest.approx(fallback_counter_before + 1)
+    assert retry_counter_after == pytest.approx(retry_counter_before + 1)
 
 @pytest.mark.asyncio
 async def test_download_html_retries_on_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
