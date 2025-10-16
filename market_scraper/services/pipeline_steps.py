@@ -38,6 +38,7 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_UA_ROTATION_TOTAL,
 )
 
+_CLOUDSCRAPER_SNIPPET_MAX_BYTES = 512
 
 logger = structlog.get_logger("pipeline_steps")
 ParserCallable = Callable[[str, str], Mapping[str, Any] | None]
@@ -193,7 +194,10 @@ def _log_client_error(*, response: httpx.Response, url: str, domain: str | None,
 
     body_excerpt = None
     if settings.SCRAPER_LOG_4XX_BODY:
-        body_excerpt = sanitize_log_data(response.text[: settings.SCRAPER_LOG_4XX_MAX_BYTES])
+        raw_excerpt = response.content[: settings.SCARPER_LOG_4XX_MAX_BYTES]
+        encoding = response.encoding or "utf-8"
+        decoded_excerpt = raw_excerpt.decode(encoding, errors="replace")
+        body_excerpt = sanitize_log_data(decoded_excerpt)
 
     logger.warning(
         "http_client_error",
@@ -216,7 +220,10 @@ def _should_trigger_cloudscraper(*, response: httpx.Response, domain: str | None
     if response.status_code not in {403, 503}:
         return False
     
-    snippet = response.text[:512].lower()
+    #O trecho analisado é limitado em bytes para evitar custos desnecessários com payloads grandes
+    raw_snippet = response.content[:_CLOUDSCRAPER_SNIPPET_MAX_BYTES]
+    encoding = response.encoding or "utf-8"
+    snippet = raw_snippet.decode(encoding, errors="replace").lower()
     return "cloudflare" in snippet or "checking your browser" in snippet or "attention required" in snippet
 
 async def _run_cloudscraper_fallback(

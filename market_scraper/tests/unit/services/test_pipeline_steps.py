@@ -15,6 +15,8 @@ from market_scraper.services.pipeline_steps import (
     HtmlMetadataParserStep,
     JsonLdParserStep,
     download_html,
+    _log_client_error,
+    _should_trigger_cloudscraper,
 )
 from market_scraper.services.synergic_pipeline import PipelineContext
 from market_scraper.core.config_scraper import settings
@@ -134,6 +136,49 @@ async def test_download_html_registra_corpo_em_erro_4xx(monkeypatch: pytest.Monk
 
     assert logs, "Era esperado registro do erro 4xx"
     assert logs[0]["body_excerpt"] == "Checking"
+
+def test_log_client_error_trunca_e_decodifica_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante truncamento em bytes e decodificação tolerante ao registrar 4xx """
+
+    url = "https://exemplo.com/recurso"
+    response = httpx.Response(
+        403,
+        content=b"A" * 9 + b"\xffresto",  # byte inválido deve ser substituído
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(settings, "SCRAPER_LOG_4XX_BODY", True)
+    monkeypatch.setattr(settings, "SCRAPER_LOG_4XX_MAX_BYTES", 10)
+
+    logs: list[dict[str, object]] = []
+
+    def fake_warning(event: str, **kwargs: object) -> None:
+        if event == "http_client_error":
+            logs.append(kwargs)
+
+    monkeypatch.setattr("market_scraper.services.pipeline_steps.logger.warning", fake_warning)
+
+    _log_client_error(response=response, url=url, domain="exemplo.com", user_agent="teste")
+
+    assert logs, "Era esperado registro do erro 4xx"
+    assert logs[0]["body_excerpt"] == "AAAAAAAAA�"
+
+
+def test_should_trigger_cloudscraper_usa_snippet_em_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Verifica que a detecção usa decodificação tolerante e respeita limites """
+
+    url = "https://bloqueado.com/pagina"
+    content = b"\xfe" + "CLOUDFLARE bloqueando acesso".encode()
+    response = httpx.Response(
+        403,
+        content=content,
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(settings, "SCRAPER_USE_CLOUDSCRAPER_FALLBACK", True)
+    monkeypatch.setattr(settings, "SCRAPER_CLOUDSCRAPER_DOMAINS", tuple())
+
+    assert _should_trigger_cloudscraper(response=response, domain="bloqueado.com") is True
 
 @pytest.mark.asyncio
 async def test_download_html_fallback_cloudscraper(monkeypatch: pytest.MonkeyPatch) -> None:
