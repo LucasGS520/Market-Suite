@@ -7,8 +7,6 @@ from typing import List
 from uuid import UUID
 
 from shared.infra.db import get_db
-
-from shared.utils.ml_url import canonicalize_ml_url, is_product_url
 from shared.schemas.schemas_products import CompetitorProductCreateScraping
 
 from market_alert.models import User
@@ -17,6 +15,8 @@ from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, delete_competitors_by_monitored_id
 from market_alert.tasks.scraper_tasks import collect_competitor_task
 from market_alert.core.security import get_current_user
+
+from market_scraper.utils.url_validation import normalize_product_url, check_url_compatibility
 
 
 router = APIRouter(prefix="/competitors", tags=["Concorrentes"])
@@ -27,19 +27,21 @@ def create_competitor_scrape(request: Request, product_data: CompetitorProductCr
     """ Endpoint para monitorar e comparar um produto concorrente por meio de um link direto (scraping) """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(product_data.monitored_product_id))
 
-    if not is_product_url(str(product_data.product_url)):
-        logger.warning("invalid_competitor_url", url=str(product_data.product_url))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL de produto inválida para Mercado Livre")
+    try:
+        normalized_url = normalize_product_url(str(product_data.product_url))
+    except ValueError as exc:
+        logger.warning("invalid_competitor_url", url=str(product_data.product_url), error=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    canonical = canonicalize_ml_url(str(product_data.product_url))
-    if not canonical:
-        logger.warning("invalid_competitor_url", url=str(product_data.product_url))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL de produto inválida para Mercado Livre")
+    issue = check_url_compatibility(normalized_url)
+    if issue:
+        logger.warning("invalid_competitor_url", url=normalized_url, code=issue.code)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
 
     #Cria um produto concorrente via Celery
     collect_competitor_task.delay(
         monitored_product_id=str(product_data.monitored_product_id),
-        url=canonical
+        url=normalized_url
     )
 
     logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled")

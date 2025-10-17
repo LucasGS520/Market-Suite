@@ -6,7 +6,6 @@ from typing import List
 
 from sqlalchemy.orm import Session
 
-from shared.utils.ml_url import canonicalize_ml_url
 from shared.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
@@ -15,8 +14,8 @@ from market_alert.enums.enums_products import ProductStatus, MonitoringType
 
 def create_or_update_competitor_product_scraped(db: Session, product_data: CompetitorProductCreateScraping, scraped_info: CompetitorScrapedInfo, last_checked: datetime) -> CompetitorProduct:
     """ Atualiza ou cria um produto concorrente a partir dos dados do scraping manual com link direto """
-    canonical = canonicalize_ml_url(str(product_data.product_url))
-    normalized_url = canonical or str(product_data.product_url)
+    normalized_url = str(product_data.product_url).strip()
+    #Mantemos a URL informada para que duplicidades reflitam a visão do usuário
 
     #Verifica se já existe um concorrente com mesmo monitored_product_id e URL
     existing = (

@@ -5,14 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from ipaddress import ip_address
 from typing import Callable, Dict
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import ParseResult, urlparse, urlunparse
+import re
 
 from market_scraper.utils.http_utils import (
     HostResolutionError,
     extract_hostname,
     resolve_public_addresses as http_resolve_public_addresses,
 )
-from shared.utils.ml_url import canonicalize_ml_url
 
 
 @dataclass(frozen=True)
@@ -27,10 +27,14 @@ SUPPORTED_DOMAINS = {
     "magazineluiza.com.br",
 }
 
-_PRODUCT_CHECKS: Dict[str, Callable[[str], bool]] = {
-    "mercadolivre.com.br": lambda url: canonicalize_ml_url(url) is not None,
-    "amazon.com.br": lambda url: "/dp/" in urlparse(url).path or "/gp/product" in urlparse(url).path,
-    "magazineluiza.com.br": lambda url: "/p/" in urlparse(url).path,
+_ML_PRODUCT_RE = re.compile(r"/MLB[-_]?[0-9]+", re.IGNORECASE)
+_AMAZON_PATH_RE = re.compile(r"/(dp|gp/product)/", re.IGNORECASE)
+_MAGALU_PATH_RE = re.compile(r"/p/", re.IGNORECASE)
+
+_PRODUCT_CHECKS: Dict[str, Callable[[ParseResult], bool]] = {
+    "mercadolivre.com.br": lambda parsed: bool(_ML_PRODUCT_RE.search(parsed.path)),
+    "amazon.com.br": lambda parsed: bool(_AMAZON_PATH_RE.search(parsed.path)),
+    "magazineluiza.com.br": lambda parsed: bool(_MAGALU_PATH_RE.search(parsed.path)),
 }
 
 def _ensure_scheme(url: str) -> str:
@@ -44,17 +48,12 @@ def _ensure_scheme(url: str) -> str:
     return urlunparse(cleaned)
 
 def normalize_product_url(url: str) -> str:
-    """ Normaliza a URL removendo fragmentos, aplicando HTTPS e canônicos """
+    """ Normaliza a URL removendo espaços extras e garantindo o esquema """
     raw = (url or "").strip()
     if not raw:
         raise ValueError("URL inválida ou malformada")
     
     normalized = _ensure_scheme(raw)
-    host = extract_hostname(normalized)
-    if host.endswith("mercadolivre.com.br"):
-        canonical = canonicalize_ml_url(normalized)
-        if canonical:
-            return canonical
     return normalized
 
 def _matches_domain(host: str, domain: str) -> bool:
@@ -67,10 +66,11 @@ def _is_supported_marketplace(host: str) -> bool:
 
 def _is_product_page(url: str) -> bool:
     """ Confere se a URL parece apontar para uma página de produto """
-    host = extract_hostname(url)
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
     for domain, checker in _PRODUCT_CHECKS.items():
         if _matches_domain(host, domain):
-            return checker(url)
+            return checker(parsed)
     return False
 
 def check_url_compatibility(url: str) -> UrlIssue | None:

@@ -8,7 +8,6 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from shared.utils.ml_url import canonicalize_ml_url
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 
 from market_alert.models.models_products import MonitoredProduct
@@ -20,8 +19,8 @@ from market_alert.crud import crud_alert_rules
 
 def create_or_update_monitored_product_scraped(db: Session, user_id: UUID, product_data: MonitoredProductCreateScraping, scraped_info: MonitoredScrapedInfo, last_checked: datetime) -> MonitoredProduct:
     """ Cria ou atualiza um produto monitorado a partir de dados de scraping """
-    canonical = canonicalize_ml_url(str(product_data.product_url))
-    normalized_url = canonical or str(product_data.product_url)
+    normalized_url = str(product_data.product_url).strip()
+    #A URL chega validada pela API e é preservada para manter unicidade baseada na entrada do usuário
 
     #Verifica se o produto já existe para o usuário
     existing = (

@@ -10,7 +10,7 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from market_scraper.main import app
 from market_scraper.services import pipeline_steps
-from market_scraper.utils import http_utils, url_validation
+from market_scraper.utils import http_utils
 
 from shared.metrics.metrics_scraper import (
     SCRAPER_NO_RESULT_TOTAL,
@@ -18,6 +18,7 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_STEP_LATENCY_SECONDS,
     SCRAPER_STEP_SUCCESS_TOTAL,
 )
+from market_scraper.utils import url_validation
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
 FIXTURES = {

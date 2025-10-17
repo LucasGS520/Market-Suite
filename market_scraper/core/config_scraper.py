@@ -132,14 +132,14 @@ class Settings(ConfigBase):
     )  #Template opcional para construir Referer dinâmico
 
     # --- Observabilidade ---
-    SCRAPER_LOG_4XX_BODY: bool = os.getenv("SCRAPER_LOG_4XX_BODY", "false").lower() in {
+    SCRAPER_LOG_4XX_BODY: bool = os.getenv("SCRAPER_LOG_4XX_BODY", "True").lower() in {
         "1",
         "true",
         "on",
         "yes",
     } #Controla logging do corpo em respostas 4xx
     SCRAPER_LOG_4XX_MAX_BYTES: int = int(
-        os.getenv("SCRAPER_LOG_4XX_MAX_BYTES", "512")
+        os.getenv("SCRAPER_LOG_4XX_MAX_BYTES", "1024")
     ) #Limite de bytes registrados em logs de 4xx
 
 #Instância única de settings para a aplicação

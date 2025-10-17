@@ -228,7 +228,7 @@ class FetchHTMLStep(PipelineStep):
             #Ajuste de código de falha alinhado com documentação pública do serviço
             return StepResult.failure(message="unsupported_by_robots")
         
-        #A checagem de cache evita roud-trips desnecessários mantendo métricas de hit/miss atualizadas
+        #A URL validada do usuário é utilizada diretamente como chave de cache para manter previsibilidade
         cached_html: str | None = cache.get(context.url)
         if cached_html is not None:
             context.set_html(cached_html)
@@ -238,7 +238,7 @@ class FetchHTMLStep(PipelineStep):
             """ Encapsula o download respeitando timeout da etapa para coalescing """
             return await download_html(context.url, timeout=timeout_value)
         
-        #O singleflight garante que somente um download efetivo ocorra por URL
+        #O singleflight também usa a mesma URL para coalescer chamadas simultâneas
         html = await singleflight.coalesce(context.url, _download)
         context.set_html(html)
         #Armazenamos o HTML recém obtido para acelerar futuras requisições

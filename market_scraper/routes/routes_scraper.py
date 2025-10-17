@@ -58,7 +58,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
         )
     
     try:
-        #Mantém a execução encapsulada para registrar métricas e facilitar o controle de timeouts
+        #Mantemos a URL fornecida pelo usuário para garantir previsibilidade em cache e métricas
         outcome = await run_pipeline(normalized_url)
     except PipelineTimeoutError as exc:
         issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline execedido")
@@ -99,7 +99,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
     response = ParserResponse(
         name=payload.get("name", ""),
         current_price=price,
-        url=payload.get("url", normalized_url),
+        url=normalized_url,
         source=payload.get("source", outcome.context.source),
     )
     logger.info(
