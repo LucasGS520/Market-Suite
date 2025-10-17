@@ -31,6 +31,8 @@ _ML_PRODUCT_RE = re.compile(r"/MLB[-_]?[0-9]+", re.IGNORECASE)
 _AMAZON_PATH_RE = re.compile(r"/(dp|gp/product)/", re.IGNORECASE)
 _MAGALU_PATH_RE = re.compile(r"/p/", re.IGNORECASE)
 
+_ALLOWED_SCHEMES = {"http", "https"}
+
 _PRODUCT_CHECKS: Dict[str, Callable[[ParseResult], bool]] = {
     "mercadolivre.com.br": lambda parsed: bool(_ML_PRODUCT_RE.search(parsed.path)),
     "amazon.com.br": lambda parsed: bool(_AMAZON_PATH_RE.search(parsed.path)),
@@ -38,13 +40,30 @@ _PRODUCT_CHECKS: Dict[str, Callable[[ParseResult], bool]] = {
 }
 
 def _ensure_scheme(url: str) -> str:
-    """ Garante que a URL possua esquema; assume HTTPS por padrão """
-    parsed = urlparse(url, scheme="https")
-    if not parsed.netloc:
+    """ Garante que a URL utilize HTTP ou HTTPS e normalize fraqmentos """
+    raw_parsed = urlparse(url)
+    scheme = (raw_parsed.scheme or "https").lower()
+
+    if raw_parsed.scheme and scheme not in _ALLOWED_SCHEMES:
+        #Bloqueamos esquemas alternativos para evitar protocolos não suportados pelo scraper
+        raise ValueError("A URL deve utilizar HTTP ou HTTPS")
+
+    if raw_parsed.scheme:
+        parsed = raw_parsed
+    elif raw_parsed.netloc:
+        #Quando a URL é relativo ao esquema, aplicamos HTTPS como padrão seguro
+        parsed = raw_parsed._replace(scheme="https")
+    else:
         parsed = urlparse(f"https://{url}")
+    
+    parsed_scheme = (parsed.scheme or "https").lower()
+    if parsed_scheme not in _ALLOWED_SCHEMES:
+        raise ValueError("A URL deve utilizar HTTP ou HTTPS")
+
     if not parsed.netloc:
         raise ValueError("URL inválida ou malformada")
-    cleaned = parsed._replace(fragment="")
+    
+    cleaned = parsed._replace(scheme=parsed_scheme, fragment="")
     return urlunparse(cleaned)
 
 def normalize_product_url(url: str) -> str:

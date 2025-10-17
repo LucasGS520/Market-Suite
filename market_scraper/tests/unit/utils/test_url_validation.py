@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from market_scraper.utils.url_validation import UrlIssue, check_url_compatibility, normalize_product_url
 
 
@@ -31,3 +33,9 @@ def test_check_url_compatibility_accepts_product_path() -> None:
     """ Aceita um caminho válido de poduto """
     issue = check_url_compatibility("https://www.amazon.com.br/dp/B000000001")
     assert issue is None
+
+def test_normalize_product_url_rejects_non_http_scheme() -> None:
+    """ Rejeita esquemas que não utilizam HTTP """
+    with pytest.raises(ValueError):
+        normalize_product_url("ftp://www.mercadolivre.com.br/MLB-123")
+        
