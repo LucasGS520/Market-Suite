@@ -7,6 +7,8 @@ segura de hosts para prevenir SSRF.
 
 from __future__ import annotations
 
+import gzip
+import io
 import ipaddress
 import socket
 import threading
@@ -15,7 +17,9 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Optional
+import zlib
 
+import httpx
 import structlog
 
 from market_scraper.core.config_scraper import settings
@@ -30,6 +34,24 @@ logger = structlog.get_logger(__name__)
 #Cache de DNS simples potegido por lock para reduzir round-trips repetidos e evitar condições de corrida entre threads do pipeline
 _DNS_CACHE: dict[str, tuple[float, list[str]]] = {}
 _DNS_CACHE_LOCK = threading.Lock()
+
+try:
+    import brotli as _brotli_lib
+except ModuleNotFoundError:
+    _brotli_lib = None
+
+try:
+    from brotlicffi import decompress as _brotlicffi_decompress
+except ModuleNotFoundError:
+    _brotlicffi_decompress = None
+
+class ContentDecodeError(Exception):
+    """ Sinaliza falhas ao transformar o corpo HTTP em texto legível """
+    def __init__(self, *, encoding: str, reason: str) -> None:
+        #Armazenamos o encoding e o motivo para facilitar logs e métricas
+        super().__init__(f"{reason} (encoding={encoding})")
+        self.encoding = encoding
+        self.reason = reason
 
 def parse_retry_after(value: str) -> Optional[int]:
     """ Retorna o valor do cabeçalho ``Retry-After`` em segundos """
@@ -114,6 +136,58 @@ def resolve_public_addresses(host: str) -> list[str]:
     #Mantemos o comportamento único para evitar duplicar lógica de resolução DNS
     return resolve_public_address(host)
 
+def _decompress_brotli(payload: bytes) -> bytes:
+    """ Aplica descompressão Brotli usando a biblioteca disponível """
+    if _brotli_lib is not None:
+        return _brotli_lib.decompress(payload)
+    if _brotlicffi_decompress is not None:
+        return _brotlicffi_decompress(payload)
+    raise ContentDecodeError(encoding="br", reason="brotli_missing")
+
+def _decompress_gzip(payload: bytes) -> bytes:
+    """ Manipula payloads gzip utilizando buffer de memória """
+    buffer = io.BytesIO(payload)
+    with gzip.GzipFile(fileobj=buffer) as gz_file:
+        return gz_file.read()
+    
+def _decompress_deflate(payload: bytes) -> bytes:
+    """ Processa corpos codificados com deflate respeitando RFC 1950 """
+    try:
+        return zlib.decompress(payload)
+    except zlib.error:
+        #Alguns servidores enviam deflate cru sem cabeçalho zlib
+        return zlib.decompress(payload, -zlib.MAX_WBITS)
+    
+def decode_http_body(response: httpx.Response, *, default_encoding: str = "utf-8") -> str:
+    """ Converte a resposta HTTP para texto tratando Content-Encoding """
+    try:
+        #Primeira tentativa delega ao httpx, que já inclui heurísticas de charset
+        return response.text
+    except (httpx.DecodingError, UnicodeDecodeError):
+        #Seguimos para a decodificaçã manual apenas quando a API padrão falha
+        pass
+
+    content_encoding = (response.headers.get("Content-Encoding") or "identity").lower()
+    payload = response.content
+
+    try:
+        if "br" in content_encoding:
+            payload = _decompress_brotli(payload)
+        elif "gzip" in content_encoding:
+            payload = _decompress_gzip(payload)
+        elif "deflate" in content_encoding:
+            payload = _decompress_deflate(payload)
+    except ContentDecodeError:
+        raise
+    except Exception as exc:
+        raise ContentDecodeError(encoding=content_encoding, reason="decompress_failed") from exc
+    
+    encoding = response.encoding or response.charset or default_encoding
+    try:
+        return payload.decode(encoding)
+    except Exception as exc:
+        raise ContentDecodeError(encoding=encoding, reason="decode_failed") from exc
+
 def _resolve_host_records(host: str) -> list[str]:
     """ Executa a resolução DNS considerando tempo limite configurável """
     timeout = float(getattr(settings, "SCRAPER_DNS_TIMEOUT", 2.0))
@@ -173,8 +247,10 @@ def _validate_public_addresses(host: str, addresses: list[str]) -> list[str]:
 
 __all__ = [
     "HostResolutionError",
+    "ContentDecodeError",
     "extract_hostname",
     "parse_retry_after",
     "resolve_public_address",
     "resolve_public_addresses",
+    "decode_http_body",
 ]

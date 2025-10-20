@@ -143,6 +143,12 @@ SCRAPER_HTTP_CLIENT_ERROR_TOTAL = Counter(
     ["domain", "status"],
 )
 
+SCRAPER_HTTP_DECODE_ERROR_TOTAL = Counter(
+    "scraper_http_decode_error_total",
+    "Total de falhas ao decodificar corpos HTTP baixados pelo scraper",
+    ["domain", "encoding", "reason"],
+)
+
 SCRAPER_UA_ROTATION_TOTAL = Counter(
     "scraper_ua_rotation_total",
     "Total de User-Agents atribuídos durante o download de HTML",
@@ -181,6 +187,7 @@ __all__ = [
     "SCRAPER_HTTP_RETRIES_TOTAL",
     "SCRAPER_HTTP_RETRY_BACKOFF_SECONDS",
     "SCRAPER_HTTP_CLIENT_ERROR_TOTAL",
+    "SCRAPER_HTTP_DECODE_ERROR_TOTAL",
     "SCRAPER_UA_ROTATION_TOTAL",
     "SCRAPING_SUSPENDED_FLAG",
     "SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS",

@@ -189,6 +189,11 @@ class DataQualityValidator:
             domain=domain,
             result=reason_code,
         ).inc()
+        SCRAPER_VALIDATION_REJECT_TOTAL.labels(
+            domain=domain,
+            step=step_name,
+            reason=reason_code,
+        ).inc()
         logger.warning(
             "validation_rejected_payload",
             step=step_name,

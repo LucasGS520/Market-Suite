@@ -28,9 +28,11 @@ from market_scraper.utils.http_retry import(
     RetryableHTTPError,
     build_retrying_operation,
 )
+from market_scraper.utils.http_utils import ContentDecodeError, decode_http_body
 from market_scraper.utils.validator import DataQualityValidator
 from shared.metrics.metrics_scraper import (
     SCRAPER_HTTP_CLIENT_ERROR_TOTAL,
+    SCRAPER_HTTP_DECODE_ERROR_TOTAL,
     SCRAPER_UA_ROTATION_TOTAL,
 )
 
@@ -158,8 +160,26 @@ async def download_html(url: str, *, timeout: float) -> str:
     if len(content) > settings.SCRAPER_HTTP_MAX_CONTENT_LENGTH:
         raise ValueError("Resposta excedeu o tamanho máximo permitido")
     
-    #Retornamos o texto decodificado após validar o tamanho bruto para evitar ataques de payload gigante
-    return response.text
+    try:
+        #Decodificamos o corpo respeitando Content-Encoding para evitar textos truncados
+        return decode_http_body(response)
+    except ContentDecodeError as exc:
+        encoding = exc.encoding or (response.headers.get("Content-Encoding") or "unknown")
+        domain_label = domain or "unknown"
+        SCRAPER_HTTP_DECODE_ERROR_TOTAL.labels(
+            domain=domain_label,
+            encoding=encoding,
+            reason=exc.reason,
+        ).inc()
+        logger.warning(
+            "http_decode_error",
+            domain=domain_label,
+            url=sanitize_log_data(url),
+            encoding=encoding,
+            reason=exc.reason,
+            error=sanitize_log_data(str(exc)),
+        )
+        raise ValueError("Falha ao decodificar corpo HTTP recebido") from exc
 
 def _extract_domain(url: str) -> str | None:
     """ Normaliza o domínio da URL para métricas e logs """

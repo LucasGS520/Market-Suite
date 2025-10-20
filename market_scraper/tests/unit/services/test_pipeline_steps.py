@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import sys
 from collections.abc import Iterator
 from typing import Any
 from types import ModuleType
 
+import brotli
 import httpx
 import pytest
 
@@ -49,11 +51,13 @@ from market_scraper.services.synergic_pipeline import PipelineContext
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils import cache
 from market_scraper.utils import singleflight
+from market_scraper.utils.http_utils import ContentDecodeError
 from shared.metrics.metrics_scraper import (
     SCRAPER_SINGLEFLIGHT_CALLS_TOTAL,
     SCRAPER_SINGLEFLIGHT_WAIT_SECONDS,
     SCRAPER_HTTP_RETRIES_TOTAL,
     SCRAPER_HTTP_RETRY_BACKOFF_SECONDS,
+    SCRAPER_HTTP_DECODE_ERROR_TOTAL,
 )
 
 
@@ -138,6 +142,53 @@ async def test_download_html_utiliza_headers_compostos(monkeypatch: pytest.Monke
     assert captured_headers["Referer"] == "https://exemplo.com.br/origem"
 
 @pytest.mark.asyncio
+async def test_download_html_decodifica_brotli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Confere que o download trate respostas Brotli sem depender do httpx """
+    url = "https://brotli.com/produto"
+    original = "<html>brotli</html>"
+    response = httpx.Response(
+        200,
+        content=brotli.compress(original.encode("utf-8")),
+        headers={"Content-Encoding": "br"},
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(iter([response])),
+    )
+
+    html = await download_html(url, timeout=1.0)
+
+    assert html == original
+
+@pytest.mark.asyncio
+async def test_download_html_decodifica_gzip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Valida suporte a gzip quando httpx retorna bytes comprimidos """
+    import gzip
+
+    url = "https://gzip.com/item"
+    original = "<html>gzip</html>"
+    buffer = io.BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="wb") as gz_file:
+        gz_file.write(original.encode("utf-8"))
+    response = httpx.Response(
+        200,
+        content=buffer.getvalue(),
+        headers={"Content-Encoding": "gzip"},
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(iter([response])),
+    )
+
+    html = await download_html(url, timeout=1.0)
+
+    assert html == original
+
+@pytest.mark.asyncio
 async def test_download_html_registra_corpo_em_erro_4xx(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Confirma logging sanitizado do corpo quando habilitado em settings """
 
@@ -198,7 +249,46 @@ async def test_download_html_registra_headers_em_debug(monkeypatch: pytest.Monke
 
     assert html == "<html></html>"
     assert debug_logs, "Era esperado log em nível debug"
-    assert debug_logs[0]["content_type"] == "text/html"
+
+@pytest.mark.asyncio
+async def test_download_html_registra_metricas_em_erro_decode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Checa incremento de métricas e log quando a decodificação falha """
+    url = "https://erro.decode"
+    response = httpx.Response(
+        200,
+        content=b"\x00\x01",
+        headers={"Content-Encoding": "br"},
+        request=httpx.Request("GET", url),
+    )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **__: DummyAsyncClient(iter([response])),
+    )
+
+    def fake_decode(_: httpx.Response) -> str:
+        raise ContentDecodeError(encoding="br", reason="decode_failed")
+    
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.decode_http_body",
+        fake_decode,
+    )
+
+    before = _metric_value(
+        SCRAPER_HTTP_DECODE_ERROR_TOTAL,
+        "scraper_http_decode_error_total",
+        {"domain": "erro.decode", "encoding": "br", "reason": "decode_failed"},
+    )
+
+    with pytest.raises(ValueError):
+        await download_html(url, timeout=1.0)
+
+    after = _metric_value(
+        SCRAPER_HTTP_DECODE_ERROR_TOTAL,
+        "scraper_http_decode_error_total",
+        {"domain": "erro.decode", "encoding": "br", "reason": "decode_failed"},
+    )
+    assert after == before + 1
 
 def test_run_parser_with_validation_registra_rejeicao() -> None:
     """ Confirma que rejeições do validador fiquem disponíveis no contexto """

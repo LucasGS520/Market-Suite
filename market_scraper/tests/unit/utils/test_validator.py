@@ -4,7 +4,10 @@ from decimal import Decimal
 import sys
 from types import ModuleType
 
-from shared.metrics.metrics_scraper import SCRAPER_STEP_INVALID_TOTAL
+from shared.metrics.metrics_scraper import (
+    SCRAPER_STEP_INVALID_TOTAL,
+    SCRAPER_VALIDATION_REJECT_TOTAL,
+)
 from structlog.testing import capture_logs
 
 if "price_parser" not in sys.modules:
@@ -27,6 +30,10 @@ from market_scraper.utils.validator import DataQualityValidator
 
 def _metric_value(step: str, domain: str, result: str) -> Decimal:
     sample = SCRAPER_STEP_INVALID_TOTAL.labels(step, domain, result)
+    return Decimal(sample._value.get())
+
+def _reject_metric_value(domain: str, step: str, reason: str) -> Decimal:
+    sample = SCRAPER_VALIDATION_REJECT_TOTAL.labels(domain, step, reason)
     return Decimal(sample._value.get())
 
 def test_validator_normalizes_payload() -> None:
@@ -120,6 +127,7 @@ def test_validator_uses_hostname_from_source_url() -> None:
 def test_validator_records_invalid_price() -> None:
     validator = DataQualityValidator()
     before = _metric_value("html_metadata_parser", "exemplo.com", "price_invalid")
+    before_reject = _reject_metric_value("exemplo.com", "html_metadata_parser", "price_invalid")
     result = validator.validate(
         step_name="html_metadata_parser",
         payload={"name": "Produto", "current_price": "abc", "url": ""},
@@ -127,13 +135,16 @@ def test_validator_records_invalid_price() -> None:
         source="exemplo.com",
     )
     after = _metric_value("html_metadata_parser", "exemplo.com", "price_invalid")
+    after_reject = _reject_metric_value("exemplo.com", "html_metadata_parser", "price_invalid")
     assert not result.is_valid
     assert result.reason_code == "price_invalid"
     assert after == before + Decimal(1)
+    assert after_reject == before_reject + Decimal(1)
 
 def test_validator_records_domain_from_full_source() -> None:
     validator = DataQualityValidator()
     before = _metric_value("html_metadata_parser", "loja.teste.com", "price_invalid")
+    before_reject = _reject_metric_value("loja.teste.com", "html_metadata_parser", "price_invalid")
     result = validator.validate(
         step_name="html_metadata_parser",
         payload={"name": "Produto", "current_price": "abc", "url": ""},
@@ -143,6 +154,8 @@ def test_validator_records_domain_from_full_source() -> None:
     after = _metric_value("html_metadata_parser", "loja.teste.com", "price_invalid")
     assert not result.is_valid
     assert after == before + Decimal(1)
+    after_reject = _reject_metric_value("loja.teste.com", "html_metadata_parser", "price_invalid")
+    assert after_reject == before_reject + Decimal(1)
 
 def test_validator_accepts_approximate_price_with_tolerance() -> None:
     validator = DataQualityValidator(price_tolerance=Decimal("0.25"))
