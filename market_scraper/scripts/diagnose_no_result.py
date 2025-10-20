@@ -301,11 +301,12 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         help="Arquivo texto contendo uma URL por linha",
     )
+    default_output = Path(__file__).parent / "diagnostics_output"
     parser.add_argument(
         "--output-dir",
-        default="diagnostics_output",
+        default=default_output,
         type=Path,
-        help="Diretório onde os dumps de HTML serão armazenados",
+        help="Diretório onde os dumps de HTML serão armazenados (default: scripts/diagnostics_output)",
     )
     return parser.parse_args()
 
@@ -376,13 +377,13 @@ def main() -> None:
 
     for report in reports:
         print(json.dumps(report, ensure_ascii=False, indent=2))
-
-    if reports:
-        summary_path = args.output_dir / "summary.json"
-        summary_path.write_text(
-            json.dumps(reports, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    # Assegura que o diretório de saída exista e grava um summary.json com todos os relatórios
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = args.output_dir / "summary.json"
+    summary_path.write_text(
+        json.dumps(reports, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - execução direta não é coberta em testes
