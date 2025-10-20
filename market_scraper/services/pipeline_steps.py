@@ -75,17 +75,30 @@ def _run_parser_with_validation(
     if not raw_payload:
         return False, None
     
+    parser_name = getattr(parser, "__name__", parser.__class__.__name__)
+    dump_path = context.data.get("dump_path")
     validated = _validator.validate(
         step_name=step_name,
         payload=raw_payload,
         url=context.url,
         source=context.source,
+        parser_name=parser_name,
+        dump_path=dump_path,
     )
-    if not validated:
+    if not validated.is_valid:
+        reason_entry = {
+            "step": step_name,
+            "reason_code": validated.reason_code,
+            "reason_message": validated.reason_message,
+            "parser_name": parser_name,
+            "dump_path": dump_path,
+        }
+        context.data.setdefault("validation_failures", []).append(reason_entry)
         return False, None
     
-    _update_shared_payload(context, validated)
-    return True, validated
+    payload = validated.payload or {}
+    _update_shared_payload(context, payload)
+    return True, payload
 
 async def download_html(url: str, *, timeout: float) -> str:
     """ Baixa o HTML usando ``httpx`` com limites rígidos de segurança """

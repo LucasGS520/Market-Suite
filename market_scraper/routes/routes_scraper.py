@@ -1,4 +1,8 @@
-""" Define as rotas responsáveis por acionar o pipeline de scraping """
+""" Define as rotas responsáveis por acionar o pipeline de scraping 
+
+O módulo concentra o endpoint ``/parse`` responsável por executar o
+pipeline sequencial de scraping.
+"""
 
 from __future__ import annotations
 
@@ -79,6 +83,18 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
         )
 
     if outcome.status != "success" or not outcome.payload:
+        validation_failures = outcome.context.data.get("validation_failures", [])
+        last_failure = validation_failures[-1] if validation_failures else None
+        logger.warning(
+            "parse_no_result",
+            url=sanitize_log_data(normalized_url),
+            source=outcome.context.source,
+            reason_code=last_failure.get("reason_code") if last_failure else None,
+            reason_message=last_failure.get("reason_message") if last_failure else None,
+            step=last_failure.get("step") if last_failure else None,
+            parser_name=last_failure.get("parser_name") if last_failure else None,
+            dump_path=last_failure.get("dump_path") if last_failure else None,
+        )
         issue = UrlIssue(code="no_result", message="Não foi possível extrair dados do produto")
         return _http_error(
             issue,

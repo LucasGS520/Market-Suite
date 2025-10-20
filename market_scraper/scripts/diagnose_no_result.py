@@ -22,7 +22,7 @@ import httpx
 from market_scraper.core.config_scraper import settings
 from market_scraper.services.services_scraper_common import build_context, create_pipeline
 from market_scraper.utils.user_agents import compose_headers, get_user_agent
-from market_scraper.utils.validator import DataQualityValidator
+from market_scraper.utils.validator import DataQualityValidator, ValidationResult
 
 
 ParserFn = Callable[[str, str], dict[str, Any] | None]
@@ -69,19 +69,30 @@ class DiagnosticValidator(DataQualityValidator):
         payload: dict[str, Any] | None,
         url: str,
         source: str,
-    ) -> dict[str, str] | None:
-        """Limpa o estado anterior e delega validação à implementação base."""
+        parser_name: str | None = None,
+        dump_path: str | None = None,
+    ) -> ValidationResult:
+        """ Limpa o estado anterior, delega validação e guarda rejeições """
 
-        #Zeramos o cache para garantir que o próximo relatório corresponda ao parser atual
+        #Zeramos o cache para garantir que o relatório represente ao parser atual
         self._last_issue = None
-        return super().validate(step_name=step_name, payload=payload, url=url, source=source)
-
-    def _register_invalid(self, step_name: str, domain: str, reason: str) -> None:  # type: ignore[override]
-        """Salva o motivo de rejeição antes de propagar o registro padrão."""
-
-        #Capturamos dados mínimos para explicar a decisão sem precisar inspecionar logs
-        self._last_issue = {"reason": reason, "domain": domain, "step": step_name}
-        super()._register_invalid(step_name, domain, reason)
+        decision = super().validate(
+            step_name=step_name,
+            payload=payload,
+            url=url,
+            source=source,
+            parser_name=parser_name,
+            dump_path=dump_path,
+        )
+        if not decision.is_valid:
+            domain = urlparse(source).hostname or urlparse(url).hostname or "unknown"
+            self._last_issue = {
+                "reason": decision.reason_code or "unknown",
+                "domain": domain,
+                "step": step_name,
+                "reason_message": decision.reason_message or "",
+            }
+        return decision
 
     def consume_issue(self) -> dict[str, str] | None:
         """Devolve o último motivo registrado e limpa o estado interno."""
@@ -227,12 +238,13 @@ def _run_parsers(
             payload=payload,
             url=url,
             source=url,
+            parser_name=name,
         )
-        if validated is not None:
+        if validated.is_valid and validated.payload is not None:
             report = ParserReport(
                 status="valid",
                 raw_payload=payload,
-                validated_payload=validated,
+                validated_payload=validated.payload,
                 validation_issue=None,
                 error=None,
             )
@@ -448,4 +460,3 @@ def main() -> None:
 
 if __name__ == "__main__":  # pragma: no cover - execução direta não é coberta em testes
     main()
-    

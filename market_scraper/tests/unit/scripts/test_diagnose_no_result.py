@@ -67,8 +67,10 @@ def test_run_parsers_reports_validation_issue() -> None:
 
     assert reports["json_ld"]["status"] == "invalid"
     assert reports["json_ld"]["validation_issue"]["reason"] == "name_missing"
+    assert reports["json_ld"]["validation_issue"]["reason_message"]
     assert reports["fallback"]["status"] == "invalid"
     assert reports["fallback"]["validation_issue"]["reason"] == "price_invalid"
+    assert reports["fallback"]["validation_issue"]["reason_message"]
     assert reports["success"]["status"] == "valid"
     assert reports["success"]["validated_payload"]["name"] == "Produto"
 
@@ -125,4 +127,3 @@ async def test_run_pipeline_with_html_returns_strucutured_summary() -> None:
     assert step_names[0] == "fetch_html"
     assert "html_metadata_parser" in step_names
     assert result["context"]["url"] == url
-    

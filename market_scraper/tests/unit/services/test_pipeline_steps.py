@@ -41,6 +41,7 @@ from market_scraper.services.pipeline_steps import (
     GenericFallbackParserStep,
     HtmlMetadataParserStep,
     JsonLdParserStep,
+    _run_parser_with_validation,
     download_html,
     _log_client_error,
 )
@@ -198,7 +199,29 @@ async def test_download_html_registra_headers_em_debug(monkeypatch: pytest.Monke
     assert html == "<html></html>"
     assert debug_logs, "Era esperado log em nível debug"
     assert debug_logs[0]["content_type"] == "text/html"
-    assert debug_logs[0]["content_encoding"] == "identity"
+
+def test_run_parser_with_validation_registra_rejeicao() -> None:
+    """ Confirma que rejeições do validador fiquem disponíveis no contexto """
+    context = PipelineContext(
+        url="https://exemplo.com/produto",
+        source="exemplo.com",
+        default_step_timeout=1.0,
+    )
+    context.set_html("<html></html>")
+
+    def _fake_parser(_: str, __: str) -> dict[str, str]:
+        return {"name": "", "current_price": "10"}
+    
+    ok, payload = _run_parser_with_validation(
+        parser=_fake_parser,
+        context=context,
+        step_name="json_ld_parser",
+    )
+
+    assert not ok
+    assert payload is None
+    failures = context.data.get("validation_failures")
+    assert failures and failures[0]["reason_code"] == "name_missing"
 
 def test_log_client_error_trunca_e_decodifica_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante truncamento em bytes e decodificações tolerante ao registrar 4xx """

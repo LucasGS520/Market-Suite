@@ -35,6 +35,12 @@ SCRAPER_STEP_INVALID_TOTAL = Counter(
     ["step", "domain", "result"],
 )
 
+SCRAPER_VALIDATION_REJECT_TOTAL = Counter(
+    "scraper_validation_reject_total",
+    "Total de rejeições emitidas pelo validador de qualidade",
+    ["domain", "step", "reason"],
+)
+
 SCRAPER_NO_RESULT_TOTAL = Counter(
     "scraper_no_result_total",
     "Execuções que não retornaram um payload válido ao final do pipeline",
@@ -182,5 +188,6 @@ __all__ = [
     "SCRAPER_STEP_LATENCY_SECONDS",
     "SCRAPER_STEP_FALLBACK_TOTAL",
     "SCRAPER_STEP_INVALID_TOTAL",
+    "SCRAPER_VALIDATION_REJECT_TOTAL",
     "SCRAPER_NO_RESULT_TOTAL",
 ]
