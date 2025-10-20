@@ -12,7 +12,9 @@ from market_scraper.scripts.diagnose_no_result import (
     ParserReport,
     _format_excerpt,
     _load_urls,
+    _prepare_output_dir,
     _run_parsers,
+    _run_pipeline_with_html,
 )
 
 
@@ -87,3 +89,40 @@ def test_parser_report_to_dict_filters_none_values() -> None:
         "raw_payload": {"a": 1},
         "validated_payload": {"b": 2},
     }
+
+def test_prepare_output_dir_resets_existing_content(tmp_path: Path) -> None:
+    """ Verifica que artefatos antigos sejam removidos antes de nova execução """
+    output_dir = tmp_path / "diagnostics_output"
+    nested_dir = output_dir / "old"
+    nested_dir.mkdir(parents=True)
+    (output_dir / "antigo.html").write_text("conteudo", encoding="utf-8")
+    (nested_dir / "extra.txt").write_text("dados", encoding="utf-8")
+
+    _prepare_output_dir(output_dir)
+
+    assert list(output_dir.iterdir()) == []
+
+@pytest.mark.asyncio()
+async def test_run_pipeline_with_html_returns_strucutured_summary() -> None:
+    """ Garante que o pipeline real seja executado e produza payload válido """
+    html = """
+    <html>
+      <head>
+        <meta property="og:title" content="Produto Teste" />
+        <meta itemprop="price" content="1999.90" />
+      </head>
+      <body></body>
+    </html>
+    """
+    url = "https://loja.exemplo/produto"
+
+    result = await _run_pipeline_with_html(url, html)
+
+    assert result["status"] == "success"
+    assert result["payload"]["name"] == "Produto Teste"
+    assert result["payload"]["current_price"] == "1999.90"
+    step_names = [step["name"] for step in result["steps"]]
+    assert step_names[0] == "fetch_html"
+    assert "html_metadata_parser" in step_names
+    assert result["context"]["url"] == url
+    

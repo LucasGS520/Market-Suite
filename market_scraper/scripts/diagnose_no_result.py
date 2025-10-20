@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import shutil
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,7 @@ from urllib.parse import urlparse
 import httpx
 
 from market_scraper.core.config_scraper import settings
+from market_scraper.services.services_scraper_common import build_context, create_pipeline
 from market_scraper.utils.user_agents import compose_headers, get_user_agent
 from market_scraper.utils.validator import DataQualityValidator
 
@@ -146,6 +148,15 @@ def _format_excerpt(html: str, length: int = 2048) -> str:
     excerpt = html[:length]
     return excerpt.replace("\n", " ").replace("\r", " ")
 
+def _prepare_output_dir(output_dir: Path) -> None:
+    """ Limpa o diretório de saída para evitar artefatos de execuções anteriores """
+    if output_dir.exists():
+        for entry in output_dir.iterdir():
+            if entry.is_file():
+                entry.unlink()
+            else:
+                shutil.rmtree(entry)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
 def _save_dump(content: bytes, output_dir: Path, url: str) -> Path:
     """Persiste o HTML bruto em disco utilizando hash para rastreabilidade."""
@@ -240,17 +251,56 @@ def _run_parsers(
 
     return results
 
+def _serialize_pipeline_steps(steps: Iterable[Any]) -> list[dict[str, Any]]:
+    """ Converte etapas do pipeline em estrutura serializável com metadados """
+    serialized: list[dict[str, Any]] = []
+    for step in steps:
+        entry: dict[str, Any] = {
+            "name": step.name,
+            "status": step.status,
+            "duration_ms": round(step.duration_seconds * 1000, 3),
+        }
+        if step.message:
+            entry["message"] = step.message
+        serialized.append(entry)
+    return serialized
+
+async def _run_pipeline_with_html(url: str, html: str) -> dict[str, Any]:
+    """ Executa o pipeline oficial reutilizando o HTML já capturado """
+    context = build_context(url)
+    context.set_html(html)
+    pipeline = create_pipeline()
+
+    try:
+        outcome = await pipeline.run(context)
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+    
+    summary: dict[str, Any] = {
+        "status": outcome.status,
+        "steps": _serialize_pipeline_steps(outcome.steps),
+    }
+    if outcome.payload is not None:
+        summary["payload"] = outcome.payload
+    if outcome.context.data:
+        summary["context"] = {
+            "name": outcome.context.data.get("name"),
+            "current_price": outcome.context.data.get("current_price"),
+            "url": outcome.context.data.get("url"),
+            "source": outcome.context.data.get("source"),
+        }
+    return summary
 
 def _build_response_summary(
     url: str,
     response: httpx.Response,
     dump_path: Path,
     *,
+    html: str,
     validator: DiagnosticValidator,
+    pipeline_report: dict[str, Any],
 ) -> dict[str, Any]:
     """Cria dicionário consolidado com metadados e resultados de parsing."""
-
-    html = response.text
     excerpt = _format_excerpt(html)
     parsers_summary = _run_parsers(html, url, validator)
 
@@ -262,6 +312,7 @@ def _build_response_summary(
         "dump_path": str(dump_path),
         "dump_hash": hashlib.sha256(response.content).hexdigest(),
         "html_excerpt": excerpt,
+        "pipeline": pipeline_report,
         "parsers": parsers_summary,
     }
 
@@ -349,8 +400,16 @@ async def diagnose_url(
         return _response_error_summary(url, exc)
 
     dump_path = _save_dump(response.content, output_dir, url)
-    return _build_response_summary(url, response, dump_path, validator=validator)
-
+    html = response.text
+    pipeline_report = await _run_pipeline_with_html(url, html)
+    return _build_response_summary(
+        url,
+        response,
+        dump_path,
+        html=html,
+        validator=validator,
+        pipeline_report=pipeline_report,
+    )
 
 async def run_diagnostics(urls: list[str], output_dir: Path) -> list[dict[str, Any]]:
     """Orquestra diagnósticos para todas as URLs informadas."""
@@ -359,6 +418,7 @@ async def run_diagnostics(urls: list[str], output_dir: Path) -> list[dict[str, A
         return []
 
     validator = DiagnosticValidator()
+    _prepare_output_dir(output_dir)
     async with _build_client() as client:
         reports = []
         for url in urls:
@@ -388,3 +448,4 @@ def main() -> None:
 
 if __name__ == "__main__":  # pragma: no cover - execução direta não é coberta em testes
     main()
+    
