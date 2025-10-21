@@ -21,6 +21,7 @@ import httpx
 
 from market_scraper.core.config_scraper import settings
 from market_scraper.services.services_scraper_common import build_context, create_pipeline
+from market_scraper.utils.headers import build_referer
 from market_scraper.utils.user_agents import compose_headers, get_user_agent
 from market_scraper.utils.validator import DataQualityValidator, ValidationResult
 
@@ -123,32 +124,12 @@ def _build_limits() -> httpx.Limits:
         max_keepalive_connections=settings.SCRAPER_HTTP_MAX_KEEPALIVE,
     )
 
-
-def _build_referer(url: str) -> str | None:
-    """Monta o header Referer seguindo o template configurado via ambiente."""
-
-    template = settings.SCRAPER_HEADERS_REFERER_TEMPLATE
-    if not template:
-        return None
-
-    parsed = urlparse(url)
-    domain = parsed.hostname
-    if not domain:
-        return None
-
-    try:
-        return template.format(domain=domain, url=url)
-    except Exception:
-        #Mantemos tolerância: templates inválidos não devem interromper o diagnóstico
-        return None
-
-
 def _compose_headers(url: str) -> dict[str, str]:
     """Reproduz o conjunto de headers oficiais do serviço."""
 
     user_agent = get_user_agent(url)
     #Incluímos Referer apenas quando configurado, reproduzindo o comportamento do pipeline
-    referer = _build_referer(url)
+    referer = build_referer(url)
     return compose_headers(user_agent, referer=referer)
 
 

@@ -257,7 +257,7 @@ class SynergicPipeline:
             else:
                 final_result_label = "error"
                 logger.warning(
-                    "unknow_result_label",
+                    "unknown_result_label",
                     last_result=last_result_label,
                     domain=context.source,
                     url=sanitize_log_data(context.url),

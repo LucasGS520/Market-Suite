@@ -129,6 +129,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
             "parse_no_result",
             url=sanitize_log_data(normalized_url),
             source=outcome.context.source,
+            error_code="no_result",
             reason_code=last_failure.get("reason_code") if last_failure else None,
             reason_message=last_failure.get("reason_message") if last_failure else None,
             step=last_failure.get("step") if last_failure else None,

@@ -27,6 +27,10 @@ from market_scraper.parsers import (
 )
 from market_scraper.services.synergic_pipeline import PipelineContext, PipelineStep, StepResult
 from market_scraper.utils import cache, robots, singleflight, user_agents
+from market_scraper.utils.headers import (
+    REFERER_TEMPLATE_ERROR_EVENT,
+    build_referer,
+)
 from market_scraper.utils.http_retry import(
     RetryableHTTPError,
     build_retrying_operation,
@@ -40,7 +44,6 @@ from shared.metrics.metrics_scraper import (
 )
 
 
-_REFERER_TEMPLATE_ERROR_EVENT = "referer_template_error"
 _UA_STRATEGY_LABEL = "round_robin"
 
 logger = structlog.get_logger("pipeline_steps")
@@ -125,7 +128,11 @@ async def download_html(url: str, *, timeout: float) -> str:
         domain=domain or "unknown",
     ).inc()
 
-    referer = _build_referer(url)
+    referer = build_referer(
+        url,
+        logger=logger,
+        event_name=REFERER_TEMPLATE_ERROR_EVENT,
+    )
     headers = user_agents.compose_headers(user_agent, referer=referer)
     
     cookies = settings.get_default_cookies()
@@ -208,27 +215,6 @@ def _extract_domain(url: str) -> str | None:
     """ Normaliza o domínio da URL para métricas e logs """
     parsed = urlparse(url)
     return parsed.hostname
-
-def _build_referer(url: str) -> str | None:
-    """ Monta Referer opcional baseado no template configurado """
-    template = settings.SCRAPER_HEADERS_REFERER_TEMPLATE
-    if not template:
-        return None
-    
-    domain = _extract_domain(url)
-    if not domain:
-        return None
-    
-    try:
-        return template.format(domain=domain, url=url)
-    except Exception:
-        #Quando o template é inválido evitamos quebrar o download e omitimos o header
-        logger.warning(
-            _REFERER_TEMPLATE_ERROR_EVENT,
-            template=sanitize_log_data(template),
-            url=sanitize_log_data(url),
-        )
-        return None
     
 def _log_response_metadata(*, response: httpx.Response, url: str, domain: str | None, user_agent: str) -> None:
     """ Registra cabeçalhos principais da resposta para depuração """

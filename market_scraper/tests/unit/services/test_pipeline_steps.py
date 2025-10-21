@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import io
 import sys
 from collections.abc import Iterator
@@ -53,6 +54,7 @@ from market_scraper.services.synergic_pipeline import PipelineContext
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils import cache
 from market_scraper.utils import singleflight
+from market_scraper.utils.http_retry import RetryableHTTPError
 from market_scraper.utils.http_utils import ContentDecodeError
 from shared.metrics.metrics_scraper import (
     SCRAPER_SINGLEFLIGHT_CALLS_TOTAL,
@@ -249,8 +251,6 @@ async def test_download_html_decodifica_brotli(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.asyncio
 async def test_download_html_decodifica_gzip(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Valida suporte a gzip quando httpx retorna bytes comprimidos """
-    import gzip
-
     url = "https://gzip.com/item"
     original = "<html>gzip</html>"
     buffer = io.BytesIO()
@@ -373,6 +373,32 @@ async def test_download_html_registra_metricas_em_erro_decode(monkeypatch: pytes
         {"domain": "erro.decode", "encoding": "br", "reason": "decode_failed"},
     )
     assert after == before + 1
+
+@pytest.mark.asyncio
+async def test_download_html_repropaga_http_status_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Garante preservação do request/response ao repropagar erros transitórios """
+    url = "https://erro-temporario.com/recurso"
+    request = httpx.Request("GET", url)
+    response = httpx.Response(503, request=request)
+    status_error = httpx.HTTPStatusError("erro", request=request, response=response)
+
+    async def fake_operation() -> httpx.Response:
+        raise RetryableHTTPError(target="html", reason="server_error", status_code=503) from status_error
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.build_retrying_operation",
+        lambda *, target, operation: fake_operation,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.user_agents.get_user_agent",
+        lambda *_a, **_k: "UA-DE-TESTE",
+    )
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        await download_html(url, timeout=1.0)
+
+    assert exc_info.value.request is request
+    assert exc_info.value.response is response
 
 def test_run_parser_with_validation_registra_rejeicao() -> None:
     """ Confirma que rejeições do validador fiquem disponíveis no contexto """
