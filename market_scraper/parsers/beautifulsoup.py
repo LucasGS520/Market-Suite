@@ -27,18 +27,34 @@ HTML_METADATA_SOURCE = "html_metadata"
 _NAME_SELECTORS = [
     ("meta", {"property": "og:title"}),
     ("meta", {"name": "title"}),
+    ("meta", {"name": "twitter:title"}),
+    ("meta", {"property": "twitter:title"}),
     ("meta", {"itemprop": "name"}),
+    ("span", {"id": "productTitle"}),
+    ("h1", {"class": "ui-pdp-title"}),
+    ("h1", {"data-testid": "heading-product-title"}),
     ("h1", {}),
     ("title", {}),
 ]
 
+#Mantemos os seletores organizados por prioridade para cobrir variações comuns dos marketplaces sem depender de heurísticas fragéis
 _PRICE_SELECTORS = [
     ("meta", {"itemprop": "price"}),
     ("meta", {"property": "product:price:amount"}),
+    ("meta", {"property": "og:price:amount"}),
     ("meta", {"name": "twitter:data1"}),
-    ("span", {"id": "price"}),
-    ("span", {"class": "price"}),
+    ("meta", {"itemprop": "priceCurrency"}),
+    ("span", {"id": "price_inside_buybox"}),
+    ("span", {"id": "priceblock_ourprice"}),
+    ("span", {"id": "priceblock_dealprice"}),
+    ("span", {"class": "a-offscreen"}),
+    ("span", {"class": "a-price-whole"}),
+    ("span", {"class": "andes-money-amount__fraction"}),
+    ("span", {"class": "price-tag-fraction"}),
+    ("span", {"data-testid": "price-value"}),
+    ("span", {"data-testid": "price-amount"}),
     ("div", {"class": "price"}),
+    ("span", {"class": "price"}),
     ("span", {"data-price": True}),
     ("data", {"itemprop": "price"}),
 ]

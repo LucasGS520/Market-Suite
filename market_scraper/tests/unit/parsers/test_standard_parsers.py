@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from market_scraper.parsers import (
+    parse_amazon_html,
+    parse_magalu_html,
+    parse_meli_html,
     parse_generic_html,
     parse_with_beautifulsoup,
     parse_with_extruct,
@@ -97,6 +100,110 @@ def test_parse_with_parsel_uses_selectors() -> None:
         "name": "Tablet",
         "current_price": "1999.90",
         "url": "https://exemplo.com/tablet",
-        "source": "",
+        "source": "parsel",
+    }
+
+def test_parse_with_parsel_combines_price_parts() -> None:
+    html = """
+    <html>
+        <head>
+            <meta name="twitter:title" content="Console" />
+        </head>
+        <body>
+            <span data-testid="price-integer">3.499</span>
+            <span data-testid="price-decimal">90</span>
+        </body>
+    </html>
+    """
+    result = parse_with_parsel(html, "https://exemplo.com/console")
+    assert result == {
+        "name": "Console",
+        "current_price": "3499.90",
+        "url": "https://exemplo.com/console",
+        "source": "parsel",
+    }
+
+
+def test_parse_with_beautifulsoup_handles_twitter_title_and_buybox() -> None:
+    html = """
+    <html>
+        <head>
+            <meta name="twitter:title" content="Smartphone" />
+        </head>
+        <body>
+            <span id="price_inside_buybox">R$ 129,90</span>
+        </body>
+    </html>
+    """
+    result = parse_with_beautifulsoup(html, "https://exemplo.com/smartphone")
+    assert result == {
+        "name": "Smartphone",
+        "current_price": "129,90",
+        "url": "https://exemplo.com/smartphone",
+        "source": "html_metadata",
+    }
+
+
+def test_parse_meli_html_handles_test_id_selectors() -> None:
+    html = """
+    <html>
+        <body>
+            <h1 data-testid="product-title">Notebook Gamer</h1>
+            <span data-testid="price-integer">3.499</span>
+            <span data-testid="price-decimal">99</span>
+            <span data-testid="price-currency">R$</span>
+        </body>
+    </html>
+    """
+    result = parse_meli_html(html, "https://www.mercadolivre.com.br/produto")
+    assert result == {
+        "name": "Notebook Gamer",
+        "current_price": "R$ 3.499,99",
+        "url": "https://www.mercadolivre.com.br/produto",
+        "source": "generic_html",
+    }
+
+
+def test_parse_amazon_html_reads_buybox_price() -> None:
+    html = """
+    <html>
+        <head>
+            <meta name="twitter:title" content="Liquidificador" />
+            <meta property="og:price:currency" content="BRL" />
+        </head>
+        <body>
+            <span id="productTitle">Liquidificador Potente</span>
+            <span id="price_inside_buybox">R$ 199,90</span>
+            <span class="a-price-symbol">R$</span>
+        </body>
+    </html>
+    """
+    result = parse_amazon_html(html, "https://www.amazon.com.br/dp/123")
+    assert result == {
+        "name": "Liquidificador Potente",
+        "current_price": "R$ 199,90",
+        "url": "https://www.amazon.com.br/dp/123",
+        "source": "generic_html",
+    }
+
+
+def test_parse_magalu_html_uses_data_testid_value() -> None:
+    html = """
+    <html>
+        <head>
+            <meta property="og:title" content="Televisor" />
+        </head>
+        <body>
+            <span data-testid="price-value">R$ 2.599,00</span>
+            <span data-testid="price-currency">R$</span>
+        </body>
+    </html>
+    """
+    result = parse_magalu_html(html, "https://www.magazineluiza.com.br/produto")
+    assert result == {
+        "name": "Televisor",
+        "current_price": "R$ 2.599,00",
+        "url": "https://www.magazineluiza.com.br/produto",
+        "source": "generic_html",
     }
     
