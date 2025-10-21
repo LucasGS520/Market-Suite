@@ -9,7 +9,7 @@ complexos que geravam ramificações de execução difíceis de auditar.
 from __future__ import annotations
 
 import os
-from typing import Tuple
+from typing import Dict, Tuple
 
 from shared.core.config_base import ConfigBase
 
@@ -130,6 +130,14 @@ class Settings(ConfigBase):
         "SCRAPER_HEADERS_REFERER_TEMPLATE",
         None,
     )  #Template opcional para construir Referer dinâmico
+    SCRAPER_HEADERS_DEFAULT_COOKIES: str = os.getenv(
+        "SCRAPER_HEADERS_DEFAULT_COOKIES",
+        "",
+    ) #Cookies opcionais enviados por padrão
+    SCRAPER_HEADERS_ADDITIONAL: str = os.getenv(
+        "SCRAPER_HEADERS_ADDITIONAL",
+        "",
+    ) #Headers adicionais enviados além do conjunto mínimo
 
     # --- Observabilidade ---
     SCRAPER_LOG_4XX_BODY: bool = os.getenv("SCRAPER_LOG_4XX_BODY", "True").lower() in {
@@ -141,6 +149,98 @@ class Settings(ConfigBase):
     SCRAPER_LOG_4XX_MAX_BYTES: int = int(
         os.getenv("SCRAPER_LOG_4XX_MAX_BYTES", "1024")
     ) #Limite de bytes registrados em logs de 4xx
+
+    SCRAPER_HTTP_FOLLOW_REDIRECTS: bool = os.getenv(
+        "SCRAPER_HTTP_FOLLOW_REDIRECTS",
+        "true",
+    ).lower() in {"1", "true", "on", "yes"} #Controla comportamento de redirecionamentos
+    SCRAPER_HTTP_DOMAIN_TIMEOUTS: str = os.getenv(
+        "SCRAPER_HTTP_DOMAIN_TIMEOUTS",
+        "",
+    ) #Permite sobreescrever timeout total por domínio
+
+    def get_default_cookies(self) -> Dict[str, str]:
+        """ Retorna cookies básicos enviados em todas as requisições 
+        
+        O formato esperado é uma lista delimitada por ``||`` em que cada
+        item segue ``chave=valor``. Entradas inválidas são ignoradas para
+        manter tolerância com configurações dinâmicas.
+        """
+        return self._parse_key_value_pairs(self.SCRAPER_HEADERS_DEFAULT_COOKIES)
+
+    def get_additional_headers(self) -> Dict[str, str]:
+        """ Retorna headers complementares configurados para o scraper
+        
+        O método aplica a mesma regra de parsing dos cookies, permitindo
+        sobrescrever seletivamente headers utilizados pelo pipeline
+        """
+        return self._parse_key_value_pairs(self.SCRAPER_HEADERS_ADDITIONAL)
+    
+    def resolve_domain_timeout(self, domain: str | None, fallback: float) -> float:
+        """ Devolve timeout específico do domínio quando configurado 
+        
+        O formato aceito também utiliza ``||`` como separador e valores
+        em segundos. Nomes de domínio são normalizados para minúsculas
+        """
+        if not domain:
+            return fallback
+        
+        normalized = domain.lower()
+        mapping = self._parse_domain_timeouts(self.SCRAPER_HTTP_DOMAIN_TIMEOUTS)
+        return mapping.get(normalized, fallback)
+    
+    @staticmethod
+    def _parse_key_value_pairs(raw: str) -> Dict[str, str]:
+        """ Converte string delimitada em dicionário ``{chave: valor}`` 
+        
+        Entradas sem ``=`` ou com chave vazia são descartadas para evitar
+        propagação de valores inconsistentes para o cliente HTTP.
+        """
+        if not raw:
+            return {}
+        
+        parsed: Dict[str, str] = {}
+        for item in raw.split("||"):
+            chunk = item.strip()
+            if not chunk or "=" not in chunk:
+                continue
+
+            key, _, value = chunk.partition("=")
+            key = key.strip()
+            if not key:
+                continue
+            parsed[key] = value.strip()
+
+        return parsed
+    
+    @staticmethod
+    def _parse_domain_timeouts(raw: str) -> Dict[str, float]:
+        """ Converte configuração de timeout por domínio em ``dict`` 
+        
+        Valores inválidos são ignorados silenciosamente para manter o
+        pipeline resiliente a erros de configuração. Os valores retornados
+        estão sempre em segundos.
+        """
+        if not raw:
+            return {}
+        
+        parsed: Dict[str, float] = {}
+        for item in raw.split("||"):
+            chunk = item.strip()
+            if not chunk or "=" not in chunk:
+                continue
+
+            domain, _, raw_value = chunk.partition("=")
+            domain = domain.strip().lower()
+            if not domain:
+                continue
+
+            try:
+                parsed[domain] = float(raw_value.strip())
+            except ValueError:
+                continue
+
+        return parsed
 
 #Instância única de settings para a aplicação
 settings = Settings()

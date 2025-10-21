@@ -15,6 +15,8 @@ def _reset_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "SCRAPER_HEADERS_CONNECTION", "keep-alive")
     monkeypatch.setattr(settings, "SCRAPER_HEADERS_CACHE_CONTROL", "max-age=0")
     monkeypatch.setattr(settings, "SCRAPER_HEADERS_ACCEPT_ENCODING", "gzip")
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_ADDITIONAL", "")
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_DEFAULT_COOKIES", "")
     user_agents.reset_user_agent_state()
 
 def test_get_user_agent_round_robin() -> None:
@@ -58,4 +60,18 @@ def test_compose_headers_retorna_campos_basicos() -> None:
         "Accept-Encoding": "gzip",
         "Referer": "https://origem.com",
     }
+
+def test_compose_headers_respeita_headers_adicionais(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Garante que headers extras possam sobrescrever valores padrão."""
+
+    monkeypatch.setattr(
+        settings,
+        "SCRAPER_HEADERS_ADDITIONAL",
+        "Accept=application/json||X-Feature=ativo",
+    )
+
+    headers = user_agents.compose_headers("UA-TEXTO")
+
+    assert headers["Accept"] == "application/json"
+    assert headers["X-Feature"] == "ativo"
     

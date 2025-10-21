@@ -115,6 +115,10 @@ def compose_headers(user_agent: str, *, referer: str | None = None) -> Dict[str,
     if referer:
         headers["Referer"] = referer
 
+    #Acrescenta headers opcionais configurados para domínios específicos
+    for key, value in settings.get_additional_headers().items():
+        headers[key] = value
+
     return headers
 
 def reset_user_agent_state() -> None:
