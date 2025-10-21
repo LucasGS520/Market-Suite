@@ -18,6 +18,9 @@ from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.core.config_scraper import settings
 from market_scraper.parsers import (
+    parse_amazon_html,
+    parse_magalu_html,
+    parse_meli_html,
     parse_generic_html,
     parse_with_beautifulsoup,
     parse_with_extruct,
@@ -36,12 +39,23 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_UA_ROTATION_TOTAL,
 )
 
+
 _REFERER_TEMPLATE_ERROR_EVENT = "referer_template_error"
 _UA_STRATEGY_LABEL = "round_robin"
 
 logger = structlog.get_logger("pipeline_steps")
 ParserCallable = Callable[[str, str], Mapping[str, Any] | None]
 _validator = DataQualityValidator()
+
+#Mapeamento dos parsers específicos por sufixo de domínio amplia a cobertura de marketplaces sem introduzir etapas complexas no pipeline enxuto
+_DOMAIN_PARSERS_SUFFIXES: tuple[tuple[str, ParserCallable], ...] = (
+    ("mercadolivre.com.br", parse_meli_html),
+    ("mercadolivre.com", parse_meli_html),
+    ("amazon.com.br", parse_amazon_html),
+    ("amazon.com", parse_amazon_html),
+    ("magazineluiza.com.br", parse_magalu_html),
+    ("magazineluiza.com", parse_magalu_html),
+)
 
 def _update_shared_payload(context: PipelineContext, payload: Mapping[str, str]) -> None:
     """ Atualiza o ``shared_context`` apenas com campos oficializados pelo contrato """
@@ -368,6 +382,47 @@ class GenericFallbackParserStep(_BaseParserStep):
             empty_message="Heurísticas genéricas não encontraram dados",
             missing_html_message="HTML indisponível para heurísticas genéricas",
         )
+
+class DomainSpecificParserStep(PipelineStep):
+    """ Executa parsers dedicados aos marketplaces conhecidos pelo serviço """
+    def __init__(self, *, timeout: float | None = None) -> None:
+        super().__init__(name="domain_specific_parser", timeout=timeout)
+
+    def _match_parser(self, domain: str) -> tuple[str, ParserCallable] | None:
+        """ Localiza o parser apropriado com base no sufixo do domínio informado """
+        normalized = (domain or "").strip().lower()
+        if not normalized:
+            return None
+        
+        for suffix, parser in _DOMAIN_PARSERS_SUFFIXES:
+            #Aplicamos comparação direta e por subdomínio para comtemplar hosts sem catalogar cada variação individualmente
+            if normalized == suffix or normalized.endswith(f".{suffix}"):
+                return suffix, parser
+        return None
+    
+    async def run(self, context: PipelineContext) -> StepResult:
+        if not context.html:
+            return StepResult.empty("HTML indisponível para parser específico de domínio")
+        
+        domain = context.source or _extract_domain(context.url) or ""
+        matched = self._match_parser(domain)
+        if not matched:
+            return StepResult.empty("Domínio sem parser dedicado")
+        
+        suffix, parser = matched
+        ok, payload = _run_parser_with_validation(
+            parser=parser,
+            context=context,
+            step_name=self.name,
+        )
+        if ok and payload:
+            #Guardamos o sufixo aplicado para debugar cenários de múltiplas tentativas
+            context.data.setdefault("domain_parser_suffix", suffix)
+            return StepResult.success(
+                payload=payload,
+                message=f"Parser específico aplicado para {suffix}",
+            )
+        return StepResult.empty("Parser específico não retornou dados válidos")
     
 def default_pipeline_steps() -> list[PipelineStep]:
     """ Retorna a sequência padrão de etapas do pipeline enxuto """
@@ -375,6 +430,7 @@ def default_pipeline_steps() -> list[PipelineStep]:
         FetchHTMLStep(),
         JsonLdParserStep(),
         HtmlMetadataParserStep(),
+        DomainSpecificParserStep(),
         GenericFallbackParserStep(),
     ]
     #Mantemos a ordem fixa para cumprir pipeline mínimo definido
@@ -384,6 +440,7 @@ __all__ = [
     "FetchHTMLStep",
     "JsonLdParserStep",
     "HtmlMetadataParserStep",
+    "DomainSpecificParserStep",
     "GenericFallbackParserStep",
     "default_pipeline_steps",
     "download_html",

@@ -6,6 +6,7 @@ import asyncio
 import io
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from types import ModuleType
 
@@ -40,6 +41,7 @@ if "price_parser" not in sys.modules:
 
 from market_scraper.services.pipeline_steps import (
     FetchHTMLStep,
+    DomainSpecificParserStep,
     GenericFallbackParserStep,
     HtmlMetadataParserStep,
     JsonLdParserStep,
@@ -70,6 +72,9 @@ def _metric_value(metric: Any, sample_name: str, labels: dict[str, str]) -> floa
             ):
                 return float(sample.value)
     return 0.0
+
+#Diretórios centralizado para carregar fixtures HTML reais das lojas suportados
+_FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
 
 class DummyAsyncClient:
     """ Cliente HTTP simplificado para controlar respostas nos testes """
@@ -391,6 +396,49 @@ def test_run_parser_with_validation_registra_rejeicao() -> None:
     assert payload is None
     failures = context.data.get("validation_failures")
     assert failures and failures[0]["reason_code"] == "name_missing"
+
+@pytest.mark.asyncio
+async def test_domain_specific_parser_aplica_parser_de_mercadolivre() -> None:
+    """Garante que o parser dedicado trate HTML estático do Mercado Livre"""
+
+    html_path = _FIXTURES_DIR / "mercadolivre" / "product_static.html"
+    html = html_path.read_text(encoding="utf-8")
+    context = PipelineContext(
+        url="https://produto.mercadolivre.com.br/MLB-123456789",
+        source="produto.mercadolivre.com.br",
+        default_step_timeout=1.0,
+    )
+    context.set_html(html)
+
+    step = DomainSpecificParserStep()
+    result = await step.run(context)
+
+    assert result.status == "success"
+    assert result.payload == {
+        "name": "Console Retro Game",
+        "current_price": "549.90",
+        "url": "https://produto.mercadolivre.com.br/MLB-123456789",
+        "source": "produto.mercadolivre.com.br",
+    }
+    assert context.data.get("domain_parser_suffix") == "mercadolivre.com.br"
+
+
+@pytest.mark.asyncio
+async def test_domain_specific_parser_ignora_dominios_nao_mapreados() -> None:
+    """Confirma que a etapa retorna vazio quando não há parser dedicado"""
+
+    context = PipelineContext(
+        url="https://loja.exemplo.com/item",
+        source="loja.exemplo.com",
+        default_step_timeout=1.0,
+    )
+    context.set_html("<html><body><h1>Produto</h1></body></html>")
+
+    step = DomainSpecificParserStep()
+    result = await step.run(context)
+
+    assert result.status == "empty"
+    assert result.message == "Domínio sem parser dedicado"
 
 def test_log_client_error_trunca_e_decodifica_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante truncamento em bytes e decodificações tolerante ao registrar 4xx """
