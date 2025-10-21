@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
-import shutil
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,10 +19,8 @@ from urllib.parse import urlparse
 import httpx
 
 from market_scraper.core.config_scraper import settings
-from market_scraper.services.services_scraper_common import build_context, create_pipeline
-from market_scraper.utils.headers import build_referer
 from market_scraper.utils.user_agents import compose_headers, get_user_agent
-from market_scraper.utils.validator import DataQualityValidator, ValidationResult
+from market_scraper.utils.validator import DataQualityValidator
 
 
 ParserFn = Callable[[str, str], dict[str, Any] | None]
@@ -70,30 +67,19 @@ class DiagnosticValidator(DataQualityValidator):
         payload: dict[str, Any] | None,
         url: str,
         source: str,
-        parser_name: str | None = None,
-        dump_path: str | None = None,
-    ) -> ValidationResult:
-        """ Limpa o estado anterior, delega validação e guarda rejeições """
+    ) -> dict[str, str] | None:
+        """Limpa o estado anterior e delega validação à implementação base."""
 
-        #Zeramos o cache para garantir que o relatório represente ao parser atual
+        #Zeramos o cache para garantir que o próximo relatório corresponda ao parser atual
         self._last_issue = None
-        decision = super().validate(
-            step_name=step_name,
-            payload=payload,
-            url=url,
-            source=source,
-            parser_name=parser_name,
-            dump_path=dump_path,
-        )
-        if not decision.is_valid:
-            domain = urlparse(source).hostname or urlparse(url).hostname or "unknown"
-            self._last_issue = {
-                "reason": decision.reason_code or "unknown",
-                "domain": domain,
-                "step": step_name,
-                "reason_message": decision.reason_message or "",
-            }
-        return decision
+        return super().validate(step_name=step_name, payload=payload, url=url, source=source)
+
+    def _register_invalid(self, step_name: str, domain: str, reason: str) -> None:  # type: ignore[override]
+        """Salva o motivo de rejeição antes de propagar o registro padrão."""
+
+        #Capturamos dados mínimos para explicar a decisão sem precisar inspecionar logs
+        self._last_issue = {"reason": reason, "domain": domain, "step": step_name}
+        super()._register_invalid(step_name, domain, reason)
 
     def consume_issue(self) -> dict[str, str] | None:
         """Devolve o último motivo registrado e limpa o estado interno."""
@@ -124,12 +110,32 @@ def _build_limits() -> httpx.Limits:
         max_keepalive_connections=settings.SCRAPER_HTTP_MAX_KEEPALIVE,
     )
 
+
+def _build_referer(url: str) -> str | None:
+    """Monta o header Referer seguindo o template configurado via ambiente."""
+
+    template = settings.SCRAPER_HEADERS_REFERER_TEMPLATE
+    if not template:
+        return None
+
+    parsed = urlparse(url)
+    domain = parsed.hostname
+    if not domain:
+        return None
+
+    try:
+        return template.format(domain=domain, url=url)
+    except Exception:
+        #Mantemos tolerância: templates inválidos não devem interromper o diagnóstico
+        return None
+
+
 def _compose_headers(url: str) -> dict[str, str]:
     """Reproduz o conjunto de headers oficiais do serviço."""
 
     user_agent = get_user_agent(url)
     #Incluímos Referer apenas quando configurado, reproduzindo o comportamento do pipeline
-    referer = build_referer(url)
+    referer = _build_referer(url)
     return compose_headers(user_agent, referer=referer)
 
 
@@ -140,15 +146,6 @@ def _format_excerpt(html: str, length: int = 2048) -> str:
     excerpt = html[:length]
     return excerpt.replace("\n", " ").replace("\r", " ")
 
-def _prepare_output_dir(output_dir: Path) -> None:
-    """ Limpa o diretório de saída para evitar artefatos de execuções anteriores """
-    if output_dir.exists():
-        for entry in output_dir.iterdir():
-            if entry.is_file():
-                entry.unlink()
-            else:
-                shutil.rmtree(entry)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
 def _save_dump(content: bytes, output_dir: Path, url: str) -> Path:
     """Persiste o HTML bruto em disco utilizando hash para rastreabilidade."""
@@ -219,13 +216,12 @@ def _run_parsers(
             payload=payload,
             url=url,
             source=url,
-            parser_name=name,
         )
-        if validated.is_valid and validated.payload is not None:
+        if validated is not None:
             report = ParserReport(
                 status="valid",
                 raw_payload=payload,
-                validated_payload=validated.payload,
+                validated_payload=validated,
                 validation_issue=None,
                 error=None,
             )
@@ -244,56 +240,17 @@ def _run_parsers(
 
     return results
 
-def _serialize_pipeline_steps(steps: Iterable[Any]) -> list[dict[str, Any]]:
-    """ Converte etapas do pipeline em estrutura serializável com metadados """
-    serialized: list[dict[str, Any]] = []
-    for step in steps:
-        entry: dict[str, Any] = {
-            "name": step.name,
-            "status": step.status,
-            "duration_ms": round(step.duration_seconds * 1000, 3),
-        }
-        if step.message:
-            entry["message"] = step.message
-        serialized.append(entry)
-    return serialized
-
-async def _run_pipeline_with_html(url: str, html: str) -> dict[str, Any]:
-    """ Executa o pipeline oficial reutilizando o HTML já capturado """
-    context = build_context(url)
-    context.set_html(html)
-    pipeline = create_pipeline()
-
-    try:
-        outcome = await pipeline.run(context)
-    except Exception as exc:
-        return {"status": "error", "error": str(exc)}
-    
-    summary: dict[str, Any] = {
-        "status": outcome.status,
-        "steps": _serialize_pipeline_steps(outcome.steps),
-    }
-    if outcome.payload is not None:
-        summary["payload"] = outcome.payload
-    if outcome.context.data:
-        summary["context"] = {
-            "name": outcome.context.data.get("name"),
-            "current_price": outcome.context.data.get("current_price"),
-            "url": outcome.context.data.get("url"),
-            "source": outcome.context.data.get("source"),
-        }
-    return summary
 
 def _build_response_summary(
     url: str,
     response: httpx.Response,
     dump_path: Path,
     *,
-    html: str,
     validator: DiagnosticValidator,
-    pipeline_report: dict[str, Any],
 ) -> dict[str, Any]:
     """Cria dicionário consolidado com metadados e resultados de parsing."""
+
+    html = response.text
     excerpt = _format_excerpt(html)
     parsers_summary = _run_parsers(html, url, validator)
 
@@ -305,7 +262,6 @@ def _build_response_summary(
         "dump_path": str(dump_path),
         "dump_hash": hashlib.sha256(response.content).hexdigest(),
         "html_excerpt": excerpt,
-        "pipeline": pipeline_report,
         "parsers": parsers_summary,
     }
 
@@ -358,11 +314,11 @@ def _parse_args() -> argparse.Namespace:
 def _build_client() -> httpx.AsyncClient:
     """Cria cliente HTTPx configurado com limites e timeouts oficiais."""
 
-    #Ativa follow_redirects para reproduzir o comportamento do pipeline de produção
+    #Ativamos follow_redirects para reproduzir o comportamento do pipeline de produção
     return httpx.AsyncClient(
         timeout=_build_timeout(),
         limits=_build_limits(),
-        follow_redirects=settings.SCRAPER_HTTP_FOLLOW_REDIRECTS,
+        follow_redirects=True,
         max_redirects=settings.SCRAPER_HTTP_MAX_REDIRECTS,
     )
 
@@ -386,42 +342,15 @@ async def diagnose_url(
     """Executa diagnóstico completo para uma URL e retorna o relatório."""
 
     headers = _compose_headers(url)
-    cookies = settings.get_default_cookies()
-    domain = urlparse(url).hostname
-    total_timeout = settings.resolve_domain_timeout(
-        domain,
-        settings.SCRAPER_STEP_TIMEOUT_SECONDS,
-    )
-    request_timeout = httpx.Timeout(
-        total_timeout,
-        connect=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
-        read=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
-        write=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
-        pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
-    )
-
     try:
-        response = await client.get(
-            url,
-            headers=headers,
-            cookies=cookies or None,
-            timeout=request_timeout,
-        )
+        response = await client.get(url, headers=headers)
     except httpx.HTTPError as exc:  # pragma: no cover - guardamos contexto para análise manual
         #Quando falha o download, devolvemos erro explícito para guiar ajustes de rede
         return _response_error_summary(url, exc)
 
     dump_path = _save_dump(response.content, output_dir, url)
-    html = response.text
-    pipeline_report = await _run_pipeline_with_html(url, html)
-    return _build_response_summary(
-        url,
-        response,
-        dump_path,
-        html=html,
-        validator=validator,
-        pipeline_report=pipeline_report,
-    )
+    return _build_response_summary(url, response, dump_path, validator=validator)
+
 
 async def run_diagnostics(urls: list[str], output_dir: Path) -> list[dict[str, Any]]:
     """Orquestra diagnósticos para todas as URLs informadas."""
@@ -430,7 +359,6 @@ async def run_diagnostics(urls: list[str], output_dir: Path) -> list[dict[str, A
         return []
 
     validator = DiagnosticValidator()
-    _prepare_output_dir(output_dir)
     async with _build_client() as client:
         reports = []
         for url in urls:
