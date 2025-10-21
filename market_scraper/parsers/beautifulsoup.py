@@ -65,6 +65,13 @@ _PRICE_SELECTORS = [
     ("data", {"itemprop": "price"}),
 ]
 
+#Seletores auxiliares capturam centavos exibidos separados em páginas de produto
+_FRACTION_SELECTORS = [
+    ("span", {"class": "andes-money-amount__cents"}),
+    ("span", {"class": "price-tag-decimal"}),
+    ("span", {"data-testid": "price-decimal"}),
+]
+
 def _clean_text(value: str | None) -> str:
     """ Normaliza strings removendo espaços extras """
     return value.strip() if value else ""
@@ -118,6 +125,17 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
         else:
             price = _clean_price_text(element.get_text())
         if price:
+            break
+
+    if price and price.isdigit():
+        for tag, attrs in _FRACTION_SELECTORS:
+            fraction_element = soup.find(tag, attrs=attrs)
+            if not fraction_element:
+                continue
+            fraction_digits = re.sub(r"\D", "", fraction_element.get_text() or "")
+            if not fraction_digits:
+                continue
+            price = f"{price}.{fraction_digits}"
             break
 
     if not name or not price:

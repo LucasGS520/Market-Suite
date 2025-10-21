@@ -15,6 +15,10 @@ from price_parser import Price
 
 from shared.metrics.metrics_scraper import SCRAPER_PRICE_PARSER_USAGE_TOTAL
 
+
+#Constante garante arredondamento consistente com duas casas decimais
+_TWO_DECIMAL_QUANTIZE = Decimal("0.01")
+
 def _normalize_raw_price(raw: str) -> str:
     """ Remove símbolos e converte vírgula decimal para ponto """
     cleaned = re.sub(r"[^0-9,.-]", "", raw)
@@ -62,7 +66,7 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
                 SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="invalid_amount").inc()
             else:
                 SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="parsed").inc()
-                return candidate
+                return candidate.quantize(_TWO_DECIMAL_QUANTIZE, rounding=ROUND_HALF_UP)
             
         else:
             SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="missing_amount").inc()
@@ -77,12 +81,12 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
         raise ValueError(f"Preço inválido em {url}: {raw_text}") from exc
     #Registramos explicitamente quando o fallback manual foi necessário
     SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="fallback").inc()
-    return parsed
+    return parsed.quantize(_TWO_DECIMAL_QUANTIZE, rounding=ROUND_HALF_UP)
     
 def format_decimal_to_str(value: Decimal) -> str:
     """ Formata ``Decimal`` com duas casas decimais para resposta padronizada """
     #Centraliza a formatação para manter arredondamento consistente
-    quantized = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    quantized = value.quantize(_TWO_DECIMAL_QUANTIZE, rounding=ROUND_HALF_UP)
     return format(quantized, "f")
 
 __all__ = ["parse_price_str", "format_decimal_to_str"]

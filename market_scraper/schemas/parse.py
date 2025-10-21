@@ -30,7 +30,8 @@ class ErrorResponse(BaseModel):
     """ Padroniza mensagens de erro retornadas pela rota """
     
     message: str = Field(..., description="Descrição humanizada do erro")
-    code: str = Field(..., description="Código interno que identifica o erro")
+    error_code: str = Field(..., description="Código categórico que identifica o erro encontrado")
+    trace_id: str = Field(..., description="Identificador correlacionado com os logs estruturados")
 
 
 __all__ = [

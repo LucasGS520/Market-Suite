@@ -6,9 +6,13 @@ pipeline sequencial de scraping.
 
 from __future__ import annotations
 
+from typing import Any
+from uuid import uuid4
+
 from fastapi import APIRouter, Body, status
 from fastapi.responses import JSONResponse
 import structlog
+from structlog.stdlib import BoundLogger
 
 from shared.utils.logging_utils import sanitize_log_data
 
@@ -23,16 +27,34 @@ logger = structlog.get_logger("routes_scraper")
 
 router = APIRouter(tags=["scraper"])
 
-def _http_error(issue: UrlIssue, *, status_code: int) -> JSONResponse:
-    """ Cria uma resposta JSON padronizada para os erros do endpoint """
-    logger.warning(
-        "parse_error", 
-        code=issue.code, 
-        message=issue.message
+def _http_error(
+    issue: UrlIssue,
+    *,
+    status_code: int,
+    trace_id: str,
+    request_logger: BoundLogger,
+    log_extra: dict[str, Any] | None = None,
+) -> JSONResponse:
+    """ Cria uma resposta JSON padronizada para os erros do endpoint
+    
+    O helper adiciona ``trace_id`` ao payload e garante que os logs 
+    tenham contexto suficiente para rastrear falha
+    """
+    log_payload = dict(log_extra or {})
+    request_logger.warning(
+        "parse_error",
+        code=issue.code,
+        message=issue.message,
+        **log_payload,
     )
+
     return JSONResponse(
         status_code=status_code,
-        content={"message": issue.message, "code": issue.code}
+        content={
+            "message": issue.message, 
+            "code": issue.code,
+            "trace_id": trace_id,
+        }
     )
 
 @router.post(
@@ -47,18 +69,31 @@ def _http_error(issue: UrlIssue, *, status_code: int) -> JSONResponse:
 )
 async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
     """ Executa o pipeline sequencial e retorna payload padronizado """
+    trace_id = str(uuid4())
+    #Ligamos o identificador para garantir correlação entre respostas e logs estruturados
+    request_logger = logger.bind(trace_id=trace_id)
+
     try:
         normalized_url = normalize_product_url(payload.url)
     except ValueError as exc:
+        issue = UrlIssue(code="invalid_url", message=str(exc))
         return _http_error(
-            UrlIssue(code="invalid_url", message=str(exc)), status_code=status.HTTP_400_BAD_REQUEST
+            issue,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            trace_id=trace_id,
+            request_logger=request_logger,
+            log_extra={"url": sanitize_log_data(payload.url)},
         )
     
+    request_logger = request_logger.bind(url=sanitize_log_data(normalized_url))
+
     compatibility = check_url_compatibility(normalized_url)
     if compatibility:
         return _http_error(
             compatibility,
-            status_code=status.HTTP_400_BAD_REQUEST
+            status_code=status.HTTP_400_BAD_REQUEST,
+            trace_id=trace_id,
+            request_logger=request_logger,
         )
     
     try:
@@ -68,7 +103,10 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
         issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline execedido")
         return _http_error(
             issue,
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            trace_id=trace_id,
+            request_logger=request_logger,
+            log_extra={"error": sanitize_log_data(str(exc))},
         )
     
     #Identifica se alguma etapa encerrou por causa do robots.txt e devolve o código especializado
@@ -80,12 +118,14 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
         return _http_error(
             issue,
             status_code=status.HTTP_403_FORBIDDEN,
+            trace_id=trace_id,
+            request_logger=request_logger,
         )
 
     if outcome.status != "success" or not outcome.payload:
         validation_failures = outcome.context.data.get("validation_failures", [])
         last_failure = validation_failures[-1] if validation_failures else None
-        logger.warning(
+        request_logger.warning(
             "parse_no_result",
             url=sanitize_log_data(normalized_url),
             source=outcome.context.source,
@@ -98,7 +138,9 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
         issue = UrlIssue(code="no_result", message="Não foi possível extrair dados do produto")
         return _http_error(
             issue,
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            trace_id=trace_id,
+            request_logger=request_logger,
         )
     
     payload = outcome.payload
@@ -109,7 +151,9 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
         issue = UrlIssue(code="invalid_price", message=str(exc))
         return _http_error(
             issue,
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            trace_id=trace_id,
+            request_logger=request_logger,
         )
     
     response = ParserResponse(
@@ -118,7 +162,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
         url=normalized_url,
         source=payload.get("source", outcome.context.source),
     )
-    logger.info(
+    request_logger.info(
         "parse_success",
         url=sanitize_log_data(response.url),
         source=response.source,

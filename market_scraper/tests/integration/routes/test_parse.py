@@ -149,10 +149,10 @@ def test_parse_respects_robots_block(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert response.status_code == 403
-    assert response.json() == {
-        "message": "O acesso à URL foi bloqueado pelas regras de robots.txt",
-        "code": "unsupported_by_robots",
-    }
+    body = response.json()
+    assert body["message"] == "O acesso à URL foi bloqueado pelas regras de robots.txt"
+    assert body["error_code"] == "unsupported_by_robots"
+    assert isinstance(body["trace_id"], str) and body["trace_id"]
 
 def test_parse_records_no_result_for_js_only_page(monkeypatch: pytest.MonkeyPatch) -> None:
     """Valida resposta 422 e incremento de métrica quando a página depende de JavaScript"""
@@ -170,10 +170,10 @@ def test_parse_records_no_result_for_js_only_page(monkeypatch: pytest.MonkeyPatc
     )
 
     assert response.status_code == 422
-    assert response.json() == {
-        "message": "Não foi possível extrair dados do produto",
-        "code": "no_result",
-    }
+    body = response.json()
+    assert body["message"] == "Não foi possível extrair dados do produto"
+    assert body["error_code"] == "no_result"
+    assert isinstance(body["trace_id"], str) and body["trace_id"]
 
     metrics_payload = client.get("/metrics").text
     no_result_value = _extract_metric(
