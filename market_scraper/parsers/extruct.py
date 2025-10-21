@@ -29,12 +29,74 @@ Exemplo
 
 import re
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Iterator
 
 from market_scraper.utils.extract_structured_data import extract_structured_data
 
 
 STRUCTURED_DATA_SOURCE = "structured_data"
+
+def _iter_json_ld_items(raw_items: Iterable[Any]) -> Iterator[dict[str, Any]]:
+    """ Expande listas e grafos do JSON-LD para alcançar todos os nós úteis """
+    for item in raw_items:
+        if isinstance(item, dict):
+            graph = item.get("@graph")
+            if isinstance(graph, list):
+                for graph_item in graph:
+                    if isinstance(graph_item, dict):
+                        yield graph_item
+                continue
+            yield item
+        elif isinstance(item, Iterable) and not isinstance(item, (str, bytes)):
+            for entry in item:
+                if isinstance(entry, dict):
+                    yield entry
+
+def _extract_price_from_offers(candidate: Any) -> str:
+    """ Percorre variações de ``offers`` buscando um valor monetário confiável """
+    def _iter_offers(value: Any) -> Iterator[dict[str, Any]]:
+        if isinstance(value, dict):
+            yield value
+            nested = value.get("offers")
+            if nested is not None and nested is not value:
+                yield from _iter_offers(nested)
+            price_spec = value.get("priceSpecification")
+            if isinstance(price_spec, list):
+                for spec in price_spec:
+                    if isinstance(spec, dict):
+                        yield spec
+            elif isinstance(price_spec, dict):
+                yield price_spec
+        elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+            for entry in value:
+                yield from _iter_offers(entry)
+    
+    for offer in _iter_offers(candidate):
+        for key in ("price", "lowPrice", "highPrice", "amount", "priceAmount", "priceValue"):
+            raw_value = _as_text(offer.get(key))
+            if raw_value:
+                return _sanitize_price(raw_value)
+    return ""
+
+def _extract_name_from_item(item: dict[str, Any]) -> str:
+    """ Normaliza os campos candidatos a nome do produto """
+    name_candidate = _as_text(item.get("name"))
+    if name_candidate:
+        return name_candidate
+    
+    #Algumas páginas expõem ``itemOffered`` ou ``mainEntity`` contendo o nome real
+    for key in ("itemOffered", "mainEntity"):
+        nested = item.get(key)
+        if isinstance(nested, dict):
+            nested_name = _as_text(nested.get("name"))
+            if nested_name:
+                return nested_name
+    brand = item.get("brand")
+    if isinstance(brand, dict):
+        brand_name = _as_text(brand.get("name"))
+        if brand_name:
+            return brand_name
+    return ""
 
 def _as_text(value: Any) -> str:
     """ Converte valores para string simples e enxutas """
@@ -82,9 +144,7 @@ def parse_with_extruct(html: str, url: str | None = None) -> dict[str, str] | No
     if not isinstance(json_ld_items, Iterable) or isinstance(json_ld_items, (str, bytes)):
         json_ld_items = [json_ld_items]
 
-    for item in json_ld_items:
-        if not isinstance(item, dict):
-            continue
+    for item in _iter_json_ld_items(json_ld_items):
         item_type = item.get("@type")
         if isinstance(item_type, list):
             match = _first_item(type_name for type_name in item_type if type_name in {"Product", "Offer"})
@@ -92,20 +152,18 @@ def parse_with_extruct(html: str, url: str | None = None) -> dict[str, str] | No
                 continue
         elif item_type not in {"Product", "Offer"}:
             continue
-        name_candidate = _as_text(item.get("name"))
+        name_candidate = _extract_name_from_item(item)
         if name_candidate:
             name = name_candidate
         offers = item.get("offers")
-        if isinstance(offers, dict):
-            raw_price = _as_text(offers.get("price") or offers.get("lowPrice"))
+        if offers:
+            price_candidate = _extract_price_from_offers(offers)
+            if price_candidate:
+                price = price_candidate
+        if not price:
+            raw_price = _extract_price_from_offers(item)
             if raw_price:
-                price = _sanitize_price(raw_price)
-        elif isinstance(offers, list):
-            first_offer = next((offer for offer in offers if isinstance(offer, dict)), None)
-            if first_offer:
-                raw_price = _as_text(first_offer.get("price") or first_offer.get("lowPrice"))
-                if raw_price:
-                    price = _sanitize_price(raw_price)
+                price = raw_price
         if not price:
             raw_price = _as_text(item.get("price"))
             if raw_price:

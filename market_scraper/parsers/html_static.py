@@ -73,7 +73,16 @@ def _extract_text(soup: BeautifulSoup, selector: str, attribute: str | None = No
         return (element.get(attribute) or "").strip()
     if element.name == "meta":
         return (element.get("content") or "").strip()
-    return element.get_text(strip=True)
+    text = element.get_text(strip=True)
+    if text:
+        return text
+    
+    #Algumas páginas guardam preços em atributos customizados
+    for attr in ("data-price", "data-price-amount", "data-value", "data-amount", "aria-label", "title"):
+        value = element.get(attr)
+        if value:
+            return value.strip()
+    return ""
 
 def _assemble_result(name: str, price: str, currency: str, url: str) -> dict[str, str] | None:
     """ Normaliza os campos e monta o dicionário de saída padronizado """
@@ -144,6 +153,10 @@ def parse_generic_html(html: str, url: str) -> dict[str, str] | None:
         )
         price = combined or price
     if not price:
+        price = _extract_text(soup, "[data-price]")
+    if not price:
+        price = _extract_text(soup, "[data-value]")
+    if not price:
         price = _extract_text(soup, ".price", attribute=None)
 
     currency = ""
@@ -198,6 +211,10 @@ def parse_meli_html(html: str, url: str) -> dict[str, str] | None:
     if not price:
         price = _extract_text(soup, "[data-testid='price-value']")
     if not price:
+        price = _extract_text(soup, ".ui-pdp-price__second-line")
+    if not price:
+        price = _extract_text(soup, ".price-tag-text-sr-only")
+    if not price:
         price = _extract_text(soup, 'span[itemprop="price"]')
     if not price:
         price = _extract_text(soup, 'meta[itemprop="price"]')
@@ -248,6 +265,10 @@ def parse_amazon_html(html: str, url: str) -> dict[str, str] | None:
     if not price_text:
         price_text = _extract_text(soup, ".a-price span.a-offscreen")
     if not price_text:
+        price_text = _extract_text(soup, "[data-a-color='price'] span.a-offscreen")
+    if not price_text:
+        price_text = _extract_text(soup, "[data-csa-c-type='price']")
+    if not price_text:
         price_text = _compose_price_from_parts(
             _extract_text(soup, "span.a-price-whole"),
             _extract_text(soup, "span.a-price-fraction"),
@@ -296,6 +317,8 @@ def parse_magalu_html(html: str, url: str) -> dict[str, str] | None:
         )
     if not price:
         price = _extract_text(soup, "span[class*='price']")
+    if not price:
+        price = _extract_text(soup, "[data-price]")
 
     currency = _extract_text(soup, 'meta[itemprop="priceCurrency"]') or _extract_text(
         soup, "[data-testid='price-currency']"
