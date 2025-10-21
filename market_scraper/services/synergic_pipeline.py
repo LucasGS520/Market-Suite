@@ -1,243 +1,284 @@
-from __future__ import annotations
+""" Pipeline sequencial e observável para o MarktScraper
 
-""" Pipeline sinérgico para orquestrar etapas de scraping
-
-Este módulo define uma estrutura genérica de pipeline onde cada etapa
-pode compartilhar e atualizar um ``shared_context``. O objetivo é
-permitir que múltiplas bibliotecas de parsing/extração trabalhem de
-forma coordenada, mantendo o código modular e extensível.
+O módulo implementa uma versão enxuta do pipeline que processa etapas em
+sequência, respeitando limites de tempo configuráveis e registrando
+métricas por etapa. A execução linear com métricas grante previsibilidade
+e observabilidade para o serviço de scraping.
 """
 
-from abc import ABC, abstractmethod
-from typing import Any, Literal
+from __future__ import annotations
+
 import asyncio
+from dataclasses import dataclass, field
 from time import perf_counter
+from typing import Any, Literal, Sequence
 
 import structlog
 
 from shared.metrics.metrics_scraper import (
-    SCRAPER_STRATEGY_TOTAL,
-    SCRAPER_FALLBACK_TOTAL,
-    SCRAPING_LATENCY_SECONDS,
+    SCRAPER_NO_RESULT_TOTAL,
+    SCRAPER_STEP_FALLBACK_TOTAL,
+    SCRAPER_STEP_LATENCY_SECONDS,
+    SCRAPER_STEP_SUCCESS_TOTAL,
 )
 from shared.utils.logging_utils import sanitize_log_data
-from market_scraper.utils.data_quality_validator import DataQualityValidator
 
 
-class PipelineStep(ABC):
-    """ Representa uma etapa do pipeline de scraping """
+#Logger estruturado para acompanhamento dos eventos do pipeline
+#Convenção: logs do pipeline sempre carregam os campos ``domain``, ``result`` e ``duration_ms``
+logger = structlog.get_logger("scraper_pipeline")
 
-    @abstractmethod
-    async def run(self, shared_context: dict[str, Any]) -> dict[str, Any]:
-        """ Executa a etapa e retorna um dicionário de resultados
+@dataclass
+class PipelineContext:
+    """ Armazena dados compartilhados entre as etapas do pipeline """
+    url: str
+    source: str
+    default_step_timeout: float
+    html: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """ Inicializa chaves mínimas do ``shared_context``
         
-        O retorno pode conter ``shared_context`` para ser mesclado ao
-        contexto principal e quaisquer dados intermediários obtidos.
+        Garante que as etapas sempre encontrem informações básicas
+        sem depender de inicialização externa.
         """
-        raise NotImplementedError
-    
-    def should_run(self, shared_context: dict[str, Any]) -> bool:
-        """ Determina se a etapa deve ser executada no modo condicional """
-        return True
-    
-logger = structlog.get_logger("synergic_pipeline")
+        self.data.setdefault("url", self.url)
+        self.data.setdefault("source", self.source)
+        self.data.setdefault("domain", self.source)
+        self.data.setdefault("step_timeout", self.default_step_timeout)
 
+    def set_html(self, html: str) -> None:
+        """ Guarda o HTML obtido para que etapas posteriores possam reutilizá-lo """
+        self.html = html
+
+    def build_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """ Normaliza o payload principal adicionando origem e URL canônica """
+        return {
+            "name": payload.get("name", ""),
+            "current_price": payload.get("current_price", ""),
+            "url": payload.get("url") or self.url,
+            "source": payload.get("source") or self.source,
+        }
+    
+@dataclass
+class StepResult:
+    """ Representa o resultado de uma etapa do pipeline """
+    status: Literal["success", "empty", "error"]
+    payload: dict[str, Any] | None = None
+    message: str | None = None
+
+    @classmethod
+    def success(cls, payload: dict[str, Any] | None = None, message: str | None = None) -> "StepResult":
+        """ Facilita a criação de um resultado de sucesso """
+        return cls(status="success", payload=payload, message=message)
+    
+    @classmethod
+    def empty(cls, message: str | None = None) -> "StepResult":
+        """ Indica que a etapa executou mas não encontrou dados úteis """
+        return cls(status="empty", payload=None, message=message)
+    
+    @classmethod
+    def failure(cls, message: str | None = None) -> "StepResult":
+        """ Representa falha não recuperável na etapa atual """
+        return cls(status="error", payload=None, message=message)
+    
+@dataclass
+class StepExecution:
+    """ Registro de execução de uma etapa para depuração e métricas """
+    name: str
+    status: str
+    duration_seconds: float
+    message: str | None = None
+
+@dataclass
+class PipelineOutcome:
+    """ Guarda o resumo da execução do pipeline """
+    status: Literal["success", "no_result", "timeout", "error"]
+    context: PipelineContext
+    payload: dict[str, Any] | None = None
+    steps: list[StepExecution] = field(default_factory=list)
+
+class PipelineError(Exception):
+    """ Erro genérico emitido quando a execução do pipeline falha """
+
+class PipelineTimeoutError(PipelineError):
+    """ Erro emitido quando o tempo máximo do pipeline é excedido """
+
+class PipelineStep:
+    """ Classe base para todas as etapas do pipeline sequencial """
+    def __init__(self, *, name: str | None = None, timeout: float | None = None) -> None:
+        self._name = name or self.__class__.__name__
+        self.timeout = timeout
+
+    @property
+    def name(self) -> str:
+        """ Retorna o nome público da etapa """
+        return self._name
+    
+    async def run(self, context: PipelineContext) -> StepResult:
+        """ Executa a etapa e retorna um ``StepResult`` com o desfecho """
+        raise NotImplementedError
 
 class SynergicPipeline:
-    """ Orquestra a execução das etapas definidas """
+    """ Executa etapas em sequência, monitorando métricas e timeouts """
     def __init__(
         self,
-        steps: list[PipelineStep],
+        steps: Sequence[PipelineStep],
         *,
-        execution_mode: Literal["sequential", "parallel", "conditional"] = "sequential",
-        validator: DataQualityValidator | None = None,
+        step_timeout: float,
+        pipeline_timeout: float,
     ) -> None:
-        """ Cria um pipeline sinérgico
-        
-        ``steps`` é a lista de etapas que será executada. ``execution_mode``
-        define como o pipeline será processado: ``sequential`` (padrão),
-        ``parallel`` ou ``conditional``. ``validator`` permite substituir o
-        :class:`DataQualityValidator` padrão, concentrando a validação das
-        saídas de parsing no pipeline.
-        """
-        self.steps = steps
-        self.execution_mode = execution_mode
-        self.validator = validator or DataQualityValidator()
+        self._steps: list[PipelineStep] = list(steps)
+        self._default_step_timeout = step_timeout
+        self._pipeline_timeout = pipeline_timeout
 
-    async def run(
-        self, 
-        shared_context: dict[str, Any] | None = None,
-        execution_mode: Literal["sequential", "parallel", "conditional"] | None = None,    
-    ) -> dict[str, Any]:
-        """ Executa o pipeline retornando os resultados e o contexto final """
-        shared_context = shared_context or {}
-        results: list[dict[str, Any]] = []
-        mode = execution_mode or self.execution_mode
+    async def run(self, context: PipelineContext) -> PipelineOutcome:
+        """ Percorre as etapas em ordem até encontrar um payload válido """
+        executions: list[StepExecution] = []
+        payload: dict[str, Any] | None = None
+        status: Literal["success", "no_result", "timeout", "error"] = "no_result"
+        #Controle de rótulos garante consistência entre métricas de etapa e do pipeline
+        last_result_label: str = "no_result"
+        final_result_label: str = "no_result"
+        context.data.setdefault("pipeline_timeout", self._pipeline_timeout)
+        context.data.setdefault("step_timeout", context.default_step_timeout)
 
-        async def _run_step(step: PipelineStep) -> tuple[str, dict[str, Any], str]:
-            """ Executa uma etapa registrando métricas e validação """
-            step_name = step.__class__.__name__
-            start = perf_counter()
-            try:
-                result = await step.run(shared_context)
-            except asyncio.CancelledError:
-                duration = perf_counter() - start
-                SCRAPER_STRATEGY_TOTAL.labels(step_name, "cancelled").inc()
-                SCRAPING_LATENCY_SECONDS.labels(step_name).observe(duration)
-                logger.info(
-                    "step_cancelled",
-                    step=step_name,
-                    execution_time=duration,
-                )
-                raise
-            except Exception as err:
-                logger.exception("pipeline_step_error", step=step_name, error=sanitize_log_data(str(err)))
-                result = {"status": "error"}
-            duration = perf_counter() - start
-
-            status = result.get("status") or "error"
-            details = result.get("details")
-            if isinstance(details, dict):
+        async def _run_sequence() -> None:
+            nonlocal payload, status, last_result_label
+            for step in self._steps:
+                timeout_value = step.timeout if step.timeout is not None else context.default_step_timeout
+                start = perf_counter()
                 try:
-                    self.validator.validate(details)
-                except ValueError as validation_error:
-                    status = "invalid"
-                    result = {
-                        **result,
-                        "status": status,
-                        "validation_error": str(validation_error),
-                    }
-                    logger.info(
-                        "step_validation_failed",
-                        step=step_name,
-                        error=sanitize_log_data(str(validation_error)),
+                    result = await asyncio.wait_for(step.run(context), timeout=timeout_value)
+                except asyncio.TimeoutError:
+                    duration = perf_counter() - start
+                    result_label = "timeout"
+                    executions.append(
+                        StepExecution(
+                            name=step.name,
+                            status="timeout",
+                            duration_seconds=duration,
+                            message="Tempo limite da etapa excedido",
+                        )
                     )
-            if result.get("status") != status:
-                result = {**result, "status": status}
-
-            ctx = result.get("shared_context")
-            if isinstance(ctx, dict):
-                shared_context.update(ctx)
-
-            SCRAPER_STRATEGY_TOTAL.labels(step_name, status).inc()
-            SCRAPING_LATENCY_SECONDS.labels(step_name).observe(duration)
-
-            logger.info(
-                "step_completed", 
-                step=step_name, 
-                status=status, 
-                execution_time=duration, 
-                details=sanitize_log_data(result.get("details")),
-            )
-            return step_name, result, status
-        
-        success_status = {"success", "ok", "NOT_MODIFIED"}
-
-        if mode == "parallel":
-            task_to_index: dict[asyncio.Task[tuple[str, dict[str, Any], str]], int] = {}
-            results_by_index: dict[int, dict[str, Any]] = {}
-            cancelled_steps: list[str] = []
-            first_success_detected = False
-
-            for index, step in enumerate(self.steps):
-                task = asyncio.create_task(_run_step(step))
-                task_to_index[task] = index
-
-            pending_tasks: set[asyncio.Task[tuple[str, dict[str, Any], str]]] = set(task_to_index.keys())
-
-            while pending_tasks:
-                done, pending_tasks = await asyncio.wait(pending_tasks, return_when=asyncio.FIRST_COMPLETED)
-
-                for finished in done:
-                    index = task_to_index.pop(finished, None)
-                    if index is None:
-                        continue
-
-                    try:
-                        step_name, resp, status = finished.result()
-                        results_by_index[index] = resp
-
-                        if status in success_status:
-                            if not first_success_detected:
-                                first_success_detected = True
-                                logger.info(
-                                    "parallel_pipeline_first_success",
-                                    step=step_name,
-                                    status=status,
-                                )
-                                for pending in pending_tasks:
-                                    pending.cancel()
-                        else:
-                            SCRAPER_FALLBACK_TOTAL.inc()
-                            logger.info("fallback_triggered", step=step_name)
-                    except asyncio.CancelledError:
-                        cancelled_steps.append(self.steps[index].__class__.__name__)
-                        results_by_index[index] = {"status": "cancelled"}
-
-            if cancelled_steps:
-                logger.info("parallel_cancelled_steps", steps=cancelled_steps)
-
-            results = [
-                results_by_index[idx]
-                for idx in range(len(self.steps))
-                if idx in results_by_index
-            ]
-
-        else:
-            for idx, step in enumerate(self.steps):
-                if mode == "conditional" and not step.should_run(shared_context):
-                    SCRAPER_FALLBACK_TOTAL.inc()
-                    logger.info("step_skipped", step=step.__class__.__name__)
+                    SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
+                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
+                    last_result_label = result_label
+                    logger.warning(
+                        "step_timeout",
+                        step=step.name,
+                        duration_ms=int(duration * 1000),
+                        timeout=timeout_value,
+                        url=sanitize_log_data(context.url),
+                        domain=context.source,
+                        result=result_label,
+                    )
+                    continue
+                except Exception as exc:
+                    duration = perf_counter() - start
+                    result_label = "error"
+                    executions.append(
+                        StepExecution(
+                            name=step.name,
+                            status="error",
+                            duration_seconds=duration,
+                            message="Falha interna na etapa",
+                        )
+                    )
+                    SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
+                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
+                    last_result_label = result_label
+                    logger.exception(
+                        "step_error",
+                        step=step.name,
+                        duration_ms=int(duration * 1000),
+                        url=sanitize_log_data(context.url),
+                        domain=context.source,
+                        result=result_label,
+                        error=sanitize_log_data(str(exc)),
+                    )
                     continue
 
-                step_name, resp, status = await _run_step(step)
-                results.append(resp)
-                
-                if status in success_status:
-                    #Interrompe o pipeline imediatamente após o primeiro sucesso
-                    if idx < len(self.steps) - 1:
-                        logger.info(
-                            "pipeline_short_circuit",
-                            step=step_name,
-                            status=status,
+                duration = perf_counter() - start
+                result_label = result.status
+                SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
+                last_result_label = result_label
+
+                if result.status == "success":
+                    SCRAPER_STEP_SUCCESS_TOTAL.labels(step.name, context.source, result_label).inc()
+                    executions.append(
+                        StepExecution(
+                            name=step.name,
+                            status="success",
+                            duration_seconds=duration,
+                            message=result.message,
                         )
-                    break
+                    )
+                    if result.payload:
+                        payload = context.build_payload(result.payload)
+                        status = "success"
+                        return
+                    continue
+                
+                SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
+                executions.append(
+                    StepExecution(
+                        name=step.name,
+                        status=result.status,
+                        duration_seconds=duration,
+                        message=result.message,
+                    )
+                )
 
-                if idx < len(self.steps) - 1:
-                    SCRAPER_FALLBACK_TOTAL.inc()
-                    logger.info("fallback_triggered", step=step_name)
-
-        primary_with_details = next(
-            (
-                item
-                for item in results
-                if item.get("status") in success_status and item.get("details")
-            ),
-            None,
+        pipeline_start = perf_counter()    
+        try:
+            await asyncio.wait_for(_run_sequence(), timeout=self._pipeline_timeout)
+        except asyncio.TimeoutError as exc:
+            final_result_label = "timeout"
+            logger.error(
+                "pipeline_timeout",
+                timeout=self._pipeline_timeout,
+                url=sanitize_log_data(context.url),
+                step_count=len(self._steps),
+                duration_ms=int((perf_counter() - pipeline_start) * 1000),
+                domain=context.source,
+                result=final_result_label,
+            )
+            SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
+            raise PipelineTimeoutError("Tempo limite do pipeline excedido") from exc
+        
+        if status != "success":
+            #Mapeia o último estado observado para um rótulo padronizado de resultado final
+            if last_result_label in {"empty", "success", "no_result"}:
+                final_result_label = "no_result"
+            elif last_result_label in {"timeout", "error"}:
+                final_result_label = last_result_label
+            else:
+                final_result_label = "error"
+                logger.warning(
+                    "unknown_result_label",
+                    last_result=last_result_label,
+                    domain=context.source,
+                    url=sanitize_log_data(context.url),
+                    result=final_result_label,
+                )
+            SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
+            
+        return PipelineOutcome(
+            status=status,
+            payload=payload,
+            steps=executions,
+            context=context,
         )
-        primary = primary_with_details or next(
-            (
-                item
-                for item in results
-                if item.get("status") in success_status
-            ),
-            None,
-        )
 
-        outcome: dict[str, Any] = {
-            "results": results,
-            "shared_context": shared_context,
-            "status": primary.get("status") if primary else "error",
-        }
-
-        if primary_with_details:
-            details = primary_with_details.get("details")
-            if details is not None:
-                outcome["details"] = details
-            if primary_with_details.get("extraction_method"):
-                outcome["extraction_method"] = primary_with_details.get("extraction_method")
-
-        return outcome
-
-  
-__all__ = ["PipelineStep", "SynergicPipeline"]
+__all__ = [
+    "PipelineContext",
+    "StepExecution",
+    "PipelineOutcome",
+    "PipelineError",
+    "PipelineTimeoutError",
+    "PipelineStep",
+    "SynergicPipeline",
+    "StepResult",
+]

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 """ Funções de parsing utilizando BeautifulSoup
 
-O objetivo do módulo é oferecer um ponto único para extração simples 
-de nome e preço a partir de HTML estático. Ele funcionna como complemento
-ao ``html_static.py`` e matém a mesma interface das demais bibliotecas
-de parsing utilizadas no projeto.
+O objetivo do módulo é oferecer um ponto único para extração simples
+de nome e preço a partir de HTML estático. Ele funciona como complemento
+ao ``html_static.py`` e mantém a mesma interface das demais bibliotecas
+de parsing utilizadas no projeto. As saídas são preparadas para que o 
+``DataQualityValidator`` consiga interpretar os valores sem ambiguidades.
 
 Exemplo
 -------
@@ -17,14 +18,72 @@ Exemplo
 {'name': 'Notebook ABC', 'current_price': 'R$ 5.999,90', 'url': 'https://loja.test/notebook'}
 """
 
+import re
+
 from bs4 import BeautifulSoup
 
+HTML_METADATA_SOURCE = "html_metadata"
+
+_NAME_SELECTORS = [
+    ("meta", {"property": "og:title"}),
+    ("meta", {"name": "title"}),
+    ("meta", {"name": "twitter:title"}),
+    ("meta", {"property": "twitter:title"}),
+    ("meta", {"itemprop": "name"}),
+    ("meta", {"name": "parsely-title"}),
+    ("span", {"id": "productTitle"}),
+    ("h1", {"class": "ui-pdp-title"}),
+    ("h1", {"data-testid": "heading-product-title"}),
+    ("span", {"data-testid": "heading-product-title"}),
+    ("h1", {}),
+    ("title", {}),
+]
+
+#Mantemos os seletores organizados por prioridade para cobrir variações comuns dos marketplaces sem depender de heurísticas fragéis
+_PRICE_SELECTORS = [
+    ("meta", {"itemprop": "price"}),
+    ("meta", {"property": "product:price:amount"}),
+    ("meta", {"property": "og:price:amount"}),
+    ("meta", {"name": "twitter:data1"}),
+    ("meta", {"itemprop": "priceCurrency"}),
+    ("span", {"id": "price_inside_buybox"}),
+    ("span", {"id": "priceblock_ourprice"}),
+    ("span", {"id": "priceblock_dealprice"}),
+    ("span", {"class": "a-offscreen"}),
+    ("span", {"class": "a-price-whole"}),
+    ("span", {"class": "a-price-range"}),
+    ("span", {"class": "andes-money-amount__fraction"}),
+    ("span", {"class": "andes-money-amount__fraction_2"}),
+    ("span", {"class": "price-tag-fraction"}),
+    ("span", {"class": "ui-pdp-price__second-line"}),
+    ("span", {"data-testid": "price-value"}),
+    ("span", {"data-testid": "price-amount"}),
+    ("div", {"class": "price"}),
+    ("span", {"class": "price"}),
+    ("span", {"data-price": True}),
+    ("span", {"data-value": True}),
+    ("data", {"itemprop": "price"}),
+]
+
+#Seletores auxiliares capturam centavos exibidos separados em páginas de produto
+_FRACTION_SELECTORS = [
+    ("span", {"class": "andes-money-amount__cents"}),
+    ("span", {"class": "price-tag-decimal"}),
+    ("span", {"data-testid": "price-decimal"}),
+]
 
 def _clean_text(value: str | None) -> str:
     """ Normaliza strings removendo espaços extras """
     return value.strip() if value else ""
 
-def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str]:
+def _clean_price_text(value: str | None) -> str:
+    """ Remove símbolos extras mantendo apenas números, vírgulas e pontos """
+    if not value:
+        return ""
+    cleaned = re.sub(r"[^0-9,.-]", "", value)
+    return cleaned.strip()
+
+def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str] | None:
     """ Extrai nome e preço utilizando `BeautifulSoup`
     
     Parâmetros
@@ -37,18 +96,13 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
     Retorna
     -------
     dict[str, str]
-        Dicionário com os campos ``name``, ``current_price`` e ``url``
+        Dicionário com os campos ``name``, ``current_price``, ``url`` e ``source``
+        ou ``None`` quando os valores obrigatórios estão ausentes.
     """
     soup = BeautifulSoup(html, "lxml")
 
-    name_candidates = [
-        ("meta", {"property": "og:title"}),
-        ("meta", {"name": "tittle"}),
-        ("h1", {}),
-        ("title", {}),
-    ]
     name = ""
-    for tag, attrs in name_candidates:
+    for tag, attrs in _NAME_SELECTORS:
         element = soup.find(tag, attrs=attrs)
         if not element:
             continue
@@ -59,29 +113,39 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
         if name:
             break
 
-    price_selectors = [
-        ("meta", {"itemprop": "price"}),
-        ("meta", {"property": "product:price:amount"}),
-        ("span", {"id": "price"}),
-        ("span", {"class": "price"}),
-        ("div", {"class": "price"}),
-    ]
     price = ""
-    for tag, attrs in price_selectors:
+    for tag, attrs in _PRICE_SELECTORS:
         element = soup.find(tag, attrs=attrs)
         if not element:
             continue
         if element.name == "meta":
-            price = _clean_text(element.get("content"))
+            price = _clean_price_text(element.get("content"))
+        elif element.name == "data":
+            price = _clean_price_text(element.get("value"))
         else:
-            price = _clean_text(element.get_text())
+            price = _clean_price_text(element.get_text())
         if price:
             break
+
+    if price and price.isdigit():
+        for tag, attrs in _FRACTION_SELECTORS:
+            fraction_element = soup.find(tag, attrs=attrs)
+            if not fraction_element:
+                continue
+            fraction_digits = re.sub(r"\D", "", fraction_element.get_text() or "")
+            if not fraction_digits:
+                continue
+            price = f"{price}.{fraction_digits}"
+            break
+
+    if not name or not price:
+        return None
 
     return {
         "name": name,
         "current_price": price,
         "url": url or "",
+        "source": HTML_METADATA_SOURCE,
     }
 
 

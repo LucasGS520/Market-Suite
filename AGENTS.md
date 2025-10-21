@@ -31,6 +31,15 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 - Como Manter o AGENTS.md Atualizado: rotina de revisão do documento.
 - Checklist de Cobertura Essencial: verificação rápida antes de releases.
 
+## Atualização rápida — Market Scraper enxuto
+- A rota ativa para scraping é `POST /scraper/parse` (alias `/scrape/parse`) utilizando `ParserResponse` como contrato.
+- O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py` e utilizam singleflight permanente com retries simples (tenacity respeitando `Retry-After`).
+- `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
+- O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Os limites são ajustados por `SCRAPER_CACHE_TTL_SECONDS` e `SCRAPER_CACHE_MAX_ENTRIES`.
+- Parâmetros essenciais ficam explícitos no `.env.market_scraper`: TTL e tamanho do cache em memória, retries HTTP (`2`), política de fallback de robots (`allow`) e TTL dos locks de singleflight. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout. Consulte `docs/runbook_scraper.md` para o passo a passo de deploy e rollback.
+- A identidade HTTP (User-Agent e headers) é centralizada em `market_scraper/utils/user_agents.py`. Ajuste `SCRAPER_USER_AGENT_POOL`, `SCRAPER_DEFAULT_USER_AGENT` e `SCRAPER_HEADERS_*` pelo `.env.market_scraper` antes de executar rollouts.
+- `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é fixa e permissiva (allow) para manter disponibilidade. Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
+
 ## Visão Geral da Arquitetura e Serviços
 Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resumo operacional para agentes.
 
@@ -49,108 +58,70 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - Função: agenda execuções periódicas (rechecagem de produtos, coleta/limpeza de métricas e caches).
 - Tarefas agendadas comuns: `collect_celery_metrics`, `cleanup_cache`, `recheck_monitored_products`, `recheck_competitor_products`.
 - Comunicação: publica jobs nas filas do Celery (broker Redis).
-- Novo Módulo `SynergicPipeline` (`market_scraper/services/synergic_pipeline.py`) permite montar pipelines de etapas compartilhando contexto, configuráveis por domínio em `domain_policy.yaml` (chaves `pipeline_steps` e `pipeline_policies`).
+- O `SynergicPipeline` (`market_scraper/services/synergic_pipeline.py`) executa o pipeline sequencial padrão (definido em `services/pipeline_steps.py`). As políticas dinâmicas por domínio estão arquivadas junto ao antigo `domain_policy.yaml`.
 -  Para agentes: ajuste cron/intervalos nas configurações do Celery; evite criar rotinas paralelas conflitantes.
 
 ### Serviço de Scraping — `market_scraper`
-- **Função:** microserviço FastAPI que recebe uma URL e retorna JSON leve (ex: `name`, `current_price`, `marketplace`).Nenhum dado é persistido localmente.
-- **Comunicação:** recebe HTTP da API/worker; aplica rate limiting, consulta cache inteligente e executa o ``SynergicPipeline`` antes de devolver a resposta.
-- **Referências essenciais:** `market_scraper/services/domain_policy.py`, `market_scraper/services/synergic_pipeline.py`, `shared/metrics/metrics_scraper.py` e `market_scraper/README.md`.
+- **Função:** microserviço FastAPI que recebe uma URL e retorna JSON leve (`name`, `current_price`, `url`, `source`). Nenhum dado é persistido localmente.
+- **Comunicação:** recebe HTTP da API/Worker, executa o `SynergicPipeline` com as etapas sequenciais padrão e responde seguindo o contrato `ParseResponse`.
+- **Referências essenciais:** `market_scraper/services/pipeline_steps.py`, `market_scraper/services/services_scraper_common.py`, `market_scraper/utils/robots.py`, `market_scraper/utils/cache.py`, `shared/metrics/metrics_scraper.py` e `market_scraper/README.md`
 
-#### Configurações centralizada (`domain_policy.yaml`)
-- O arquivo padrão está em `market_scraper/services/domain_policy.yaml`. Pode ser substituído via `DOMAIN_POLICY_FILE`.
-- Hot reload opcional (`DOMAIN_POLICY_HOT_RELOAD=1`) facilita ajustes em ambientes de desenvolvimento.
+#### Pipeline padrão e fallback
+- Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep`, utilizando `price-parser` como primeira heurística textual.
+- `FetchHTMLStep` normaliza URL, verifica `robots.txt`, consulta singleflight e o cache em memória antes de baixar o HTML com `httpx` usando retries simples (até duas tentativas extras respeitando `Retry-After`).
+- Cada parser valida o payload com `DataQualityValidator`; quando nenhum retorna resultado válido o endpoint responde com `no_result`.
+- Métricas principais: `SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_STEP_FALLBACK_TOTAL`, `SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_HTTP_RETRY_BACKOFF_SECONDS` e `SCRAPER_ROBOTS_CHECK_TOTAL`.
 
-> **Boa prática**: sempre garantir que cada item cadastrado em `strategies` ou `pipeline_steps` possua uma classe válida no código. Estratégias/etapas deconhecidas são silenciosamente ignoradas pelo loader.
+#### Validação, cache e segurança
+- `market_scraper/utils/url_validation.py` garante que a URL pertença aos marketplaces suportados e bloqueia hosts privados (SSRF).
+- `market_scraper/utils/http_utils.py` resolve endereços públicos com cache/timeout configuráveis (`SCRAPER_DNS_CACHE_TTL`, `SCRAPER_DNS_TIMEOUT`) e bloqueia IPs privados antes do download.
+- `market_scraper/utils/robots.py` reutiliza `robots.txt` em cache por host, aplica retries simples, devolve `unsupported_by_robots` quando o acesso é negado e assume fallback permissivo documentado em falhas de download/parse.
+- Cache padrão em memória usa LRU/TTL com métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Não há backend alternativo carregado por padrão.
+- O arquivo `.env.market_scraper` lista apenas parâmetros de tuning (TTL, limites de cache e timeouts); mantenha os comentários desligados até ajustar limites HTTP específicos.
 
-#### Fluxo operacional e fallback
-```mermaid
-flowchart LR
-    A[POST /scrape/parse] --> B{Cache válido?}
-    B -- Sim --> C[Retorno 304 / cache hit]
-    B -- Não --> D[Carregar domain_policy.yaml]
-    D --> E[Montar lista de estratégias e pipeline steps]
-    E --> F[Executar SynergicPipeline (sequencial/parallel/conditional)]
-    F --> G{Status OK?}
-    G -- Sim --> H[Validar com DataQualityValidator]
-    H --> I[Persistir em cache inteligente]
-    I --> J[Responder]
-    G -- Não --> K[SCRAPER_FALLBACK_TOTAL++ & logs estruturados]
-    K --> F
-```
+#### Contexto compartilhado e métricas
+- O `PipelineContext` expõe `url`, `source`, `html` e `data` (payload final). Atualize apenas chaves documentadas (`name`, `current_price`, `url`, `source`, `payload`).
+- Métricas ficam em `shared/metrics/metrics_scraper.py`. Sempre reutilize contadores existentes antes de criar novos.
 
-- **Prioridade:** o YAML ordena estratégias e etapas por domínio/contexto. O fallback percorre a lista até obter `success` ou `NOT_MODIFIED`.
-- **Paralelismo:** usar `execution_mode="parallel"` apenas quando a política justificar. Monitorar o histograma de latência (`SCRAPING_LATENCY_SECONDS`).
-- **Timeouts:** cada etapa deve implementar regras próprias de timeout, pois o pipeline não cancela automaticamente tarefas travadas.
+#### Consolidação dos utilitários do `market_scraper`
+- `market_scraper/utils/` mantém helpers puros (sem estado compartilhado). Esses módulos podem ser importados diretamente pelas etapas do pipeline sem depender de configuração global.
+- Módulos de rede (`http_retry.py`, `singleflight.py`, `http_utils.py`) expõem funções reutilizáveis com métricas; preserve a API pública e parâmetros numéricos (`SCRAPER_HTTP_RETRIES`, `SCRAPER_DNS_TIMEOUT`) ao criar novos usos.
+- `market_scraper/utils_controllers` concentra orquestradores com estado, evitando que cada etapa manipule diretamente recursos externos.
+- `shared/utils` continua sendo a fonte para rotinas verdadeiramente compartilhadas. Sempre avalie se o helper pertence á camada comum antes de criar novos módulos no scraper.
 
-#### Contexto compartilhado e instrumentação
-```mermaid
-flowchart TD
-    subgraph Contexto
-        C1[shared_context]
-    end
-    Step1[Etapa leve] -->|atualiza| C1
-    Step2[Etapa pesada] -->|consulta| C1
-    C1 --> Cache[IntelligentCacheManager]
-    Step1 & Step2 --> Metrics[[Prometheus (metrics_scraper)]]
-```
+**Boas práticas ao criar/editar utilitários:**
+- `market_scraper/utils/` armazena helpers puros (cache, robots, validação de URL, parsing de preço).
+- `market_scraper/utils/price.py` utiliza o `price-parser` como primeira estratégia antes do fallback manual.
+- `market_scraper/utils_controllers/` concentra componentes com estado (loaders/config). Avalie se o utilitário realmente precisa de estado antes de adicioná-lo aqui.
+- `shared/utils` continua a fonte para funcionalidades cross-service (Redis, logging, normalização de URL). Prefira mover lógicas genéricas para lá.
 
-- **shared_context:** dicionário mutável compartilhado entre etapas. Use chaves nominais (`html_raw`, `json_ld`, `cookies_rotated`).
-- **cache:** o `IntelligentCacheManager` opera com TTL, ETag e assinatura (`SIG_CACHE_TTL`). Verificar se a chave segue o padrão `<domínio>|<url-normalizada>`.
-- **Métricas principais:**
-  - `SCRAPER_STRATEGY_TOTAL` (labels: classe, status).
-  - `SCRAPER_FALLBACK_TOTAL` (contador global de fallback).
-  - `SCRAPING_LATENCY_SECONDS` (histograma por etapa).
-  - Complementares: `SCRAPER_HTTP_BLOCKED_TOTAL`, `SCRAPER_CACHE_HIT_TOTAL` quando importados por rotas específicas.
+**Testes de regressão dos utilitários:**
+- `pytest market_scraper/tests/unit/utils -q`
+- `pytest market_scraper/tests/unit/services -q`
+- `pytest market_scraper/tests/integration/routes/test_parse.py -q`
+- Utilize fixtures em `market_scraper/tests/fixtures/` para simular respostas de marketplaces quando necessário.
 
-#### Checklist para novas estratégias ou etapas
-1. Criar a classe herdando de `ScrapingStrategy` ou `PipelineStep`.
-2. Registrar no YAML (`strategies` ou `pipeline_steps`) e definir a ordem desejada.
-3. Incluir testes unitários/integrados:
-  - `pytest market_scraper/tests/unit/services/test_domain_policy.py -k <nome>`.
-  - `pytest market_scraper/tests/integration/routes/test_strategy_selection.py` para validar seleção e fallback.
-4. Documentar requisitos de ambiente (cookies, headers, credenciais) no README/AGENTS.
-5. Publicar métricas adicionais se necessário (ex.: contador customizado dentro da etapa).
+#### Checklist para novas etapas do pipeline
+1. Criar a classe herdando de `PipelineStep` em `market_scraper/services/pipeline_steps.py` (ou módulo dedicado).
+2. Registrar a etapa na função `default_pipeline_steps()` na posição desejada.
+3. Adicionar testes unitários cobrindo a etapa isolada e integração via `test_parse.py` quando afetar o fluxo final.
+4. Atualizar documentação (`market_scraper/README.md`, `README.md` e esta seção) descrevendo a nova etapa e métricas.
+5. Revisar variáveis de ambiente/timeouts necessários e adicionar às instruções de configuração.
 
 #### Segurança, compliance e limites
-- Respeitar `robots.txt` (utilizar `market_scraper/utils/robots.txt`) antes de ativar novas políticas.
+- Respeitar `robots.txt` antes de ativar novas políticas.
 - Preservar a minimização de dados (LGPD/GDPR): coletar somente campos necessários ao alerta e mascarar quaisquer dados sensíveis nos logs (`shared/utils/logging.py`).
-- Ajustar `ThottleManager`, `RateLimiter` e `HumanizedDelayManager` ao configurar novas etapas pesadas para evitar violações de termos.
-- Usar `CircuitBreaker` e `BlockRecoveryManager` como gatilhos obrigatórios em fluxos com autenticação ou páginação agressiva.
 - Revisar limites externos (headers `Retry-After`, quotas por API pública) antes de aumentar o paralelismo.
 - Evitar armazenar tokens/sessões em arquivos temporários; usar apenas o cache in-memory controlado.
 
 #### Observabilidade de regressões
-- Ativar dashboards específicos no Grafana acompanhando `SCRAPER_FALLBACK_TOTAL` vs. taxa de sucesso.
+- Ativar dashboards específicos no Grafana acompanhando `SCRAPER_STEP_FALLBACK_TOTAL` vs. taxa de sucesso.
 - Criar alertas no Prometheus quando `SCRAPING_LATENCY_SECONDS{le="5"}` sair da meta definida no README.
 - Para diagnósticos rápidos, habilitar logs nível `debug` apenas em ambientes controlados {`structlog` com `contextvars`}.
-- Sempre registrar no PR alterações no YAML e nas métricas acompanhadas.
+- Sempre registrar no PR alterações no pipeline (`pipeline_steps.py`), configurações e métricas acompanhadas.
 
 ### Utilitários Compartilhados — `shared`
-- Principais componentes: `IntelligentUserAgentManager`, `CookieManager`, `ThrottleManager`, `RateLimiter`, `CircuitBreaker`, `BlockRecoveryManager`, `HumanizeDelayManager`, `AdaptiveRecheckManager`, `IntelligentCacheManager`, `DataQualityValidator`.
-- Papel: suporte a scraping, resiliência, limitação de requisições e qualidade de dados.
 - Para agentes: reutilizar utilitários em novas tarefas/estratégias; evitar duplicar lógica existente.
-
-#### Mapa de Utilitários e Gerenciadores Internos
-
-| Gerenciador | Função/Descrição |
-|---|---|
-| `IntelligentUserAgentManager` | Seleciona/rotaciona User-Agent de forma inteligente (por domínio/estado), reduzindo bloqueios e fingerprinting previsível. |
-| `CookieManager` | Gerencia cookies por domínio/sessão; persiste e reaproveita quando saudável; reinicia/limpa em caso de bloqueios. |
-| `ThrottleManager` | Impõe atrasos mínimos entre requisições (por host/rota), evitando rajadas que acionem mitigação anti‑bot. |
-| `RateLimiter` | Limita taxa de requisições (p.ex. token bucket) por janela/host; garante respeito a limites globais e específicos. |
-| `CircuitBreaker` | Abre o circuito após falhas repetidas/timeouts; evita insistir em endpoints instáveis; fecha/half‑open após cooldown. |
-| `BlockRecoveryManager` | Detecta sinais de bloqueio (CAPTCHA, 403, padrões de HTML) e aciona recuperação: troca UA/cookies, backoff e limpeza de estado. |
-| `HumanizeDelayManager` | Adiciona jitter/variação “humana” aos tempos (sleep); simula comportamento não determinístico para reduzir detecção. |
-| `AdaptiveRecheckManager` | Agenda rechecagens dinamicamente com base em mudanças recentes, erros e carga; ajusta intervalos de coleta. |
-| `IntelligentCacheManager` | Cacheia respostas/parsed data com TTL/ETag/Last‑Modified; evita coletas redundantes e respeita 304 Not Modified. |
-| `DataQualityValidator` | Valida qualidade dos dados (ex.: preço numérico/positivo, nome não vazio, moeda/marketplace coerentes), rejeitando outliers. |
-
-Notas rápidas de uso:
-- Preferir compor `ThrottleManager` + `RateLimiter` + `HumanizeDelayManager` para tráfego sustentado e previsível.
-- Consultar o cache (`IntelligentCacheManager`) antes de acionar o `market_scraper`; tratar 304 para evitar retrabalho.
-- Em erro repetido, verificar estado do `CircuitBreaker` e acionar `BlockRecoveryManager` antes de reintentar.
-- Validar sempre com `DataQualityValidator` antes de persistir/propagar dados para comparação/alertas.
 
 ### Infra e Observabilidade
 - Componentes: PostgreSQL, Redis, Prometheus, Grafana, Loki/Promtail; orquestrados por `docker-compose.yml`.
@@ -176,7 +147,7 @@ Notas rápidas de uso:
     - Tarefas: `CELERY_TASKS_TOTAL` (com status), `CELERY_TASK_DURATION_SECONDS`.
   - Celery Beat: servidor embutido Prometheus em `market_alert/beat_with_metrics.py:8` (porta 8001). Coleta periódica:
     - Filas/Workers/Redis: `CELERY_QUEUE_LENGTH`, `CELERY_WORKERS_TOTAL`, `CELERY_WORKER_CONCURRENCY`, `REDIS_MEMORY_USAGE_BYTES`, `REDIS_QUEUE_MESSAGES` em `market_alert/tasks/metrics_tasks.py:1`.
-  - Scraper: utiliza contadores/histogramas em `shared/metrics/metrics_scraper.py:1` (ex.: `SCRAPING_LATENCY_SECONDS`, `SCRAPER_HTTP_BLOCKED_TOTAL`, `SCRAPER_STRATEGY_TOTAL`). Exposição HTTP dedicada não está ativa por padrão; as métricas aparecem quando importadas por serviços com endpoint `/metrics`.
+    - Scraper: utiliza contadores/histogramas em `shared/metrics/metrics_scraper.py:1` (ex.: `SCRAPING_LATENCY_SECONDS`, `SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_CACHE_LOOKUPS_TOTAL`). Exposição HTTP dedicada não está ativa por padrão; as métricas aparecem quando importadas por serviços com endpoint `/metrics`.
 
 - Coleta de logs estruturados:
   - API e Worker logam em JSON via `structlog` (incrementa `LOG_ENTRIES_TOTAL`).
@@ -200,8 +171,8 @@ Notas rápidas de uso:
   - Redis: `redis_memory_usage_bytes` com headroom > 20%; filas sem picos contínuos.
 
 - Boas práticas para agentes (autoajuste):
-  - Use `SCRAPER_HTTP_BLOCKED_TOTAL` e `SCRAPER_CIRCUIT_OPEN` para acionar backoff e rotação de UA/cookies.
-  - Ajuste cadência via `ThrottleManager` e `RateLimiter` quando `http_request_latency_seconds` ou `api_errors_total` aumentarem.
+ - Use `SCRAPER_CACHE_LOOKUPS_TOTAL` e `SCRAPER_ROBOTS_CHECK_TOTAL` para correlacionar quedas de desempenho com bloqueios do site.
+ - Ajuste cadência revisando `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` e parâmetros de cache quando `SCRAPING_LATENCY_SECONDS` ou `SCRAPER_STEP_FALLBACK_TOTAL` indicarem degradação.
   - Condicione rechecagens com `AdaptiveRecheckManager` considerando `SCRAPER_RETRY_TOTAL` e variação recente de preço.
 
 - Referências rápidas (FastAPI + Prometheus):
@@ -222,7 +193,6 @@ Notas rápidas de uso:
 - Alteração de interfaces: tenha extrema cautela ao mudar contratos de API, esquemas Pydantic, assinaturas de tasks Celery e estruturas de resposta do scraper. Preserve retrocompatibilidade (parâmetros opcionais com default), documente deprecações e atualize `AGENTS.md`, `README.md` e testes.
 - Banco e migrações: não modifique esquemas sem migrar via Alembic; descreva riscos e plano de rollback. Nunca apague dados em massa em rotinas automatizadas.
 - Observabilidade: ao introduzir funcionalidades, inclua métricas relevantes (latência, contadores de erro, tamanhos de fila) e logs estruturados. Atualize `shared/infra/prometheus/alert_rules.yml` se o SLO for afetado.
-- Desempenho e limites: respeite `ThrottleManager`/`RateLimiter`/`CircuitBreaker` ao criar rotas/tarefas que façam I/O; utilize `IntelligentCacheManager` antes de novas coletas.
 - Segurança e segredos: nunca logue tokens/senhas; use `.env` e utilidades em `shared/infra` para acessar segredos. Evite hardcode de URLs/credenciais.
 - Compatibilidade local/Docker: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos (ex.: métricas Beat 8001, Worker 8002, API 8000, Scraper 8010 em dev).
 - Ao final de cada Sprint, Etapas ou Fases, trazer alertas para que haja atualização nos arquivos `README.md` e `AGENTS.md`.
@@ -289,7 +259,6 @@ Notas rápidas de uso:
 - Para preparar o ambiente local e facilitar reativação futura:
   - `playwright install chromium` (após ativar a venv e instalar requirements)
 - Diretrizes:
-  - Execute Playwright apenas para testes controlados, respeitando `ThrottleManager`/`RateLimiter`/`CircuitBreaker` e limites de domínio.
   - Mantenha a flag/estratégia de scraping configurada via `.env.market_scraper` (`SCRAPER_STRATEGIES`) e use headless conforme variáveis (`PLAYWRIGHT_HEADLESS`, `PLAYWRIGHT_TIMEOUT`).
 
 ### Tarefas Celery disponíveis

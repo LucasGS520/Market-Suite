@@ -1,12 +1,51 @@
-""" Métricas prometheus relacionadas ao processo de scraping
+""" Métricas Prometheus essenciais para o serviço de scraping enxuto.
 
-Inclui contadores e gauges para monitorar requisições, latência,
-bloqueios e mecanismos de fallback, oferecendo visibilidade
-completa sobre o comportamento do scraper.
+O módulo concentra apenas contadores, histogramas e gauges efetivamente
+utilizados pelo pipeline reduzido. O objetivo é simplificar a
+observabilidade mantendo visibilidade sobre sucesso por etapa, latência,
+interações com cache e verificações de robots.txt.
 """
 
 from prometheus_client import Counter, Gauge, Histogram
 
+
+#Métricas focadas no pipeline determinístico do scraper
+SCRAPER_STEP_SUCCESS_TOTAL = Counter(
+    "scraper_step_success_total",
+    "Total de execuções bem-sucedidas por etapa do pipeline do scraper",
+    ["step", "domain", "result"],
+)
+
+SCRAPER_STEP_LATENCY_SECONDS = Histogram(
+    "scraper_step_latency_seconds",
+    "Latência das etapas do pipeline do scraper (segundos)",
+    ["step", "domain", "result"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
+
+SCRAPER_STEP_FALLBACK_TOTAL = Counter(
+    "scraper_step_fallback_total",
+    "Total de vezes que uma etapa precisou recorrer ao fallback",
+    ["step", "domain", "result"],
+)
+
+SCRAPER_STEP_INVALID_TOTAL = Counter(
+    "scraper_step_invalid_total",
+    "Total de resultados descartados por invalidação de qualidade",
+    ["step", "domain", "result"],
+)
+
+SCRAPER_VALIDATION_REJECT_TOTAL = Counter(
+    "scraper_validation_reject_total",
+    "Total de rejeições emitidas pelo validador de qualidade",
+    ["domain", "step", "reason"],
+)
+
+SCRAPER_NO_RESULT_TOTAL = Counter(
+    "scraper_no_result_total",
+    "Execuções que não retornaram um payload válido ao final do pipeline",
+    ["domain", "result"],
+)
 
 SCRAPING_LATENCY_SECONDS = Histogram(
     "scraping_latency_seconds",
@@ -20,130 +59,142 @@ SCRAPER_IN_FLIGHT = Gauge(
     "Número de requisições de scraping em andamento",
 )
 
-SCRAPER_REQUESTS_TOTAL = Counter(
-    "scraper_requests_total",
-    "Total de requisições HTTP feitas pelo scraper",
-    ["method", "status_code"],
-)
-
 SCRAPER_HEAD_FAILURES_TOTAL = Counter(
     "scraper_head_failures_total",
     "Total de falhas de scraping registradas",
 )
 
-SCRAPER_HTTP_BLOCKED_TOTAL = Counter(
-    "scraper_http_blocked_total",
-    "Total de respostas bloqueadas (status 403/429) recebidas pelo scraper",
+SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
+    "scraper_cache_lookups_total",
+    "Total de consultas ao cache básico do scraper por resultado",
+    ["outcome"],
 )
 
-SCRAPER_JITTER_SECONDS = Histogram(
-    "scraper_jitter_seconds",
-    "Distribuição dos atrasos de jitter aplicados pelo ThrottleManager (segundos)",
-    buckets=[0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
+SCRAPER_CACHE_SIZE = Gauge(
+    "scraper_cache_size",
+    "Quantidade de entradas ativas no cache básico do scraper",
 )
 
-SCRAPER_BACKOFF_FACTOR = Gauge(
-    "scraper_backoff_factor",
-    "Fator de backoff/exponenciação atual usado pelo ThrottleManager",
+SCRAPER_CACHE_EVICTIONS_TOTAL = Counter(
+    "scraper_cache_evictions_total",
+    "Total de itens removidos do cache básico do scraper por motivo",
+    ["reason"],
 )
 
-SCRAPER_CIRCUIT_OPEN = Gauge(
-    "scraper_circuit_open",
-    "Estado atual do circuit breaker do scraper",
-    ["state"],
+SCRAPER_CACHE_HIT_RATE = Gauge(
+    "scraper_cache_hit_rate",
+    "Taxa de acerto observada no cache básico do scraper",
+)
+
+SCRAPER_PRICE_PARSER_USAGE_TOTAL = Counter(
+    "scraper_price_parser_usage_total",
+    "Total de usos do price-parser para interpretar preços por resultado",
+    ["outcome"],
+)
+
+SCRAPER_DNS_RESOLVE_DURATION_SECONDS = Histogram(
+    "scraper_dns_resolve_duration_seconds",
+    "Latência para resolver hosts antes de efetuar downloads HTTP",
+    ["outcome"],
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0],
+)
+
+SCRAPER_DNS_BLOCKED_TOTAL = Counter(
+    "scraper_dns_blocked_total",
+    "Total de resoluções DNS bloqueadas por motivo de segurança",
+    ["reason"],
+)
+
+SCRAPER_ROBOTS_CHECK_TOTAL = Counter(
+    "scraper_robots_check_total",
+    "Total de verificações realizadas contra o robots.txt por resultado",
+    ["outcome"],
+)
+
+SCRAPER_SINGLEFLIGHT_CALLS_TOTAL = Counter(
+    "scraper_singleflight_calls_total",
+    "Total de chamadas coordenadas pelo singleflight por papel e resultado",
+    ["role", "outcome"],
+)
+
+SCRAPER_SINGLEFLIGHT_WAIT_SECONDS = Histogram(
+    "scraper_singleflight_wait_seconds",
+    "Tempo de espera de participantes singleflight antes de reutilizar o download",
+    ["role"],
+    buckets=[0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0],
+)
+
+SCRAPER_HTTP_RETRIES_TOTAL = Counter(
+    "scraper_http_retries_total",
+    "Total de tentativas extras realizadas durante downloads HTTP do scraper",
+    ["target", "reason"],
+)
+
+SCRAPER_HTTP_RETRY_BACKOFF_SECONDS = Histogram(
+    "scraper_http_retry_backoff_seconds",
+    "Tempo de espera aplicado antes de novas tentativas de download HTTP",
+    ["target", "reason"],
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
+)
+
+SCRAPER_HTTP_CLIENT_ERROR_TOTAL = Counter(
+    "scraper_http_client_error_total",
+    "Total de respostas 4xx observadas durante downloads HTML",
+    ["domain", "status"],
+)
+
+SCRAPER_HTTP_DECODE_ERROR_TOTAL = Counter(
+    "scraper_http_decode_error_total",
+    "Total de falhas ao decodificar corpos HTTP baixados pelo scraper",
+    ["domain", "encoding", "reason"],
+)
+
+SCRAPER_UA_ROTATION_TOTAL = Counter(
+    "scraper_ua_rotation_total",
+    "Total de User-Agents atribuídos durante o download de HTML",
+    ["strategy", "domain"],
 )
 
 SCRAPING_SUSPENDED_FLAG = Gauge(
     "scraping_suspended_flag",
-    "Flag de suspensão global de scraping",
+    "Flag de suspensão global de scraping controlado via Redis",
 )
 
-SCRAPER_CIRCUIT_OPEN.labels(state="open").set(0)
-SCRAPER_CIRCUIT_OPEN.labels(state="closed").set(1)
 SCRAPING_SUSPENDED_FLAG.set(0)
 
-SCRAPER_RETRY_TOTAL = Counter(
-    "scraper_retry_total",
-    "Total de tentativas de retry feitas pelo scraper",
+SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS = Gauge(
+    "scraper_domain_policy_last_load_success",
+    "Estado da última tentativa de carregar políticas por domínio",
 )
 
-SCRAPER_CAPTCHA_TOTAL = Counter(
-    "scraper_captcha_total",
-    "Total de captchas detectados pelo scraper",
-)
+SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS.set(1)
 
-SCRAPER_BROWSER_FALLBACK_TOTAL = Counter(
-    "scraper_browser_fallback_total",
-    "Total de vezes que o scraper recorreu a um navegador headless",
-)
-
-SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL = Counter(
-    "scraper_browser_recovery_success_total",
-    "Total de recuperações bem-sucedidas via navegador headless",
-)
-
-SCRAPER_STRATEGY_TOTAL = Counter(
-    "scraper_strategy_total",
-    "Total de execuções por estratégia de scraping",
-    ["strategy", "status"],
-)
-
-SCRAPER_FALLBACK_TOTAL = Counter(
-    "scraper_fallback_total",
-    "Total de fallbacks acionados entre estratégias após falha de validação de dados",
-)
-
-SCRAPER_FEATURE_FLAG_TOTAL = Counter(
-    "scraper_feature_flag_total",
-    "Total de decisões tomadas por feature flags no fluxo de scraping",
-    ["feature", "state"],
-)
-
-SCRAPER_REQUEST_SIZE_BYTES = Histogram(
-    "scraper_request_size_bytes",
-    "Distribuição do tamanho das requisições HTTP do scraper (bytes)",
-    ["method"],
-    buckets=[128, 512, 1024, 4096, 16384, 65536, 262144],
-)
-
-SCRAPER_RESPONSE_SIZE_BYTES = Histogram(
-    "scraper_response_size_bytes",
-    "Distribuição do tamanho das respostas HTTP do scraper (bytes)",
-    ["method", "status_code"],
-    buckets=[128, 512, 1024, 4096, 16384, 65536, 262144],
-)
-
-SCRAPER_URL_STATUS_TOTAL = Counter(
-    "scraper_url_status_total",
-    "Total de requisições por domínio de URL e status de sucesso ou falha",
-    ["url_host", "status"],
-)
-
-SCRAPER_CIRCUIT_STATE_CHANGES_TOTAL = Counter(
-    "scraper_circuit_state_changes_total",
-    "Total de mudanças de estado do circuit breaker do scraper",
-    ["state"],
-)
 
 __all__ = [
     "SCRAPING_LATENCY_SECONDS",
     "SCRAPER_IN_FLIGHT",
-    "SCRAPER_REQUESTS_TOTAL",
     "SCRAPER_HEAD_FAILURES_TOTAL",
-    "SCRAPER_HTTP_BLOCKED_TOTAL",
-    "SCRAPER_JITTER_SECONDS",
-    "SCRAPER_BACKOFF_FACTOR",
-    "SCRAPER_CIRCUIT_OPEN",
+    "SCRAPER_CACHE_LOOKUPS_TOTAL",
+    "SCRAPER_CACHE_SIZE",
+    "SCRAPER_CACHE_EVICTIONS_TOTAL",
+    "SCRAPER_CACHE_HIT_RATE",
+    "SCRAPER_PRICE_PARSER_USAGE_TOTAL",
+    "SCRAPER_DNS_RESOLVE_DURATION_SECONDS",
+    "SCRAPER_DNS_BLOCKED_TOTAL",
+    "SCRAPER_ROBOTS_CHECK_TOTAL",
+    "SCRAPER_SINGLEFLIGHT_CALLS_TOTAL",
+    "SCRAPER_SINGLEFLIGHT_WAIT_SECONDS",
+    "SCRAPER_HTTP_RETRIES_TOTAL",
+    "SCRAPER_HTTP_RETRY_BACKOFF_SECONDS",
+    "SCRAPER_HTTP_CLIENT_ERROR_TOTAL",
+    "SCRAPER_HTTP_DECODE_ERROR_TOTAL",
+    "SCRAPER_UA_ROTATION_TOTAL",
     "SCRAPING_SUSPENDED_FLAG",
-    "SCRAPER_RETRY_TOTAL",
-    "SCRAPER_CAPTCHA_TOTAL",
-    "SCRAPER_BROWSER_FALLBACK_TOTAL",
-    "SCRAPER_BROWSER_RECOVERY_SUCCESS_TOTAL",
-    "SCRAPER_STRATEGY_TOTAL",
-    "SCRAPER_FALLBACK_TOTAL",
-    "SCRAPER_FEATURE_FLAG_TOTAL",
-    "SCRAPER_REQUEST_SIZE_BYTES",
-    "SCRAPER_RESPONSE_SIZE_BYTES",
-    "SCRAPER_URL_STATUS_TOTAL",
-    "SCRAPER_CIRCUIT_STATE_CHANGES_TOTAL",
+    "SCRAPER_DOMAIN_POLICY_LAST_LOAD_SUCCESS",
+    "SCRAPER_STEP_SUCCESS_TOTAL",
+    "SCRAPER_STEP_LATENCY_SECONDS",
+    "SCRAPER_STEP_FALLBACK_TOTAL",
+    "SCRAPER_STEP_INVALID_TOTAL",
+    "SCRAPER_VALIDATION_REJECT_TOTAL",
+    "SCRAPER_NO_RESULT_TOTAL",
 ]

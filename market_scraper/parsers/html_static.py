@@ -5,8 +5,8 @@ from __future__ import annotations
 O módulo oferece utilitários focados em coletar nome e preço a partir
 de HTML estático utilizando apenas BeautifulSoup com o parser ``lxml``.
 Todas as funções expõem a mesma interface, retornando um dicionário com 
-``name```, ``current_price`` e ``url``. Não existem fallbacks, tentativas
-qualquer lógica de fallback ou orquestração.
+``name```, ``current_price`` e ``url``. Não existem fallbacks, ou orquestrações
+adicionais; o retorno é pensado para ser validado pelo ``DataQualityValidator``.
 """
 
 import re
@@ -14,6 +14,21 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from bs4 import BeautifulSoup
+
+
+GENERIC_HTML_SOURCE = "generic_html"
+
+def _compose_price_from_parts(integer: Optional[str], fraction: Optional[str]) -> str:
+    """ Concatena partes separadas do preço em formato decimal """
+    if not integer:
+        return ""
+    digits = re.sub(r"\D", "", integer)
+    decimals = re.sub(r"\D", "", fraction or "")
+    if not digits:
+        return ""
+    if decimals:
+        return f"{digits}.{decimals}"
+    return digits
 
 def _normalize_price(value: Optional[str]) -> Optional[Decimal]:
     """ Converte uma string de preço para ``Decimal`` quando possível """
@@ -39,7 +54,12 @@ def _format_price(value: Optional[str], currency: Optional[str]) -> str:
     number = _normalize_price(value)
     if number is None:
         return ""
-    symbol = (currency or "R$").strip() or "R$"
+    symbol_map = {
+        "BRL": "R$",
+    }
+    sanitized_currency = (currency or "R$").strip()
+    #Normalizamos o código quando a página informa apenas a sigla monetária
+    symbol = symbol_map.get(sanitized_currency.upper(), sanitized_currency or "R$")
     whole, fraction = f"{number:,.2f}".split(".")
     whole = whole.replace(",", ".")
     return f"{symbol} {whole},{fraction}"
@@ -53,17 +73,30 @@ def _extract_text(soup: BeautifulSoup, selector: str, attribute: str | None = No
         return (element.get(attribute) or "").strip()
     if element.name == "meta":
         return (element.get("content") or "").strip()
-    return element.get_text(strip=True)
+    text = element.get_text(strip=True)
+    if text:
+        return text
+    
+    #Algumas páginas guardam preços em atributos customizados
+    for attr in ("data-price", "data-price-amount", "data-value", "data-amount", "aria-label", "title"):
+        value = element.get(attr)
+        if value:
+            return value.strip()
+    return ""
 
-def _assemble_result(name: str, price: str, currency: str, url: str) -> dict[str, str]:
-    """ Normaliza os campos e monta o dicionário de saída """
+def _assemble_result(name: str, price: str, currency: str, url: str) -> dict[str, str] | None:
+    """ Normaliza os campos e monta o dicionário de saída padronizado """
+    formatted_price = _format_price(price, currency)
+    if not name or not formatted_price:
+        return None
     return {
-        "name": name or "",
-        "current_price": _format_price(price, currency),
+        "name": name,
+        "current_price": formatted_price,
         "url": url,
+        "source": GENERIC_HTML_SOURCE,
     }
 
-def parse_generic_html(html: str, url: str) -> dict[str, str]:
+def parse_generic_html(html: str, url: str) -> dict[str, str] | None:
     """ Realiza uma extração genérica de nome e preço a partir da página 
     
     A extração utiliza exclusivamente seletores CSS via BeautifulSoup com o
@@ -81,7 +114,10 @@ def parse_generic_html(html: str, url: str) -> dict[str, str]:
     for selector in [
         'meta[property="og:title"]',
         'meta[name="title"]',
+        'meta[name="twitter:title"]',
         'meta[itemprop="name"]',
+        "span#productTitle",
+        "h1[data-testid='heading-product-title']",
         "title",
         "h1",
     ]:
@@ -94,6 +130,7 @@ def parse_generic_html(html: str, url: str) -> dict[str, str]:
         'meta[itemprop="price"]',
         'meta[property="product:price:amount"]',
         'meta[property="og:price:amount"]',
+        'meta[name="twitter:data1"]',
         'span[itemprop="price"]',
         'div[itemprop="price"]',
     ]:
@@ -101,6 +138,24 @@ def parse_generic_html(html: str, url: str) -> dict[str, str]:
         if price:
             break
 
+    if not price:
+        price = _extract_text(soup, "[data-testid='price-value']")
+    if not price:
+        combined = _compose_price_from_parts(
+            _extract_text(soup, "[data-testid='price-integer']"),
+            _extract_text(soup, "[data-testid='price-decimal']"),
+        )
+        price = combined or price
+    if not price:
+        combined = _compose_price_from_parts(
+            _extract_text(soup, "span.a-price-whole"),
+            _extract_text(soup, "span.a-price-fraction"),
+        )
+        price = combined or price
+    if not price:
+        price = _extract_text(soup, "[data-price]")
+    if not price:
+        price = _extract_text(soup, "[data-value]")
     if not price:
         price = _extract_text(soup, ".price", attribute=None)
 
@@ -110,6 +165,7 @@ def parse_generic_html(html: str, url: str) -> dict[str, str]:
         'meta[property="product:price:currency"]',
         'meta[property="og:price:currency"]',
         'span[itemprop="priceCurrency"]',
+        '[data-testid="price-currency"]',
     ]:
         currency = _extract_text(soup, selector)
         if currency:
@@ -117,7 +173,7 @@ def parse_generic_html(html: str, url: str) -> dict[str, str]:
 
     return _assemble_result(name, price, currency, url)
 
-def parse_meli_html(html: str, url: str) -> dict[str, str]:
+def parse_meli_html(html: str, url: str) -> dict[str, str] | None:
     """ Extrai informações básicas das páginas do Mercado Livre 
     
     A leitura do HTML utiliza apenas BeautifulSoup com o parser ``lxml`` e 
@@ -136,6 +192,7 @@ def parse_meli_html(html: str, url: str) -> dict[str, str]:
     name = ""
     for selector in [
         "h1.ui-pdp-title",
+        "h1[data-testid='product-title']",
         "h1",
         'meta[property="og:title"]',
     ]:
@@ -143,30 +200,35 @@ def parse_meli_html(html: str, url: str) -> dict[str, str]:
         if name:
             break
 
-    whole = _extract_text(soup, ".andes-money-amount__fraction") or _extract_text(
-        soup, ".price-tag-fraction"
+    price = _compose_price_from_parts(
+        _extract_text(soup, "[data-testid='price-integer']")
+        or _extract_text(soup, ".andes-money-amount__fraction")
+        or _extract_text(soup, ".price-tag-fraction"),
+        _extract_text(soup, "[data-testid='price-decimal']")
+        or _extract_text(soup, ".andes-money-amount__cents")
+        or _extract_text(soup, ".price-tag-decimal"),
     )
-    cents = _extract_text(soup, ".andes-money-amount__cents") or _extract_text(
-        soup, ".price-tag-decimal"
-    )
-    price = ""
-    if whole:
-        digits = re.sub(r"\D", "", whole)
-        if cents:
-            cents = re.sub(r"\D", "", cents)
-            price = f"{digits}.{cents}" if digits else ""
-        else:
-            price = digits
-
-    else:
+    if not price:
+        price = _extract_text(soup, "[data-testid='price-value']")
+    if not price:
+        price = _extract_text(soup, ".ui-pdp-price__second-line")
+    if not price:
+        price = _extract_text(soup, ".price-tag-text-sr-only")
+    if not price:
         price = _extract_text(soup, 'span[itemprop="price"]')
+    if not price:
+        price = _extract_text(soup, 'meta[itemprop="price"]')
+    if not price:
+        price = _extract_text(soup, 'meta[property="product:price:amount"]')
 
-    currency = _extract_text(soup, 'meta[itemprop="priceCurrency"]') or _extract_text(
-        soup, 'meta[property="product:price:currency"]'
+    currency = (
+        _extract_text(soup, 'meta[itemprop="priceCurrency"]')
+        or _extract_text(soup, 'meta[property="product:price:currency"]')
+        or _extract_text(soup, "[data-testid='price-currency']")
     )
     return _assemble_result(name, price, currency, url)
 
-def parse_amazon_html(html: str, url: str) -> dict[str, str]:
+def parse_amazon_html(html: str, url: str) -> dict[str, str] | None:
     """ Captura nome e preço em páginas da Amazon Brasil 
     
     Nenhuma etapa adicional é executada além da análise do HTML por meio de
@@ -183,29 +245,44 @@ def parse_amazon_html(html: str, url: str) -> dict[str, str]:
     name = ""
     for selector in [
         "#productTitle",
+        "#titleSection span",
+        "#title span",
         'meta[property="og:title"]',
+        'meta[name="twitter:title"]',
         "title",
     ]:
         name = _extract_text(soup, selector)
         if name:
             break
 
-    whole = _extract_text(soup, "#corePriceDisplay_desktop_feature_div span.a-offscreen")
-    if not whole:
-        whole = _extract_text(soup, ".apexPriceToPay span.a-offscreen")
-    if not whole:
-        whole = _extract_text(soup, "span.a-price-whole")
-        fraction = _extract_text(soup, "span.a-price-fraction")
-        if whole and fraction:
-            whole = f"{whole},{fraction}"
+    price_text = _extract_text(soup, "#corePriceDisplay_desktop_feature_div span.a-offscreen")
+    if not price_text:
+        price_text = _extract_text(soup, "#apex_desktop span.a-offscreen")
+    if not price_text:
+        price_text = _extract_text(soup, "#price_inside_buybox")
+    if not price_text:
+        price_text = _extract_text(soup, "#newBuyBoxPrice span.a-offscreen")
+    if not price_text:
+        price_text = _extract_text(soup, ".a-price span.a-offscreen")
+    if not price_text:
+        price_text = _extract_text(soup, "[data-a-color='price'] span.a-offscreen")
+    if not price_text:
+        price_text = _extract_text(soup, "[data-csa-c-type='price']")
+    if not price_text:
+        price_text = _compose_price_from_parts(
+            _extract_text(soup, "span.a-price-whole"),
+            _extract_text(soup, "span.a-price-fraction"),
+        )
 
-    currency = _extract_text(soup, 'meta[property="og:price:currency"]')
-    if not currency:
-        currency = _extract_text(soup, "span.a-price-symbol")
+    currency = (
+        _extract_text(soup, 'meta[property="og:price:currency"]')
+        or _extract_text(soup, 'meta[itemprop="priceCurrency"]')
+        or _extract_text(soup, "span.a-price-symbol")
+    )
 
-    return _assemble_result(name, whole, currency, url)
+    return _assemble_result(name, price_text, currency, url)
 
-def parse_magalu_html(html: str, url: str) -> dict[str, str]:
+def parse_magalu_html(html: str, url: str) -> dict[str, str] | None:
     """ Extrai dados essenciais das páginas do Magazine Luiza 
     
     O parser faz uso exclusivo do BeautifulSoup configurado com ``lxml`` para
@@ -222,6 +299,7 @@ def parse_magalu_html(html: str, url: str) -> dict[str, str]:
     name = ""
     for selector in [
         'meta[property="og:title"]',
+        "h1[data-testid='heading-product-title']",
         "h1",
         "title",
     ]:
@@ -231,9 +309,20 @@ def parse_magalu_html(html: str, url: str) -> dict[str, str]:
 
     price = _extract_text(soup, 'meta[itemprop="price"]')
     if not price:
+        price = _extract_text(soup, "[data-testid='price-value']")
+    if not price:
+        price = _compose_price_from_parts(
+            _extract_text(soup, "[data-testid='price-integer']"),
+            _extract_text(soup, "[data-testid='price-decimal']"),
+        )
+    if not price:
         price = _extract_text(soup, "span[class*='price']")
+    if not price:
+        price = _extract_text(soup, "[data-price]")
 
-    currency = _extract_text(soup, 'meta[itemprop="priceCurrency"]')
+    currency = _extract_text(soup, 'meta[itemprop="priceCurrency"]') or _extract_text(
+        soup, "[data-testid='price-currency']"
+    )
 
     return _assemble_result(name, price, currency, url)
 

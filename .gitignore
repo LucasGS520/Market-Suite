@@ -105,6 +105,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Diagnosticos de scraping
+diagnostics_output/
+
 # IDEs and editors
 .idea/
 .vscode/

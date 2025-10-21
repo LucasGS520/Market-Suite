@@ -18,6 +18,7 @@ class MonitoredProduct(Base):
     __tablename__ = "monitored_products" #Define o nome da tabela como monitored_products
 
     __table_args__ = (
+        #A restrição considera a URL exatamente como informado, sem canonicalização
         UniqueConstraint("user_id", "product_url", name="uq_user_product_url"),
     )
 
@@ -71,6 +72,7 @@ class CompetitorProduct(Base):
     __tablename__ = "competitor_products"
 
     __table_args__ = (
+        #Duplicidades são avaliadas com base na URL original do usuário
         UniqueConstraint("monitored_product_id", "product_url", name="uq_competitor_url"),
     )
 

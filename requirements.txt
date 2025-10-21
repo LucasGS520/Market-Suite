@@ -15,6 +15,7 @@ bidict==0.23.1
 billiard==4.2.1
 blinker==1.9.0
 Brotli==1.1.0
+brotlicffi==1.1.0.0
 cachetools==5.5.2
 celery==5.5.2
 certifi==2025.4.26
@@ -53,6 +54,7 @@ html5lib=1.1
 httpcore==1.0.9
 httptools==0.6.4
 httpx==0.28.1
+httpx-cache==0.13.0
 humanize==4.12.3
 idna==3.10
 importlib_metadata==8.7.0
@@ -91,6 +93,7 @@ platformdirs==4.3.8
 playwright==1.52.0
 playwright-stealth==2.0.0
 pluggy==1.5.0
+price-parser==0.5.0
 prometheus-fastapi-instrumentator==7.1.0
 prometheus_client==0.21.1
 prompt_toolkit==3.0.51
@@ -130,11 +133,10 @@ redis==6.1.0
 referencing==0.36.2
 regex==2024.11.6
 requests==2.32.3
-requests-html==0.10.0
 requests-toolbelt==1.0.0
 rpds-py==0.25.1
 rsa==4.9.1
-selectorlib==0.16.0
+selectolax==0.4.0
 setuptools==80.9.0
 simple-websocket==1.1.0
 six==1.17.0

@@ -1,57 +1,138 @@
-""" Validações de URLs utilizadas pelo serviço de scraping
-
-Fornece funções auxiliares para garantir que a URL recebida pertence a um
-marketplace suportado e representa de fato uma página de produto. Essa
-camada evita processamentos desnecessários e gera mensagens de erro mais
-claras para o cliente da API
-"""
+""" Normalização e verificação de URLs aceitas pelo scraper """
 
 from __future__ import annotations
 
-import re
-from urllib.parse import urlparse
+from dataclasses import dataclass
+from ipaddress import ip_address
 from typing import Callable, Dict
+from urllib.parse import ParseResult, urlparse, urlunparse
+import re
 
-from market_scraper.services.domain_policy import PIPELINE_POLICIES
-from market_scraper.utils.http_utils import extract_hostname
-from shared.utils.ml_url import canonicalize_ml_url
+from market_scraper.utils.http_utils import (
+    HostResolutionError,
+    extract_hostname,
+    resolve_public_addresses as http_resolve_public_addresses,
+)
 
 
-#Mapeia domínios para funções de verificação de página de produto
-_PRODUCT_CHECKS: Dict[str, Callable[[str], bool]] = {
-    "mercadolivre.com.br": lambda url: canonicalize_ml_url(url) is not None,
-    "amazon.com.br": lambda url: "/dp/" in urlparse(url).path or "/gp/product" in urlparse(url).path,
-    "magazineluiza.com.br": lambda url: "/p/" in urlparse(url).path,
+@dataclass(frozen=True)
+class UrlIssue:
+    """ Representa um problema encontrado durante a validação da URL """
+    code: str
+    message: str
+
+SUPPORTED_DOMAINS = {
+    "mercadolivre.com.br",
+    "amazon.com.br",
+    "magazineluiza.com.br",
 }
 
+_ML_PRODUCT_RE = re.compile(r"/MLB[-_]?[0-9]+", re.IGNORECASE)
+_AMAZON_PATH_RE = re.compile(r"/(dp|gp/product)/", re.IGNORECASE)
+_MAGALU_PATH_RE = re.compile(r"/p/", re.IGNORECASE)
+
+_ALLOWED_SCHEMES = {"http", "https"}
+
+_PRODUCT_CHECKS: Dict[str, Callable[[ParseResult], bool]] = {
+    "mercadolivre.com.br": lambda parsed: bool(_ML_PRODUCT_RE.search(parsed.path)),
+    "amazon.com.br": lambda parsed: bool(_AMAZON_PATH_RE.search(parsed.path)),
+    "magazineluiza.com.br": lambda parsed: bool(_MAGALU_PATH_RE.search(parsed.path)),
+}
+
+def _ensure_scheme(url: str) -> str:
+    """ Garante que a URL utilize HTTP ou HTTPS e normalize fraqmentos """
+    raw_parsed = urlparse(url)
+    scheme = (raw_parsed.scheme or "https").lower()
+
+    if raw_parsed.scheme and scheme not in _ALLOWED_SCHEMES:
+        #Bloqueamos esquemas alternativos para evitar protocolos não suportados pelo scraper
+        raise ValueError("A URL deve utilizar HTTP ou HTTPS")
+
+    if raw_parsed.scheme:
+        parsed = raw_parsed
+    elif raw_parsed.netloc:
+        #Quando a URL é relativo ao esquema, aplicamos HTTPS como padrão seguro
+        parsed = raw_parsed._replace(scheme="https")
+    else:
+        parsed = urlparse(f"https://{url}")
+    
+    parsed_scheme = (parsed.scheme or "https").lower()
+    if parsed_scheme not in _ALLOWED_SCHEMES:
+        raise ValueError("A URL deve utilizar HTTP ou HTTPS")
+
+    if not parsed.netloc:
+        raise ValueError("URL inválida ou malformada")
+    
+    cleaned = parsed._replace(scheme=parsed_scheme, fragment="")
+    return urlunparse(cleaned)
+
+def normalize_product_url(url: str) -> str:
+    """ Normaliza a URL removendo espaços extras e garantindo o esquema """
+    raw = (url or "").strip()
+    if not raw:
+        raise ValueError("URL inválida ou malformada")
+    
+    normalized = _ensure_scheme(raw)
+    return normalized
+
+def _matches_domain(host: str, domain: str) -> bool:
+    """ Retorna ``True`` quando o host pertence ao domínio informado """
+    return host == domain or host.endswith(f".{domain}")
+
 def _is_supported_marketplace(host: str) -> bool:
-    """ Verifica se o host pertence a algum domínio configurado """
-    for domain in PIPELINE_POLICIES.keys():
-        if domain == "default":
-            continue
-        if host == domain or host.endswith("." + domain):
-            return True
-    return False
+    """ Verifica se o host pertence a uma marketplace suportada """
+    return any(_matches_domain(host, domain) for domain in SUPPORTED_DOMAINS)
 
 def _is_product_page(url: str) -> bool:
     """ Confere se a URL parece apontar para uma página de produto """
-    host = extract_hostname(url)
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
     for domain, checker in _PRODUCT_CHECKS.items():
-        if host == domain or host.endswith("." + domain):
-            return checker(url)
+        if _matches_domain(host, domain):
+            return checker(parsed)
     return False
 
-def check_url_compatibility(url: str) -> str | None:
-    """ Valida se a URL é aceita pelo sistema
-
-    Retorna ``None`` quando a URL é valida ou uma mensagem
-    explicando o motivo da incompatibilidade
-    """
+def check_url_compatibility(url: str) -> UrlIssue | None:
+    """ Valida a URL normalizada e retorna o primeiro problema encontrado """
     host = extract_hostname(url)
     if not host:
-        return "URL inválida"
+        return UrlIssue(code="invalid_url", message="URL inválida ou malformada")
+    
     if not _is_supported_marketplace(host):
-        return "Marketplace ainda não suportado"
+        return UrlIssue(code="unsupported_marketplace", message="Marketplace ainda não suportado")
+    
+    public_issue = _ensure_public_endpoint(host)
+    if public_issue:
+        return public_issue
+    
     if not _is_product_page(url):
-        return "A URL informada não corresponde a um produto"
+        return UrlIssue(code="not_a_product", message="A URL informada não corresponde a um produto")
     return None
+
+def resolve_public_addresses(host: str) -> list[str]:
+    """ Mantém o alias padronizado para uso em testes e chamadas legadas """
+    #Delegamos para o utilitário compartilhado para preservar a regra única de validação
+    return http_resolve_public_addresses(host)
+
+def _ensure_public_endpoint(host: str) -> UrlIssue | None:
+    """ Confere se o host aponta para endereços públicos válidos """
+    try:
+        ip_obj = ip_address(host)
+    except ValueError:
+        try:
+            resolve_public_addresses(host)
+        except HostResolutionError as exc:
+            return UrlIssue(code="blocked_host", message=str(exc))
+        return None
+    
+    if not ip_obj.is_global:
+        return UrlIssue(code="blocked_host", message="Endereços privados não são permitidos")
+    
+    return None
+
+__all__ = [
+    "UrlIssue",
+    "normalize_product_url",
+    "check_url_compatibility",
+    "resolve_public_addresses",
+]

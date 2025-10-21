@@ -1,334 +1,121 @@
-# Arquitetura de Scraping Leve
-Este documento descreve o fluxo de coleta de dados do serviço `market_scraper` utilizando abordagens de baixo custo baseadas em **JSON**, **HTML estático** e pipeline sinérgico configurável.
-O objetivo é extrair apenas os campos essenciais `name` e `current_price` de maneira discreta, com observabilidade, compliance e rollout controlado, evitando o uso de navegadores controlados pelo Playwright nesta fase do projeto.
+# Market Scraper
 
-## Visão Geral do Fluxo
-1. A rota `/parse` recebe a URL do produto.
-2. A função `scrape_product_common_async` normaliza o endereço, consulta o cache inteligente e aciona o `SynergicPipeline` definido no `domain_policy.yaml`.
-3. O `SynergicPipeline` seleciona etapas conforme configuração centralizada e executa o modo configurado (`sequential`, `parallel` ou `conditional`).
-4. Cada etapa lê e atualiza o `shared_context`, garantindo reaproveitamento de resultados e eliminando consultas duplicadas.
-5. O `DataQualityvalidator` valida o retorno da etapa corrente; em caso de falha ou timeout, o pipeline aplica fallback automático para a próxima etapa disponível.
-6. Resultados válidos são armazenados no `IntelligentCacheManager` e retornados ao solicitante, respeitando TTL, ETag e políticas de domínio.
-7. Métricas e logs estruturados são registrados para observabilidade, permitindo acompanhar latência, sucessos, fallback e bloqueios por etapa.
+## Objetivo
+O serviço `market_scraper` coleta nome e preço de anúncios em marketplaces estáticos. A implementação atual prioriza confiabilidade e baixo tempo de resposta, utilizando apenas páginas HTML e metadados expostos sem renderização de JavaScript.
 
-## Políticas de Domínio e Configuração Centralizada
-O módulo `domain_policy` mapeia cada marketplace para uma ordem de execução, contexto e modo de processamento:
-- Etapas leves (extrações estruturadas) são priorizadas, seguidas por variações baseadas em HTML estático e renderização leve.
-- O arquivo `domain_policy.yaml` centraliza etapas de pipeline, modos de execução (`sequential`, `parallel`, `conditional`), limites de requisições e feature flags.
-- Contextos (ex: `default`, `competitor`) permitem granularidade por tipo de página ou cenário.
-- Novas etapas ou domínios podem ser adicionados facilmente via YAML, sem alterar o core do código.
+## Endpoints principais
+- `POST /scraper/parse` (alias `POST /scrape/parse`): recebe `{ "url": "<string>" }` e devolve `ParserResponse` com `name`, `current_price`, `url` e `source`.
+- `GET /health/ping`: verificação simples de disponibilidade.
+- `GET /metrics`: expõe as métricas registradas no `prometheus_client`.
 
-## Estratégias de Coleta e Pipeline
+## Pipeline mínimo
+O fluxo é sequencial e definido em `market_scraper/services/pipeline_steps.py`:
 
-### Parsers especializados
-Cada biblioteca de parsing possui um módulo dedicado em `market_scraper/parsers`:
-- `html_static.py` mantém funções puras para parsing por BeautifulSoup
-- `extruct.py`, `parsel.py`, `requests_html.py` e `selectorlib.py` seguem a mesma interface (`html`, `url` -> `dict`)
-- As etapas do pipeline (`pipeline_steps`) apenas coordenam o uso dos parsers acima, respeitando o contexto compartilhado.
+1. **FetchHTMLStep** – normaliza a URL, consulta o singleflight para evitar downloads duplicados, valida `robots.txt`, bloqueia SSRF (hosts privados) e baixa o HTML com `httpx` usando retries com backoff. Ao sucesso, o HTML é salvo no contexto compartilhado e no cache configurado.
+2. **JsonLdParserStep** – tenta extrair dados estruturados (`application/ld+json`).
+3. **HtmlMetadataParserStep** – analisa metatags e elementos semânticos com BeautifulSoup.
+4. **GenericFallbackParserStep** – aplica heurísticas genéricas no HTML para obter nome e preço, utilizando `price-parser` como primeira estratégia textual.
 
-Todos os módulos retornam sempre o dicionário padronizado com `name`, `current_price` e `url`, simplificando a integração com o `SynergicPipeline`.
+Cada etapa registra métricas de latência e resultado (`success`, `empty`, `failure`). O pipeline completo respeita `SCRAPER_STEP_TIMEOUT_SECONDS` por etapa e `SCRAPER_PIPELINE_TIMEOUT_SECONDS` como teto global. Retries adicionais seguem `SCRAPER_HTTP_RETRIES` e `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, aplicando o cabeçalho `Retry-After` sempre que presente.
 
-### HTML Estático
-O módulo utilitário `market_scraper/parsers/html_static.py` concentra funções puras de parsing para cada marketplace suportado. Cada função recebe apenas o HTML bruto e a URL original, retornando um dicionário com `name` e `current_price`.
-A extração prioriza seletores simples via BeautifulSoup, e é consumida diretamente pelas etapas do pipeline configuradas via YAML.
-### SelectorLib
-Para páginas instáveis, usamos **SelectorLib** com templates YAML em `selectorlib_templates`.
+## Validação de URLs e segurança
+- Apenas marketplaces listados em `market_scraper/utils/url_validation.py` são aceitos (Mercado Livre, Amazon Brasil e Magazine Luiza).
+- O módulo `market_scraper/utils/http_utils.py` evita SSRF resolvendo o host para endereços públicos, recusando IPs privados/loopback e aplicando cache com TTL e timeout configuráveis (`SCRAPER_DNS_CACHE_TTL`, `SCRAPER_DNS_TIMEOUT`). Métricas acompanham resoluções bem-sucedidas, bloqueios e falhas (`SCRAPER_DNS_RESOLVE_DURATION_SECONDS`, `SCRAPER_DNS_BLOCKED_TOTAL`).
+- O utilitário `market_scraper/utils/robots.py` reutiliza `robots.txt` por host durante uma hora, aplica retries com backoff e, diante de falhas de download ou parse, adota fallback permissivo documentado. Se o site negar acesso explicitamente, a etapa `FetchHTMLStep` retorna `unsupported_by_robots` e incrementa `SCRAPER_ROBOTS_CHECK_TOTAL` com o label `disallowed`.
 
-### Pipeline Sinérgico
-O `SynergicPipeline` executa etapas configuráveis por domínio/contexto, compartilhando dados via `shared_context` e registrando métricas de latência, fallback e sucesso/falha. Todas as chamadas de scraping passam exclusivamente pelo pipeline, evitando orquestrações paralelas ou estratégias isoladas e garantindo que a política definida no YAML seja a única fonte de verdade para o fluxo de coleta.
+## Cache resiliente
+O cache padrão utiliza `cachetools.TTLCache` com bloqueios internos (`market_scraper/utils/cache.py`). Principais características:
 
-Essa pipeline realiza curto-ciruito assim que uma etapa retorna status de sucesso (`success`, `ok` ou `NOT_MODIFIED`), mantendo o `shared_context` já atualizado e evitando a execução de etapas subsequentes desnecessárias. 
+- O cache em memória com LRU/TTL é utilizado sempre e respeita o TTL configurado por `SCRAPER_CACHE_TTL_SECONDS`.
+- O limite máximo de entradas (`SCRAPER_CACHE_MAX_ENTRIES`) mantém política LRU e suporte a TTL individual por item. Evictions são contabilizadas em `SCRAPER_CACHE_EVICTIONS_TOTAL` e o tamanho atual em `SCRAPER_CACHE_SIZE`.
+- Métricas de hits/misses são atualizadas em `SCRAPER_CACHE_LOOKUPS_TOTAL` e `SCRAPER_CACHE_HIT_RATE`.
 
-#### Uso do `shared_context`
-- Utilize chaves semânticas (`html_raw`, `json_ld`, `offers`, `cookies_rotacionados`) para registar dados acessíveis às etapas subsequentes.
-- Prefira atualizar valores existentes ao invés de sobrescrever todo o dicionário; o método `shared_context.update(...)` mantém consistência entre as etapas.
-- Remova dados sensíveis antes de finalizar a etapa, garantindo compliance com LGPD/GDPR.
-- Documente no docstring da etapa quais chaves são lidas ou atualizadas, facilitando a criação de novas etapas compatíveis
-- Ajustes de timeout podem ser aplicados em tempo de execução usando `shared_context["timeouts"]` ou chaves específicas como `extruct_timeout`, sobreecrevendo a configuração do YAML para aquela execução.
+## Camada de utilitários reforçada
+- **Retries HTTP** (`market_scraper/utils/http_retry.py`): centraliza tentativas extras para downloads de HTML e `robots.txt`, respeitando `Retry-After`, aplicando backoff exponencial e registrando métricas (`SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_HTTP_RETRY_BACKOFF_SECONDS`).
+- **Singleflight** (`market_scraper/utils/singleflight.py`): reduz stampede de downloads concorrentes agrupando chamadas por URL, com métricas de espera e participação sempre ativas.
+- **DNS seguro** (`market_scraper/utils/http_utils.py`): restringe IPs privados, reutiliza resoluções em cache e falha rapidamente quando o host não é público.
+- **Parsing de preço** (`market_scraper/utils/price.py`): utiliza o `price-parser` como primeira estratégia e mantém fallback manual, contabilizando resultados em `SCRAPER_PRICE_PARSER_USAGE_TOTAL`.
+- **Robots permissivo** (`market_scraper/utils/robots.py`): utiliza apenas `urllib.robotparser`, mantém cache local com TTL e fallback permissivo quando o arquivo não é acessível.
 
-### Etapas configuráveis
-As etapas disponíveis são declaradas em `services/pipeline_steps.py` e registradas no YAML (`pipeline_steps`). Cada etapa pode:
-- Carregar HTML de diferentes fontes (requisições estáticas, renderização leve, login mecânico);
-- Executar parsers especializados reutilizando resultados anteriores;
-- Inserir dados adicionais no `shared_context` (cookies, assinaturas de conteúdo, templates do SelectorLib).
+## Configurações relevantes (`market_scraper/core/config_scraper.py`)
+- `SCRAPER_STEP_TIMEOUT_SECONDS` / `SCRAPER_PIPELINE_TIMEOUT_SECONDS` – limites de tempo do pipeline.
+- `SCRAPER_HTTP_TIMEOUT_CONNECT`, `SCRAPER_HTTP_TIMEOUT_READ`, `SCRAPER_HTTP_TIMEOUT_WRITE`, `SCRAPER_HTTP_TIMEOUT_POOL` – controle fino de timeouts `httpx`.
+- `SCRAPER_HTTP_MAX_REDIRECTS`, `SCRAPER_HTTP_MAX_CONNECTIONS`, `SCRAPER_HTTP_MAX_KEEPALIVE`, `SCRAPER_HTTP_MAX_CONTENT_LENGTH` – limites defensivos.
+- `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES` - controle do cache em memória com LRU/TTL.
+- `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE` - controle de novas tentativas com backoff exponencial leve para downloads.
+- `SCRAPER_DNS_TIMEOUT` - timeout máximo para resolução DNS.
+- `SCRAPER_DNS_CACHE_TTL` - tempo em segundos que uma resolução DNS permanece em cache.
+- `SCRAPER_SINGLEFLIGHT_LOCK_TTL` - TTL dos locks do singleflight para reciclar entradas travadas.
+- `SCRAPER_PRICE_TOLERANCE` - tolerância percentual opcional para aceitar preços aproximados.
+- Demais variáveis herdadas de `shared.core.config_base.ConfigBase` (Redis, observabilidade, etc.) são definidas em `.env.common`.
 
-A composição final do pipeline é definida por domínio em `pipeline_policies`, permitindo rearranjar etapas ou criar sequências exclusivas para contextos como `competitor`. Essa padronização elimina duplicação de código e facilita a evolução das etapas.
+### Arquivo `.env.market_scraper`
+Use este arquivo para sobrescrever valores padrão. Exemplo:
 
-## MechanicalSoup para Fluxos Simples
-Utilizado para interações leves (login, filtros simples), combinando `requests` e `BeautifulSoup` sem overhead de navegador completo. Playwright é reservado para cenários avançados e não está ativo por padrão.
+```env
+# Configurações essenciais — mantêm o pipeline padrão previsível
+SCRAPER_CACHE_TTL_SECONDS=3600
+SCRAPER_CACHE_MAX_ENTRIES=5000
 
-## Requests-HTML para Páginas Dinâmicas Leves
-Utilizado para páginas que exigem renderização simples de JavaScript. Prefira Requests-HTML antes de recorrer ao Playwright. Limitações: depende de `pyppeteer`, não realiza navegação avançada, pode consumir mais recursos.
+SCRAPER_STEP_TIMEOUT_SECONDS=8.0
+SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
 
-## Rollout, Feature Flags e Observabilidade
-O rollout de funcionalidades críticas (ex: pipeline sinérgico) é controlado por feature flags no `domain_policy.yaml`, permitindo ativação gradual por domínio/contexto e rollback imediato.
-- Métricas Prometheus (`SCRAPER_FEATURE_FLAG_TOTAL`, `SCRAPER_STRATEGY_TOTAL`, `SCRAPER_FALLBACK_TOTAL`, `SCRAPING_LATENCY_SECONDS`) monitoram decisões, latência e fallback.
-- Logs estruturados registram decisões de rollout, execuções e bloqueios.
-- O plano de rollout e rollback está documentado e testado, garantindo governança e rastreabilidade.
+SCRAPER_HTTP_RETRIES=2
+SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
 
-## Segurança, Compliance e Limites
-- Respeito ao `robots.txt` antes de qualquer coleta.
-- Limites de requisições por domínio configurados no YAML e aplicados via `RateLimiter` e `ThrottleManager`.
-- Logs passam por sanitização (`sanitize_log_data`), evitando registro de dados sensíveis (cookies, tokens, credenciais).
-- Coleta apenas dos campos essenciais, conforme LGPD/GDPR.
+SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
+SCRAPER_PRICE_TOLERANCE=0.0
 
-## Extensibilidade e Exemplos Práticos
-Para adicionar novas etapas ou domínios:
-1. Implemente a classe derivando de `PipelineStep` ou reutilize parsers existentes.
-2. Garanta que a docstring da etapa descreva entradas, saídas e chaves do `shared_context` utilizadas.
-3. Registre no `domain_policy.yaml` em `pipeline_steps`
-4. Defina a ordem e contexto em `pipeline_policies` e selecione o modo em `pipeline_execution`
-5. Atualize testes unitários/integrados que validam a montagem do pipeline e as rotas que dependem do contexto.
-6. Monitore métricas após deploy para ajustes finos.
-
-### Como adicionar um novo parser puro
-1. Crie um módulo em `market_scraper/parsers` seguindo a interface padrão (`html`, `url` -> `dict`).
-2. Documente o comportamento com docstrings e exemplos em português.
-3. Adicione testes unitários dedicados em `market_scraper/tests/unit/services`.
-4. Integre o parser a uma etapa do pipeline atualizando o YAML quando necessário.
-
-Exemplo de rollout:
-```yaml
-feature_flags:
-  synergic_pipeline:
-    mercadolivre.com.br:
-      default:
-        enabled: true
-        rollout_percentage: 40
-      competitor:
-        enabled: false
-```
-Permite ativar o pipeline para 40% das requisições, com rollback imediato via YAML.
-
-## Métricas e Monitoramento
-Principais métricas Prometheus:
-| Métrica | Descrição |
-| ------- | --------- |
-| `SCRAPER_STRATEGY_TOTAL` | Contador por etapa e status |
-| `SCRAPER_FALLBACK_TOTAL` | Fallbacks acionados |
-| `SCRAPING_LATENCY_SECONDS` | Latência por etapa |
-| `SCRAPER_FEATURE_FLAG_TOTAL` | Decisões de rollout |
-| `SCRAPER_HTTP_BLOCKED_TOTAL` | Bloqueios por rate limit ou robots.txt |
-| `SCRAPER_URL_STATUS_TOTAL` | Status por domínio |
-
-Dashboards Grafana e alertas Prometheus/Loki acompanham rollout, latência, taxa de sucesso e compliance.
-
-## Resultado Esperado
-Para cada URL, o serviço retorna um dicionário com `name` e `current_price`. Se o conteúdo não mudou, responde **304 Not Modified**. Bloqueios sucessivos podem suspender temporariamente o scraping.
-
-## Checklist de Extensão e Compliance
-- [x] Configuração centralizada no YAML
-- [x] Código modular e extensível
-- [x] Documentação e exemplos completos
-- [x] Testes aprovados e cobertura validada
-- [x] Observabilidade e compliance garantidos
-
-## Referências Rápidas
-- `AGENTS.md`: guia operacional para agentes e automações
-- `market_scraper/services/domain_policy.yaml`: configuração centralizada
-- `shared/metrics/metrics_scraper.py`: métricas e observabilidade
-- `tests/unit/services/test_domain_policy.py`: exemplos de testes de seleção/contexto
-
-### Configuração centralizada (`domain_policy.yaml`)
-O arquivo ``services/domain_policy.yaml`` centraliza todas as decisões de orquestração do scraper;
-Ele define:
-- **`pipeline_steps`** - cataloga as etapas do ``SynergicPipeline`` capazes de compartilhar contexto.
-- **`pipeline_policies`** - descreve, por domínio e contexto, a ordem das etapas executadas pelo pipeline.
-- **`pipeline_steps_options`** - permite ajustar parâmetros de cada etapa (como timeouts) por domínio/contexto.
-- **`pipeline_execution`** - especifica o modo de execução (`sequential`, `parallel`, `conditional`).
-- **`rate_limits`** - define limites de requisições por domínio.
-- **`feature_flags`** - controla o rollout de funcionalidades sensíveis.
-
-```yaml
-#Trechos ilustrativos do arquivo domain_policy.yaml
-pipeline_steps:
-  extruct: ExtructExtractionStep
-  parsel: ParselExtractionStep
-  requestshtml: RequestsHTMLRenderStep
-  selectorlib: SelectorLibExtractionStep
-
-pipeline_step_options:
-  default:
-    default:
-      requestshtml:
-        timeout: 8
-
-pipeline_policies:
-  mercadolivre.com.br:
-    default:
-      - extruct
-      - parsel
-      - requestshtml
-      - selectorlib
-    competitor:
-      - requestshtml
-      - selectorlib
-      - parsel
-
-pipeline_execution:
-  default:
-    default: sequential
-    competitor: sequential
-  mercadolivre.com.br:
-    default: conditional
-    competitor: conditional
 ```
 
-Cada contexto representa um cenário configurável (por exemplo, `product_type=competitor`).
-Caso um contexto não seja encontrado para o domínio, o bloco `default` é utilizado automaticamente.
-Isso permite priorizar etapas mais leves para páginas monitoradas e reservar opções mais robustas apenas quando o usuário solicita comparações de concorrentes.
+### Identidade HTTP centralizada
+- `market_scraper/utils/user_agents.py` fornece as funções `get_user_agent` e `compose_headers`, reutilizadas pelo pipeline. O comportamento é controlado pelas variáveis `SCRAPER_USER_AGENT_POOL`, `SCRAPER_DEFAULT_USER_AGENT` e `SCRAPER_HEADERS_*`.
 
-> Variáveis de ambiente permitem customizar a configuração sem alterar o código
-> - ``DOMAIN_POLICY_FILE`` aponta para outro arquivo YAML.
-> - ``DOMAIN_POLICY_HOT_RELOAD=1`` ativa recarga automática quando o arquivo é alterado
+### Política de fallback do robots.txt
+- Comportamento padrão: fallback permissivo (`allow`) quando `robots.txt` não pode ser obtido ou interpretado. Métrica `SCRAPER_ROBOTS_CHECK_TOTAL` registra o label `error` nesses casos.
+- Justificativa: evita quedas em massa do pipeline quando sites retornam erros intermitentes ou bloqueiam a leitura do arquivo.
+- Runbook para política conservadora (`block`):
+  1. Ajustar `market_scraper/utils/robots.py` para retornar `False` nos blocos de fallback, conforme comentários do arquivo.
+  2. Executar `pytest market_scraper/tests/unit/utils/test_robots.py` para validar as métricas e o novo comportamento.
+  3. Gerar imagem/container atualizado, aplicar rollout gradual e monitorar `SCRAPER_ROBOTS_CHECK_TOTAL` (labels `disallowed` e `error`) por domínio.
+  4. Se houver regressões relevantes, reverter o commit ou reinstaurar o fallback permissivo seguindo o mesmo fluxo.
 
-#### Fluxo operacional e fallback do pipeline
-O ``SynergicPipeline`` garante que as etapas sigam uma ordem previsível, reutilizando intermediários e registrando métricas de latência e fallback.
+## Métricas expostas
+As métricas estão em `shared/metrics/metrics_scraper.py`. Destaques:
 
-```mermaid
-flowchart LR
-    A[Requisição /scrape/parse] ---> B{Cache válido?}
-    B -- Sim --> C[Retorno imediato (304 ou cache hit)]
-    B -- Não --> D[Carregar domain_policy.yaml]
-    D --> E[Selecionar etapas por domínio/contexto]
-    E --> F[Executar SynergicPipeline]
-    F --> G{Etapa bem-sucedida?}
-    G -- Sim --> H[Validação e DataQuality]
-    H --> I[Armazenar no IntelligentCacheManager]
-    I --> J[Responder API]
-    G -- Não --> K[Incrementar métricas de fallback]
-    K --> F
+- `SCRAPER_STEP_SUCCESS_TOTAL`, `SCRAPER_STEP_FALLBACK_TOTAL` e `SCRAPER_STEP_INVALID_TOTAL` – contadores por etapa/resultado.
+- `SCRAPER_STEP_LATENCY_SECONDS` – histograma de latência das etapas do pipeline.
+- `SCRAPER_NO_RESULT_TOTAL` – contagem de execuções que terminaram sem payload válido.
+- `SCRAPING_LATENCY_SECONDS` – histograma de latência agregado por fonte.
+- `SCRAPER_ROBOTS_CHECK_TOTAL` – contagem de checagens de robots (`allowed`, `disallowed`, `error`).
+- `SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_HTTP_RETRY_BACKOFF_SECONDS` – acompanham novas tentativas de download e tempo de espera aplicado.
+- `SCRAPER_DNS_RESOLVE_DURATION_SECONDS`, `SCRAPER_DNS_BLOCKED_TOTAL` – observabilidade da camada DNS segura.
+- `SCRAPER_SINGLEFLIGHT_CALLS_TOTAL`, `SCRAPER_SINGLEFLIGHT_WAIT_SECONDS` – acompanham coalescing de downloads e tempo de espera.
+- `SCRAPER_PRICE_PARSER_USAGE_TOTAL` – monitora o uso do `price-parser` e cenários de fallback.
+- Métricas de cache listadas acima (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`, `SCRAPER_CACHE_SIZE`).
+
+Para visualizar, acesse `GET /metrics` ou configure o Prometheus via `docker-compose`.
+
+## Execução local
+```bash
+uvicorn market_scraper.main:app --port 8010 --reload
 ```
 
-Durante a execução:
+Opcionalmente, utilize Docker (`docker compose up market_scraper`). Garanta que `.env.common` e `market_scraper/.env.market_scraper` estejam configurados antes de iniciar.
 
-1. O cache inteligente é consultado antes de iniciar etapas custosas.
-2. A ordem de fallback é definida no ``domain_policy.yaml`` e percorre as alternativas até encontrar um resultado válido.
-3. Cada etapa registra métricas estruturadas (tempo, status e fallback) para análise posterior no Prometheus.
-4. O processamento pode ser **sequencial**, **paralelo** ou **condicional**, conforme o parâmetro ``execution_mode`` do ``SynergicPipeline``.
+## Testes
+Execute os testes dedicados ao scraper:
 
-#### Contexto compartilhado, cache e métricas
-As etapas compartilham informações pelo ``shared_context``. Isso reduz requisições redundantes (por exemplo, reaproveitando HTML pré-processado) e facilita instrumentação.
-
-```mermaid
-flowchart TD
-    subgraph Pipeline
-        S1[Etapa 1] -->|shared_context| S2[Etapa 2]
-        S2 -->|shared_context| S3[Etapa 3]
-    end 
-    S1 -.->|Resultados intermediários| Cache[IntelligentCacheManager]
-    Cache -->|TTL, ETag, Sig| S3
-    Pipeline --> Metrics[[Prometheus / Logs estruturados]]
-    Metrics --> Observabilidade[(Grafana / Alertmanager / Loki)]
+```bash
+pytest market_scraper -q
 ```
 
-- **Cache inteligente**: ``IntelligentCacheManager`` usa TTL, ETag e assinatura de conteúdo para evitar coletas redundantes.
-- **Contexto compartilhado**: etapas podem inserir dados em ``shared_context`` (cookies, HTML bruto, headers) para as próximas etapas.
-- **Métricas**: o módulo ``shared.metrics`` expõe contadores e histogramas específicos do pipeline.
+O pacote inclui fixtures para simular respostas HTTP e HTML de marketplaces.
 
-| Métrica Prometheus | Descrição |
-| ------------------ | --------- |
-| ``SCRAPER_STRATEGY_TOTAL`` | Contador por etapa (classe) e status: ``success``, ``NOT_MODIFIED`` ou falha. |
-| ``SCRAPER_FALLBACK_TOTAL`` | Contabiliza quantas vezes um fallback foi acionado entre etapas configuradas. |
-| ``SCRAPING_LATENCY_SECONDS`` | Histograma de latência individual por etapa. |
+## Recursos arquivados
+- `market_scraper/archive/domain_policy.py` e `market_scraper/archive/domain_policy.yaml` preservam a versão antiga baseada em políticas declarativas. Para reativá-la, mova os arquivos para `market_scraper/services/`, atualize os imports e reintroduza o carregamento dinâmico antes de registrar as etapas no pipeline.
+- Outros componentes legados removidos do fluxo mínimo devem permanecer arquivados até que haja um requisito explícito para retomá-los.
 
-Essas métricas complementam as métricas HTTP padrão e devem ser acompanhadas com alertas (ex.: aumento de ``fallback_total``) para reagir a bloqueios ou mudanças nos marketplaces.
-
-#### Como adicionar novas etapas
-1. **Criar a classe** em ``market_scraper/services/pipeline_steps.py`` herdando de `PipelineStep` e garantindo validação com `DataQualityValidator`.
-2. **Registrar a classe** no `domain_policy.yaml` em `pipeline_steps`.
-3. **Definir a ordem** em `pipeline_policies` para domínio e contexto desejado (e.: `default`, `competitor`, `logged_user`).
-4. **Ajustar o bloco `pipeline_execution`** para indicar como cada contexto será executado (`sequential`, `parallel` ou `conditional`).
-5. **Adicionar Testes** cobrindo seleção e execução (``tests/unit/services/test_domain_policy.py`` contém exemplos atualizados).
-6. **Monitorar métricas** após o deploy para ajustar TTL de cache, paralelismo ou limites.
-
-#### Exemplo prático de extensão com nova biblioteca
-Suponha que seja necessário utilizar uma etapa ``PlaywrightRenderStep`` apenas para páginas de concorrentes de um novo marketplace:
-
-1. **Instale a dependência** e crie ``market_scraper/services/pipeline_steps.py`` implementando `PlawrightRenderStep` com validação e uso de `shared_context`.
-2. **Registre a classe** em `domain_policy.yaml` dentro de ``pipeline_steps`` (ex.: `playwright_render: PlaywrightRenderStep`).
-3. **Atualize `pipeline_policies`** para o domínio desejado definindo o contexto `competitor` com a nova etapa como último fallback. O contexto `default` pode continuar priorizando etapas leves.
-4. **Ajuste `pipeline_execution`** para executar o contexto ``competitor`` em modo ``conditional`` (evitando que a etapa pesada rode quando o HTML já está disponível).
-5. **Adicione testes** unitários/integrados garantindo que o contexto ``competitor`` seleciona a nova etapa e que o comportamento antigo permanece intacto para o contexto ``default``.
-
-Esse fluxo garante que novas bibliotecas possam ser adicionadas de forma modular, habilitadas apenas quando configuradas via YAML e acompanhadas por métricas específicas.
-
-#### Feature flags e rollout controlado
-O arquivo ``domain_policy.yaml`` possui a seção ``feature_flags`` que controla funcionalidades sensíveis. Cada feature pode possuir valores por domínio e contexto, aceitando ``enabled`` (``true``/``false``) e ``rollout_percentage`` (0-100).
-O valor final é determinado de forma determinística utilizando ``user_id`` e URL, permitindo liberar funcionalidades gradualmente sem inconsistências entre chamadas do mesmo usuário.
-
-```yaml
-feature_flags:
-  synergic_pipeline:
-    mercadolivre.com.br:
-      default:
-        enabled: true
-        rollout_percentage: 40 #Ativa o pipeline para 40% das requisições
-      competitor:
-        enabled: false #mantém o comportamento anterior
-```
-* Valores ausentes herdam do bloco ``default``.
-* ``rollout_percentage`` controla o canário: ``10`` significa que apenas 10% das requisições utilizarão a funcionalidade.
-* Defina ``enabled: false`` (ou ``rollou_percentage: 0``) para realizar rollback imediato sem necessidade de deploy.
-
-Ative ``DOMAIN_POLICY_HOT_RELOAD=1`` em desenvolvimento para testar novos percentuais sem reiniciar o serviço
-
-#### Observabilidade do rollout
-Três sinais principais acompanham a saúde do rollout:
-
-1. **Métrica Prometheus ``scraper_feature_flag_total``**
-  - Labels ``feature`` e ``state`` (`enabled`, `disabled`, `no_steps`).
-  - Permite criar alertas (ex.: queda brusca na razão `enabled`/`disabled`).
-2. **Logs estruturados**
-  - `running_pipeline` inclui ``rollout`` e ``bucket_value`` indicando o percentual configurado e o valor sorteado para a requisição.
-  - `pipeline_feature_disabled` e ``pipeline_skipped_no_steps`` sinalizam quando o pipeline não é executado por configuração.
-3. **Métricas de latência e fallback**
-  - ``SCRAPING_LATENCY_SECONDS`` e ``SCRAPER_FALLBACK_TOTAL`` ajudam a comparar o comportamento antes/depois do rollout.
-
-Após alterações em ``feature_flags`` monitore:
-- Grafana: dashboard do scraper (latência, taxa de sucesso, contadores ``scraper_feature_flag_total``).
-- Loki: buscar eventos `pipeline_feature_disabled` para confirmar se o rollback foi aplicado.
-
-#### Plano de rollout e rollback
-1. **Preparação**
-  - Ajuste o percentual inicial (ex.: 10%) no YAML e habilite hot reload em ambientes de teste.
-  - Valide com testes automatizados (`pytest`) e smoke tests manuais.
-2. **Rollout canário**
-  - Publicar o YAML atualizado via pipeline de configuração.
-  - Acompanhar ``scraper_feature_flag_total{state="enabled"}`` vs ``scraper_feature_flag_total{state="disabled"}``.
-  - Observar histogramas de latência e logs de erro nos primeiros minutos.
-3. **Escalonamento**
-  - Se não houver regressões, aumentar gradualmente o ``rollout_parcentage`` (40% -> 70% -> 100%).
-  - Documentar cada incremento no changelog interno.
-4. **Rollback**
-  - Em caso de falha, ajustar ``enabled: false`` ou ``rollout_percentage: 0`` e forçar recarga do YAML (hot reload ou restart leve).
-  - Confirmar no Grafana que o contador `state="disabled"` voltou a subir e que não há novas execuções da feature.
-
-Esses passos mantêm o serviço aderente às boas práticas de segurança (LGPD/GDPR), possibilitam auditoria das decisões e evitam instabilidade em produção.
-
-#### Segurança, compliance e limites de scraping
-- Respeitar ``robots.txt`` consultando ``utils/robots.txt`` antes de liberar novas rotas e durante tentativas de recuperação (`BlockRecoverymanager`, aborta quano o domínio proíbe o caminho).
-- Utilizar ``ThrottleManager`` e ``RateLimiter`` para manter intervalos e janelas alinhados com os termos de uso; o contador `SCRAPER_HTTP_BLOCKED_TOTAL` é incrementado automaticamente quando o rate limit é atingido.
-- Sanitizar logs com os utilitários de mascaramento de dados do diretório ``shared``; o serviço aplica `sanitize_log_data` para remover tokens, cookies e parâmetros sensíveis de URLs antes de registrar eventos.
-- Configurar limites e comportamentos específicos por domínio no YAML, evitando que etapas pesadas sejam aplicadas indiscriminadamente. O bloco ``rate_limits`` define ``max_requests`` e ``window`` por host, refletidos em métricas no ``SCRAPER_URL_STATUS_TOTAL``.
-- Seguir o princípio de minimização de dados (LGPD/GDPR), coletando apenas os campos essenciais (nome, preço, etc...).
-- Documentar e revisar periodicamente exceções de compliance em conjunto com a equipe jurídica antes de ativar novas etapas.
-
-
-## Serviços Utilitários
-- **IntelligentCacheManager** - armazena resultados de produtos por domínio e URL para reduzir requisições repetidas.
-- **DataQualityValidator** - garante que `name` e `current_price` estejam presentes e que o preço seja válido.
-- **IntelligentUserAgentManager** - rotaciona `User-Agent` para cada requisição, evitando bloqueios.
-- **BlockRecoveryManager** e **HumanizedDelayManager** - auxiliam na recuperação de bloqueios, rotacionam recursos e, após uma suspensão temporária, tentam nova requisição ou consultam o cache para obter o HTML, registrando o resultado em log.
-
-## Resultado Esperado
-Para cada URL o serviço retorna um dicionário com `name` e `current_price`. Se o conteúdo não mudou desde a última coleta o endpoint responde **304 Not Modified**.
-Bloqueios sucessivos podem resultar em suspensão temporária do scraping.
-
-## Decisões de Arquitetura e Migração
-- **Descontinuação de estratégias isoladas**: versões anteriores executavam estratégias diretas (`structured_data_strategy`, `html_static_strategy`) sem o pipeline. Essas abrodagens foram removidas para reduzir divergência de comportamento entre domínios.
-- **Fonte única de configuração**: o `domain_policy.yaml` é agora a única referência para ativar etapas, modos de execução e limites. Commits futuros que criem novas etapas devem incluir ajustes nesse arquivo.
-- **Critérios para descartar etapas**: etapas que não atualizam o `shared_context`, não registram métricas ou divergem do contrato `PipelineStep` devem ser migradas ou removidas. As remoções precisam ser documentadas no YAML e acompanhadas por limpeza de métricas deprecatadas.
-- **Boas práticas de migração**: antes de eliminar uma etapa antiga, mova seu comportamento para uma classe de pipeline compátivel, atualize a política correspondente e valide em ambiente de teste utilizando `DOMAIN_POLICY_HOT_RELOAD=1` para observar métricas em tempo real.
-
-Essas decisões consolidam o `SynergicPipeline` como ponto central de evolução do serviço, mantendo observabilidade e compliance alinhadas às políticas de domínio.
+## Próximos passos
+- Monitorar o comportamento do cache em memória e avaliar se um backend compartilhado será necessário futuramente.
+- Expandir a lista de marketplaces suportados conforme novas regras forem consolidadas.
