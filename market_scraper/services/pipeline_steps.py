@@ -103,7 +103,7 @@ def _run_parser_with_validation(
     return True, payload
 
 async def download_html(url: str, *, timeout: float) -> str:
-    """ Baixa o HTML usando ``httpx`` com limites rígidos de segurança """
+    """Baixa o HTML usando ``httpx`` com limites rígidos de segurança."""
     user_agent = user_agents.get_user_agent(url)
     domain = _extract_domain(url)
     SCRAPER_UA_ROTATION_TOTAL.labels(
@@ -113,12 +113,16 @@ async def download_html(url: str, *, timeout: float) -> str:
 
     referer = _build_referer(url)
     headers = user_agents.compose_headers(user_agent, referer=referer)
-    
+    cookies = settings.get_default_cookies()
+
+    # Ajustamos timeout global considerando possíveis overrides por domínio.
+    total_timeout = settings.resolve_domain_timeout(domain, timeout)
+
     client_timeout = httpx.Timeout(
-        timeout,
-        connect=min(timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
-        read=min(timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
-        write=min(timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
+        total_timeout,
+        connect=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
+        read=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
+        write=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
         pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
     )
     limits = httpx.Limits(
@@ -129,11 +133,15 @@ async def download_html(url: str, *, timeout: float) -> str:
     async def _execute_request() -> httpx.Response:
         async with httpx.AsyncClient(
             timeout=client_timeout,
-            follow_redirects=True,
+            follow_redirects=settings.SCRAPER_HTTP_FOLLOW_REDIRECTS,
             limits=limits,
             max_redirects=settings.SCRAPER_HTTP_MAX_REDIRECTS,
         ) as client:
-            return await client.get(url, headers=headers)
+            return await client.get(
+                url,
+                headers=headers,
+                cookies=cookies or None,
+            )
         
     wrapped_operation = build_retrying_operation(target="html", operation=_execute_request)
 

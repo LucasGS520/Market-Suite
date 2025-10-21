@@ -377,11 +377,10 @@ def _parse_args() -> argparse.Namespace:
 def _build_client() -> httpx.AsyncClient:
     """Cria cliente HTTPx configurado com limites e timeouts oficiais."""
 
-    #Ativamos follow_redirects para reproduzir o comportamento do pipeline de produção
     return httpx.AsyncClient(
         timeout=_build_timeout(),
         limits=_build_limits(),
-        follow_redirects=True,
+        follow_redirects=settings.SCRAPER_HTTP_FOLLOW_REDIRECTS,
         max_redirects=settings.SCRAPER_HTTP_MAX_REDIRECTS,
     )
 
@@ -405,8 +404,26 @@ async def diagnose_url(
     """Executa diagnóstico completo para uma URL e retorna o relatório."""
 
     headers = _compose_headers(url)
+    cookies = settings.get_default_cookies()
+    domain = urlparse(url).hostname
+    total_timeout = settings.resolve_domain_timeout(
+        domain,
+        settings.SCRAPER_STEP_TIMEOUT_SECONDS,
+    )
+    request_timeout = httpx.Timeout(
+        total_timeout,
+        connect=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
+        read=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
+        write=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
+        pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
+    )
     try:
-        response = await client.get(url, headers=headers)
+        response = await client.get(
+            url,
+            headers=headers,
+            cookies=cookies or None,
+            timeout=request_timeout,
+        )
     except httpx.HTTPError as exc:  # pragma: no cover - guardamos contexto para análise manual
         #Quando falha o download, devolvemos erro explícito para guiar ajustes de rede
         return _response_error_summary(url, exc)

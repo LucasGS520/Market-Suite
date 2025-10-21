@@ -92,14 +92,15 @@ def get_user_agent(
                 return cached
             
             agent = _next_user_agent_unlocked()
-            #Mantemos o vínculo por domínio para reaproveitar o mesmo agente em chamadas subsequentes
+            # Mantemos o vínculo por domínio para reaproveitar o mesmo agente em chamadas subsequentes
             _DOMAIN_AFFINITY[normalized_domain] = agent
             return agent
         
         return _next_user_agent_unlocked()
     
 def compose_headers(user_agent: str, *, referer: str | None = None) -> Dict[str, str]:
-    """ Produz o conjunto mínimo de headers coerentes com o User-Agent """
+    """Produz o conjunto mínimo de headers coerentes com o User-Agent."""
+
     headers = {
         "User-Agent": user_agent,
         "Accept": settings.SCRAPER_HEADERS_ACCEPT,
@@ -114,6 +115,10 @@ def compose_headers(user_agent: str, *, referer: str | None = None) -> Dict[str,
 
     if referer:
         headers["Referer"] = referer
+
+    # Acrescentamos headers opcionais configurados para domínios específicos.
+    for key, value in settings.get_additional_headers().items():
+        headers[key] = value
 
     return headers
 

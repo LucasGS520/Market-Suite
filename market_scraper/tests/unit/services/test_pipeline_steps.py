@@ -72,17 +72,23 @@ def _metric_value(metric: Any, sample_name: str, labels: dict[str, str]) -> floa
     return 0.0
 
 class DummyAsyncClient:
-    """ Cliente HTTP simplificado para controlar respostas nos testes """
-    def __init__(self, responses: Iterator[httpx.Response]) -> None:
+    """Cliente HTTP simplificado para controlar respostas nos testes."""
+
+    def __init__(self, responses: Iterator[httpx.Response], **_: object) -> None:
         self._responses = responses
 
     async def __aenter__(self) -> "DummyAsyncClient":
         return self
-    
+
     async def __aexit__(self, exc_type, exc, tb) -> None:
         return None
-    
-    async def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+
+    async def get(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+        **_: object,
+    ) -> httpx.Response:
         try:
             return next(self._responses)
         except StopIteration as exc:
@@ -90,13 +96,15 @@ class DummyAsyncClient:
 
 @pytest.mark.asyncio
 async def test_download_html_utiliza_headers_compostos(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Garante que headers básicos e Referer sejam construídos dinamicamente """
+    """Garante que headers, cookies e referer sejam construídos dinamicamente."""
 
     url = "https://exemplo.com.br/produto"
     captured_headers: dict[str, str] = {}
+    captured_cookies: dict[str, str] | None = None
+    client_kwargs: dict[str, object] = {}
 
     class CaptureClient:
-        """ Cliente fake que captura headers enviados pelo FetchHTMLStep """
+        """Cliente fake que captura dados enviados pelo FetchHTMLStep."""
 
         async def __aenter__(self) -> "CaptureClient":
             return self
@@ -104,16 +112,27 @@ async def test_download_html_utiliza_headers_compostos(monkeypatch: pytest.Monke
         async def __aexit__(self, exc_type, exc, tb) -> None:
             return None
 
-        async def get(self, request_url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+        async def get(
+            self,
+            request_url: str,
+            headers: dict[str, str] | None = None,
+            cookies: dict[str, str] | None = None,
+        ) -> httpx.Response:
             assert request_url == url
             captured_headers.clear()
             if headers:
                 captured_headers.update(headers)
+            nonlocal captured_cookies
+            captured_cookies = cookies
             return httpx.Response(200, text="<html>ok</html>", request=httpx.Request("GET", url))
+
+    def fake_async_client(**kwargs: object) -> CaptureClient:
+        client_kwargs["last"] = kwargs
+        return CaptureClient()
 
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.httpx.AsyncClient",
-        lambda **__: CaptureClient(),
+        fake_async_client,
     )
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.user_agents.get_user_agent",
@@ -129,17 +148,79 @@ async def test_download_html_utiliza_headers_compostos(monkeypatch: pytest.Monke
         "SCRAPER_HEADERS_REFERER_TEMPLATE",
         "https://{domain}/origem",
     )
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_ADDITIONAL", "Accept=custom/html||X-Test=valor")
+    monkeypatch.setattr(settings, "SCRAPER_HEADERS_DEFAULT_COOKIES", "csrftoken=abc123")
+    monkeypatch.setattr(settings, "SCRAPER_HTTP_FOLLOW_REDIRECTS", False)
 
     html = await download_html(url, timeout=1.0)
 
     assert html == "<html>ok</html>"
     assert captured_headers["User-Agent"] == "UA-DE-TEXTO"
-    assert captured_headers["Accept"] == settings.SCRAPER_HEADERS_ACCEPT
+    assert captured_headers["Accept"] == "custom/html"
     assert captured_headers["Accept-Language"] == settings.SCRAPER_HEADERS_ACCEPT_LANGUAGE
     assert captured_headers["Connection"] == settings.SCRAPER_HEADERS_CONNECTION
     assert captured_headers["Cache-Control"] == settings.SCRAPER_HEADERS_CACHE_CONTROL
     assert captured_headers["Accept-Encoding"] == settings.SCRAPER_HEADERS_ACCEPT_ENCODING
     assert captured_headers["Referer"] == "https://exemplo.com.br/origem"
+    assert captured_headers["X-Test"] == "valor"
+    assert captured_cookies == {"csrftoken": "abc123"}
+    assert client_kwargs["last"]["follow_redirects"] is False
+
+
+@pytest.mark.asyncio
+async def test_download_html_respeita_timeout_por_dominio(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Garante que timeouts específicos de domínio sejam considerados."""
+
+    url = "https://exemplo.com.br/pagina"
+    timeout_args: dict[str, float] = {}
+
+    class DummyTimeout:
+        """Captura parâmetros usados na criação do timeout personalizado."""
+
+        def __init__(
+            self,
+            total: float,
+            *,
+            connect: float,
+            read: float,
+            write: float,
+            pool: float,
+        ) -> None:
+            timeout_args.update(
+                {
+                    "total": total,
+                    "connect": connect,
+                    "read": read,
+                    "write": write,
+                    "pool": pool,
+                }
+            )
+
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.Timeout",
+        DummyTimeout,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        lambda **kwargs: DummyAsyncClient(
+            iter([httpx.Response(200, text="<html>ok</html>", request=httpx.Request("GET", url))]),
+            **kwargs,
+        ),
+    )
+    monkeypatch.setattr(settings, "SCRAPER_HTTP_TIMEOUT_CONNECT", 3.0)
+    monkeypatch.setattr(settings, "SCRAPER_HTTP_TIMEOUT_READ", 3.0)
+    monkeypatch.setattr(settings, "SCRAPER_HTTP_TIMEOUT_WRITE", 3.0)
+    monkeypatch.setattr(settings, "SCRAPER_HTTP_TIMEOUT_POOL", 2.5)
+    monkeypatch.setattr(settings, "SCRAPER_HTTP_DOMAIN_TIMEOUTS", "exemplo.com.br=5.5")
+
+    html = await download_html(url, timeout=1.0)
+
+    assert html == "<html>ok</html>"
+    assert timeout_args["total"] == 5.5
+    assert timeout_args["connect"] == min(5.5, settings.SCRAPER_HTTP_TIMEOUT_CONNECT)
+    assert timeout_args["read"] == min(5.5, settings.SCRAPER_HTTP_TIMEOUT_READ)
+    assert timeout_args["write"] == min(5.5, settings.SCRAPER_HTTP_TIMEOUT_WRITE)
+    assert timeout_args["pool"] == settings.SCRAPER_HTTP_TIMEOUT_POOL
 
 @pytest.mark.asyncio
 async def test_download_html_decodifica_brotli(monkeypatch: pytest.MonkeyPatch) -> None:
