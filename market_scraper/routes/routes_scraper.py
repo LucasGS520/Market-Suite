@@ -37,13 +37,13 @@ def _http_error(
 ) -> JSONResponse:
     """ Cria uma resposta JSON padronizada para os erros do endpoint
     
-    O helper adiciona ``trace_id`` ao payload e garante que os logs 
-    tenham contexto suficiente para rastrear falha
+    O helper adiciona ``trace_id`` ao payload, serializa ``error_code`` 
+    e garante que os logs tenham contexto suficiente para rastrear falha
     """
     log_payload = dict(log_extra or {})
     request_logger.warning(
         "parse_error",
-        code=issue.code,
+        error_code=issue.code,
         message=issue.message,
         **log_payload,
     )
@@ -51,8 +51,8 @@ def _http_error(
     return JSONResponse(
         status_code=status_code,
         content={
-            "message": issue.message, 
-            "code": issue.code,
+            "message": issue.message,
+            "error_code": issue.code,
             "trace_id": trace_id,
         }
     )
