@@ -6,16 +6,20 @@ pipeline sequencial de scraping.
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, status
-from fastapi.responses import JSONResponse
 import structlog
-from structlog.stdlib import BoundLogger
 
 from shared.utils.logging_utils import sanitize_log_data
 
+from market_scraper.routes.response_helpers import (
+    _http_error,
+    _map_http_download_issue,
+    _sanitize_payload,
+    build_no_result_response,
+    build_success_response,
+)
 from market_scraper.schemas.parse import ErrorResponse, ParseRequest, ParserResponse
 from market_scraper.services.services_scraper_common import run_pipeline
 from market_scraper.services.synergic_pipeline import PipelineTimeoutError
@@ -26,36 +30,6 @@ from market_scraper.utils.url_validation import UrlIssue, check_url_compatibilit
 logger = structlog.get_logger("routes_scraper")
 
 router = APIRouter(tags=["scraper"])
-
-def _http_error(
-    issue: UrlIssue,
-    *,
-    status_code: int,
-    trace_id: str,
-    request_logger: BoundLogger,
-    log_extra: dict[str, Any] | None = None,
-) -> JSONResponse:
-    """ Cria uma resposta JSON padronizada para os erros do endpoint
-    
-    O helper adiciona ``trace_id`` ao payload, serializa ``error_code`` 
-    e garante que os logs tenham contexto suficiente para rastrear falha
-    """
-    log_payload = dict(log_extra or {})
-    request_logger.warning(
-        "parse_error",
-        error_code=issue.code,
-        message=issue.message,
-        **log_payload,
-    )
-
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "message": issue.message,
-            "error_code": issue.code,
-            "trace_id": trace_id,
-        }
-    )
 
 @router.post(
     "/parse",
@@ -70,7 +44,6 @@ def _http_error(
 async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
     """ Executa o pipeline sequencial e retorna payload padronizado """
     trace_id = str(uuid4())
-    #Ligamos o identificador para garantir correlação entre respostas e logs estruturados
     request_logger = logger.bind(trace_id=trace_id)
 
     try:
@@ -82,7 +55,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
             status_code=status.HTTP_400_BAD_REQUEST,
             trace_id=trace_id,
             request_logger=request_logger,
-            log_extra={"url": sanitize_log_data(payload.url)},
+            log_extra=_sanitize_payload(payload.url),
         )
     
     request_logger = request_logger.bind(url=sanitize_log_data(normalized_url))
@@ -97,7 +70,6 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
         )
     
     try:
-        #Mantemos a URL fornecida pelo usuário para garantir previsibilidade em cache e métricas
         outcome = await run_pipeline(normalized_url)
     except PipelineTimeoutError as exc:
         issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline execedido")
@@ -109,45 +81,27 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
             log_extra={"error": sanitize_log_data(str(exc))},
         )
     
-    #Identifica se alguma etapa encerrou por causa do robots.txt e devolve o código especializado
-    if any(step.message == "unsupported_by_robots" for step in outcome.steps):
-        issue = UrlIssue(
-            code="unsupported_by_robots",
-            message="O acesso à URL foi bloqueado pelas regras de robots.txt",
-        )
+    http_issue = _map_http_download_issue(outcome)
+    if http_issue:
+        issue, status_code = http_issue
         return _http_error(
             issue,
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status_code,
             trace_id=trace_id,
             request_logger=request_logger,
         )
 
     if outcome.status != "success" or not outcome.payload:
-        validation_failures = outcome.context.data.get("validation_failures", [])
-        last_failure = validation_failures[-1] if validation_failures else None
-        request_logger.warning(
-            "parse_no_result",
-            url=sanitize_log_data(normalized_url),
-            source=outcome.context.source,
-            error_code="no_result",
-            reason_code=last_failure.get("reason_code") if last_failure else None,
-            reason_message=last_failure.get("reason_message") if last_failure else None,
-            step=last_failure.get("step") if last_failure else None,
-            parser_name=last_failure.get("parser_name") if last_failure else None,
-            dump_path=last_failure.get("dump_path") if last_failure else None,
-        )
-        issue = UrlIssue(code="no_result", message="Não foi possível extrair dados do produto")
-        return _http_error(
-            issue,
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            trace_id=trace_id,
+        return build_no_result_response(
+            outcome=outcome,
             request_logger=request_logger,
+            trace_id=trace_id,
         )
     
-    payload = outcome.payload
+    payload_data = outcome.payload
 
     try:
-        price = parse_price_str(payload.get("current_price"), normalized_url)
+        price = parse_price_str(payload_data.get("current_price"), normalized_url)
     except ValueError as exc:
         issue = UrlIssue(code="invalid_price", message=str(exc))
         return _http_error(
@@ -157,17 +111,14 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
             request_logger=request_logger,
         )
     
-    response = ParserResponse(
-        name=payload.get("name", ""),
+    response = build_success_response(
+        payload_data,
+        normalized_url=normalized_url,
+        outcome=outcome,
+        request_logger=request_logger,
         current_price=price,
-        url=normalized_url,
-        source=payload.get("source", outcome.context.source),
-    )
-    request_logger.info(
-        "parse_success",
-        url=sanitize_log_data(response.url),
-        source=response.source,
     )
     return response
+
 
 __all__ = ["router"]
