@@ -25,7 +25,7 @@ from market_scraper.utils.http_retry import (
     RetryableHTTPError,
     build_retrying_operation,
 )
-from market_scraper.utils.http_utils import ContentDecodeError, decode_http_body
+from market_scraper.utils.http_utils import ContentDecodeError, build_timeout, decode_http_body
 from shared.metrics.metrics_scraper import (
     SCRAPER_HTTP_CLIENT_ERROR_TOTAL,
     SCRAPER_HTTP_DECODE_ERROR_TOTAL,
@@ -61,13 +61,8 @@ async def download_html(url: str, *, timeout: float) -> str:
     #Ajustamos timeout global considerando possíveis overrides por domínio
     total_timeout = settings.resolve_domain_timeout(domain, timeout)
 
-    client_timeout = httpx.Timeout(
-        total_timeout,
-        connect=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
-        read=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
-        write=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
-        pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
-    )
+    #Usamos o helper centralizado para manter consistência na configuração de timeouts
+    client_timeout = build_timeout(total_timeout)
     limits = httpx.Limits(
         max_connections=settings.SCRAPER_HTTP_MAX_CONNECTIONS,
         max_keepalive_connections=settings.SCRAPER_HTTP_MAX_KEEPALIVE,
