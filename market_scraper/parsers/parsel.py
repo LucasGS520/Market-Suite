@@ -91,7 +91,11 @@ def parse_with_parsel(html: str, url: str | None = None) -> dict[str, str] | Non
     if not name:
         name = _clean_text(selector.css("meta[name='twitter:title']::attr(content)").get(default=""))
     if not name:
-        name = _clean_text(selector.css("meta[name='twitter:title']::attr(content)").get(default=""))
+        name = _clean_text(selector.css("meta[property='og:title']::attr(content)").get(default=""))
+    if not name:
+        name = _clean_text(selector.css("meta[name='title']::attr(content)").get(default=""))
+    if not name:
+        name = _clean_text(selector.css("meta[property='twitter:title']::attr(content)").get(default=""))
     if not name:
         name = _clean_text(selector.css("span#productTitle::text").get(default=""))
     if not name:
@@ -118,13 +122,11 @@ def parse_with_parsel(html: str, url: str | None = None) -> dict[str, str] | Non
         )
         price = combined or price
     if not price:
-        combined = _combine_price_parts(
-            selector.css("span[data-testid='price-integer']::text").get(default=""),
-            selector.css("span[data-testid='price-decimal']::text").get(default=""),
-        )
-        price = combined or price
-    if not price:
         price = _sanitize_price(selector.css("span.price::text").get(default=""))
+
+    canonical_url = _clean_text(selector.css("link[rel='canonical']::attr(href)").get(default=""))
+    #Mantemos o canonical como referência sempre que disponível para preservar a origem real do produto
+    normalized_url = canonical_url or (url or "")
 
     name = _clean_text(name)
     price = _sanitize_price(price)
@@ -135,7 +137,7 @@ def parse_with_parsel(html: str, url: str | None = None) -> dict[str, str] | Non
     return {
         "name": name,
         "current_price": price,
-        "url": url or "",
+        "url": normalized_url,
         "source": PARSEL_SOURCE,
     }
 

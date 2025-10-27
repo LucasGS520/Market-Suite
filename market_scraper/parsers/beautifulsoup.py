@@ -141,10 +141,26 @@ def parse_with_beautifulsoup(html: str, url: str | None = None) -> dict[str, str
     if not name or not price:
         return None
 
+    canonical_url = ""
+    
+    def _is_canonical(value: str | list[str] | None) -> bool:
+        """ Avalia se o atributo ``rel`` referencia o link canônico """
+        if value is None:
+            return False
+        if isinstance(value, list):
+            return any(item.lower() == "canonical" for item in value if isinstance(item, str))
+        return value.lower() == "canonical"
+
+    canonical_tag = soup.find("link", rel=_is_canonical)
+    if canonical_tag:
+        href = canonical_tag.get("href")
+        if href:
+            canonical_url = href.strip() 
+
     return {
         "name": name,
         "current_price": price,
-        "url": url or "",
+        "url": canonical_url or (url or ""),
         "source": HTML_METADATA_SOURCE,
     }
 
