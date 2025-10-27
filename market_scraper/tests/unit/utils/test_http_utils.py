@@ -33,13 +33,17 @@ class DummyResponse:
         return self._content
 
 def test_parse_retry_after_seconds():
-    assert parse_retry_after("30") == 30
+    assert parse_retry_after("30") == pytest.approx(30.0)
+
+def test_parse_retry_after_fractional_seconds():
+    assert parse_retry_after("1.5") == pytest.approx(1.5)
 
 def test_parse_retry_after_http_date():
     future = datetime.now(timezone.utc) + timedelta(seconds=20)
     header = future.strftime("%a, %d %b %Y %H:%M:%S GMT")
     result = parse_retry_after(header)
-    assert 0 < result <= 20
+    assert result is not None
+    assert 0.0 <= result <= 20.0
 
 def test_resolve_public_address_blocks_private_ip(monkeypatch):
     _DNS_CACHE.clear()

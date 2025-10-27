@@ -64,23 +64,33 @@ def build_timeout(total_timeout: float) -> httpx.Timeout:
         pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
     )
 
-def parse_retry_after(value: str) -> Optional[int]:
-    """ Retorna o valor do cabeçalho ``Retry-After`` em segundos """
+def parse_retry_after(value: str | None) -> Optional[float]:
+    """ Interpreta ``Retry-After`` em segundos, aceitando fracionários ou HTTP-date """
     if not value:
         return None
 
-    value = value.strip()
-    if value.isdigit():
-        return int(value)
+    normalized = value.strip()
+    if not normalized:
+        return None
 
     try:
-        dt = parsedate_to_datetime(value)
+        #Permite segundos fracionários
+        seconds = float(normalized)
+    except ValueError:
+        try:
+            dt = parsedate_to_datetime(normalized)
+        except (TypeError, ValueError):
+            return None
+        
+        if dt is None:
+            return None
+
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        
         diff = (dt - datetime.now(timezone.utc)).total_seconds()
-        return max(0, int(diff))
-    except Exception:
-        return None
+        return max(0.0, diff)
+    return max(0.0, seconds)
 
 def extract_hostname(url: str) -> str:
     """ Retorna o nome do host de uma URL ou string vazia se inválida """

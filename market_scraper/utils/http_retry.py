@@ -8,8 +8,6 @@ consumidores atuais.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from typing import Awaitable, Callable, Optional
 
 import httpx
@@ -22,6 +20,7 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_HTTP_RETRIES_TOTAL,
     SCRAPER_HTTP_RETRY_BACKOFF_SECONDS,
 )
+from market_scraper.utils.http_utils import parse_retry_after
 
 
 logger = structlog.get_logger(__name__)
@@ -59,35 +58,6 @@ class _WaitRetryAfter(wait_base):
             retry_state=retry_state,
             multiplier=self._multiplier,
         )
-    
-def _parse_retry_after(header_value: Optional[str]) -> Optional[float]:
-    """ Traduz o cabeçalho ``Retry-After`` em segundos de espera quando válido """
-    if not header_value:
-        return None
-    
-    value = header_value.strip()
-    if not value:
-        return None
-    
-    try:
-        #Permite segundos fracionários além de valores inteiros
-        seconds = float(value)
-    except ValueError:
-        try:
-            parsed = parsedate_to_datetime(value)
-        except (TypeError, ValueError):
-            return None
-        
-        if parsed is None:
-            return None
-        
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-
-        delta = (parsed - datetime.now(timezone.utc)).total_seconds()
-        return max(0.0, delta)
-    else:
-        return max(0.0, seconds)
     
 def _categorize_reason(status_code: Optional[int]) -> str:
     """ Reduz cardinalidade descrevendo o motivo da nova tentativa """
@@ -154,7 +124,7 @@ def _raise_for_retryable_response(
     if response.status_code not in _RETRYABLE_STATUS:
         return
     
-    retry_after = _parse_retry_after(response.headers.get("Retry-After"))
+    retry_after = parse_retry_after(response.headers.get("Retry-After"))
     reason = _categorize_reason(response.status_code)
 
     message = "Download HTTP elegível para nova tentativa"
