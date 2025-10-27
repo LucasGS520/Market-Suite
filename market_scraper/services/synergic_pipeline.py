@@ -93,7 +93,12 @@ class StepExecution:
 
 @dataclass
 class PipelineOutcome:
-    """ Guarda o resumo da execução do pipeline """
+    """ Guarda o resumo da execução do pipeline 
+    
+    O atributo ``status`` reflete o rótulo final calculado a partir das
+    etapas, podendo assumir ``success``, ``no_result``, ``timeout`` ou
+    ``error`` conforme o desfecho consolidado.
+    """
     status: Literal["success", "no_result", "timeout", "error"]
     context: PipelineContext
     payload: dict[str, Any] | None = None
@@ -248,7 +253,9 @@ class SynergicPipeline:
             SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
             raise PipelineTimeoutError("Tempo limite do pipeline excedido") from exc
         
-        if status != "success":
+        if status == "success":
+            final_result_label = "success"
+        else:
             #Mapeia o último estado observado para um rótulo padronizado de resultado final
             if last_result_label in {"empty", "success", "no_result"}:
                 final_result_label = "no_result"
@@ -265,6 +272,8 @@ class SynergicPipeline:
                 )
             SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
             
+            status = final_result_label
+
         return PipelineOutcome(
             status=status,
             payload=payload,
