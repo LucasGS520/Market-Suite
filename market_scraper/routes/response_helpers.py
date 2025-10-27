@@ -8,6 +8,7 @@ orquestração do fluxo.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from fastapi import status
@@ -96,7 +97,7 @@ def build_success_response(
     normalized_url: str,
     outcome: PipelineOutcome,
     request_logger: BoundLogger,
-    current_price: float,
+    current_price: Decimal,
 ) -> ParserResponse:
     """ Cria ``ParserResponse`` garantindo consistência de logs """
     response = ParserResponse(

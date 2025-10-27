@@ -6,6 +6,7 @@ pipeline sequencial de scraping.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, status
@@ -101,7 +102,10 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
     payload_data = outcome.payload
 
     try:
-        price = parse_price_str(payload_data.get("current_price"), normalized_url)
+        price: Decimal = parse_price_str(
+            payload_data.get("current_price"),
+            normalized_url,
+        )
     except ValueError as exc:
         issue = UrlIssue(code="invalid_price", message=str(exc))
         return _http_error(
