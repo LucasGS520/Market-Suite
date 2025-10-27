@@ -25,6 +25,7 @@ from market_scraper.utils.http_retry import (
     RetryableHTTPError,
     build_retrying_operation,
 )
+from market_scraper.utils.http_utils import build_timeout
 from market_scraper.core.config_scraper import settings
 
 
@@ -67,19 +68,9 @@ def _prepare_urls(url: str) -> tuple[str, str, str]:
     host_key = parsed.netloc.lower()
     return normalized_url, robots_url, host_key
 
-def _build_timeout(total_timeout: float) -> httpx.Timeout:
-    """ Monta o objeto de timeout alinhado aos limites globais do serviço """
-    return httpx.Timeout(
-        total_timeout,
-        connect=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
-        read=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
-        write=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
-        pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
-    )
-
 async def _download_robots(robots_url: str, *, timeout: float) -> str | None:
     """ Baixa o conteúdo do robots.txt respeitando limites configurados """
-    client_timeout = _build_timeout(timeout)
+    client_timeout = build_timeout(timeout)
     limits = httpx.Limits(
         max_connections=settings.SCRAPER_HTTP_MAX_CONNECTIONS,
         max_keepalive_connections=settings.SCRAPER_HTTP_MAX_KEEPALIVE,

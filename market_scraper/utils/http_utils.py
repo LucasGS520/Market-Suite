@@ -1,8 +1,8 @@
-""" Funções auxiliares para lidar com cabeçalhos HTTP e validações de host
+""" Funções auxiliares para lidar com cabeçalhos HTTP, timeouts e validações de host
 
 Este módulo centraliza utilidades usadas por diferentes etapas do pipeline,
-com destaque para validação de cabeçalhos como ``Retry-After`` e resolução
-segura de hosts para prevenir SSRF.
+com destaque para validação de cabeçalhos como ``Retry-After``, configuração
+de timeouts aderentes às políticas globais e resolução segura de hosts para prevenir SSRF.
 """
 
 from __future__ import annotations
@@ -52,6 +52,17 @@ class ContentDecodeError(Exception):
         super().__init__(f"{reason} (encoding={encoding})")
         self.encoding = encoding
         self.reason = reason
+
+def build_timeout(total_timeout: float) -> httpx.Timeout:
+    """ Monta ``httpx.Timeout`` obedecendo limites específicos do scraper """
+    #Ajustamos cada fase individual para respeitar valores máximos globais, evitando que cada chamada configure tempos exagerados
+    return httpx.Timeout(
+        total_timeout,
+        connect=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
+        read=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
+        write=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
+        pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
+    )
 
 def parse_retry_after(value: str) -> Optional[int]:
     """ Retorna o valor do cabeçalho ``Retry-After`` em segundos """
