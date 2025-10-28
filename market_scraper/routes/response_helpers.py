@@ -17,7 +17,7 @@ from structlog.stdlib import BoundLogger
 
 from shared.utils.logging_utils import sanitize_log_data
 
-from market_scraper.schemas.parse import ParserResponse
+from market_scraper.schemas.schemas_parse import ParserResponse
 from market_scraper.services.synergic_pipeline import PipelineOutcome
 from market_scraper.utils.url_validation import UrlIssue
 

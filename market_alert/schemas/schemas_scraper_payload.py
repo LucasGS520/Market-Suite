@@ -4,27 +4,30 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import Field, HttpUrl, field_validator
+
+from shared.schemas.schemas_scraper import ParserResponse
 
 
-class ScraperPayload(BaseModel):
-    """ Representa payload mínimo aceito pelo ``market_scraper`` """
-    name: str = Field(..., description="Nome identificado do produto")
-    current_price: Decimal = Field(..., description="Preço atual normalizado")
+class ScraperPayload(ParserResponse):
+    """ Especializa o contrato compartilhado com campos usados internamente """
     url: HttpUrl = Field(..., description="URL processada pelo scraper")
-    source: str = Field(..., description="Origem atribuída pelo scraper")
-    currency: Optional[str] = Field(None, description="Código de moeda ISO-4217")
-    etag: Optional[str] = Field(None, description="ETag devolvido pelo scraper")
-    last_modified: Optional[datetime] = Field(None, description="Timestamp HTTP Last-Modified")
-    payload: Optional[dict[str, Any]] = Field(None, description="Payload bruto opcional")
-    timestamp: Optional[datetime] = Field(None, description="Momento de coleta no scraper")
+    current_price: Decimal | None = Field(None, description="Preço atual normalizado")
+    currency: str | None = Field(None, description="Código de moeda ISO-4217")
+    etag: str | None = Field(None, description="ETag devolvido pelo scraper")
+    last_modified: datetime | None = Field(None, description="Timestamp HTTP Last-Modified")
+    payload: dict[str, Any] | None = Field(None, description="Payload bruto opcional")
+    timestamp: datetime | None = Field(None, description="Momento de coleta no scraper")
 
     @field_validator("name")
     @classmethod
-    def _validate_name(cls, value: str) -> str:
+    def _validate_name(cls, value: str | None) -> str:
         """ Garante nome preenchido após remoção de espaços """
+        if value is None:
+            msg = "campo name ausente no payload do scraper"
+            raise ValueError(msg)
         if not value or not value.strip():
             raise ValueError("campo name vazio no payload do scraper")
         return value.strip()
@@ -44,7 +47,7 @@ class ScraperPayload(BaseModel):
     @field_validator("currency")
     @classmethod
     def _normalize_currency(cls, value: str | None) -> str | None:
-        """ Normaliza moeda para letras maiúsculas e max 8 caracteres """
+        """ Normaliza moeda para letras maiúsculas e até oito caracteres """
         if value is None:
             return None
         cleaned = value.strip().upper()

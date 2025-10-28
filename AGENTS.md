@@ -45,7 +45,7 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 
 ### API Principal — `market_alert`
 - Função: expõe endpoints REST (FastAPI) para cadastro/gestão de monitoramentos, dispara tarefas assíncronas (Celery) e integra com PostgreSQL/Redis/observabilidade.
-- Comunicação: recebe requisições de usuários; agenda tarefas no Celery (broker Redis); consulta o `market_scraper` via HTTP (`SCRAPER_SERVICE_URL`). Exposição de métricas quando aplicável (ex.: `/metrics`).
+- Comunicação: recebe requisições de usuários; agenda tarefas no Celery (broker Redis); consulta o `market_scraper` via HTTP. Exposição de métricas quando aplicável (ex.: `/metrics`).
 - Para agentes: prefira interagir via API para agendar coletas, rechecks e consultar status, evitando acoplamento direto ao worker.
 
 ### Worker Celery — `market_alert.core.celery_app`
