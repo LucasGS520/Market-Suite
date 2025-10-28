@@ -6,8 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from shared.exceptions import ScraperError
-from market_alert.scraper.scraper_tasks import collect_product_task, collect_competitor_task
 from market_alert.scraper.scraper_client import ScraperClientError
+from market_alert.scraper.types import ScrapeResult
+from market_alert.scraper.scraper_tasks import collect_competitor_task, collect_product_task
 
 
 class DummySession:
@@ -20,6 +21,15 @@ class DummySession:
 
     def close(self):
         pass
+
+    def add(self, *_args, **__kwargs):
+        return None
+    
+    def commit(self):
+        return None
+    
+    def refresh(self, *_args, **__kwargs):
+        return None
 
 #UUID válido fixo para testes
 VALID_UUID = "123e4567-e89b-12d3-a456-426655440000"
@@ -65,7 +75,7 @@ def test_collect_product_task_generic_exception_creates_error(monkeypatch):
     """ Falhas genéricas na persistência devem gerar registro de erro """
 
     def fake_service(*a, **k):
-        return Exception("boom")
+        raise Exception("boom")
 
     captured = {}
 
@@ -101,13 +111,106 @@ def test_collect_competitor_task_scraping_http_exception(monkeypatch):
 
     def fake_service(*a, **k):
         raise ScraperClientError("erro", status_code=500)
+    
+    def fake_retry(*_, **kwargs):
+        raise RuntimeError(f"retry:{kwargs.get('countdown')}")
 
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_competitor_product", fake_service)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
+    monkeypatch.setattr(collect_competitor_task, "retry", fake_retry)
 
-    with pytest.raises(ScraperError):
+    with pytest.raises(RuntimeError) as exc:
         collect_competitor_task.run(
             VALID_UUID,
             "https://mercadolivre.com.br/comp",
         )
+    assert "retry" in str(exc.value)
+
+def test_collect_competitor_task_http_5xx_retorna_retry(monkeypatch):
+    """Erro 5xx deve acionar retry progressivo."""
+
+    def fake_service(*a, **k):
+        raise ScraperClientError("erro", status_code=500)
+
+    def fake_retry(*_, **kwargs):
+        raise RuntimeError(f"retry:{kwargs.get('countdown')}")
+
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(collect_product_task, "retry", fake_retry)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.crud_errors.create_scraping_error", lambda *a, **k: None)
+
+    with pytest.raises(RuntimeError) as exc:
+        collect_product_task.run(
+            "https://mercadolivre.com.br/abc",
+            VALID_UUID,
+            "Produto",
+            10.0,
+        )
+
+    assert "retry" in str(exc.value)
+
+
+def test_collect_product_task_processa_sucesso(monkeypatch):
+    """Resultado de sucesso não deve acionar retries."""
+
+    def fake_service(*a, **k):
+        return ScrapeResult(status="success", product_id=VALID_UUID, price_changed=True)
+
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+
+    assert collect_product_task.run(
+        "https://mercadolivre.com.br/abc",
+        VALID_UUID,
+        "Produto",
+        10.0,
+        VALID_UUID,
+    ) is None
+
+
+def test_collect_product_task_no_result_dispara_retry(monkeypatch):
+    """Cenário ``no_result`` deve solicitar reexecução posterior."""
+
+    def fake_service(*a, **k):
+        return ScrapeResult(status="no_result", product_id=VALID_UUID)
+
+    captured = {}
+
+    def fake_retry(*_, **kwargs):  # pragma: no cover - função auxiliar
+        captured["countdown"] = kwargs.get("countdown")
+        raise collect_product_task.MaxRetriesExceededError()
+
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(collect_product_task, "retry", fake_retry)
+
+    collect_product_task.run(
+        "https://mercadolivre.com.br/abc",
+        VALID_UUID,
+        "Produto",
+        10.0,
+    )
+
+    assert captured["countdown"] is not None
+
+
+def test_collect_competitor_task_not_modified(monkeypatch):
+    """Resposta 304 deve evitar reprocessamento de comparação."""
+
+    captured = {}
+
+    def fake_service(*a, **k):
+        return ScrapeResult(status="not_modified", product_id=VALID_UUID, price_changed=False)
+
+    def fake_compare(arg):
+        captured["called"] = True
+
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_competitor_product", fake_service)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.compare_prices_task", SimpleNamespace(delay=fake_compare))
+
+    assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None
+    assert "called" not in captured

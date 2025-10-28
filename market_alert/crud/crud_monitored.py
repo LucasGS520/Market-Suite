@@ -15,34 +15,63 @@ from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_alerts import AlertType
 from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
 from market_alert.crud import crud_alert_rules
+from market_alert.crud import crud_price_history
 
 
-def create_or_update_monitored_product_scraped(db: Session, user_id: UUID, product_data: MonitoredProductCreateScraping, scraped_info: MonitoredScrapedInfo, last_checked: datetime) -> MonitoredProduct:
+def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_url: str) -> MonitoredProduct | None:
+    """ Busca produto específico combinando usuário e URL normalizada """
+
+    normalized_url = str(product_url).strip()
+    return (
+        db.query(MonitoredProduct)
+        .filter(
+            MonitoredProduct.user_id == user_id,
+            MonitoredProduct.product_url == normalized_url,
+        )
+        .first()
+    )
+
+def create_or_update_monitored_product_scraped(
+    db: Session,
+    user_id: UUID,
+    product_data: MonitoredProductCreateScraping,
+    scraped_info: MonitoredScrapedInfo,
+    last_checked: datetime,
+    *,
+    currency: str | None = None,
+    etag: str | None = None,
+    last_modified: datetime | None = None,
+) -> MonitoredProduct:
     """ Cria ou atualiza um produto monitorado a partir de dados de scraping """
     normalized_url = str(product_data.product_url).strip()
     #A URL chega validada pela API e é preservada para manter unicidade baseada na entrada do usuário
 
     #Verifica se o produto já existe para o usuário
-    existing = (
-        db.query(MonitoredProduct)
-        .filter(
-            MonitoredProduct.user_id == user_id,
-            MonitoredProduct.product_url == normalized_url
-        )
-        .first()
-    )
+    existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
 
     if existing:
-        #Atualiza campos principais
+        previous_price = existing.current_price
         existing.current_price = scraped_info.current_price
         existing.thumbnail = scraped_info.thumbnail
         existing.free_shipping = scraped_info.free_shipping
+        existing.currency = currency or scraped_info.currency or existing.currency
+        existing.etag = etag or existing.etag
+        existing.last_modified = last_modified or existing.last_modified
         existing.last_checked = last_checked
         existing.status = MonitoredStatus.active
         db.commit()
         db.refresh(existing)
-        return existing
 
+        if scraped_info.current_price is not None:
+            crud_price_history.create_for_monitored(
+                db,
+                existing.id,
+                scraped_info.current_price,
+                currency or scraped_info.currency or existing.currency,
+                last_checked,
+            )
+        existing._price_changed = previous_price != scraped_info.current_price
+        return existing
 
     #Se não existir, cria o registro
     new = MonitoredProduct(
@@ -56,11 +85,25 @@ def create_or_update_monitored_product_scraped(db: Session, user_id: UUID, produ
         free_shipping=scraped_info.free_shipping,
         monitoring_type=MonitoringType.scraping,
         status=MonitoredStatus.active,
-        last_checked=last_checked
+        last_checked=last_checked,
+        currency=currency or scraped_info.currency,
+        etag=etag,
+        last_modified=last_modified,
     )
     db.add(new)
     db.commit()
     db.refresh(new)
+
+    if scraped_info.current_price is not None:
+        crud_price_history.create_for_monitored(
+            db,
+            new.id,
+            scraped_info.current_price,
+            currency or scraped_info.currency,
+            last_checked,
+        )
+
+    new._price_changed = True
 
     #Se não houver regras ativas para este produto, cria um padrão
     rules = crud_alert_rules.get_active_alert_rules_for_product(db, user_id, new.id)

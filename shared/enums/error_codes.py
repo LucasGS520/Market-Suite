@@ -10,3 +10,4 @@ class ScrapingErrorType(str, Enum):
     missing_data = "missing_data" #Dados essenciais ausentes
     timeout = "timeout" #Tempo de resposta excedida
     parsing_error = "parsing_error" #Erro ao analisar a página
+    no_result = "no_result" #Nenhum resultado encontrado para o URL fornecido após parsing

@@ -25,6 +25,7 @@ from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
 from market_alert.crud import crud_errors
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.scraper.types import ScrapeResult
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
@@ -37,6 +38,11 @@ def _observe_metrics(start: datetime, task_name: str, status: str) -> None:
     """ Registra latência e contagem de tasks no Prometheus """
     duration = (datetime.now(timezone.utc) - start).total_seconds()
     SCRAPING_LATENCY_SECONDS.labels(source="scraper").observe(duration)
+
+def _compute_retry_delay(base: float, attempt: int, limit: int) -> int:
+    """ Calcula atraso exponencial limitado para retries no Celery """
+    delay = base * (2 ** max(0, attempt - 1))
+    return min(int(delay), limit)
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30, name="collect_product_task", rate_limit=settings.SCRAPER_RATE_LIMIT, queue="scraping")
 def collect_product_task(self, url: str, user_id: str, name_identification: str, target_price: float, monitored_id: str | None = None) -> None:
@@ -76,25 +82,40 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
     product_id = monitored_id
     with SessionLocal() as db:
         try:
-            resultado = scrape_monitored_product(
+            result: ScrapeResult = scrape_monitored_product(
                 db=db,
                 url=url,
                 user_id=UUID(user_id),
                 payload=payload,
             )
-            product_id = resultado.get("product_id")
+            product_id = result.product_id
+
+            if result.status == "no_result":
+                status = "failure"
+                task_logger.warning("collect_product_no_result")
+                if result.product_id:
+                    crud_errors.create_scraping_error(
+                        db,
+                        UUID(result.product_id),
+                        url,
+                        "pipeline retornou no_result",
+                        ScrapingErrorType.no_result,
+                    )
+                retry_delay = min(
+                    settings.SCRAPER_NO_RESULT_RETRY_SECONDS * (self.request.retries + 1),
+                    settings.SCRAPER_MAX_RETRY_DELAY_SECONDS,
+                )
+                raise self.retry(countdown=retry_delay)
 
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
-            task_logger.info("collect_product_completed", duration_ms=elapsed_ms)
-            #Atualiza marcador de sucesso no Redis apenas se o cliente estiver disponível
+            task_logger.info(
+                "collect_product_completed",
+                duration_ms=elapsed_ms,
+                status=result.status,
+                price_changed=result.price_changed,
+            )
             if redis_client is not None:
                 redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
-            else:
-                task_logger.warning(
-                    "cache_indisponivel",
-                    detalhe="Redis indisponível, pulando atualização de cache",
-                )
-            redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
         except ScraperClientError as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
@@ -103,6 +124,7 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
                 error=str(req_err),
                 monitored_product_id=product_id,
                 url=url,
+                status_code=req_err.status_code,
             )
             if product_id:
                 try:
@@ -115,8 +137,22 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
                     )
                 except Exception as err:
                     task_logger.warning("error_persist_failed", error=str(err))
-            status_code = req_err.status_code or 500
-            raise ScraperError(status_code=status_code, detail=str(req_err))
+            
+            if req_err.status_code and 500 <= req_err.status_code < 600:
+                delay = _compute_retry_delay(
+                    settings.SCRAPER_RETRY_BACKOFF_MIN,
+                    self.request.retries + 1,
+                    settings.SCRAPER_MAX_RETRY_DELAY_SECONDS,
+                )
+                raise self.retry(countdown=delay)
+            
+            if req_err.status_code == 429 and req_err.retry_after:
+                raise self.retry(countdown=req_err.retry_after)
+            
+            raise ScraperError(status_code=req_err.status_code or 500, detail=str(req_err))
+        except self.MaxRetriesExceededError as exc:
+            status = "failure"
+            task_logger.error("max_retries_exceeded", error=str(exc))
         except Exception as exc:
             status = "failure"
             task_logger.error("collect_product_failed", error=str(exc))
@@ -172,7 +208,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
             monitored = get_monitored_product_by_id(db, UUID(monitored_product_id))
             user_id = monitored.user_id if monitored else UUID(int=0)
 
-            scrape_competitor_product(
+            result: ScrapeResult = scrape_competitor_product(
                 db=db,
                 user_id=user_id,
                 url=url,
@@ -180,10 +216,31 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
             )
 
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
-            task_logger.info("collect_competitor_completed", duration_ms=elapsed_ms)
+            task_logger.info(
+                "collect_competitor_completed", 
+                duration_ms=elapsed_ms,
+                status=result.status,
+                price_changed=result.price_changed,
+            )
 
-            compare_prices_task.delay(str(monitored_product_id))
-            task_logger.info("price_comparison_task_dispatched")
+            if result.status == "no_result":
+                status = "failure"
+                crud_errors.create_scraping_error(
+                    db,
+                    UUID(monitored_product_id),
+                    url,
+                    "pipeline retornou no_result",
+                    ScrapingErrorType.no_result,
+                )
+                delay = min(
+                    settings.SCRAPER_NO_RESULT_RETRY_SECONDS * (self.request.retries + 1),
+                    settings.SCRAPER_MAX_RETRY_DELAY_SECONDS,
+                )
+                raise self.retry(countdown=delay)
+            
+            if result.price_changed:
+                compare_prices_task.delay(str(monitored_product_id))
+                task_logger.info("price_comparison_task_dispatched")
 
         except ScraperClientError as req_err:
             status = "failure"
@@ -193,6 +250,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 error=str(req_err),
                 monitored_product_id=monitored_product_id,
                 url=url,
+                status_code=req_err.status_code,
             )
             try:
                 crud_errors.create_scraping_error(
@@ -204,8 +262,23 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 )
             except Exception as err:
                 task_logger.warning("error_persist_failed", error=str(err))
-            status_code = req_err.status_code or 500
-            raise ScraperError(status_code=status_code, detail=str(req_err))
+            
+            if req_err.status_code and 500 <= req_err.status_code < 600:
+                delay = _compute_retry_delay(
+                    settings.SCRAPER_RETRY_BACKOFF_MIN,
+                    self.request.retries + 1,
+                    settings.SCRAPER_MAX_RETRY_DELAY_SECONDS,
+                )
+                raise self.retry(countdown=delay)
+            
+            if req_err.status_code == 429 and req_err.retry_after:
+                raise self.retry(countdown=req_err.retry_after)
+            
+            raise ScraperError(status_code=req_err.status_code or 500, detail=str(req_err))
+        
+        except self.MaxRetriesExceededError as exc:
+            status = "failure"
+            task_logger.error("max_retries_exceeded", error=str(exc))
 
         except Exception as exc:
             status = "failure"

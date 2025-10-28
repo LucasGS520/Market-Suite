@@ -61,6 +61,9 @@ class Settings(ConfigBase):
     SCRAPER_READ_TIMEOUT: float = float(
         os.getenv("SCRAPER_READ_TIMEOUT", "25.0")
     ) #Tempo limite de leitura em segundos
+    SCRAPER_TOTAL_TIMEOUT: float = float(
+        os.getenv("SCRAPER_TOTAL_TIMEOUT", "8.0")
+    ) #Tempo total máximo da chamada
     SCRAPER_RETRY_ATTEMPTS: int = int(
         os.getenv("SCRAPER_RETRY_ATTEMPTS", "3")
     ) #Número máximo de espera exponencial entre tentativas
@@ -76,6 +79,30 @@ class Settings(ConfigBase):
     SCRAPER_SERVICE_AUTH_TOKEN: str | None = os.getenv(
         "SCRAPER_SERVICE_AUTH_TOKEN"
     ) #Valor enviado no header opcional de autenticação
+    SCRAPER_HOST_RATE_LIMIT: int = int(
+        os.getenv("SCRAPER_HOST_RATE_LIMIT", "20")
+    ) #Chamadas máximas por host na janela
+    SCRAPER_HOST_RATE_WINDOW_SECONDS: int = int(
+        os.getenv("SCRAPER_HOST_RATE_WINDOW_SECONDS", "60")
+    ) #Janela de rate limit por host
+    SCRAPER_CIRCUIT_FAILURE_THRESHOLD: int = int(
+        os.getenv("SCRAPER_CIRCUIT_FAILURE_THRESHOLD", "5")
+    ) #Falhas para acionar o circuito
+    SCRAPER_CIRCUIT_WINDOW_SECONDS: int = int(
+        os.getenv("SCRAPER_CIRCUIT_WINDOW_SECONDS", str(10 * 60))
+    ) #Janela de observação de falhas
+    SCRAPER_CIRCUIT_COOLDOWN_SECONDS: int = int(
+        os.getenv("SCRAPER_CIRCUIT_COOLDOWN_SECONDS", str(30 * 60))
+    ) #Tempo de pausa ao abrir circuito
+    SCRAPER_FORCE_REFRESH_TTL_SECONDS: int = int(
+        os.getenv("SCRAPER_FORCE_REFRESH_TTL_SECONDS", str(24 * 60 * 60))
+    ) #Intervalo para forçar reprocessamento completo
+    SCRAPER_NO_RESULT_RETRY_SECONDS: int = int(
+        os.getenv("SCRAPER_NO_RESULT_RETRY_SECONDS", str(15 * 60))
+    ) #Espera mínima antes de reprocessar no_result
+    SCRAPER_MAX_RETRY_DELAY_SECONDS: int = int(
+        os.getenv("SCRAPER_MAX_RETRY_DELAY_SECONDS", str(5 * 60))
+    ) #Limite superior para backoff de Celery
 
 
 #Instância única de settings para a aplicação

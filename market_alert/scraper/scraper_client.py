@@ -1,82 +1,203 @@
-""" Módulo que provê um cliente HTTP assíncrono para interagir com
-o serviço externo de scraping ``market_scraper``
-
-Envia requisições de parsing para páginas de produtos e retorna
-os dados estruturados, tratando erros de comunicação com o serviço
-"""
+""" Cliente resiliente para integração com ``market_scraper`` """
 
 from __future__ import annotations
 
+import asyncio
+import random
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from datetime import datetime
+from email.utils import format_datetime
+from typing import Any, Mapping
+from urllib.parse import urlparse
 
 import httpx
+import structlog
+
+from shared.utils.redis_client import get_redis_client
 
 from market_alert.core.config_alert import settings
+from market_alert.utils.circuit_breaker import CircuitBreaker
+from market_alert.utils.rate_limiter import RateLimiter
 
+
+logger = structlog.get_logger(__name__)
 
 class ScraperClientError(Exception):
-    """ Erro de comunicação com o serviço ``market_scraper``
-
-    Attributes:
-        status_code: Código HTTP retornado, quando disponível
-    """
-
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    """ Representa falhas de comunicação ou regras de proteção do cliente """
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        retry_after: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after = retry_after
+
+@dataclass(slots=True)
+class ScraperFetchResult:
+    """ Contém dados normalizados da resposta do serviço de scraping """
+    status_code: int
+    payload: dict[str, Any] | None
+    headers: Mapping[str, str]
+    error_code: str | None = None
+    retry_after: int | None = None
+
+def _build_timeout() -> httpx.Timeout:
+    """ Configura timeout composto respeitando limites do serviço """
+    return httpx.Timeout(
+        timeout=settings.SCRAPER_TOTAL_TIMEOUT,
+        connect=settings.SCRAPER_CONNECT_TIMEOUT,
+        read=settings.SCRAPER_READ_TIMEOUT,
+    )
+
+rate_limiter = RateLimiter(
+    get_redis_client,
+    max_requests=settings.SCRAPER_HOST_RATE_LIMIT,
+    window_seconds=settings.SCRAPER_HOST_RATE_WINDOW_SECONDS,
+)
+
+circuit_breaker = CircuitBreaker(
+    get_redis_client,
+    failure_threshold=settings.SCRAPER_CIRCUIT_FAILURE_THRESHOLD,
+    failure_window=settings.SCRAPER_CIRCUIT_WINDOW_SECONDS,
+    cooldown_seconds=settings.SCRAPER_CIRCUIT_COOLDOWN_SECONDS,
+)
 
 @dataclass
 class ScraperClient:
-    """ Cliente simples para interagir com o ``market_scraper``
-
-    Mantém uma instância reutilizável de ``httpx.AsyncClient`` para evitar
-    o custo de criar novas conexões a cada requisição
-    """
+    """ Cliente HTTP assíncrono com retries, rate limit e circuit breaker """
     base_url: str = settings.SCRAPER_SERVICE_URL
     client: httpx.AsyncClient = field(init=False)
 
     def __post_init__(self) -> None:
-        """ Inicializa o ``AsyncClient`` com URL base e timeout padrão """
-        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
+        """ Inicializa o ``AsyncClient`` com parâmetros de timeout configurados """
+        user_agent = getattr(settings, "HTTP_USER_AGENT", None)
+        default_headers = {"User-Agent": user_agent} if user_agent else None
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=_build_timeout(),
+            headers=default_headers,
+        )
 
-    async def parse(self, url: str, product_type: str, **extra: Any) -> Dict[str, Any]:
-        """ Envia requisição ``POST`` ao endpoint de parsing de forma assíncrona
+    async def fetch(
+        self,
+        *,
+        url: str,
+        monitored_id: str | None = None,
+        etag: str | None = None,
+        last_modified: datetime | None = None,
+        force_refresh: bool = False,
+    ) -> ScraperFetchResult:
+        """ Executa POST no ``/scraper/parse`` com proteção contra oberload """
+        parsed = urlparse(url)
+        host = parsed.netloc or "unknown"
 
-        Args:
-            url: Endereço do produto que será analisado
-            product_type: Tipo de produto (``monitored`` ou ``competitor``)
-            **extra: Campos adicionais enviados no ``payload``
-
-        Returns:
-            Dicionário com os dados retornados pelo serviço de scraping
-
-        Raises:
-            ScraperClientError: Em casos de ``timeout`` ou respostas ``4xx/5xx``
-        """
-
-        payload = {"url": url, "product_type": product_type} | extra
-
-        try:
-            resp = await self.client.post(
-                "/scraper/parse",
-                json=payload,
+        if circuit_breaker.is_open(host):
+            raise ScraperClientError(
+                "Circuito aberto para host solicitado",
+                status_code=503,
             )
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.TimeoutException as exc:
+        
+        if not rate_limiter.allow(host):
             raise ScraperClientError(
-                "Tempo limite excedido ao chamar o serviço de scraping",
-            ) from exc
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code if exc.response else 500
+                "Limite de requisições para host excedido",
+                status_code=429,
+            )
+        
+        headers: dict[str, str] = {}
+        if not force_refresh and etag:
+            headers["If-None-Match"] = etag
+        if not force_refresh and last_modified:
+            headers["If-Modified-Since"] = format_datetime(last_modified, usegmt=True)
+
+        if settings.SCRAPER_SERVICE_AUTH_HEADER and settings.SCRAPER_SERVICE_AUTH_TOKEN:
+            headers[settings.SCRAPER_SERVICE_AUTH_HEADER] = settings.SCRAPER_SERVICE_AUTH_TOKEN
+
+        attempt = 0
+        backoff = settings.SCRAPER_RETRY_BACKOFF_MIN
+
+        while True:
+            attempt += 1
+            try:
+                response = await self.client.post(
+                    "/scraper/parse",
+                    json={"url": url},
+                    headers=headers or None,
+                )
+            except httpx.TimeoutException as exc:
+                circuit_breaker.record_failure(host)
+                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
+                    raise ScraperClientError(
+                        "Tempo limite ao consultar o serviço de scraping",
+                        status_code=504,
+                    ) from exc
+                await asyncio.sleep(self._compute_backoff(backoff, attempt))
+                continue
+            except httpx.RequestError as exc:
+                circuit_breaker.record_failure(host)
+                raise ScraperClientError(
+                    f"Falha de transporte ao consultar o scraper: {exc}",
+                    status_code=503,
+                ) from exc
+
+            status_code = response.status_code
+
+            if status_code == 200:
+                circuit_breaker.record_success(host)
+                return ScraperFetchResult(
+                    status_code=status_code,
+                    payload=response.json(),
+                    headers=response.headers,
+                )
+
+            if status_code == 304:
+                circuit_breaker.record_success(host)
+                return ScraperFetchResult(
+                    status_code=status_code,
+                    payload=None,
+                    headers=response.headers,
+                )
+
+            if status_code == 422:
+                body = response.json()
+                error_code = body.get("error_code")
+                circuit_breaker.record_success(host)
+                return ScraperFetchResult(
+                    status_code=status_code,
+                    payload=body,
+                    headers=response.headers,
+                    error_code=error_code,
+                )
+
+            if status_code in {429}:
+                circuit_breaker.record_failure(host)
+                retry_after = self._extract_retry_after(response)
+                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
+                    raise ScraperClientError(
+                        "Serviço de scraping respondeu com 429",
+                        status_code=status_code,
+                        retry_after=retry_after,
+                    )
+                await asyncio.sleep(self._calculate_retry_delay(backoff, attempt, retry_after))
+                continue
+
+            if 500 <= status_code < 600:
+                circuit_breaker.record_failure(host)
+                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
+                    raise ScraperClientError(
+                        "Erro 5xx ao consultar o serviço de scraping",
+                        status_code=status_code,
+                    )
+                await asyncio.sleep(self._compute_backoff(backoff, attempt))
+                continue
+
+            circuit_breaker.record_failure(host)
             raise ScraperClientError(
-                f"Erro HTTP {status} ao chamar o serviço de scraping", status
-            ) from exc
-        except httpx.RequestError as exc:
-            raise ScraperClientError(
-                f"Falha na comunicação com o serviço de scraping: {exc}"
-            ) from exc
+                f"Resposta inesperada do scraper: {status_code}",
+                status_code=status_code,
+            )
 
     async def aclose(self) -> None:
         """ Encerra a sessão HTTP assíncrona para liberar recursos """
@@ -89,3 +210,29 @@ class ScraperClient:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         """ Garante que o cliente seja fechado ao sair do contexto """
         await self.aclose()
+
+    @staticmethod
+    def _compute_backoff(base: float, attempt: int) -> float:
+        """ Calcula backoff exponencial com jitter aleatório """
+        exp = min(settings.SCRAPER_RETRY_BACKOFF_MAX, base * (2 ** (attempt - 1)))
+        jitter = random.uniform(0, base)
+        return exp + jitter
+    
+    @staticmethod
+    def _calculate_retry_delay(base: float, attempt: int, retry_after: int | None) -> float:
+        """ Seleciona entre ``Retry-After`` e backoff exponencial """
+        if retry_after is not None:
+            return float(retry_after)
+        return ScraperClient._compute_backoff(base, attempt)
+    
+    @staticmethod
+    def _extract_retry_after(response: httpx.Response) -> int | None:
+        """ Extrai valor numérico do cabeçalho ``Retry-After`` quando presente """
+        header = response.headers.get("Retry-After")
+        if header is None:
+            return None
+        try:
+            return int(header)
+        except ValueError:
+            logger.warning("invalid_retry_after_header", value=header)
+            return None
