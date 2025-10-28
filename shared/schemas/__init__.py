@@ -6,8 +6,12 @@ from .schemas_products import (
     CompetitorProductCreateScraping,
     CompetitorScrapedInfo,
 )
-from .schemas_scraper import ScraperRequest, ScraperResponse
-from .schemas_scraper import ParseRequest, ParseResponse
+from .schemas_scraper import (
+    ParserRequest,
+    ParserResponse,
+    ScraperRequest,
+    ScraperResponse,
+)
 
 
 __all__ = [
@@ -17,6 +21,4 @@ __all__ = [
     "CompetitorScrapedInfo",
     "ScraperRequest",
     "ScraperResponse",
-    "ParseRequest",
-    "ParseResponse",
 ]

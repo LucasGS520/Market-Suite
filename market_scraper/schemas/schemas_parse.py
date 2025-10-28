@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from shared.schemas.schemas_scraper import ParseRequest as SharedParseRequest
-from shared.schemas.schemas_scraper import ParseResponse as SharedParserResponse
+from shared.schemas.schemas_scraper import ParserRequest as SharedParserRequest
+from shared.schemas.schemas_scraper import ParserResponse as SharedParserResponse
 
 
-class ParseRequest(SharedParseRequest):
+class ParseRequest(SharedParserRequest):
     """ Especializa o contrato compartilhado para manter compatibilidade local """
     #Utilizamos herança direta para reaproveitar validações e garantir alinhamento
 

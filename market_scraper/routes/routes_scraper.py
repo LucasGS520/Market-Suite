@@ -21,7 +21,7 @@ from market_scraper.routes.response_helpers import (
     build_no_result_response,
     build_success_response,
 )
-from market_scraper.schemas.schemas_parse import ErrorResponse, ParseRequest, ParserResponse
+from market_scraper.schemas.schemas_parse import ErrorResponse, ParserRequest, ParserResponse
 from market_scraper.services.pipeline_factory import run_pipeline
 from market_scraper.services.synergic_pipeline import PipelineTimeoutError
 from market_scraper.utils.price import parse_price_str
@@ -47,8 +47,9 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
     trace_id = str(uuid4())
     request_logger = logger.bind(trace_id=trace_id)
 
+    raw_url = str(payload.url)
     try:
-        normalized_url = normalize_product_url(payload.url)
+        normalized_url = normalize_product_url(raw_url)
     except ValueError as exc:
         issue = UrlIssue(code="invalid_url", message=str(exc))
         return _http_error(
@@ -56,7 +57,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
             status_code=status.HTTP_400_BAD_REQUEST,
             trace_id=trace_id,
             request_logger=request_logger,
-            log_extra=_sanitize_payload(payload.url),
+            log_extra=_sanitize_payload(raw_url),
         )
     
     request_logger = request_logger.bind(url=sanitize_log_data(normalized_url))
