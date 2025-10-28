@@ -55,6 +55,28 @@ class Settings(ConfigBase):
     SCRAPER_SERVICE_URL: str = os.getenv(
         "SCRAPER_SERVICE_URL", "http://market_scraper:8000"
     ) #Endpoint do market_scraper
+    SCRAPER_CONNECT_TIMEOUT: float = float(
+        os.getenv("SCRAPER_CONNECT_TIMEOUT", "5.0")
+    ) #Tempo limite de conexão em segundos
+    SCRAPER_READ_TIMEOUT: float = float(
+        os.getenv("SCRAPER_READ_TIMEOUT", "25.0")
+    ) #Tempo limite de leitura em segundos
+    SCRAPER_RETRY_ATTEMPTS: int = int(
+        os.getenv("SCRAPER_RETRY_ATTEMPTS", "3")
+    ) #Número máximo de espera exponencial entre tentativas
+    SCRAPER_RETRY_BACKOFF_MIN: float = float(
+        os.getenv("SCRAPER_RETRY_BACKOFF_MIN", "0.2")
+    ) #Valor mínimo de espera exponencial entre tentativas
+    SCRAPER_RETRY_BACKOFF_MAX: float = float(
+        os.getenv("SCRAPER_RETRY_BACKOFF_MAX", "2.0")
+    ) #Valor máximo de espera exponencial entre tentativas
+    SCRAPER_SERVICE_AUTH_HEADER: str | None = os.getenv(
+        "SCRAPER_SERVICE_AUTH_HEADER"
+    ) #Nome do header opcional para autenticação interna
+    SCRAPER_SERVICE_AUTH_TOKEN: str | None = os.getenv(
+        "SCRAPER_SERVICE_AUTH_TOKEN"
+    ) #Valor enviado no header opcional de autenticação
+
 
 #Instância única de settings para a aplicação
 settings = Settings()
