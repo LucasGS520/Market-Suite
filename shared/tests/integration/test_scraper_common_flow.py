@@ -12,7 +12,7 @@ from shared.metrics import SCRAPING_SUSPENDED_FLAG
 from shared.schemas.schemas_products import MonitoredProductCreateScraping
 
 try:
-    from market_scraper.services import services_scraper_common as mod
+    from market_scraper.services import pipeline_factory as mod
     scrape_product_common = mod.scrape_product_common
 except Exception:
     pytestmark = pytest.mark.skip(reason="Dependências do market_scraper indisponíveis")

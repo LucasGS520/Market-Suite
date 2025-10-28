@@ -46,12 +46,11 @@ from market_scraper.services.pipeline_steps import (
     GenericFallbackParserStep,
     HtmlMetadataParserStep,
     JsonLdParserStep,
-    _run_parser_with_validation,
-    download_html,
-    _log_client_error,
 )
+from market_scraper.services.parser_runner import run_parser_with_validation
 from market_scraper.services.synergic_pipeline import PipelineContext
 from market_scraper.core.config_scraper import settings
+from market_scraper.utils.http_download import _log_client_error, download_html
 from market_scraper.utils import cache
 from market_scraper.utils import singleflight
 from market_scraper.utils.http_retry import RetryableHTTPError
@@ -137,11 +136,11 @@ async def test_download_html_utiliza_headers_compostos(monkeypatch: pytest.Monke
         return CaptureClient()
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         fake_async_client,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.user_agents.get_user_agent",
+        "market_scraper.utils.http_download.user_agents.get_user_agent",
         lambda *_args, **_kwargs: "UA-DE-TEXTO",
     )
     monkeypatch.setattr(settings, "SCRAPER_HEADERS_ACCEPT", "text/html")
@@ -202,11 +201,11 @@ async def test_download_html_respeita_timeout_por_dominio(monkeypatch: pytest.Mo
             )
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.Timeout",
+        "market_scraper.utils.http_download.httpx.Timeout",
         DummyTimeout,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         lambda **kwargs: DummyAsyncClient(
             iter([httpx.Response(200, text="<html>ok</html>", request=httpx.Request("GET", url))]),
             **kwargs,
@@ -240,7 +239,7 @@ async def test_download_html_decodifica_brotli(monkeypatch: pytest.MonkeyPatch) 
     )
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         lambda **__: DummyAsyncClient(iter([response])),
     )
 
@@ -264,7 +263,7 @@ async def test_download_html_decodifica_gzip(monkeypatch: pytest.MonkeyPatch) ->
     )
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         lambda **__: DummyAsyncClient(iter([response])),
     )
 
@@ -284,7 +283,7 @@ async def test_download_html_registra_corpo_em_erro_4xx(monkeypatch: pytest.Monk
     )
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         lambda **__: DummyAsyncClient(iter([response])),
     )
     monkeypatch.setattr(settings, "SCRAPER_LOG_4XX_BODY", True)
@@ -296,7 +295,7 @@ async def test_download_html_registra_corpo_em_erro_4xx(monkeypatch: pytest.Monk
         if event == "http_client_error":
             logs.append(kwargs)
 
-    monkeypatch.setattr("market_scraper.services.pipeline_steps.logger.warning", fake_warning)
+    monkeypatch.setattr("market_scraper.utils.http_download.logger.warning", fake_warning)
 
     with pytest.raises(httpx.HTTPStatusError):
         await download_html(url, timeout=1.0)
@@ -317,7 +316,7 @@ async def test_download_html_registra_headers_em_debug(monkeypatch: pytest.Monke
     )
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         lambda **__: DummyAsyncClient(iter([response])),
     )
 
@@ -327,7 +326,7 @@ async def test_download_html_registra_headers_em_debug(monkeypatch: pytest.Monke
         if event == "http_download_metadata":
             debug_logs.append(kwargs)
 
-    monkeypatch.setattr("market_scraper.services.pipeline_steps.logger.debug", fake_debug)
+    monkeypatch.setattr("market_scraper.utils.http_download.logger.debug", fake_debug)
 
     html = await download_html(url, timeout=1.0)
 
@@ -346,7 +345,7 @@ async def test_download_html_registra_metricas_em_erro_decode(monkeypatch: pytes
     )
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         lambda **__: DummyAsyncClient(iter([response])),
     )
 
@@ -354,7 +353,7 @@ async def test_download_html_registra_metricas_em_erro_decode(monkeypatch: pytes
         raise ContentDecodeError(encoding="br", reason="decode_failed")
     
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.decode_http_body",
+        "market_scraper.utils.http_download.decode_http_body",
         fake_decode,
     )
 
@@ -386,11 +385,11 @@ async def test_download_html_repropaga_http_status_error(monkeypatch: pytest.Mon
         raise RetryableHTTPError(target="html", reason="server_error", status_code=503) from status_error
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.build_retrying_operation",
+        "market_scraper.utils.http_download.build_retrying_operation",
         lambda *, target, operation: fake_operation,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.user_agents.get_user_agent",
+        "market_scraper.utils.http_download.user_agents.get_user_agent",
         lambda *_a, **_k: "UA-DE-TESTE",
     )
 
@@ -412,7 +411,7 @@ def test_run_parser_with_validation_registra_rejeicao() -> None:
     def _fake_parser(_: str, __: str) -> dict[str, str]:
         return {"name": "", "current_price": "10"}
     
-    ok, payload = _run_parser_with_validation(
+    ok, payload = run_parser_with_validation(
         parser=_fake_parser,
         context=context,
         step_name="json_ld_parser",
@@ -484,7 +483,7 @@ def test_log_client_error_trunca_e_decodifica_payload(monkeypatch: pytest.Monkey
         if event == "http_client_error":
             logs.append(kwargs)
 
-    monkeypatch.setattr("market_scraper.services.pipeline_steps.logger.warning", fake_warning)
+    monkeypatch.setattr("market_scraper.utils.http_download.logger.warning", fake_warning)
 
     _log_client_error(response=response, url=url, domain="exemplo.com", user_agent="teste")
 
@@ -507,7 +506,7 @@ async def test_download_html_retries_on_retry_after(monkeypatch: pytest.MonkeyPa
     )
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         lambda **__: DummyAsyncClient(responses),
     )
 
@@ -553,7 +552,7 @@ async def test_download_html_retries_on_server_error(monkeypatch: pytest.MonkeyP
     )
 
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.httpx.AsyncClient",
+        "market_scraper.utils.http_download.httpx.AsyncClient",
         lambda **__: DummyAsyncClient(responses),
     )
 

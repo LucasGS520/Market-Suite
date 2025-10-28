@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import shutil
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,8 @@ import httpx
 
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils.user_agents import compose_headers, get_user_agent
-from market_scraper.utils.validator import DataQualityValidator
+from market_scraper.utils.validator import DataQualityValidator, ValidationResult
+from market_scraper.services.pipeline_factory import build_context, create_pipeline
 
 
 ParserFn = Callable[[str, str], dict[str, Any] | None]
@@ -72,14 +74,46 @@ class DiagnosticValidator(DataQualityValidator):
 
         #Zeramos o cache para garantir que o próximo relatório corresponda ao parser atual
         self._last_issue = None
-        return super().validate(step_name=step_name, payload=payload, url=url, source=source)
+        result: ValidationResult = super().validate(
+            step_name=step_name,
+            payload=payload,
+            url=url,
+            source=source,
+        )
+        if result.is_valid:
+            return result.payload
+        return None
 
-    def _register_invalid(self, step_name: str, domain: str, reason: str) -> None:  # type: ignore[override]
+    def _register_invalid(
+        self, 
+        step_name: str, 
+        domain: str, 
+        reason_code: str,
+        reason_message: str,
+        url: str,
+        parser_name: str | None = None,
+        dump_path: str | None = None,
+        ) -> None:  # type: ignore[override]
         """Salva o motivo de rejeição antes de propagar o registro padrão."""
 
         #Capturamos dados mínimos para explicar a decisão sem precisar inspecionar logs
-        self._last_issue = {"reason": reason, "domain": domain, "step": step_name}
-        super()._register_invalid(step_name, domain, reason)
+        self._last_issue = {
+            "reason": reason_code,
+            "reason_message": reason_message,
+            "domain": domain,
+            "step": step_name,
+            "parser_name": parser_name or "",
+            "dump_path": dump_path or "",
+        }
+        super()._register_invalid(
+            step_name,
+            domain,
+            reason_code,
+            reason_message,
+            url,
+            parser_name,
+            dump_path,
+        )
 
     def consume_issue(self) -> dict[str, str] | None:
         """Devolve o último motivo registrado e limpa o estado interno."""
@@ -161,6 +195,17 @@ def _save_dump(content: bytes, output_dir: Path, url: str) -> Path:
     target_path.write_bytes(content)
     return target_path
 
+def _prepare_output_dir(output_dir: Path) -> None:
+    """Garante que o diretório de saída esteja limpo antes de um novo diagnóstico."""
+
+    if output_dir.exists():
+        for item in output_dir.iterdir():
+            if item.is_dir():
+                #Removemos pastas anteriores para evitar mistura de dumps entre execuções
+                shutil.rmtree(item, ignore_errors=True)
+            else:
+                item.unlink(missing_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
 def _run_parsers(
     html: str,
@@ -331,6 +376,33 @@ def _response_error_summary(url: str, error: Exception) -> dict[str, Any]:
         "error": str(error),
     }
 
+async def _run_pipeline_with_html(url: str, html: str) -> dict[str, Any]:
+    """Executa o pipeline oficial reutilizando um HTML já capturado."""
+
+    pipeline = create_pipeline()
+    context = build_context(url)
+    #Atalhamos o download definindo o HTML manualmente, simulando o cache do pipeline
+    context.set_html(html)
+    outcome = await pipeline.run(context)
+    steps = [
+        {
+            "name": step.name,
+            "status": step.status,
+            "duration_seconds": step.duration_seconds,
+            "message": step.message,
+        }
+        for step in outcome.steps
+    ]
+    return {
+        "status": outcome.status,
+        "payload": outcome.payload,
+        "steps": steps,
+        "context": {
+            "url": outcome.context.url,
+            "source": outcome.context.source,
+            "data": dict(outcome.context.data),
+        },
+    }
 
 async def diagnose_url(
     client: httpx.AsyncClient,
@@ -372,6 +444,7 @@ def main() -> None:
     """Ponto de entrada CLI para geração dos relatórios de diagnóstico."""
 
     args = _parse_args()
+    _prepare_output_dir(args.output_dir)
     urls = _load_urls(args.urls, input_file=args.input_file)
     reports = asyncio.run(run_diagnostics(urls, args.output_dir))
 

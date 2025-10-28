@@ -159,6 +159,13 @@ def parse_generic_html(html: str, url: str) -> dict[str, str] | None:
     if not price:
         price = _extract_text(soup, ".price", attribute=None)
 
+    canonical = ""
+    canonical_link = soup.find("link", rel=lambda value: value and ("canonical" in [v.lower() for v in value] if isinstance(value, list) else value.lower() == "canonical"))
+    if canonical_link:
+        href = canonical_link.get("href")
+        if href:
+            canonical = href.strip()
+
     currency = ""
     for selector in [
         'meta[itemprop="priceCurrency"]',
@@ -171,7 +178,8 @@ def parse_generic_html(html: str, url: str) -> dict[str, str] | None:
         if currency:
             break
 
-    return _assemble_result(name, price, currency, url)
+    final_url = canonical or url
+    return _assemble_result(name, price, currency, final_url)
 
 def parse_meli_html(html: str, url: str) -> dict[str, str] | None:
     """ Extrai informações básicas das páginas do Mercado Livre 

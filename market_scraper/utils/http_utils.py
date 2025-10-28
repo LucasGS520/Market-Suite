@@ -1,8 +1,8 @@
-""" Funções auxiliares para lidar com cabeçalhos HTTP e validações de host
+""" Funções auxiliares para lidar com cabeçalhos HTTP, timeouts e validações de host
 
 Este módulo centraliza utilidades usadas por diferentes etapas do pipeline,
-com destaque para validação de cabeçalhos como ``Retry-After`` e resolução
-segura de hosts para prevenir SSRF.
+com destaque para validação de cabeçalhos como ``Retry-After``, configuração
+de timeouts aderentes às políticas globais e resolução segura de hosts para prevenir SSRF.
 """
 
 from __future__ import annotations
@@ -53,23 +53,44 @@ class ContentDecodeError(Exception):
         self.encoding = encoding
         self.reason = reason
 
-def parse_retry_after(value: str) -> Optional[int]:
-    """ Retorna o valor do cabeçalho ``Retry-After`` em segundos """
+def build_timeout(total_timeout: float) -> httpx.Timeout:
+    """ Monta ``httpx.Timeout`` obedecendo limites específicos do scraper """
+    #Ajustamos cada fase individual para respeitar valores máximos globais, evitando que cada chamada configure tempos exagerados
+    return httpx.Timeout(
+        total_timeout,
+        connect=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_CONNECT),
+        read=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_READ),
+        write=min(total_timeout, settings.SCRAPER_HTTP_TIMEOUT_WRITE),
+        pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
+    )
+
+def parse_retry_after(value: str | None) -> Optional[float]:
+    """ Interpreta ``Retry-After`` em segundos, aceitando fracionários ou HTTP-date """
     if not value:
         return None
 
-    value = value.strip()
-    if value.isdigit():
-        return int(value)
+    normalized = value.strip()
+    if not normalized:
+        return None
 
     try:
-        dt = parsedate_to_datetime(value)
+        #Permite segundos fracionários
+        seconds = float(normalized)
+    except ValueError:
+        try:
+            dt = parsedate_to_datetime(normalized)
+        except (TypeError, ValueError):
+            return None
+        
+        if dt is None:
+            return None
+
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        
         diff = (dt - datetime.now(timezone.utc)).total_seconds()
-        return max(0, int(diff))
-    except Exception:
-        return None
+        return max(0.0, diff)
+    return max(0.0, seconds)
 
 def extract_hostname(url: str) -> str:
     """ Retorna o nome do host de uma URL ou string vazia se inválida """

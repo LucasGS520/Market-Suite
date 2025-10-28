@@ -41,11 +41,21 @@ class ValidationResult:
 
 def _normalize_url(raw_url: Any, fallback: str) -> str:
     """ Padroniza URL de saída priorizando o valor válido do contexto """
+    candidate = ""
     if isinstance(raw_url, str):
         candidate = raw_url.strip()
-        if candidate:
-            return candidate
-    return fallback
+    elif raw_url is not None:
+        #Convertendo outros tipos para string evitando propagar objetos inesperados
+        candidate = str(raw_url).strip()
+
+    if candidate:
+        return candidate
+    
+    if isinstance(fallback, str):
+        return fallback
+    
+    #Garante que valores residuais não contaminem payload final
+    return str(fallback or "")
 
 def _normalize_source(raw_source: Any, fallback: str) -> str:
     """ Garante que a origem represente um domínio válido """
@@ -164,11 +174,13 @@ class DataQualityValidator:
                 return ValidationResult(payload=None, reason_code=reason_code, reason_message=reason_message)
             price_decimal = tolerant_price
         
+        normalized_url = _normalize_url(payload.get("url"), url)
+        canonical_source = _extract_domain(normalized_url, source)
         normalized_payload = {
             "name": name,
             "current_price": format_decimal_to_str(price_decimal),
-            "url": _normalize_url(payload.get("url"), url),
-            "source": _normalize_source(payload.get("source"), source),
+            "url": normalized_url,
+            "source": _normalize_source(payload.get("source"), canonical_source),
         }
         return ValidationResult(payload=normalized_payload)
     

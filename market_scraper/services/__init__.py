@@ -1,6 +1,6 @@
 """ Facilita acesso às principais funções e classes do serviço """
 
-from .services_scraper_common import build_context, create_pipeline, run_pipeline
+from .pipeline_factory import build_context, create_pipeline, run_pipeline
 from .pipeline_steps import (
     FetchHTMLStep,
     GenericFallbackParserStep,
