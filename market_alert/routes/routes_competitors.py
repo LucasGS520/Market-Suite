@@ -13,7 +13,7 @@ from market_alert.models import User
 from market_alert.schemas.schemas_products import CompetitorProductResponse
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, delete_competitors_by_monitored_id
-from market_alert.tasks.scraper_tasks import collect_competitor_task
+from market_alert.scraper.scraper_tasks import collect_competitor_task
 from market_alert.core.security import get_current_user
 
 from market_scraper.utils.url_validation import normalize_product_url, check_url_compatibility

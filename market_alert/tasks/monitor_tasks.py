@@ -24,7 +24,7 @@ from market_alert.enums.enums_products import MonitoringType
 from market_alert.crud.crud_monitored import get_products_by_type, create_or_update_monitored_product_scraped
 from market_alert.crud.crud_competitor import get_all_competitor_products, create_or_update_competitor_product_scraped
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
-from market_alert.services.scraper_client import ScraperClient, ScraperClientError
+from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 
 
 logger = structlog.get_logger("monitor_tasks")

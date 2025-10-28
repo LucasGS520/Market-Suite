@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from shared.exceptions import ScraperError
-from market_alert.tasks.scraper_tasks import collect_product_task, collect_competitor_task
-from market_alert.services.scraper_client import ScraperClientError
+from market_alert.scraper.scraper_tasks import collect_product_task, collect_competitor_task
+from market_alert.scraper.scraper_client import ScraperClientError
 
 
 class DummySession:

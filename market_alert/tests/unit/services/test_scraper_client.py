@@ -1,7 +1,7 @@
 import pytest
 import httpx
 
-from market_alert.services.scraper_client import ScraperClient, ScraperClientError
+from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 
 
 class DummyClientSuccess:

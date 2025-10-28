@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 
-from market_alert.services.scraper_client import ScraperClient
+from market_alert.scraper.scraper_client import ScraperClient
 from market_alert.crud.crud_monitored import create_or_update_monitored_product_scraped
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
 

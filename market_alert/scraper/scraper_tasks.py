@@ -19,11 +19,12 @@ from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS, SCRAPER_HEA
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.enums.error_codes import ScrapingErrorType
 
+from market_alert.scraper.scraper_client import ScraperClientError
+
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
 from market_alert.crud import crud_errors
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.services.scraper_client import ScraperClientError
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
