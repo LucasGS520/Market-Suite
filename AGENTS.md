@@ -1,6 +1,6 @@
 # AGENTS.md — Guia para Agentes de IA (MarketSuite)
 
-Este arquivo é um guia específico para agentes de IA que interagem com o código do projeto MarketSuite. Ele complementa o `README.md` voltado a pessoas desenvolvedoras, oferecendo contexto operacional do repositório, listagem de serviços e tarefas, utilidades internas e boas práticas para automação e manutenção.
+Este arquivo é um guia específico para agentes de IA que interagem com o código do projeto MarketSuite. Ele complementa os `README.md` voltado a pessoas desenvolvedoras, oferecendo contexto operacional do repositório, listagem de serviços e tarefas, utilidades internas e boas práticas para automação e manutenção.
 
 > Nota: Sempre que novos módulos, tarefas ou serviços forem introduzidos, este arquivo deve ser atualizado. O AGENTS.md é um documento vivo e deve refletir a realidade do projeto.
 
@@ -13,19 +13,20 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 ---
 
 ## Referências
-- `README.md`: arquitetura, setup humano e visão geral do projeto.
+- `README.md`: visão geral da suíte, topologias de execução e checklist rápido para pessoas desenvolvedoras
+- `market_alert/README.md`: responsabilidades, fluxos e comandos do orquestrador.
 - `market_scraper/README.md`: detalhes e estratégias do microserviço de scraping.
 
 ## Como Usar Este Documento
-- Use este arquivo para instruções operacionais e automação (rotas, tasks, métricas, inicialização de serviços).
-- Para setup local, visão conceitual e instruções humanas, consulte o `README.md`.
-- Evite duplicar conteúdo extenso: referencie os arquivos acima quando necessário.
+- Utilize este arquivo omo manual operacional para automações, integrações entre serviços e inspeção de métricas
+- Para visão conceitual, requisitos funcionais e setup humano consulte o `README.md` e, quando precisar de detalhes específicos, abra a documentação do serviço correspondente.
+- Evite duplicar conteúdo extenso: preferencialmente referencie os arquivos listados em *Referências*
 
 ## Sumário Rápido
-- Visão Geral da Arquitetura e Serviços: resumo de serviços e como iniciar.
+- Visão Geral da Arquitetura e Serviços: resumo de serviços, responsabilidades e como iniciar.
 - Infra e Observabilidade: portas, métricas, Prometheus/Grafana/Loki.
 - Diretrizes de Desenvolvimento para Agentes: tipagem, docstrings, testes, métricas.
-- Tarefas e Comandos de Execução: pré-requisitos, .env, Docker e execução manual.
+- Tarefas e Comandos de Execução: pré-requisitos, `.env`, Docker e execução manual.
 - Tarefas Celery disponíveis: assinaturas e efeitos das tasks.
 - Exemplos de chamadas de API: autenticação, scraping, comparação.
 - Como Manter o AGENTS.md Atualizado: rotina de revisão do documento.

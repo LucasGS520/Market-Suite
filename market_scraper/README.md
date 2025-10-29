@@ -3,6 +3,10 @@
 ## Objetivo
 O serviço `market_scraper` coleta nome e preço de anúncios em marketplaces estáticos. A implementação atual prioriza confiabilidade e baixo tempo de resposta, utilizando apenas páginas HTML e metadados expostos sem renderização de JavaScript.
 
+### Documentação Relacionada
+- Visão geral da suíte: [`README.md`](../README.md)
+- Integração com o orquestrador: [`market_alert/README.md`](../market_alert/README.md)
+
 ## Endpoints principais
 - `POST /scraper/parse` (alias `POST /scrape/parse`): recebe `{ "url": "<string>" }` e devolve `ParserResponse` com `name`, `current_price`, `url` e `source`.
 - `GET /health/ping`: verificação simples de disponibilidade.
