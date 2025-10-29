@@ -1,13 +1,14 @@
 # Market Alert
-API FastAPI que centraliza autenticação, cadastro de monitoramentos, comparação de preços e disparo de notificações. A aplicação integra PostgreSQL, Redis e Celery (worker + beat) e consome o `market_scraper` via cliente HTTP dedicado.
+API FastAPI responsável por autenticação, gestão e monitoramento, comparação de preços e disparo de notificações. Opera com PostgreSQL, Redis, Celery (worker + beat) e integra o `market_scraper` para coleta de dados.
 
 ## Relações e Referências
 - Visão geral da suíte e topologia: [`../README.md`](../README.md)
-- Detalhes do scraper consumido pela API: [`../market_scraper/README.md`](../market_scraper/README.md)
+- Detalhes do serviço de scraping: [`../market_scraper/README.md`](../market_scraper/README.md)
+- Guia operacional para agentes: [`../AGENTS.md`](../AGENTS.md)
 
 ## Principais Responsabilidades
-- **Expor rotas REST** para gerenciamento de usuários, produtos monitorados, concorrentes e configurações de alertas.
-- **Agendar tarefas Celery** (`scraping`, `monitor`, `metrics`) para coleta de dados, comparações e notificações.
+- **Expor rotas REST** para gerenciamento de usuários, autenticação, produtos monitorados e concorrentes, comparações e notificações.
+- **Agendar tarefas Celery** (`scraping`, `monitor`, `metrics`) para coleta de dados, rechecagens, envio de alertas e coleta de métricas.
 - **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
 - **Registrar métricas e logs estruturados** para Prometheus e Loki.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
@@ -15,35 +16,38 @@ API FastAPI que centraliza autenticação, cadastro de monitoramentos, comparaç
 ## Estrutura do Diretório
 ```text
 market_alert/
-├── auth/                # Fluxos de autenticação, JWT, rotas de login/refresh/reset
-├── core/                # Configuração, inicialização do Celery e carregamento de env
-├── crud/                # Operações de banco de dados
-├── models/              # ORM (SQLAlchemy)
-├── routes/              # Rotas FastAPI (usuários, monitoramentos, notificações, etc.)
-├── schemas/             # Modelos Pydantic expostos pela API
-├── services/            # Regras de negócio (scraper client, comparações, notificações)
-├── tasks/               # Conjunto de tasks Celery (monitoramento, métricas, alertas)
-├── notifications/       # Templates e canais de notificação
-├── templates/           # E-mails e mensagens HTML/texto
-└── utils/               # Auxiliares (cache, rate limiting, etc.)
+├── auth/                #Fluxos de autenticação, JWT e rotas de login/refresh/reset
+├── core/                #Configuração do serviço, inicialização do Celery e carregamento de env
+├── crud/                #Operações de banco de dados (SQLAlcemy Session)
+├── models/              #Modelos ORM (SQLAlchemy)
+├── routes/              #Rotas FastAPI (usuários, monitoramentos, notificações, etc.)
+├── schemas/             #Modelos Pydantic expostos pela API
+├── services/            #Regras de negócio (scraper client, comparações, notificações)
+├── tasks/               #Conjunto de tasks Celery (scraping, monitoramento, métricas, alertas)
+├── notifications/       #Templates e canais de envio de notificação
+├── templates/           #Recursos HTML/Texto para e-mails e mensagens
+└── utils/               #Auxiliares (cache, rate limiting, serialização, etc.)
 ```
 
 ## Endpoints e Fluxos Relevantes
-- **Auth** (`/auth`, `/auth/refresh`, `/auth/logout`, `/auth/profile`, `/auth/reset-password`): login com JWT, refresh e gerenciamento de credenciais.
-- **Monitoramentos** (`/monitored`, `/monitored/{id}`, `/monitored/scrape`): CRUD de produtos monitorados e acionamento manual de scraping.
-- **Concorrentes** (`/competitors`, `/competitors/{monitored_id}`, `/competitors/scrape`): gestão de URLs concorrentes vinculadas a um monitorado.
-- **Comparações** (`/comparisons/{monitored_id}/run`): executa comparação imediata e retorna agregados.
-- **Alertas e notificações** (`/alerts`, `/notifications`): consulta histórico e configurações.
-- **Saúde e métricas** (`/health/ping`, `/metrics`): status da API e métricas Prometheus.
+| Método | Rota / Fluxo | Descrição |
+|--------|--------------|-----------|
+| `POST` | `/auth` | Autenticação via formulário e emissão de JWT. |
+| `POST` | `/auth/refresh` | Renova token de acesso ativo. |
+| `POST` | `/monitored` | Cria produto monitorado associado ao usuário autenticado. |
+| `POST` | `/monitored/scrape` | Agenda coleta imediata e persiste última cotação. |
+| `POST` | `/competitors` | Registra URL concorrente vinculada a um monitorado. |
+| `POST` | `/competitors/scrape` | Agenda scraping de concorrente específico. |
+| `POST` | `/comparisons/{monitored_id}/run` | Executa comparação síncrona utilizando dados mais recentes. |
+| `GET` | `/notifications` | Lista histórico e status de notificações geradas. |
+| `GET` | `/metrics` | Exibe métricas Prometheus da API. |
+| `Celery` | `tasks.monitor_tasks.collect_product_task` | Consome fila `scraping` para coletar dados do monitorado. |
+| `Celery` | `tasks.alert_tasks.dispatch_price_alert_task` | Enfileira alertas quando regras de preço são acionadas. |
 
-Todas as rotas utilizam modelos Pydantic de `schemas/`. O throttling básico é aplicado pelo `Limiter` configurado em `main.py`.
-
-## Integração com o Scraper
-1. Rotas como `POST /monitored/scrape` chamam `services/scraper_client.ScraperClient`.
-2. O cliente monta `ParseRequest` com base no schema da API e envia ao endpoint `/scraper/parse`.
-3. Respostas `ParseResponse` são persistidas em `crud/` e podem disparar tasks de comparação.
-4. Cenários `304 Not Modified` ou `no_result` são tratados para evitar escrita desnecessária.
-5. Erros HTTP e de parsing são registrados em tabelas de auditoria e expõem métricas em `shared/metrics/metrics_api.py`.
+### Integração com os Serviços
+- **`market_scraper`**: consumido por `services/scraper_client.ScraperClient`, que envia `ParseRequest` e trata respostas `ParseResponse` ou `304`.
+- **`shared/`**: reutiliza abstrações de configuração, métricas (`shared/metrics/metrics_api.py`), segurança e utilidades comuns.
+- **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs e tracing.
 
 ## Celery
 - **Arquivo principal:** `core/celery_app.py`.
@@ -60,15 +64,51 @@ Todas as rotas utilizam modelos Pydantic de `schemas/`. O throttling básico é 
 ## Configuração
 Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e podem ser sobrescritas via `market_alert/.env.market_alert`.
 
-| Categoria | Exemplos de variáveis |
-|-----------|-----------------------|
-| Banco de dados | `DATABASE_URL`, `SQLALCHEMY_POOL_SIZE`, `SQLALCHEMY_MAX_OVERFLOW` |
-| Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE` |
+| Categoria | Variáveis relevantes |
+|-----------|----------------------|
+| Banco de dados | `DATABASE_URL`, `SQLALCHEMY_POOL_SIZE`, `SQLALCHEMY_MAX_OVERFLOW`, `DB_ECHO` |
+| Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Scraper | `SCRAPER_BASE_URL`, `SCRAPER_TIMEOUT_SECONDS`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN` |
-| Notificações | `NOTIFICATION_FROM_EMAIL`, `NOTIFICATION_WEBHOOK_URL`, `NOTIFICATION_COOLDOWN_SECONDS` |
-| Observabilidade | `OTEL_EXPORTER_OTLP_ENDPOINT`, `SERVICE_NAME`, flags para métricas/logs |
+| Notificações | `NOTIFICATION_FROM_EMAIL`, `NOTIFICATION_WEBHOOK_URL`, `NOTIFICATION_COOLDOWN_SECONDS`, `NOTIFICATION_CHANNELS` |
+| Observabilidade | `SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `METRICS_PORT`, `LOG_LEVEL` |
 
-`.env.common` complementa configurações compartilhadas (Redis, logging, tracing). Sempre referencie o exemplo mantido na raiz do projeto.
+## Principais Componentes do Serviço
+- `main.py` – instancia a aplicação FastAPI, middlewares, limiter e rotas.
+- `core/config_alert.py` – carrega variáveis de ambiente e aplica defaults.
+- `core/celery_app.py` – configura worker, beat e registradores de métricas.
+- `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
+- `services/comparison_service.py` – orquestra cálculos de comparação e dispara regras.
+- `tasks/monitor_tasks.py` – concentra tasks de coleta de monitorados e concorrentes.
+- `tasks/alert_tasks.py` – envia notificações e aplica cooldowns.
+- `tasks/metrics_tasks.py` – publica métricas periódicas da fila e recursos.
+
+Exemplo mínimo de `.env.market_alert`:
+```env
+DATABASE_URL=postgresql+asyncpg://market:market@db:5432/market
+
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/1
+CELERY_TASK_ROUTES={"tasks.monitor_tasks.*": {"queue": "scraping"}}
+
+SCRAPER_BASE_URL=http://market_scraper:8010
+SCRAPER_TIMEOUT_SECONDS=15
+SCRAPER_SERVICE_AUTH_TOKEN=token-exemplo
+
+NOTIFICATION_FROM_EMAIL=alerts@empresa.dev
+SERVICE_NAME=market-alert
+```
+
+## Segurança e Observabilidade
+- **Segurança:**
+  - JWT curto com refresh token
+  - Filtragem de payloads e segregação de permissões por usuário
+  - Segredos permanecem em arquivos `.env` ignorados pelo Git.
+
+- **Observabilidade:**
+  - Métricas expostas em `/metrics`
+  - Logs estruturados via `structlog`
+  - Métricas Celery disponíveis em `beat_with_metrics.py` na porta configurada.
+  - Tracing opcional via OTEL (`OTEL_EXPORTER_OTLP_ENDPOINT`)
 
 ## Execução Local
 - **Docker Compose** (recomendado):
@@ -77,24 +117,26 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
   docker compose up -d migrations
   docker compose up -d api celery-worker celery_beat
   ```
+  
 - **Sem Docker:**
-  1. Ative a virtualenv e instale dependências (`pip install -r ../requirements.txt`).
-  2. Configure `.env.common` e `.env.market_alert`.
-  3. Rode migrações: `alembic upgrade head`.
-  4. Inicie a API: `uvicorn market_alert.main:app --reload --port 8000`.
-  5. Inicie o worker: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info --pool=threads --concurrency=4 -Q celery,scraping,monitor`.
+  1. Ative virtualenv e instale dependências: `pip install -r ../requirements.txt`.
+  2. Configure `.env.common` e `.env.market_alert` com valores locais.
+  3. Execute migrações: `alembic upgrade head`.
+  4. Inicie API: `uvicorn market_alert.main:app --reload --port 8000`.
+  5. Suba worker Celery: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q celery,scraping,monitor`.
   6. Inicie o beat com métricas: `python market_alert/beat_with_metrics.py`.
 
 ## Testes
 ```bash
 pytest market_alert -q
 ```
-Fixtures cobrem rotas, tasks e integração com o scraper (mocks HTTP). Utilize marcadores específicos (`-k`, `-m`) para focar cenários.
+As suítes cobrem rotas, tasks e integrações simuladas com o scraper; utilize `-k` ou `-m` para isolar cenários específicos.
 
 ## Troubleshooting Rápido
 - **Falhas ao contatar o scraper:** verifique `SCRAPER_BASE_URL`, tokens de serviço e métricas `SCRAPER_CLIENT_REQUESTS_TOTAL` em `shared/metrics`.
-- **Fila acumulada:** confira o estado do Redis e monitore `CELERY_TASKS_TOTAL` por fila; ajuste `concurrency` do worker conforme necessário.
+- **Fila Celery acumulada:** confira o estado do Redis e monitore `CELERY_TASKS_TOTAL` por fila; ajuste `concurrency` do worker conforme necessário.
 - **Rate limit excedido:** erros 429 indicam configuração do `Limiter`; ajuste limites ou whitelists em `main.py`.
 - **Problemas de banco:** monitore `DB_POOL_SIZE`, `DB_POOL_CHECKOUTS` (expostos em `/metrics`) e revise parâmetros de pool no `.env`.
+- **Métricas ausentes**: confirme porta configurada (`METRICS_PORT`) e se `beat_with_metrics.py` está ativo.
 
 Atualize este documento sempre que rotas, tasks, filas ou dependências forem alteradas.
