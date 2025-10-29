@@ -10,7 +10,7 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from market_scraper.main import app
 from market_scraper.services import pipeline_steps
-from market_scraper.utils import http_utils
+from market_scraper.utils import cache, http_utils
 
 from shared.metrics.metrics_scraper import (
     SCRAPER_NO_RESULT_TOTAL,
@@ -58,6 +58,11 @@ def _patch_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(http_utils, "resolve_public_addresses", fake_dns)
     monkeypatch.setattr(url_validation, "resolve_public_addresses", fake_dns)
 
+@pytest.fixture(autouse=True)
+def _clear_caches() -> None:
+    """ Limpa caches entre os cenários para evitar interferência """
+    cache.clear()
+
 def test_parse_returns_payload_from_json_ld(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Garante sucesso quando a página contém JSON-LD válido """
     _reset_pipeline_metrics()
@@ -69,8 +74,8 @@ def test_parse_returns_payload_from_json_ld(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
 
     response = client.post(
-        "/scrape/parse", 
-        json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"}
+        "/scrape/parse",
+        json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
     )
     assert response.status_code == 200
     body = response.json()
@@ -79,6 +84,8 @@ def test_parse_returns_payload_from_json_ld(monkeypatch: pytest.MonkeyPatch) -> 
         "current_price": "799.00",
         "url": "https://www.amazon.com.br/dp/B08N36XNTT",
         "source": "www.amazon.com.br",
+        "payload": None,
+        "no_result": False,
     }
 
     metrics_payload = client.get("/metrics").text
@@ -112,6 +119,8 @@ def test_parse_uses_html_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         "current_price": "549.90",
         "url": "https://produto.mercadolivre.com.br/MLB-123456789",
         "source": "produto.mercadolivre.com.br",
+        "payload": None,
+        "no_result": False,
     }
 
     metrics_payload = client.get("/metrics").text
@@ -182,3 +191,78 @@ def test_parse_records_no_result_for_js_only_page(monkeypatch: pytest.MonkeyPatc
         {"domain": "www.magazineluiza.com.br", "result": "no_result"},
     )
     assert no_result_value is not None and no_result_value >= 1.0
+
+def test_parse_returns_not_modified_with_matching_etag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Responde 304 quando o cliente envia ETag previamente emitido"""
+
+    _reset_pipeline_metrics()
+    client = TestClient(app)
+
+    async def fake_download(_: str, *, timeout: float) -> str:
+        return _load_html("amazon")
+
+    monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+
+    first = client.post(
+        "/scrape/parse",
+        json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
+    )
+
+    assert first.status_code == 200
+    etag = first.headers.get("ETag")
+    last_modified = first.headers.get("Last-Modified")
+    assert etag and last_modified
+    assert first.headers.get("Cache-Control") == "max-age=0, must-revalidate"
+
+    second = client.post(
+        "/scrape/parse",
+        headers={"If-None-Match": etag},
+        json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
+    )
+
+    assert second.status_code == 304
+    assert second.text == ""
+    assert second.headers.get("ETag") == etag
+    assert second.headers.get("Cache-Control") == "max-age=0, must-revalidate"
+
+    third = client.post(
+        "/scrape/parse",
+        headers={"If-Modified-Since": last_modified},
+        json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
+    )
+
+    assert third.status_code == 304
+    assert third.headers.get("Last-Modified") == last_modified
+
+
+def test_parse_bypasses_cache_when_force_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Força execução completa quando o metadado ``force_refresh`` é verdadeiro"""
+
+    _reset_pipeline_metrics()
+    client = TestClient(app)
+
+    async def fake_download(_: str, *, timeout: float) -> str:
+        return _load_html("amazon")
+
+    monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+
+    first = client.post(
+        "/scrape/parse",
+        json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
+    )
+
+    assert first.status_code == 200
+    etag = first.headers.get("ETag")
+    assert etag
+
+    refresh = client.post(
+        "/scrape/parse",
+        headers={"If-None-Match": etag},
+        json={
+            "url": "https://www.amazon.com.br/dp/B08N36XNTT",
+            "metadata": {"force_refresh": True},
+        },
+    )
+
+    assert refresh.status_code == 200
+    

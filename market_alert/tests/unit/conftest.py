@@ -81,8 +81,20 @@ def fake_redis_client(monkeypatch):
     fake_redis = FakeRedis()
 
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.redis_client", fake_redis, raising=False)
-    monkeypatch.setattr("market_alert.tasks.monitor_tasks.redis_client", fake_redis, raising=False)
+    
+    try:
+        import market_alert.scraper.scraper_tasks as scraper_tasks
+    except ImportError:
+        scraper_tasks = None
+    if scraper_tasks is not None:
+        monkeypatch.setattr(scraper_tasks, "redis_client", fake_redis, raising=False)
+
+    try:
+        import market_alert.tasks.monitor_tasks as monitor_tasks
+    except ImportError:
+        monitor_tasks = None
+    if monitor_tasks is not None:
+        monkeypatch.setattr(monitor_tasks, "redis_client", fake_redis, raising=False)
     return fake_redis
 
 @pytest.fixture(autouse=True)

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from cachetools import Cache, TTLCache
 import structlog
@@ -52,7 +52,7 @@ class _InstrumentedTTLCache(TTLCache):
             self._on_eviction(1, "capacity")
         return item
     
-    def set_with_ttl(self, key: str, value: str, ttl_seconds: int) -> int:
+    def set_with_ttl(self, key: str, value: Any, ttl_seconds: int) -> int:
         """ Replica ``__setitem__`` permitindo TTL individual e retorna expirados """
         ttl_seconds = max(ttl_seconds, 0)
         current_time = self.timer()
@@ -127,8 +127,8 @@ class InMemoryTTLCacheAdapter:
         rate = (self._hits / total) if total else 0.0
         SCRAPER_CACHE_HIT_RATE.set(rate)
 
-    def get(self, url: str) -> Optional[str]:
-        """ Busca HTML armazenado registrando métricas de hit/miss """
+    def get(self, url: str) -> Optional[Any]:
+        """ Busca conteudo armazenado registrando métricas de hit/miss """
         with self._lock:
             removed_by_ttl = self._cache.expire()
             if removed_by_ttl > 0:
@@ -148,10 +148,10 @@ class InMemoryTTLCacheAdapter:
                 self._update_hit_rate()
                 return value
         
-    def set(self, url: str, html: str, ttl_seconds: int) -> None:
-        """ Armazena HTML respeitando TTL informado e política LRU """
+    def set(self, url: str, value: Any, ttl_seconds: int) -> None:
+        """ Armazena valores respeitando TTL informado e política LRU """
         with self._lock:
-            removed_by_ttl = self._cache.set_with_ttl(url, html, ttl_seconds)
+            removed_by_ttl = self._cache.set_with_ttl(url, value, ttl_seconds)
             if removed_by_ttl > 0:
                 SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired").inc(removed_by_ttl)
             SCRAPER_CACHE_SIZE.set(len(self._cache))
@@ -178,13 +178,13 @@ _CACHE_ADAPTER = InMemoryTTLCacheAdapter(
     default_ttl_seconds=settings.SCRAPER_CACHE_TTL_SECONDS,
 )
 
-def get(url: str) -> Optional[str]:
-    """ Consulta cache configurado para obter HTML previamente armazenado """
+def get(url: str) -> Optional[Any]:
+    """ Consulta cache configurado para obter conteúdo previamente armazenado """
     return _CACHE_ADAPTER.get(url)
 
-def set(url: str, html: str, ttl_seconds: int) -> None:
-    """ Armazena HTML da URL mantendo compatibilidade da API pública """
-    _CACHE_ADAPTER.set(url, html, ttl_seconds)
+def set(url: str, value: Any, ttl_seconds: int) -> None:
+    """ Armazena valores da URL mantendo compatibilidade da API pública """
+    _CACHE_ADAPTER.set(url, value, ttl_seconds)
 
 def invalidate(url: str) -> None:
     """ Remove uma única entrada armazenada para a URL informada """

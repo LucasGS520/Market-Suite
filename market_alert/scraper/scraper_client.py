@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import random
 from dataclasses import dataclass, field
-from datetime import datetime
-from email.utils import format_datetime
+from datetime import datetime, timezone
+from email.utils import format_datetime, parsedate_to_datetime
 from typing import Any, Mapping
 from urllib.parse import urlparse
 from uuid import UUID
@@ -267,7 +267,7 @@ class ScraperClient:
             return result.payload
         
         if result.status_code == 304:
-            raise ScraperClientError("Conteúdo nçao modificado", status_code=304)
+            raise ScraperClientError("Conteúdo não modificado", status_code=304)
         
         if result.error_code:
             raise ScraperClientError(
@@ -300,8 +300,24 @@ class ScraperClient:
         header = response.headers.get("Retry-After")
         if header is None:
             return None
+        header = header.strip()
+        if not header:
+            return None
         try:
             return int(header)
         except ValueError:
-            logger.warning("invalid_retry_after_header", value=header)
-            return None
+            try:
+                retry_at = parsedate_to_datetime(header)
+            except (TypeError, ValueError):
+                logger.warning("invalid_retry_after_header", value=header)
+                return None
+            
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            else:
+                retry_at = retry_at.astimezone(timezone.utc)
+
+            now = datetime.now(timezone.utc)
+            delay_seconds = (retry_at - now).total_seconds()
+            return max(0, int(delay_seconds))
+        
