@@ -5,9 +5,9 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 > Nota: Sempre que novos módulos, tarefas ou serviços forem introduzidos, este arquivo deve ser atualizado. O AGENTS.md é um documento vivo e deve refletir a realidade do projeto.
 
 ## Objetivo
-- Descrever como agentes de IA devem navegar no repositório e usar os serviços disponíveis.
+- Descrever como agentes de IA devem navegar no repositório e usar os serviços disponíveis, com foco na integração `market_alert` ⇄ `market_scraper`.
 - Fornecer um ponto de referência para tarefas automatizadas, integrações e rotinas internas.
-- Consolidar boas práticas para manter consistência e qualidade das automações.
+- Consolidar boas práticas para manter consistência e qualidade das automações, evitando duplicação de lógica entre serviços.
 - Melhorar a eficiência ao indicar onde buscar contexto (no `README.md`) e onde encontrar instruções operacionais (aqui).
 
 ---
@@ -33,21 +33,23 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
 - Checklist de Cobertura Essencial: verificação rápida antes de releases.
 
 ## Atualização rápida — Market Scraper enxuto
-- A rota ativa para scraping é `POST /scraper/parse` (alias `/scrape/parse`) utilizando `ParserResponse` como contrato.
+- A rota ativa para scraping é `POST /scraper/parse` (alias `/scrape/parse`) utilizando `ParserRequest` e `ParserResponse` definidos em `shared/schemas/schemas_scraper.py`.
 - O pipeline mínimo executa `FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`; todas as etapas ficam em `market_scraper/services/pipeline_steps.py` e utilizam singleflight permanente com retries simples (tenacity respeitando `Retry-After`).
-- `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas.
+- `domain_policy.py` e `domain_policy.yaml` foram movidos para `market_scraper/archive/` e não são carregados automaticamente. Reative-os apenas se precisar de políticas dinâmicas documentadas.
 - O cache padrão é em memória com LRU/TTL e métricas (`SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL`). Os limites são ajustados por `SCRAPER_CACHE_TTL_SECONDS` e `SCRAPER_CACHE_MAX_ENTRIES`.
 - Parâmetros essenciais ficam explícitos no `.env.market_scraper`: TTL e tamanho do cache em memória, retries HTTP (`2`), política de fallback de robots (`allow`) e TTL dos locks de singleflight. Ajustes adicionais devem ser tratados como opt-in e documentados no rollout. Consulte `docs/runbook_scraper.md` para o passo a passo de deploy e rollback.
 - A identidade HTTP (User-Agent e headers) é centralizada em `market_scraper/utils/user_agents.py`. Ajuste `SCRAPER_USER_AGENT_POOL`, `SCRAPER_DEFAULT_USER_AGENT` e `SCRAPER_HEADERS_*` pelo `.env.market_scraper` antes de executar rollouts.
 - `robots.txt` é respeitado antes do download e utiliza retries controlados; a política de fallback é fixa e permissiva (allow) para manter disponibilidade. Métricas ficam em `SCRAPER_ROBOTS_CHECK_TOTAL`.
+- O serviço nunca expõe HTML bruto para o `market_alert`; quaisquer trasnformações adicionais devem ser implementadas no scraper e publicadas via `ParserResponse` para evitar divergências de lógica.
 
 ## Visão Geral da Arquitetura e Serviços
 Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resumo operacional para agentes.
 
 ### API Principal — `market_alert`
 - Função: expõe endpoints REST (FastAPI) para cadastro/gestão de monitoramentos, dispara tarefas assíncronas (Celery) e integra com PostgreSQL/Redis/observabilidade.
-- Comunicação: recebe requisições de usuários; agenda tarefas no Celery (broker Redis); consulta o `market_scraper` via HTTP. Exposição de métricas quando aplicável (ex.: `/metrics`).
+- Comunicação: recebe requisições de usuários; agenda tarefas no Celery (broker Redis); consulta o `market_scraper` via HTTP utilizando `ScraperClient` (`market_alert/services/scraper_client.py`). Exposição de métricas quand aplicável (ex.: `/metrics`).
 - Para agentes: prefira interagir via API para agendar coletas, rechecks e consultar status, evitando acoplamento direto ao worker.
+- O serviço consome apenas os contratos do diretório `shared/` e nunca replica validações do scraper.
 
 ### Worker Celery — `market_alert.core.celery_app`
 - Função: processa tarefas intensivas em background (scraping, comparação de preços, notificações, métricas, limpeza de cache).
@@ -62,10 +64,10 @@ Para o diagrama e detalhes de arquitetura, consulte `README.md`. Abaixo, um resu
 - O `SynergicPipeline` (`market_scraper/services/synergic_pipeline.py`) executa o pipeline sequencial padrão (definido em `services/pipeline_steps.py`). As políticas dinâmicas por domínio estão arquivadas junto ao antigo `domain_policy.yaml`.
 -  Para agentes: ajuste cron/intervalos nas configurações do Celery; evite criar rotinas paralelas conflitantes.
 
-### Serviço de Scraping — `market_scraper`
 - **Função:** microserviço FastAPI que recebe uma URL e retorna JSON leve (`name`, `current_price`, `url`, `source`). Nenhum dado é persistido localmente.
 - **Comunicação:** recebe HTTP da API/Worker, executa o `SynergicPipeline` com as etapas sequenciais padrão e responde seguindo o contrato `ParseResponse`.
 - **Referências essenciais:** `market_scraper/services/pipeline_steps.py`, `market_scraper/services/services_scraper_common.py`, `market_scraper/utils/robots.py`, `market_scraper/utils/cache.py`, `shared/metrics/metrics_scraper.py` e `market_scraper/README.md`
+- **Contrato compartilhado:** use sempre os modelos de `shared/schemas/schemas_scraper.py`. Ao evoluir o pipeline, valide se novos campos devem ser expostos e atualize o diretório `shared/` antes de alterar clientes.
 
 #### Pipeline padrão e fallback
 - Ordem fixa: `FetchHTMLStep` → `JsonLdParserStep` → `HtmlMetadataParserStep` → `GenericFallbackParserStep`, utilizando `price-parser` como primeira heurística textual.

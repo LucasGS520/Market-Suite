@@ -5,7 +5,7 @@ Market Suite é uma suíte de serviços especializados para monitoramento de pre
 
 | Serviço | Função principal | Documentação dedicada |
 |---------|------------------|-----------------------|
-| **market_alert** | expõe a API pública, agenda tarefas Celery, persiste dados e interpreta as respostas do scraper. | [`market_alert/README.md`](market_alert/README.md) |
+| **market_alert** | expõe a API pública, agenda tarefas Celery, persiste dados e consome o scraper via cliente dedicado. | [`market_alert/README.md`](market_alert/README.md) |
 | **market_scraper** | realiza o download da página, aplica o pipeline de parsing e devolve um `ParseResponse` consolidado. | [`market_scraper/README.md`](market_scraper/README.md) |
 | **shared** | concentra contratos, métricas e utilidades comuns às duas aplicações. | [`shared/`](shared/) |
 
@@ -33,8 +33,15 @@ graph TD
 ### Fluxo Ponta a Ponta
 1. Usuários autenticam e interagem somente com o `market_alert`.
 2. A API agenda tarefas de scraping/comparação nas filas Celery e consulta o `market_scraper` sempre que precisa atualizar preços.
-3. As tarefas persistem dados em PostgreSQL, utilizam Redis para caches/locks e geram métricas expostas em `/metrics`.
-4. Quando regras de alerta são atendidas, notificações são disparadas pelos canais ativos.
+3. O `market_scraper` valida a URL recebida, roda o pipeline de parsing (`FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`) e retorna um `ParseResponse` padronizado.
+4. As tarefas persistem dados em PostgreSQL, utilizam Redis para caches/locks e geram métricas expostas em `/metrics`.
+5. Quando regras de alerta são atendidas, notificações são disparadas pelos canais ativos.
+
+### Integração entre serviços
+- **Contrato único:** residem em [`shared/schemas/schemas_scraper.py`](shared/schemas/schemas_scraper.py) e são reutilizados pela API, worker e scraper.
+- **Chamada HTTP:** o `market_alert` usa `ScraperClient` (`market_alert/services/scraper_client.py`) para enviar `POST /scraper/parse` ao `market_scraper`.
+- **Tratamento de erros:** respostas `304 Not Modified` ou `no_result` evitam persistir dados desnecessários; erros são registrados em `crud_errors` com métricas específicas.
+- **Sem parsing duplicado:** apenas o `market_scraper` manipula HTML. Caso novos campos sejam necessários, evolua primeiro `shared/` e ajuste o pipeline do scraper antes de tocar no domínio de alertas.
 
 ## Contrato Compartilhado de Scraping
 - O request aceito pelo scraper é definido em [`shared/schemas/schemas_scraper.py`](shared/schemas/schemas_scraper.py).
@@ -55,6 +62,7 @@ Interrompa com `docker compose down`. Todos os serviços respeitam variáveis de
 
 ## Observabilidade
 - Cada serviço expõe métricas Prometheus em `/metrics` (API: `:8000`, Beat: `:8001`, Worker: `:8002`, Scraper: `:8010`).
+- Métricas compartilhadas do scraping vivem em [`shared/metrics/metrics_scraper.py`](shared/metrics/metrics_scraper.py); métricas da API/worker estão em `market_alert/metrics/`.
 - Logs estruturados são enviados para Loki quando o stack completo está em execução.
 - Dashboards de referência estão no Grafana (`http://localhost:3000`).
 

@@ -15,9 +15,10 @@ O `market_alert` é o orquestrador da suíte Market Suite. Ele expõe a API púb
 
 ## Fluxo de scraping
 1. A rota `POST /monitored/scrape` recebe a URL do produto e demais parâmetros de monitoramento.
-2. A task `collect_product_task` valida o payload, respeita a flag global de suspensão e consulta o `market_scraper` via `ScraperClient`.
-3. O resultado (`ParseResponse`) é persistido com `create_or_update_monitored_scraped` e pode acionar `compare_prices_task` quando o preço muda.
-4. Erros são registrados via `crud_errors` com o tipo apropriado (`http_error`, `no_result`, `parsing_error`), alimentando métricas e relatórios.
+2. O schema de entrada utiliza modelos Pydantic da pasta `market_alert/schemas/` e mapeia para `ParserRequest` definido em [`shared/schemas/schemas_scraper.py`](../shared/schemas/schemas_scraper.py).
+3. A task `collect_product_task` valida o payload, respeita a flag global de suspensão e consulta o `market_scraper` via `ScraperClient` (`market_alert/services/scraper_client.py`).
+4. O resultado (`ParseResponse`) é persistido com `create_or_update_monitored_scraped` e pode acionar `compare_prices_task` quando o preço muda.
+5. Erros são registrados via `crud_errors` com o tipo apropriado (`http_error`, `no_result`, `parsing_error`), alimentando métricas e relatórios.
 
 ## Estrutura principal
 ```text
@@ -45,7 +46,8 @@ market_alert/
 ## Integração com o `market_scraper`
 - O cliente HTTP está em `market_alert/services/scraper_client.py` e utiliza os contratos compartilhados em [`shared/schemas/schemas_scraper.py`](../shared/schemas/schemas_scraper.py).
 - Autenticação opcional entre serviços é configurada pelas variáveis `SCRAPER_SERVICE_AUTH_HEADER` e `SCRAPER_SERVICE_AUTH_TOKEN`.
-- Respostas 304/`no_result` mantêm consistência com o scraper e evitam parsing duplicado.
+- O cliente interpreta `ParseResponse` completo, respeitando cenários `no_result`, `304 Not Modified`, erros de validação e `unsupported_by_robots`.
+- Lógicas de parsing permanecem exclusivas do `market_scraper`; ao evoluir o contrato, atualize primeiro o diretório `shared/` e reaproveite validações existentes.
 
 ## Testes
 Execute os testes específicos com:

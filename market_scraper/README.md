@@ -12,10 +12,14 @@ O serviço `market_scraper` coleta nome e preço de anúncios em marketplaces es
 - `GET /health/ping`: verificação simples de disponibilidade.
 - `GET /metrics`: expõe as métricas registradas no `prometheus_client`.
 
+### Consumo pelo `market_alert`
+- O cliente oficial está em [`market_alert/services/scraper_client.py`](../market_alert/services/scraper_client.py) e envia requisições JSON seguindo o contrato compartilhado.
+- Respostas `304 Not Modified` são emitidas quando o scraper detecta conteúdo idêntico ao cache compartilhado; o `market_alert` interpreta esse cenário como ausência de alterações.
+
 ## Pipeline mínimo
 O fluxo é sequencial e definido em `market_scraper/services/pipeline_steps.py`:
 
-1. **FetchHTMLStep** – normaliza a URL, consulta o singleflight para evitar downloads duplicados, valida `robots.txt`, bloqueia SSRF (hosts privados) e baixa o HTML com `httpx` usando retries com backoff. Ao sucesso, o HTML é salvo no contexto compartilhado e no cache configurado.
+1. **FetchHTMLStep** – normaliza a URL a partir do `ParserRequest`, consulta o singleflight para evitar downloads duplicados, valida `robots.txt`, bloqueia SSRF (hosts privados) e baixa o HTML com `httpx` usando retries com backoff. Ao sucesso, o HTML é salvo no contexto compartilhado e no cache configurado.
 2. **JsonLdParserStep** – tenta extrair dados estruturados (`application/ld+json`).
 3. **HtmlMetadataParserStep** – analisa metatags e elementos semânticos com BeautifulSoup.
 4. **GenericFallbackParserStep** – aplica heurísticas genéricas no HTML para obter nome e preço, utilizando `price-parser` como primeira estratégia textual.
