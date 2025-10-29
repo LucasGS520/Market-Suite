@@ -15,7 +15,7 @@ from market_alert.crud.crud_monitored import get_all_monitored_products, get_mon
 from market_alert.scraper.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
 
-from market_scraper.utils.url_validation import normalize_product_url, check_url_compatibility
+from shared.utils.url_validation import check_url_compatibility, normalize_product_url
 
 
 router = APIRouter(prefix="/monitored", tags=["Monitoramento"])

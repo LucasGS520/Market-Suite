@@ -42,7 +42,8 @@ router = APIRouter(tags=["scraper"])
         504: {"model": ErrorResponse},
     },
 )
-async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
+
+async def parse_endpoint(payload: ParserRequest = Body(...)) -> ParserResponse:
     """ Executa o pipeline sequencial e retorna payload padronizado """
     trace_id = str(uuid4())
     request_logger = logger.bind(trace_id=trace_id)
@@ -74,7 +75,7 @@ async def parse_endpoint(payload: ParseRequest = Body(...)) -> ParserResponse:
     try:
         outcome = await run_pipeline(normalized_url)
     except PipelineTimeoutError as exc:
-        issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline execedido")
+        issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline excedido")
         return _http_error(
             issue,
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,

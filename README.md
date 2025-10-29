@@ -92,7 +92,7 @@ Para detalhes operacionais consulte também [`market_scraper/README.md`](market_
 
 ### Componentes principais
 - **main.py** – instancia a aplicação FastAPI e registra rotas de saúde, scraping e métricas.
-- **routes/** – expõe ``/health/ping`` e ``/scraper/parse`` (alias ``/scrape/parse``) com o contrato `ParseRequest`/`ParserResponse` definido em ``shared/schemas/schemas_scraper.py``.
+- **routes/** – expõe ``/health/ping`` e ``/scraper/parse`` (alias ``/scrape/parse``) com o contrato `ParserRequest`/`ParserResponse` definido em ``shared/schemas/schemas_scraper.py``.
 - **services/services_scraper_common.py** – cria o pipeline enxuto e aplica timeouts configuráveis antes de repassar o resultado à rota.
 - **services/pipeline_steps.py** – define as etapas `FetchHTMLStep`, `JsonLdParserStep`, `HtmlMetadataParserStep` e `GenericFallbackParserStep`.
 - **parsers/** – implementa transformações para JSON‑LD, metatags HTML e heurísticas genéricas.

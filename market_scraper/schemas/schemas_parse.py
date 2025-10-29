@@ -8,7 +8,7 @@ from shared.schemas.schemas_scraper import ParserRequest as SharedParserRequest
 from shared.schemas.schemas_scraper import ParserResponse as SharedParserResponse
 
 
-class ParseRequest(SharedParserRequest):
+class ParserRequest(SharedParserRequest):
     """ Especializa o contrato compartilhado para manter compatibilidade local """
     #Utilizamos herança direta para reaproveitar validações e garantir alinhamento
 
@@ -23,7 +23,7 @@ class ErrorResponse(BaseModel):
 
 
 __all__ = [
-    "ParseRequest",
+    "ParserRequest",
     "ParserResponse",
     "ErrorResponse",
 ]
