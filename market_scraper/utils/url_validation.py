@@ -19,7 +19,7 @@ def check_url_compatibility(url: str) -> UrlIssue | None:
     """ Aplica validações compartilhadas adicionando checagem SSRF """
     shared_issue = shared_check_url_compatibility(
         url,
-        _ensure_public_endpoint=_ensure_public_endpoint,
+        ensure_public_endpoint=_ensure_public_endpoint,
     )
     if shared_issue:
         return shared_issue

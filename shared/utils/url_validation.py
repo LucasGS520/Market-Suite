@@ -17,7 +17,7 @@ class UrlIssue:
 
 SUPPORTED_DOMAINS = {
     "mercadolivre.com.br",
-    "mercadolivre.com"
+    "mercadolivre.com",
     "amazon.com.br",
     "amazon.com",
     "magazineluiza.com.br",

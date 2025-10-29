@@ -9,10 +9,14 @@ from datetime import datetime
 from email.utils import format_datetime
 from typing import Any, Mapping
 from urllib.parse import urlparse
+from uuid import UUID
 
 import httpx
 import structlog
 
+from pydantic import ValidationError
+
+from shared.schemas.schemas_scraper import ParserResponse, ScraperRequest
 from shared.utils.redis_client import get_redis_client
 
 from market_alert.core.config_alert import settings
@@ -39,10 +43,14 @@ class ScraperClientError(Exception):
 class ScraperFetchResult:
     """ Contém dados normalizados da resposta do serviço de scraping """
     status_code: int
-    payload: dict[str, Any] | None
+    payload: ParserResponse | None
     headers: Mapping[str, str]
     error_code: str | None = None
     retry_after: int | None = None
+
+    def dump_payload(self) -> dict[str, Any] | None:
+        """ Retorna o corpo em formato ``dict`` para compatibilidade """
+        return self.payload.model_dump() if self.payload else None
 
 def _build_timeout() -> httpx.Timeout:
     """ Configura timeout composto respeitando limites do serviço """
@@ -89,8 +97,11 @@ class ScraperClient:
         etag: str | None = None,
         last_modified: datetime | None = None,
         force_refresh: bool = False,
+        product_type: str | None = None,
+        user_id: UUID | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> ScraperFetchResult:
-        """ Executa POST no ``/scraper/parse`` com proteção contra oberload """
+        """ Executa POST no ``/scraper/parse`` com proteção contra sobrecarga """
         parsed = urlparse(url)
         host = parsed.netloc or "unknown"
 
@@ -115,6 +126,21 @@ class ScraperClient:
         if settings.SCRAPER_SERVICE_AUTH_HEADER and settings.SCRAPER_SERVICE_AUTH_TOKEN:
             headers[settings.SCRAPER_SERVICE_AUTH_HEADER] = settings.SCRAPER_SERVICE_AUTH_TOKEN
 
+        request_model = ScraperRequest(
+            url=url,
+            product_type=product_type or "monitored",
+            user_id=user_id,
+        )
+        request_payload = request_model.model_dump(exclude_none=True)
+
+        extra_metadata: dict[str, Any] = dict(metadata or {})
+        if monitored_id:
+            extra_metadata.setdefault("monitored_id", monitored_id)
+        if force_refresh:
+            extra_metadata.setdefault("force_refresh", force_refresh)
+        if extra_metadata:
+            request_payload["metadata"] = extra_metadata
+
         attempt = 0
         backoff = settings.SCRAPER_RETRY_BACKOFF_MIN
 
@@ -123,7 +149,7 @@ class ScraperClient:
             try:
                 response = await self.client.post(
                     "/scraper/parse",
-                    json={"url": url},
+                    json=request_payload,
                     headers=headers or None,
                 )
             except httpx.TimeoutException as exc:
@@ -145,10 +171,18 @@ class ScraperClient:
             status_code = response.status_code
 
             if status_code == 200:
+                try:
+                    parsed_payload = ParserResponse.model_validate(response.json())
+                except ValidationError as exc:
+                    circuit_breaker.record_failure(host)
+                    raise ScraperClientError(
+                        "Resposta inválida recebida do serviço de scraping",
+                        status_code=500,
+                    ) from exc
                 circuit_breaker.record_success(host)
                 return ScraperFetchResult(
                     status_code=status_code,
-                    payload=response.json(),
+                    payload=parsed_payload,
                     headers=response.headers,
                 )
 
@@ -166,7 +200,7 @@ class ScraperClient:
                 circuit_breaker.record_success(host)
                 return ScraperFetchResult(
                     status_code=status_code,
-                    payload=body,
+                    payload=None,
                     headers=response.headers,
                     error_code=error_code,
                 )
@@ -210,6 +244,41 @@ class ScraperClient:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         """ Garante que o cliente seja fechado ao sair do contexto """
         await self.aclose()
+
+    async def parse(
+        self,
+        *,
+        url: str,
+        product_type: str | None = None,
+        monitored_id: str | None = None,
+        user_id: UUID | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> ParserResponse:
+        """ Executa ``fetch`` e devolve apenas o payload validado """
+        result = await self.fetch(
+            url=url,
+            monitored_id=monitored_id,
+            product_type=product_type,
+            user_id=user_id,
+            metadata=metadata,
+        )
+
+        if result.status_code == 200 and result.payload:
+            return result.payload
+        
+        if result.status_code == 304:
+            raise ScraperClientError("Conteúdo nçao modificado", status_code=304)
+        
+        if result.error_code:
+            raise ScraperClientError(
+                f"Erro retornado pelo scraper: {result.error_code}",
+                status_code=result.status_code,
+            )
+        
+        raise ScraperClientError(
+            "Resposta sem payload válida retornada pelo scraper",
+            status_code=result.status_code,
+        )
 
     @staticmethod
     def _compute_backoff(base: float, attempt: int) -> float:

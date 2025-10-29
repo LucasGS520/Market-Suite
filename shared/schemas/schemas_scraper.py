@@ -50,6 +50,10 @@ class ScraperRequest(_BaseUrlPayload):
         None,
         description="Identificador do usuário ligado ao monitoramento (quando disponível)",
     )
+    metadata: dict[str, Any] | None = Field(
+        None,
+        description="Campos adicionais livres para auditoria ou depuração",
+    )
 
 class ParserResponse(BaseModel):
     """ Resposta padronizada contendo os atributos essenciais do scraping """

@@ -16,8 +16,8 @@ from fastapi.responses import JSONResponse
 from structlog.stdlib import BoundLogger
 
 from shared.utils.logging_utils import sanitize_log_data
+from shared.schemas.schemas_scraper import ParserResponse
 
-from market_scraper.schemas.schemas_parse import ParserResponse
 from market_scraper.services.synergic_pipeline import PipelineOutcome
 from market_scraper.utils.url_validation import UrlIssue
 
@@ -91,6 +91,12 @@ def build_no_result_response(
         request_logger=request_logger,
     )
 
+def _extract_additional_payload(data: dict[str, Any]) -> dict[str, Any] | None:
+    """ Remove campos padrão preservando apenas metadados adicionais """
+    base_keys = {"name", "current_price", "url", "source"}
+    extras = {key: value for key, value in data.items() if key not in base_keys and value is not None}
+    return extras or None
+
 def build_success_response(
     payload: dict[str, Any],
     *,
@@ -105,6 +111,7 @@ def build_success_response(
         current_price=current_price,
         url=normalized_url,
         source=payload.get("source", outcome.context.source),
+        payload=_extract_additional_payload(payload),
     )
     request_logger.info(
         "parse_success",
@@ -117,6 +124,7 @@ def build_success_response(
 __all__ = [
     "_http_error",
     "_map_http_download_issue",
+    "_extract_additional_payload",
     "_sanitize_payload",
     "build_no_result_response",
     "build_success_response",

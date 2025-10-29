@@ -21,7 +21,9 @@ from market_scraper.routes.response_helpers import (
     build_no_result_response,
     build_success_response,
 )
-from market_scraper.schemas.schemas_parse import ErrorResponse, ParserRequest, ParserResponse
+from shared.schemas.schemas_scraper import ParserRequest, ParserResponse
+
+from market_scraper.schemas.schemas_parse import ErrorResponse
 from market_scraper.services.pipeline_factory import run_pipeline
 from market_scraper.services.synergic_pipeline import PipelineTimeoutError
 from market_scraper.utils.price import parse_price_str

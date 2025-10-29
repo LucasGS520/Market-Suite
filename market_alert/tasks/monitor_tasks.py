@@ -10,13 +10,20 @@ from decimal import Decimal
 import time
 import os
 import asyncio
+from typing import Any
 
 import structlog
 
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
-from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.schemas.schemas_products import (
+    MonitoredProductCreateScraping,
+    MonitoredScrapedInfo,
+    CompetitorProductCreateScraping,
+    CompetitorScrapedInfo,
+)
+from shared.schemas.schemas_scraper import ParserResponse
 
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
@@ -43,6 +50,10 @@ ADAPTIVE_RECHECK_BASE_INTERVAL = settings.ADAPTIVE_RECHECK_BASE_INTERVAL
 
 #TTL dos heartbeats em segundos (1 hora)
 HEARTBEAT_TTL_SECONDS = 60 * 60
+
+def _extract_details_payload(details: ParserResponse) -> dict[str, Any]:
+    """ Normaliza o campo ``payload`` opcional devolvido pelo scraper """
+    return details.payload or {}
 
 async def _parse_monitored_batch(products):
     """ Executa o parsing de produtos monitorados de forma concorrente """
@@ -118,7 +129,8 @@ def recheck_monitored_products() -> None:
                     )
                     continue
 
-                details = result["details"]
+                details: ParserResponse = result["details"]
+                extras = _extract_details_payload(details)
 
                 #Salva os dados atualizados no banco e guarda preço anterior para verificar se houve mudança
                 old_price = p.current_price
@@ -131,9 +143,10 @@ def recheck_monitored_products() -> None:
                         target_price=p.target_price,
                     ),
                     scraped_info=MonitoredScrapedInfo(
-                        current_price=Decimal(str(details.get("current_price", 0))),
-                        thumbnail=details.get("thumbnail"),
-                        free_shipping=details.get("free_shipping", False),
+                        current_price=details.current_price or Decimal("0"),
+                        thumbnail=extras.get("thumbnail"),
+                        free_shipping=bool(extras.get("free_shipping", False)),
+                        currency=extras.get("currency"),
                     ),
                     last_checked=datetime.now(timezone.utc),
                 )
@@ -191,7 +204,8 @@ def recheck_competitor_products():
                     )
                     continue
 
-                details = result["details"]
+                details: ParserResponse = result["details"]
+                extras = _extract_details_payload(details)
 
                 old_price = c.current_price
                 competitor = create_or_update_competitor_product_scraped(
@@ -201,15 +215,17 @@ def recheck_competitor_products():
                         product_url=c.product_url,
                     ),
                     scraped_info=CompetitorScrapedInfo(
-                        name=details.get("name", ""),
-                        current_price=Decimal(str(details.get("current_price", 0))),
-                        old_price=Decimal(str(details.get("old_price")))
-                        if details.get("old_price") is not None
+                        name=details.name or "",
+                        current_price=details.current_price or Decimal("0"),
+                        old_price=Decimal(str(extras.get("old_price")))
+                        if extras.get("old_price") is not None
                         else None,
-                        thumbnail=details.get("thumbnail"),
-                        free_shipping=details.get("free_shipping", False),
-                        seller=details.get("seller"),
-                        seller_rating=None,
+                        thumbnail=extras.get("thumbnail"),
+                        free_shipping=bool(extras.get("free_shipping", False)),
+                        seller=extras.get("seller"),
+                        seller_rating=float(extras.get("seller_rating"))
+                        if extras.get("seller_rating") is not None
+                        else None,
                     ),
                     last_checked=datetime.now(timezone.utc),
                 )

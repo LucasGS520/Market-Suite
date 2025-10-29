@@ -13,11 +13,11 @@ import structlog
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.schemas.schemas_scraper import ParserResponse
 
 from market_alert.crud import crud_errors
 from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.schemas.schemas_scraper_payload import ScraperPayload
 from market_alert.scraper.types import ScrapeResult
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 from shared.enums.error_codes import ScrapingErrorType
@@ -35,6 +35,10 @@ def _parse_last_modified(header: str | None) -> datetime | None:
         return dt.astimezone(timezone.utc)
     except Exception:
         return None
+    
+def _extract_metadata(payload: ParserResponse) -> dict[str, Any]:
+    """ Agrupa metadados opcionais expostos pelo scraper """
+    return payload.payload or {}
     
 def _get_existing(db: Session, payload: CompetitorProductCreateScraping) -> CompetitorProduct | None:
     """ Recupera concorrente já persistido para reaproveitar metdados """
@@ -56,6 +60,39 @@ def _extract_decimal(value: Any) -> Decimal | None:
     except Exception:
         return None
 
+def _extract_float(value: Any) -> float | None:
+    """ Converte valores numéricos opcionais em ``float`` """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+    
+def _ensure_price(payload: ParserResponse, url: str) -> Decimal:
+    """ Garante que o payload retornou preço válido """
+    if payload.current_price is None:
+        raise ScraperClientError(
+            f"Payload do scraper sem preço para a URL {url}",
+            status_code=500,
+        )
+    return payload.current_price
+
+def _ensure_name(payload: ParserResponse, url: str) -> str:
+    """ Valida presença de nome do produto antes de persistir """
+    if payload.name is None:
+        raise ScraperClientError(
+            f"Payload do scraper sem nome para a URL {url}",
+            status_code=500,
+        )
+    cleaned = payload.name.strip()
+    if not cleaned:
+        raise ScraperClientError(
+            f"Nome vazio retornado pelo scraper para a URL {url}",
+            status_code=500,
+        )
+    return cleaned
+
 async def scrape_competitor_product_async(
     db: Session,
     user_id: UUID,
@@ -73,6 +110,8 @@ async def scrape_competitor_product_async(
             monitored_id=str(payload.monitored_product_id),
             etag=etag,
             last_modified=last_modified,
+            product_type="competitor",
+            user_id=user_id,
         )
 
     headers = {k.lower(): v for k, v in response.headers.items()}
@@ -110,19 +149,20 @@ async def scrape_competitor_product_async(
             status_code=status_code,
         )
         
-    payload_model = ScraperPayload.model_validate(response.payload)
-    etag = payload_model.etag or headers.get("etag")
-    last_modified = payload_model.last_modified or _parse_last_modified(headers.get("last-modified"))
+    payload_model = response.payload
+    extras = _extract_metadata(payload_model)
+    etag = extras.get("etag") or headers.get("etag")
+    last_modified = _parse_last_modified(headers.get("last_modified") or headers.get("last-modified"))
 
     scraped_info = CompetitorScrapedInfo(
-        name=payload_model.name,
-        current_price=payload_model.current_price,
-        old_price=_extract_decimal(response.payload.get("old_price")),
-        thumbnail=response.payload.get("thumbnail"),
-        free_shipping=bool(response.payload.get("free_shipping", False)),
-        seller=response.payload.get("seller"),
-        seller_rating=response.payload.get("seller_rating"),
-        currency=payload_model.currency,
+        name=_ensure_name(payload_model, url),
+        current_price=_ensure_price(payload_model, url),
+        old_price=_extract_decimal(extras.get("old_price")),
+        thumbnail=extras.get("thumbnail"),
+        free_shipping=bool(extras.get("free_shipping", False)),
+        seller=extras.get("seller"),
+        seller_rating=_extract_float(extras.get("seller_rating")),
+        currency=extras.get("currency"),
     )
 
     competitor = create_or_update_competitor_product_scraped(
@@ -130,7 +170,7 @@ async def scrape_competitor_product_async(
         product_data=payload,
         scraped_info=scraped_info,
         last_checked=now,
-        currency=payload_model.currency,
+        currency=extras.get("currency"),
         etag=etag,
         last_modified=last_modified,
     )

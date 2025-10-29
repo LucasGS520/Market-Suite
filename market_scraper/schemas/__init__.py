@@ -3,7 +3,7 @@
 from .schemas_parse import ErrorResponse, ParseRequest, ParserResponse
 
 __all__ = [
-    "ParseRequest",
+    "ParserRequest",
     "ParserResponse",
     "ErrorResponse",
 ]

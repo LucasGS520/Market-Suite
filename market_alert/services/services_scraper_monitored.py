@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from decimal import Decimal
 from email.utils import parsedate_to_datetime
+from typing import Any
 from uuid import UUID
 
 import structlog
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from shared.schemas.schemas_scraper import ParserResponse
 
 from market_alert.core.config_alert import settings
 from market_alert.crud import crud_errors
@@ -19,7 +22,6 @@ from market_alert.crud.crud_monitored import (
     get_monitored_product_by_user_and_url,
 )
 from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.schemas.schemas_scraper_payload import ScraperPayload
 from market_alert.scraper.types import ScrapeResult
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
@@ -39,6 +41,19 @@ def _parse_last_modified(header_value: str | None) -> datetime | None:
     except Exception:
         return None
     
+def _extract_metadata(payload: ParserResponse) -> dict[str, Any]:
+    """ Normaliza metadados opcionais enviadas pelo scraper """
+    return payload.payload or {}
+
+def _ensure_price(payload: ParserResponse, url: str) -> Decimal:
+    """ Garante presença de preço válido antes de persistir informações """
+    if payload.current_price is None:
+        raise ScraperClientError(
+            f"Payload do scraper sem preço para a URL {url}",
+            status_code=500,
+        )
+    return payload.current_price
+
 async def _handle_response(
     db: Session,
     user_id: UUID,
@@ -48,6 +63,7 @@ async def _handle_response(
     headers: dict[str, str],
     existing_id: UUID | None,
     last_checked: datetime,
+    request_url: str,
 ) -> ScrapeResult:
     """ Processa reposta recebida atualizando banco e gerando histórico """
     status_code = fetch_result.status_code
@@ -74,16 +90,18 @@ async def _handle_response(
             status_code=status_code,
         )
 
-    payload = ScraperPayload.model_validate(fetch_result.payload)
+    payload = fetch_result.payload
+    extras = _extract_metadata(payload)
     normalized_headers = {k.lower(): v for k, v in headers.items()}
-    etag = payload.etag or normalized_headers.get("etag")
-    last_modified = payload.last_modified or _parse_last_modified(normalized_headers.get("last-modified"))
+    etag = extras.get("etag") or normalized_headers.get("etag")
+    last_modified_header = extras.get("last_modified") or normalized_headers.get("last_modified")
+    parsed_last_modified = _parse_last_modified(last_modified_header)
 
     scraped_info = MonitoredScrapedInfo(
-        current_price=payload.current_price,
-        thumbnail=fetch_result.payload.get("thumbnail"),
-        free_shipping=bool(fetch_result.payload.get("free_shipping", False)),
-        currency=payload.currency,
+        current_price=_ensure_price(payload, request_url),
+        thumbnail=extras.get("thumbnail"),
+        free_shipping=bool(extras.get("free_shipping", False)),
+        currency=extras.get("currency"),
     )
 
     product = create_or_update_monitored_product_scraped(
@@ -92,9 +110,9 @@ async def _handle_response(
         product_data=monitored_payload,
         scraped_info=scraped_info,
         last_checked=last_checked,
-        currency=payload.currency,
+        currency=extras.get("currency"),
         etag=etag,
-        last_modified=last_modified,
+        last_modified=parsed_last_modified,
     )
 
     price_changed = bool(getattr(product, "_price_changed", True))
@@ -133,6 +151,8 @@ async def scrape_monitored_product_async(
             etag=etag,
             last_modified=last_modified,
             force_refresh=force_refresh,
+            product_type="monitored",
+            user_id=user_id,
         )
         
     headers = dict(result.headers)
@@ -144,6 +164,7 @@ async def scrape_monitored_product_async(
         headers=headers,
         existing_id=existing.id if existing else None,
         last_checked=now,
+        request_url=url,
     )
 
     if outcome.status == "no_result" and existing:
