@@ -21,7 +21,7 @@ market_scraper/
 ├── services/             #Pipeline, etapas e orquestradores de parsing
 ├── parsers/              #Parsers específicos por domínio e fallback genérico
 ├── utils/                #Utilidades (HTTP, cache, DNS, robots, validação de URL)
-├── schemas/              #Modelos Pydantic de entrada e saída
+├── schemas/              #Modelos de erro locais
 ├── tests/                #Suite de testes do serviço
 └── archive/              #Implementações legadas mantidas para referência
 ```
@@ -29,13 +29,13 @@ market_scraper/
 ## Endpoints e Fluxos Relevantes
 | Método | Rota / Fluxo | Descrição |
 |--------|--------------|-----------|
-| `POST` | `/scraper/parse` (alias `/scrape/parse`) | Recebe `ParseRequest`, executa o pipeline e devolve `ParseResponse`. Pode retornar `304 Not Modified` ou `no_result` quando não há dados novos. |
+| `POST` | `/scraper/parse` (alias `/scrape/parse`) | Recebe `ParserRequest`, executa o pipeline e devolve `ParserResponse`. Pode retornar `304 Not Modified` ou `no_result` quando não há dados novos. |
 | `GET` | `/health/ping` | Retorna `{ "status": "ok" }` para monitoramento básico. |
 | `GET` | `/metrics` | Exibe métricas Prometheus do `REGISTRY` padrão. |
 | `Pipeline` | `services/synergic_pipeline.SynergicPipeline` | Coordena etapas sequenciais de parsing com timeouts individuais. |
 | `Pipeline` | `services/pipeline_steps.FetchHTMLStep` | Baixa HTML aplicando cache, singleflight e política de robots. |
 
-O cliente oficial vive em [`market_alert/services/scraper_client.py`](../market_alert/services/scraper_client.py) e encapsula autenticação, timeouts e tratamento dos códigos de resposta.
+O cliente oficial vive em [`market_alert/scraper/scraper_client.py`](../market_alert/services/scraper_client.py) e encapsula autenticação, timeouts, tratamento de `304 Not Modified` e validação do contrato compartilhado.
 
 ### Integração com os Serviços
 - **`market_alert`**: consome o endpoint `/scraper/parse` via `ScraperClient`, usando autenticação e timeouts definidos na API.

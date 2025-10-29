@@ -27,7 +27,7 @@ from shared.schemas.schemas_scraper import ParserResponse
 
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
-from market_alert.enums.enums_products import MonitoringType
+from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.crud.crud_monitored import get_products_by_type, create_or_update_monitored_product_scraped
 from market_alert.crud.crud_competitor import get_all_competitor_products, create_or_update_competitor_product_scraped
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
@@ -51,8 +51,10 @@ ADAPTIVE_RECHECK_BASE_INTERVAL = settings.ADAPTIVE_RECHECK_BASE_INTERVAL
 #TTL dos heartbeats em segundos (1 hora)
 HEARTBEAT_TTL_SECONDS = 60 * 60
 
-def _extract_details_payload(details: ParserResponse) -> dict[str, Any]:
+def _extract_details_payload(details: ParserResponse | None) -> dict[str, Any]:
     """ Normaliza o campo ``payload`` opcional devolvido pelo scraper """
+    if details is None:
+        return {}
     return details.payload or {}
 
 async def _parse_monitored_batch(products):
@@ -129,7 +131,13 @@ def recheck_monitored_products() -> None:
                     )
                     continue
 
-                details: ParserResponse = result["details"]
+                details: ParserResponse | None = result["details"]
+                if details is None:
+                    #Quando recebemos 304, apenas atualizamos o controle de verificação
+                    p.last_checked = datetime.now(timezone.utc)
+                    p.status = MonitoredStatus.active
+                    db.commit()
+                    continue
                 extras = _extract_details_payload(details)
 
                 #Salva os dados atualizados no banco e guarda preço anterior para verificar se houve mudança
@@ -204,7 +212,12 @@ def recheck_competitor_products():
                     )
                     continue
 
-                details: ParserResponse = result["details"]
+                details: ParserResponse | None = result["details"]
+                if details is None:
+                    #Em 304 para concorrentes, evitamos trabalho extra e só atualizamos a checagem
+                    c.last_checked = datetime.now(timezone.utc)
+                    db.commit()
+                    continue
                 extras = _extract_details_payload(details)
 
                 old_price = c.current_price

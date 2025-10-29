@@ -45,7 +45,7 @@ market_alert/
 | `Celery` | `tasks.alert_tasks.dispatch_price_alert_task` | Enfileira alertas quando regras de preço são acionadas. |
 
 ### Integração com os Serviços
-- **`market_scraper`**: consumido por `services/scraper_client.ScraperClient`, que envia `ParseRequest` e trata respostas `ParseResponse` ou `304`.
+- **`market_scraper`**: consumido por `scraper/scraper_client.ScraperClient`, que envia `ParseRequest` valida `ParseResponse` do pacote e trata `304 Not Modified` retornando `None` quando nada mudou.
 - **`shared/`**: reutiliza abstrações de configuração, métricas (`shared/metrics/metrics_api.py`), segurança e utilidades comuns.
 - **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs e tracing.
 
@@ -117,7 +117,7 @@ SERVICE_NAME=market-alert
   docker compose up -d migrations
   docker compose up -d api celery-worker celery_beat
   ```
-  
+
 - **Sem Docker:**
   1. Ative virtualenv e instale dependências: `pip install -r ../requirements.txt`.
   2. Configure `.env.common` e `.env.market_alert` com valores locais.

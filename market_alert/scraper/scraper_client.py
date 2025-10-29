@@ -253,8 +253,8 @@ class ScraperClient:
         monitored_id: str | None = None,
         user_id: UUID | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> ParserResponse:
-        """ Executa ``fetch`` e devolve apenas o payload validado """
+    ) -> ParserResponse | None:
+        """ Executa ``fetch`` e devolve payload válido ou `None` quando inalterado """
         result = await self.fetch(
             url=url,
             monitored_id=monitored_id,
@@ -267,7 +267,7 @@ class ScraperClient:
             return result.payload
         
         if result.status_code == 304:
-            raise ScraperClientError("Conteúdo não modificado", status_code=304)
+            return None
         
         if result.error_code:
             raise ScraperClientError(

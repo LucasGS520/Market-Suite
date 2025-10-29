@@ -78,6 +78,22 @@ async def test_fetch_returns_not_modified(monkeypatch: pytest.MonkeyPatch) -> No
     await client.aclose()
 
 @pytest.mark.asyncio
+async def test_parse_returns_none_on_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Parse deve retornar ``None`` quando o scraper responder 304"""
+
+    responses = [_build_response(304, None)]
+    monkeypatch.setattr(
+        "market_alert.scraper.scraper_client.httpx.AsyncClient",
+        lambda *a, **k: _DummyAsyncClient(responses),
+    )
+
+    client = ScraperClient(base_url="http://fake")
+    resultado = await client.parse(url="http://produto")
+    await client.aclose()
+
+    assert resultado is None
+
+@pytest.mark.asyncio
 async def test_fetch_handles_no_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Resposta 422 com ``no_result`` deve ser devolvida ao chamador """
 

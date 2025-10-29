@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any, ClassVar, Literal
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, Field, field_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, field_validator, model_validator
 
 
 class _BaseUrlPayload(BaseModel):
@@ -90,6 +90,17 @@ class ParserResponse(BaseModel):
         cleaned = value.strip()
         return cleaned or None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_marketplace_alias(cls, data: Any) -> Any:
+        """ Permite aceitar ``marketplace`` como alias de ``source`` sem duplicar campos """
+        if isinstance(data, dict) and "marketplace" in data:
+            #Ao receber payloads antigos ainda usando ``marketplace``, convertemos para ``source``
+            transformed = dict(data)
+            transformed.setdefault("source", transformed.pop("marketplace"))
+            return transformed
+        return data
+
 class ScraperResponse(ParserResponse):
     """ Contrato expandido utilizado pelos modelos internos do ``market_alert`` """
     old_price: Decimal | None = Field(
@@ -105,10 +116,6 @@ class ScraperResponse(ParserResponse):
     shipping: str | None = Field(
         None,
         description="Detalhes textuais de envio extraídos durante o parsing",
-    )
-    marketplace: str | None = Field(
-        None,
-        description="Origem resumida do anúncio para fins de auditoria",
     )
 
 

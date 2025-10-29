@@ -6,7 +6,7 @@ Market Suite é uma suíte de monitoramento de preços composta por serviços in
 | Serviço | Função principal | Documentação dedicada |
 |---------|------------------|-----------------------|
 | **market_alert** | expõe a API pública, agenda tarefas Celery, persiste dados, consome o scraper via cliente dedicado e orquestra notificações | [`market_alert/README.md`](market_alert/README.md) |
-| **market_scraper** | valida URLs, realiza o download da página, executa o pipeline de parsing e devolve um `ParseResponse`. | [`market_scraper/README.md`](market_scraper/README.md) |
+| **market_scraper** | valida URLs, realiza o download da página, executa o pipeline de parsing e devolve um `ParserResponse`. | [`market_scraper/README.md`](market_scraper/README.md) |
 | **shared** | concentra contratos, métricas, configuração e utilidades comuns às duas aplicações. | [`shared/`](shared/) |
 
 O arquivo [`docker-compose.yml`](docker-compose.yml) oferece a topologia completa com banco de dados PostgreSQL, Redis, workers Celery, infraestrutura de observabilidade (Prometheus, Alertmanager, Grafana, Loki, Promtail) e ferramentas auxiliares como Locust.
@@ -35,7 +35,7 @@ graph TD
 ### Fluxo Ponta a Ponta
 1. Usuários interagem apenas com o `market_alert`, autenticando via rotas de auth e configurando monitoramentos.
 2. A API agenda tarefas Celery (`monitor`, `scraping`, `metrics`) e dispara coleta imediata quando necessário.
-3. Quando um produto precisa ser atualizado, o `market_alert` chama `POST /scraper/parse` no `market_scraper` usando contratos de [`shared/schemas/schemas_scraper.py`](shared/schemas/schemas_scraper.py).
+3. Quando um produto precisa ser atualizado, o `market_alert` chama `POST /scraper/parse` no `market_scraper` usando contratos de [`shared/schemas/schemas_scraper.py`](shared/schemas/schemas_scraper.py), onde `source` é o campo canônico (aceitando alias `marketplace` apenas para compatibilidade).
 4. O `market_scraper` aplica validação de URL, checagem de `robots.txt`, cache com LRU/TTL e executa o pipeline sequencial (`FetchHTML` → `DomainSpecificParser` → `JsonLdParser` → `HtmlMetadataParser` → `GenericFallbackParser`).
 5. Os workers Celery persistem resultados, atualizam métricas (`shared/metrics/`) e publicam notificações quando as regras de alerta ativas são atendidas.
 6. Métricas e logs são expostos para observabilidade centralizada; dashboards prontos ficam disponíveis no Grafana.
