@@ -1,7 +1,7 @@
-""" Conversão e manipulação de valores monetários 
+""" Conversão e manipulação de valores monetários
 
-O módulo prioriza estratégias robustas para interpretar diferentes 
-formatos de preços mantendo ``Decimal`` como tipo canônico. o 
+O módulo prioriza estratégias robustas para interpretar diferentes
+formatos de preços mantendo ``Decimal`` como tipo canônico. O
 ``price-parser`` é utilizado sempre como primeira tentativa para
 uniformizar o parsing e registrar métricas de adoção.
 """

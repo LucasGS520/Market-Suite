@@ -1,4 +1,10 @@
-""" Normalização e validação básica de URLs compartilhadas """
+""" Normalização e validação básica de URLs compartilhadas 
+
+O módulo concentra regras de sanitização e verificação utilizadas pelos
+serviços ``market_alert`` e ``market_scraper``. O objetivo é garantir que
+ambos os serviços aceitem apenas URLs legítimas de marketplaces suportados,
+evitando duplicação de regras de negócio e reduzindo riscos de SSRF.
+"""
 
 from __future__ import annotations
 
@@ -123,7 +129,7 @@ def check_url_compatibility(
         return issue
     
     if not _is_product_page(url):
-        return UrlIssue(code="not_a_product_page", message="A URL informada não corresponde a um produto")
+        return UrlIssue(code="not_a_product", message="A URL informada não corresponde a um produto")
     
     return None
 
