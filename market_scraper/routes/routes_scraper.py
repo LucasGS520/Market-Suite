@@ -13,6 +13,11 @@ from fastapi import APIRouter, Body, Request, Response, status
 import structlog
 
 from shared.utils.logging_utils import sanitize_log_data
+from shared.utils.url_validation import (
+    UrlIssue,
+    check_url_compatibility as shared_check_url_compatibility,
+    normalize_product_url as shared_normalize_product_url,
+)
 
 from market_scraper.routes.response_helpers import (
     _http_error,
@@ -34,11 +39,20 @@ from market_scraper.utils.conditional_payload import (
     should_return_not_modified,
     store_response,
 )
+from market_scraper.utils.http_utils import HostResolutionError, resolve_public_address
 from market_scraper.utils.price import parse_price_str
-from market_scraper.utils.url_validation import UrlIssue, check_url_compatibility, normalize_product_url
 
 
 logger = structlog.get_logger("routes_scraper")
+
+def _ensure_public_endpoint(host: str) -> UrlIssue | None:
+    """ Garante que apenas hosts públicos sejam processados pelo pipeline """
+    #A resolução DNS utiliza utilitário compartilhado que bloqueia IPs privados e documenta eventuais falhas para facilitar auditoria de SSRF.
+    try:
+        resolve_public_address(host)
+    except HostResolutionError as exc:
+        return UrlIssue(code="blocked_host", message=str(exc))
+    return None
 
 router = APIRouter(tags=["scraper"])
 
@@ -64,7 +78,7 @@ async def parse_endpoint(
 
     raw_url = str(payload.url)
     try:
-        normalized_url = normalize_product_url(raw_url)
+        normalized_url = shared_normalize_product_url(raw_url)
     except ValueError as exc:
         issue = UrlIssue(code="invalid_url", message=str(exc))
         return _http_error(
@@ -77,7 +91,10 @@ async def parse_endpoint(
     
     request_logger = request_logger.bind(url=sanitize_log_data(normalized_url))
 
-    compatibility = check_url_compatibility(normalized_url)
+    compatibility = shared_check_url_compatibility(
+        normalized_url,
+        ensure_public_endpoint=_ensure_public_endpoint,    
+    )
     if compatibility:
         return _http_error(
             compatibility,

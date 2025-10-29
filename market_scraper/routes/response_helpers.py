@@ -15,11 +15,11 @@ from fastapi import status
 from fastapi.responses import JSONResponse
 from structlog.stdlib import BoundLogger
 
-from shared.utils.logging_utils import sanitize_log_data
 from shared.schemas.schemas_scraper import ParserResponse
+from shared.utils.logging_utils import sanitize_log_data
+from shared.utils.url_validation import UrlIssue
 
 from market_scraper.services.synergic_pipeline import PipelineOutcome
-from market_scraper.utils.url_validation import UrlIssue
 
 
 def _sanitize_payload(url: str) -> dict[str, str]:
