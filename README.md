@@ -1,22 +1,22 @@
 # Market Suite
-Market Suite é uma suíte de serviços especializados para monitoramento de preços e disparo de alertas. O projeto é composto por microserviços independentes que se comunicam por HTTP e filas Celery, mantendo contratos compartilhados no diretório [`shared/`](shared/).
+Market Suite é uma suíte de monitoramento de preços composta por serviços independentes que compartilham contratos, métricas e ferramentas de infraestrutura. A plataforma combina API pública, processamento assíncrono e um microserviço de scraping especializado, permitindo acompanhar produtos, comparar ofertas e disparar alertas quando critérios de preço são atendidos.
 
 ## Serviços e responsabilidades
 
 | Serviço | Função principal | Documentação dedicada |
 |---------|------------------|-----------------------|
-| **market_alert** | expõe a API pública, agenda tarefas Celery, persiste dados e consome o scraper via cliente dedicado. | [`market_alert/README.md`](market_alert/README.md) |
-| **market_scraper** | realiza o download da página, aplica o pipeline de parsing e devolve um `ParseResponse` consolidado. | [`market_scraper/README.md`](market_scraper/README.md) |
-| **shared** | concentra contratos, métricas e utilidades comuns às duas aplicações. | [`shared/`](shared/) |
+| **market_alert** | expõe a API pública, agenda tarefas Celery, persiste dados, consome o scraper via cliente dedicado e orquestra notificações | [`market_alert/README.md`](market_alert/README.md) |
+| **market_scraper** | valida URLs, realiza o download da página, executa o pipeline de parsing e devolve um `ParseResponse`. | [`market_scraper/README.md`](market_scraper/README.md) |
+| **shared** | concentra contratos, métricas, configuração e utilidades comuns às duas aplicações. | [`shared/`](shared/) |
 
-A orquestração completa é realizada pelo [`docker-compose.yml`](docker-compose.yml), que sobe banco de dados, Redis, workers Celery e a stack de observabilidade.
+O arquivo [`docker-compose.yml`](docker-compose.yml) oferece a topologia completa com banco de dados PostgreSQL, Redis, workers Celery, infraestrutura de observabilidade (Prometheus, Alertmanager, Grafana, Loki, Promtail) e ferramentas auxiliares como Locust.
 
 ## Visão Arquitetural
 ```mermaid
 graph TD
-    User[Usuário] --> API[market_alert]
-    API --> |HTTP| Scraper[market_scraper]
-    API --> |Tarefas| Worker[Celery Worker]
+    User[Usuário autenticado] --> API[market_alert]
+    API --> |HTTP (ParserRequest) | Scraper[market_scraper]
+    API --> |Filas Celery | Worker[Celery Worker]
     Worker --> Beat[Celery Beat]
     API --> DB[(PostgreSQL)]
     Worker --> DB
@@ -25,56 +25,71 @@ graph TD
     API --> Prometheus
     Worker --> Prometheus
     Beat --> Prometheus
-    Prometheus --> Grafana[(Grafana)]
-    API --> Loki[(Loki + Promtail)]
+    Scraper --> Prometheus
+    Prometheus --> Grafana[(Dashboards)]
+    API --> Loki[(Logs estruturados)]
     Worker --> Loki
+    Scraper --> Loki
 ```
 
 ### Fluxo Ponta a Ponta
-1. Usuários autenticam e interagem somente com o `market_alert`.
-2. A API agenda tarefas de scraping/comparação nas filas Celery e consulta o `market_scraper` sempre que precisa atualizar preços.
-3. O `market_scraper` valida a URL recebida, roda o pipeline de parsing (`FetchHTML` → `JsonLd` → `HtmlMetadata` → `GenericFallback`) e retorna um `ParseResponse` padronizado.
-4. As tarefas persistem dados em PostgreSQL, utilizam Redis para caches/locks e geram métricas expostas em `/metrics`.
-5. Quando regras de alerta são atendidas, notificações são disparadas pelos canais ativos.
+1. Usuários interagem apenas com o `market_alert`, autenticando via rotas de auth e configurando monitoramentos.
+2. A API agenda tarefas Celery (`monitor`, `scraping`, `metrics`) e dispara coleta imediata quando necessário.
+3. Quando um produto precisa ser atualizado, o `market_alert` chama `POST /scraper/parse` no `market_scraper` usando contratos de [`shared/schemas/schemas_scraper.py`](shared/schemas/schemas_scraper.py).
+4. O `market_scraper` aplica validação de URL, checagem de `robots.txt`, cache com LRU/TTL e executa o pipeline sequencial (`FetchHTML` → `DomainSpecificParser` → `JsonLdParser` → `HtmlMetadataParser` → `GenericFallbackParser`).
+5. Os workers Celery persistem resultados, atualizam métricas (`shared/metrics/`) e publicam notificações quando as regras de alerta ativas são atendidas.
+6. Métricas e logs são expostos para observabilidade centralizada; dashboards prontos ficam disponíveis no Grafana.
 
-### Integração entre serviços
+### Princípios de integração
 - **Contrato único:** residem em [`shared/schemas/schemas_scraper.py`](shared/schemas/schemas_scraper.py) e são reutilizados pela API, worker e scraper.
+- **Isolamento de parsing:** apenas o `market_scraper` manipula HTML e heurísticas de extração; o `market_alert` utiliza somente os dados consolidados.
 - **Chamada HTTP:** o `market_alert` usa `ScraperClient` (`market_alert/services/scraper_client.py`) para enviar `POST /scraper/parse` ao `market_scraper`.
 - **Tratamento de erros:** respostas `304 Not Modified` ou `no_result` evitam persistir dados desnecessários; erros são registrados em `crud_errors` com métricas específicas.
+- **Idempotência e cache:** o scraper evita downloads duplicados (singleflight + cache) e devolve `304 Not Modified`/`no_result` quando não há novidade, reduzindo carga no banco e no pipeline.
 - **Sem parsing duplicado:** apenas o `market_scraper` manipula HTML. Caso novos campos sejam necessários, evolua primeiro `shared/` e ajuste o pipeline do scraper antes de tocar no domínio de alertas.
+- **Observabilidade compartilhada:** métricas, logs e configurações sensíveis seguem convenções unificadas em `shared/` para simplificar automações.
 
-## Contrato Compartilhado de Scraping
-- O request aceito pelo scraper é definido em [`shared/schemas/schemas_scraper.py`](shared/schemas/schemas_scraper.py).
-- O `ParseResponse` retorna `name`, `current_price`, `url`, `source` e um campo opcional `payload`. Em cenários sem dados válidos o serviço responde `no_result`.
-- O `market_alert` nunca processa HTML diretamente; toda lógica de parsing pertence ao `market_scraper`.
+## Executando a Suíte
 
-## Executando o Projeto
+### Docker Compose
 ```bash
 docker compose up -d db redis redis-init
 docker compose up -d api market_scraper celery-worker celery_beat
 ```
-Interrompa com `docker compose down`. Todos os serviços respeitam variáveis definidas em `.env.common` e nos arquivos `.env.market_alert`/`.env.market_scraper`.
+Interrompa com `docker compose down`. Variáveis comuns residem em `.env.common`, enquanto configurações específicas ficam em `market_alert/.env.market_alert` e `market_scraper/.env.market_scraper`.
 
 ### Ambiente local
-1. Crie uma `venv` e instale dependências: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`.
-2. Configure `.env.common`, `market_alert/.env.market_alert` e `market_scraper/.env.market_scraper`.
-3. Inicie os serviços desejados conforme descrito nas documentações específicas.
+1. `python -m venv .venv && source .venv/bin/activate`
+2. `pip install -r requirements.txt`
+3. Configure as variáveis de ambiente (.env descritos acima).
+4. Inicie os serviços desejados:
+   - API FastAPI: `uvicorn market_alert.main:app --reload --port 8000`
+   - Worker Celery: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info --pool=threads --concurrency=4 -Q celery,scraping,monitor`
+   - Celery Beat com métricas: `python market_alert/beat_with_metrics.py`
+   - Scraper FastAPI: `uvicorn market_scraper.main:app --reload --port 8010`
 
-## Observabilidade
-- Cada serviço expõe métricas Prometheus em `/metrics` (API: `:8000`, Beat: `:8001`, Worker: `:8002`, Scraper: `:8010`).
-- Métricas compartilhadas do scraping vivem em [`shared/metrics/metrics_scraper.py`](shared/metrics/metrics_scraper.py); métricas da API/worker estão em `market_alert/metrics/`.
-- Logs estruturados são enviados para Loki quando o stack completo está em execução.
-- Dashboards de referência estão no Grafana (`http://localhost:3000`).
+## Observabilidade e operação
+- **Métricas Prometheus:** `/metrics` em cada serviço (API `:8000`, Beat `:8001`, Worker `:8002`, Scraper `:8010`). As definições vivem em [`shared/metrics`](shared/metrics).
+- **Logs estruturados:** os serviços usam `structlog` e enviam JSON para stdout; com Compose, Loki + Promtail coletam os fluxos.
+- **Dashboards:** Grafana em `http://localhost:3000` já provisiona dashboards básicos (ver `shared/infra/monitoring`).
+- **Alertas:** Alertmanager (`:9093`) utiliza regras em `shared/infra/alertmanager` e pode ser integrado a canais externos.
 
 ## Estrutura do Repositório
 ```text
-market_alert/ #API FastAPI, tarefas Celery e notificações
-market_scraper/ #Microserviço de scraping com pipeline enxuto
-shared/ #Contratos, métricas e utilidades comuns
+market_alert/      # API FastAPI, tasks Celery, notificações e rotinas de comparação
+market_scraper/    # Microserviço FastAPI de scraping com pipeline sequencial
+shared/            # Configuração, contratos, métricas, utilidades e recursos de infraestrutura
+docker-compose.yml # Orquestração completa em desenvolvimento
+requirements.txt   # Dependências comuns (FastAPI, Celery, httpx, structlog, etc.)
 ```
 
-## Documentação complementar 
-- [`AGENTS.md`](AGENTS.md): manual operacional para agentes de IA e automações.
-- Testes automatizados podem ser executados com `pytest` no diretórios dos serviços.
+## Testes e qualidade
+- Execute `pytest market_alert -q` para validar a API, tasks e integrações.
+- Execute `pytest market_scraper -q` para validar parsers, utilitários e pipeline.
+- Testes compartilhados (ex.: contratos) estão em `shared/tests`.
+- Linters e validações adicionais podem ser configurados via `pre-commit` conforme a equipe necessitar.
 
-
+## Próximos passos e referências
+- Leia [`AGENTS.md`](AGENTS.md) para instruções operacionais direcionadas a agentes/automação.
+- Consulte os READMEs específicos para detalhes de cada serviço.
+- Atualize este documento sempre que novos serviços, filas ou integrações forem introduzidos na suíte.
