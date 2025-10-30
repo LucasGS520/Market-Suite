@@ -253,11 +253,17 @@ class ScraperClient:
         monitored_id: str | None = None,
         user_id: UUID | None = None,
         metadata: Mapping[str, Any] | None = None,
+        etag: str | None = None,
+        last_modified: datetime | None = None,
+        force_refresh: bool = False,
     ) -> ParserResponse | None:
-        """ Executa ``fetch`` e devolve payload válido ou `None` quando inalterado """
+        """ Executa ``fetch`` reaproveitando cabeçalhos condicionais e força atualização """
         result = await self.fetch(
             url=url,
             monitored_id=monitored_id,
+            etag=etag,
+            last_modified=last_modified,
+            force_refresh=force_refresh,
             product_type=product_type,
             user_id=user_id,
             metadata=metadata,

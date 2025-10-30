@@ -6,6 +6,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from types import SimpleNamespace
+from uuid import UUID
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -80,18 +82,51 @@ async def test_fetch_returns_not_modified(monkeypatch: pytest.MonkeyPatch) -> No
 @pytest.mark.asyncio
 async def test_parse_returns_none_on_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:
     """Parse deve retornar ``None`` quando o scraper responder 304"""
-
-    responses = [_build_response(304, None)]
-    monkeypatch.setattr(
-        "market_alert.scraper.scraper_client.httpx.AsyncClient",
-        lambda *a, **k: _DummyAsyncClient(responses),
+    fetch_mock = AsyncMock(
+        return_value=ScraperFetchResult(status_code=304, payload=None, headers={})
     )
+    monkeypatch.setattr(ScraperClient, "fetch", fetch_mock)
 
     client = ScraperClient(base_url="http://fake")
-    resultado = await client.parse(url="http://produto")
+    resultado = await client.parse(
+        url="http://produto",
+        etag="abc",
+        last_modified=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        force_refresh=False,
+    )
     await client.aclose()
 
+    fetch_mock.assert_awaited_once()
     assert resultado is None
+
+@pytest.mark.asyncio
+async def test_parse_forwards_conditional_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Confere se parâmetros condicionais são repassados para ``fetch``"""
+
+    fetch_mock = AsyncMock(
+        return_value=ScraperFetchResult(status_code=304, payload=None, headers={})
+    )
+    monkeypatch.setattr(ScraperClient, "fetch", fetch_mock)
+
+    client = ScraperClient(base_url="http://fake")
+    last_modified = datetime(2024, 5, 1, 12, 0, tzinfo=timezone.utc)
+    await client.parse(
+        url="http://produto",
+        monitored_id="mid", 
+        product_type="monitored",
+        user_id=UUID("00000000-0000-0000-0000-000000000001"),
+        metadata={"a": "b"},
+        etag="xyz",
+        last_modified=last_modified,
+        force_refresh=True,
+    )
+    await client.aclose()
+
+    args = fetch_mock.await_args
+    assert args is not None
+    assert args.kwargs["etag"] == "xyz"
+    assert args.kwargs["last_modified"] == last_modified
+    assert args.kwargs["force_refresh"] is True
 
 @pytest.mark.asyncio
 async def test_fetch_handles_no_result(monkeypatch: pytest.MonkeyPatch) -> None:
