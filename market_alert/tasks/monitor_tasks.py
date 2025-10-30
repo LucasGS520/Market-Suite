@@ -1,268 +1,322 @@
 """ Tarefas agendadas para monitoramento periódico.
 
-As funções deste Módulo são executadas pelo Celery Beat e têm como objetivo
-despachar novas coletas de produtos e concorrentes, além de iniciar a
-comparação de preços.
+As funções deste Módulo são executadas pelo Celery Beat e delegam as
+coletas aos serviços ``scrape_monitored_product`` e ``scrape_competitor_product``,
+para reaproveitar a política de retries, persistência de erros e métricas
+padronizadas do pipeline.
 """
 
 from datetime import datetime, timezone
-from decimal import Decimal
-import time
 import os
-import asyncio
-from typing import Any
+import time
+from typing import Iterable
 
 import structlog
 
 from shared.infra.db import SessionLocal
-from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
-from shared.utils.redis_client import get_redis_client, is_scraping_suspended
+from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL
+from shared.utils.redis_client import  get_redis_client, is_scraping_suspended, suspend_scraping
 from shared.schemas.schemas_products import (
     MonitoredProductCreateScraping,
-    MonitoredScrapedInfo,
     CompetitorProductCreateScraping,
-    CompetitorScrapedInfo,
 )
-from shared.schemas.schemas_scraper import ParserResponse
+from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
-from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
-from market_alert.crud.crud_monitored import get_products_by_type, create_or_update_monitored_product_scraped
-from market_alert.crud.crud_competitor import get_all_competitor_products, create_or_update_competitor_product_scraped
+from market_alert.enums.enums_products import MonitoringType
+from market_alert.crud import crud_errors
+from market_alert.crud.crud_monitored import get_products_by_type, get_monitored_product_by_id
+from market_alert.crud.crud_competitor import get_all_competitor_products
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
-from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
+from market_alert.scraper.scraper_client import ScraperClientError
+from market_alert.scraper.types import ScrapeResult
+from market_alert.services.services_scraper_monitored import scrape_monitored_product
+from market_alert.services.services_scraper_competitor import scrape_competitor_product
 
 
 logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()
-scraper_client = ScraperClient()
-
-#Limite de concorrência para chamadas ao serviço de scraping
-MAX_SCRAPER_CONCURRENCY = int(os.getenv("MAX_SCRAPER_CONCURRENCY", "5"))
 
 #Tamanho dos lotes para rechecagens de produtos e concorrentes
 BATCH_SIZE_SCRAPING = int(os.getenv("BATCH_SIZE_SCRAPING", "10"))
 BATCH_SIZE_COMPETITOR = int(os.getenv("BATCH_SIZE_COMPETITOR", "20"))
 
-#Intervalo base usado para reagendamentos automáticos adaptativos
-ADAPTIVE_RECHECK_BASE_INTERVAL = settings.ADAPTIVE_RECHECK_BASE_INTERVAL
-
 #TTL dos heartbeats em segundos (1 hora)
 HEARTBEAT_TTL_SECONDS = 60 * 60
 
-def _extract_details_payload(details: ParserResponse | None) -> dict[str, Any]:
-    """ Normaliza o campo ``payload`` opcional devolvido pelo scraper """
-    if details is None:
-        return {}
-    return details.payload or {}
 
-async def _parse_monitored_batch(products):
-    """ Executa o parsing de produtos monitorados de forma concorrente """
+def _compute_retry_delay(base: float, attempt: int, limit: int) -> int:
+    """ Calcula um atraso exponencial limitado para reagendamentos automáticos """
+    delay = base * (2 ** max(0, attempt - 1))
+    return min(int(delay), limit)
 
-    semaphore = asyncio.Semaphore(MAX_SCRAPER_CONCURRENCY)
+def _compute_no_result_delay(attempt: int) -> int:
+    """ Ajusta o intervalo de retry quando o scraper retorna ``no_result`` """
+    delay = settings.SCRAPER_NO_RESULT_RETRY_SECONDS * attempt
+    return min(delay, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS)
 
-    async def _fetch(p):
-        log = logger.bind(monitored_id=str(p.id))
-        log.info("chamada_market_scraper", product_url=p.product_url)
-        async with semaphore:
-            try:
-                details = await scraper_client.parse(
-                    url=p.product_url,
-                    product_type="monitored",
-                    monitored_id=str(p.id),
-                )
-                return {"product": p, "details": details, "error": None}
-            except ScraperClientError as exc:
-                return {"product": p, "details": None, "error": exc}
+def _persist_scraping_error(db, product_id, url: str, message: str, error_type: ScrapingErrorType, *, logger_bound) -> None:
+    """ Guarda o erro de scraping com tolerância a falhas de persistência """
+    try:
+        crud_errors.create_scraping_error(db, product_id, url, message, error_type)
+    except Exception as persist_err:
+        logger_bound.warning("error_persist_failed", error=str(persist_err))
 
-    tasks = [_fetch(p) for p in products]
-    return await asyncio.gather(*tasks)
+def _handle_http_error(task, db, product_id, url: str, error: ScraperClientError, *, logger_bound) -> None:
+    """ Normaliza tratamento de ``ScraperClientError`` aplicando métricas e retries """
+    SCRAPER_HEAD_FAILURES_TOTAL.inc()
+    _persist_scraping_error(db, product_id, url, str(error), ScrapingErrorType.http_error, logger_bound=logger_bound)
 
-async def _parse_competitor_batch(competitors):
-    """ Executa o parsing de concorrentes de forma concorrente """
+    status_code = error.status_code or 0
+    attempt = task.request.retries + 1
 
-    semaphore = asyncio.Semaphore(MAX_SCRAPER_CONCURRENCY)
-
-    async def _fetch(c):
-        log = logger.bind(competitor_id=str(c.id))
-        log.info("chamada_market_scraper", product_url=c.product_url)
-        async with semaphore:
-            try:
-                details = await scraper_client.parse(
-                    url=c.product_url,
-                    product_type="competitor",
-                )
-                return {"competitor": c, "details": details, "error": None}
-            except ScraperClientError as exc:
-                return {"competitor": c, "details": None, "error": exc}
-
-    tasks = [_fetch(c) for c in competitors]
-    return await asyncio.gather(*tasks)
-
-@celery_app.task(name="market_alert.tasks.monitor_tasks.recheck_monitored_products")
-def recheck_monitored_products() -> None:
-    """ Rechecagem periódica de produtos monitorados via scraping """
-    start = time.time()
-    status = "success"
-    log = logger.bind(phase="recheck_scraping")
-
-    # Flag de suspensão global controlada via Redis
-    if is_scraping_suspended():
-        log.warning("suspended_via_flag", detail="scraping suspended flag is set")
+    #Se o scraper sinaliza retry-after, usamos o mesmo intervalo e suspendemos coletas
+    if status_code == 429:
+        countdown = error.retry_after or _compute_retry_delay(settings.SCRAPER_RETRY_BACKOFF_MIN, attempt, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS)
+        if countdown > 0:
+            suspend_scraping(countdown)
+        raise task.retry(countdown=countdown)
+    
+    #Falhas 5xx merecem retry exponencial
+    if 500 <= status_code < 600:
+        countdown = _compute_retry_delay(settings.SCRAPER_RETRY_BACKOFF_MIN, attempt, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS)
+        raise task.retry(countdown=countdown)
+    
+    #Bloqueios explícitos por robots exigem apenas log para diagnóstico
+    if status_code in {403, 451}:
+        logger_bound.warning("scraping_blocked_by_robots", status_code=status_code, url=url)
         return
+    
+    #Demais erros 4xx não possuem ação automática além de log estruturado
+    logger_bound.error("scraping_http_error", status_code=status_code, url=url)
 
-    with SessionLocal() as db:
+def _build_monitored_paylaod(product) -> MonitoredProductCreateScraping:
+    """ Constrói o payload compatível com o serviço de monitorados """
+    return MonitoredProductCreateScraping(
+        name_identification=product.name_identification,
+        product_url=product.product_url,
+        target_price=product.target_price,
+    )
+
+def _build_competitor_payload(competitor) -> CompetitorProductCreateScraping:
+    """ Constrói o payload compatível com o serviço de concorrentes """
+    return CompetitorProductCreateScraping(
+        monitored_product_id=competitor.monitored_product_id,
+        product_url=competitor.product_url,
+    )
+
+def _observe_latency(source: str, started_at: float) -> None:
+    """ Consolida a latência da task para Prometheus """
+    duration = time.time() - started_at
+    SCRAPING_LATENCY_SECONDS.labels(source=source).observe(duration)
+
+def _collect_batch_products(db, batch: Iterable, *, task, logger_bound) -> str:
+    """ Processa lote de produtos monitorados retornando status agregado """
+    status = "success"
+    for product in batch:
+        product_logger = logger_bound.bind(monitored_id=str(product.id))
+        payload = _build_monitored_paylaod(product)
+    
         try:
+            result: ScrapeResult = scrape_monitored_product(
+                db=db,
+                url=product.product_url,
+                user_id=product.user_id,
+                payload=payload,
+            )
+        except ScraperClientError as error:
+            status = "failure"
+            product_logger.error(
+                "recheck_monitored_http_error",
+                error=str(error),
+                status_code=error.status_code,
+                url=product.product_url,
+            )
+            _handle_http_error(task, db, product.id, product.product_url, error, logger_bound=product_logger)
+            continue
+        except Exception as exc:
+            status = "failure"
+            product_logger.error("recheck_monitored_unexpected_error", error=str(exc))
+            _persist_scraping_error(db, product.id, product.product_url, str(exc), ScrapingErrorType.parsing_error, logger_bound=product_logger)
+            continue
+
+        if result.status == "no_result":
+            status = "failure"
+            product_logger.warning("recheck_monitored_no_result")
+            _persist_scraping_error(
+                db,
+                product.id,
+                product.product_url,
+                "pipeline retornou no_result",
+                ScrapingErrorType.no_result,
+                logger_bound=product_logger,
+            )
+            countdown = _compute_no_result_delay(task.request.retries + 1)
+            raise task.retry(countdown=countdown)
+        
+    return status
+
+def _collect_batch_competitors(db, batch: Iterable, *, task, logger_bound) -> tuple[str, set]:
+    """ Processa lote de concorrentes retornando status agregado e IDs atualizados """
+    status = "success"
+    updated_ids: set = set()
+
+    for competitor in batch:
+        competitor_logger = logger_bound.bind(competitor_id=str(competitor.id))
+        payload = _build_competitor_payload(competitor)
+
+        try:
+            monitored = getattr(competitor, "monitored_product", None)
+            if monitored is None:
+                monitored = get_monitored_product_by_id(db, competitor.monitored_product_id)
+
+            user_id = monitored.user_id if monitored is not None else competitor.monitored_product_id
+
+            result: ScrapeResult = scrape_competitor_product(
+                db=db,
+                user_id=user_id,
+                url=competitor.product_url,
+                payload=payload,
+            )
+        except ScraperClientError as error:
+            status = "failure"
+            competitor_logger.error(
+                "recheck_competitor_http_error",
+                error=str(error),
+                status_code=error.status_code,
+                url=competitor.product_url,
+            )
+            _handle_http_error(task, db, competitor.monitored_product_id, competitor.product_url, error, logger_bound=competitor_logger)
+            continue
+
+        except Exception as exc:
+            status = "failure"
+            competitor_logger.error("recheck_competitor_unexpected_error", error=str(exc))
+            _persist_scraping_error(
+                db,
+                competitor.monitored_product_id,
+                competitor.product_url,
+                str(exc),
+                ScrapingErrorType.parsing_error,
+                logger_bound=competitor_logger,
+            )
+            continue
+
+        if result.status == "no_result":
+            status = "failure"
+            competitor_logger.warning("recheck_competitor_no_result")
+            _persist_scraping_error(
+                db,
+                competitor.monitored_product_id,
+                competitor.product_url,
+                "pipeline retornou no_result",
+                ScrapingErrorType.no_result,
+                logger_bound=competitor_logger,
+            )
+            countdown = _compute_no_result_delay(task.request.retries + 1)
+            raise task.retry(countdown=countdown)
+        
+        if result.price_changed:
+            updated_ids.add(competitor.monitored_product_id)
+
+    return status, updated_ids
+
+
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    name="market_alert.tasks.monitor_tasks.recheck_monitored_products",
+)
+def recheck_monitored_products(self) -> None:
+    """ Rechecagem periódica de produtos monitorados via scraping """
+    started_at = time.time()
+    status = "success"
+    task_logger = logger.bind(task_id=getattr(self.request, "id", None), phase="recheck_scraping")
+
+    try:
+        #Flag de suspensão global controlada via Redis
+        if is_scraping_suspended():
+            status = "failure"
+            task_logger.warning("suspended_via_flag", detail="scraping suspended flag is set")
+            return
+        
+        with SessionLocal() as db:
             products = get_products_by_type(db, MonitoringType.scraping)
             batch = products[:BATCH_SIZE_SCRAPING]
 
-            #Executa o scraping de forma concorrente
-            results = asyncio.run(_parse_monitored_batch(batch))
+            status = _collect_batch_products(db, batch, task=self, logger_bound=task_logger)
 
-            for result in results:
-                p = result["product"]
-                if result["error"] is not None:
-                    status = "failure"
-                    log.error(
-                        "scraper_request_failed",
-                        error=str(result["error"]),
-                        url=p.product_url,
-                    )
-                    continue
+            elapsed_ms = int((time.time() - started_at) * 1000)
+            task_logger.info("recheck_monitored_completed", status=status, duration_ms=elapsed_ms, dispatched=len(batch))
 
-                details: ParserResponse | None = result["details"]
-                if details is None:
-                    #Quando recebemos 304, apenas atualizamos o controle de verificação
-                    p.last_checked = datetime.now(timezone.utc)
-                    p.status = MonitoredStatus.active
-                    db.commit()
-                    continue
-                extras = _extract_details_payload(details)
+            if redis_client is not None:
+                redis_client.set("beat:last_scraping", datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL_SECONDS)
 
-                #Salva os dados atualizados no banco e guarda preço anterior para verificar se houve mudança
-                old_price = p.current_price
-                product = create_or_update_monitored_product_scraped(
-                    db=db,
-                    user_id=p.user_id,
-                    product_data=MonitoredProductCreateScraping(
-                        name_identification=p.name_identification,
-                        product_url=p.product_url,
-                        target_price=p.target_price,
-                    ),
-                    scraped_info=MonitoredScrapedInfo(
-                        current_price=details.current_price or Decimal("0"),
-                        thumbnail=extras.get("thumbnail"),
-                        free_shipping=bool(extras.get("free_shipping", False)),
-                        currency=extras.get("currency"),
-                    ),
-                    last_checked=datetime.now(timezone.utc),
-                )
+    except self.MaxRetriesExceededError as exc:
+        status = "failure"
+        task_logger.error("recheck_monitored_max_retries", error=str(exc))
+    except ScraperClientError as exc:
+        #Erros não tratados em _collect_* sçao convertidos em log crítico
+        status = "failure"
+        task_logger.error("recheck_monitored_unhandled_http", error=str(exc), status_code=exc.status_code)
+    except Exception as exc:
+        status = "failure"
+        task_logger.error("recheck_monitored_failed", error=str(exc))
+        raise
+    finally:
+        _observe_latency("monitor_scraper", started_at)
 
-                #Agendamento da comparação apenas se houver mudança no preço
-                if old_price != product.current_price:
-                    compare_prices_task.delay(str(product.id))
-
-            elapsed_ms = int((time.time() - start) * 1000)
-            log.info("recheck_monitored_completed", status=status, duration_ms=elapsed_ms, dispatched=len(batch))
-
-            #Atualizar heartbeat com expiração automática
-            redis_client.set("beat:last_scraping", datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL_SECONDS)
-
-        except Exception as exc:
-            status = "failure"
-            elapsed_ms = int((time.time() - start) * 1000)
-            log.error("recheck_monitored_failed", message=str(exc), duration_ms=elapsed_ms)
-            raise
-
-        finally:
-            #Metricas Prometheus
-            duration = time.time() - start
-            SCRAPING_LATENCY_SECONDS.labels(source="monitor_scraper").observe(duration)
-
-@celery_app.task(name="market_alert.tasks.monitor_tasks.recheck_competitor_products")
-def recheck_competitor_products():
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    name="market_alert.tasks.monitor_tasks.recheck_competitor_products",
+)
+def recheck_competitor_products(self) -> None:
     """ Rechecagem periódica de produtos concorrentes e comparação de preços """
-    start = time.time()
+    started_at = time.time()
     status = "success"
-    log = logger.bind(phase="recheck_competitors")
+    task_logger = logger.bind(task_id=getattr(self.request, "id", None), phase="recheck_competitors")
 
-    # Flag de suspensão global controlada via Redis
-    if is_scraping_suspended():
-        log.warning("suspended_via_flag", detail="scraping suspended flag is set")
-        return
-
-    with (SessionLocal() as db):
-        try:
+    try:
+        if is_scraping_suspended():
+            status = "failure"
+            task_logger.warning("suspended_via_flag", detail="scraping suspended flag is set")
+            return
+        
+        with SessionLocal() as db:
             competitors = get_all_competitor_products(db)
             batch = competitors[:BATCH_SIZE_COMPETITOR]
-            updated_ids = set()
 
-            # Executa o scraping de forma concorrente
-            results = asyncio.run(_parse_competitor_batch(batch))
+            status, updated_ids = _collect_batch_competitors(db, batch, task=self, logger_bound=task_logger)
 
-            for result in results:
-                c = result["competitor"]
-                if result["error"] is not None:
-                    status = "failure"
-                    log.error(
-                        "scraper_competitor_failed",
-                        error=str(result["error"]),
-                        url=c.product_url,
-                    )
-                    continue
+            for monitored_id in updated_ids:
+                #Disparamos comparação apenas para monitorados com preço alterado
+                compare_prices_task.delay(str(monitored_id))
 
-                details: ParserResponse | None = result["details"]
-                if details is None:
-                    #Em 304 para concorrentes, evitamos trabalho extra e só atualizamos a checagem
-                    c.last_checked = datetime.now(timezone.utc)
-                    db.commit()
-                    continue
-                extras = _extract_details_payload(details)
+            elapsed_ms = int((time.time() - started_at) * 1000)
+            task_logger.info("recheck_competitors_completed", status=status, duration_ms=elapsed_ms, count=len(batch))
 
-                old_price = c.current_price
-                competitor = create_or_update_competitor_product_scraped(
-                    db=db,
-                    product_data=CompetitorProductCreateScraping(
-                        monitored_product_id=c.monitored_product_id,
-                        product_url=c.product_url,
-                    ),
-                    scraped_info=CompetitorScrapedInfo(
-                        name=details.name or "",
-                        current_price=details.current_price or Decimal("0"),
-                        old_price=Decimal(str(extras.get("old_price")))
-                        if extras.get("old_price") is not None
-                        else None,
-                        thumbnail=extras.get("thumbnail"),
-                        free_shipping=bool(extras.get("free_shipping", False)),
-                        seller=extras.get("seller"),
-                        seller_rating=float(extras.get("seller_rating"))
-                        if extras.get("seller_rating") is not None
-                        else None,
-                    ),
-                    last_checked=datetime.now(timezone.utc),
-                )
+            if redis_client is not None:
+                redis_client.set("beat:last_competitor", datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL_SECONDS)
 
-                if old_price != competitor.current_price:
-                    updated_ids.add(competitor.monitored_product_id)
+    except self.MaxRetriesExceededError as exc:
+        status = "failure"
+        task_logger.error("recheck_competitors_max_retries", error=str(exc))
+    except ScraperClientError as exc:
+        status = "failure"
+        task_logger.error("recheck_competitors_unhandled_http", error=str(exc), status_code=exc.status_code)
+    except Exception as exc:
+        status = "failure"
+        task_logger.error("recheck_competitors_failed", error=str(exc))
+        raise
+    finally:
+        _observe_latency("monitor_competitor", started_at)
 
-            elapsed_ms = int((time.time() - start) * 1000)
-            log.info("recheck_competitors_completed", status=status, duration_ms=elapsed_ms, count=len(batch))
 
-            #Atualizar heartbeat
-            redis_client.set("beat:last_competitor", datetime.now(timezone.utc).isoformat(), ex=HEARTBEAT_TTL_SECONDS)
-
-            #Dispara uma nova task de comparação para cada produto monitorado com mudança de preço
-            for mp_id in updated_ids:
-                compare_prices_task.delay(str(mp_id))
-
-        except Exception as exc:
-            status = "failure"
-            elapsed_ms = int((time.time() - start) * 1000)
-            log.error("recheck_competitors_failed", message=str(exc), duration_ms=elapsed_ms)
-            raise
-
-        finally:
-            #Métricas Prometheus
-            duration = time.time() - start
-            SCRAPING_LATENCY_SECONDS.labels(source="monitor_competitor").observe(duration)
+__all__ = [
+    "recheck_monitored_products",
+    "recheck_competitor_products",
+]
