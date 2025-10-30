@@ -1,4 +1,4 @@
-""" Testes de integração das tasks de scraping usando o serviço externo market_scraper """
+""" Testes de integração isolados para as tasks de scraping """
 
 import pickle
 from types import SimpleNamespace
@@ -8,7 +8,7 @@ import pytest
 from shared.exceptions import ScraperError
 from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.scraper.types import ScrapeResult
-from market_alert.scraper.scraper_tasks import collect_competitor_task, collect_product_task
+from market_alert.tasks.scraper_tasks import collect_competitor_task, collect_product_task
 
 
 class DummySession:
@@ -34,6 +34,26 @@ class DummySession:
 #UUID válido fixo para testes
 VALID_UUID = "123e4567-e89b-12d3-a456-426655440000"
 
+@pytest.fixture(autouse=True)
+def _isolate_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Substitui dependências externas por dublês de teste"""
+
+    def _session_factory() -> DummySession:
+        #Cria uma sessão desconectada do banco real
+        return DummySession()
+
+    _patch_task_attr(monkeypatch, "SessionLocal", _session_factory)
+    #Evita tentativas de contato com Redis durante os testes
+    _patch_task_attr(monkeypatch, "redis_client", None)
+    _patch_task_attr(monkeypatch, "get_redis_client", lambda: None)
+
+
+def _patch_task_attr(monkeypatch: pytest.MonkeyPatch, name: str, value) -> None:
+    """Atualiza um atributo nos módulos de tasks real e de compatibilidade"""
+
+    monkeypatch.setattr(f"market_alert.scraper.scraper_tasks.{name}", value, raising=False)
+    monkeypatch.setattr(f"market_alert.tasks.scraper_tasks.{name}", value, raising=False)
+
 def test_collect_product_tasks_with_invalid_payload():
     """ Quando o payload é inválido (Pydantic), a task encerra sem exceção """
     result = collect_product_task.run(
@@ -50,8 +70,7 @@ def test_collect_product_task_scraping_http_exception(monkeypatch):
     def fake_service(*a, **k):
         raise ScraperClientError("erro", status_code=429)
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
 
     with pytest.raises(ScraperError) as exc:
         collect_product_task.run(
@@ -82,9 +101,8 @@ def test_collect_product_task_generic_exception_creates_error(monkeypatch):
     def fake_create(db, product_id, url, message, error_type):
         captured["args"] = (str(product_id), url, message, error_type)
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.crud_errors.create_scraping_error", fake_create)
+    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
+    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", fake_create)
 
     collect_product_task.run(
         "https://ml.com/x",
@@ -115,9 +133,8 @@ def test_collect_competitor_task_scraping_http_exception(monkeypatch):
     def fake_retry(*_, **kwargs):
         raise RuntimeError(f"retry:{kwargs.get('countdown')}")
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_competitor_product", fake_service)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
+    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
+    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
     monkeypatch.setattr(collect_competitor_task, "retry", fake_retry)
 
     with pytest.raises(RuntimeError) as exc:
@@ -136,10 +153,9 @@ def test_collect_competitor_task_http_5xx_retorna_retry(monkeypatch):
     def fake_retry(*_, **kwargs):
         raise RuntimeError(f"retry:{kwargs.get('countdown')}")
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
     monkeypatch.setattr(collect_product_task, "retry", fake_retry)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.crud_errors.create_scraping_error", lambda *a, **k: None)
+    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", lambda *a, **k: None)
 
     with pytest.raises(RuntimeError) as exc:
         collect_product_task.run(
@@ -158,8 +174,7 @@ def test_collect_product_task_processa_sucesso(monkeypatch):
     def fake_service(*a, **k):
         return ScrapeResult(status="success", product_id=VALID_UUID, price_changed=True)
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
 
     assert collect_product_task.run(
         "https://mercadolivre.com.br/abc",
@@ -182,8 +197,7 @@ def test_collect_product_task_no_result_dispara_retry(monkeypatch):
         captured["countdown"] = kwargs.get("countdown")
         raise collect_product_task.MaxRetriesExceededError()
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
     monkeypatch.setattr(collect_product_task, "retry", fake_retry)
 
     collect_product_task.run(
@@ -207,9 +221,8 @@ def test_collect_competitor_task_not_modified(monkeypatch):
     def fake_compare(arg):
         captured["called"] = True
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_competitor_product", fake_service)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
+    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
+    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.compare_prices_task", SimpleNamespace(delay=fake_compare))
 
     assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None

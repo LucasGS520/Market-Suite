@@ -7,9 +7,10 @@ padronizadas do pipeline.
 """
 
 from datetime import datetime, timezone
+import asyncio
 import os
 import time
-from typing import Iterable
+from typing import Iterable, Sequence
 
 import structlog
 
@@ -29,7 +30,7 @@ from market_alert.crud import crud_errors
 from market_alert.crud.crud_monitored import get_products_by_type, get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_all_competitor_products
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
-from market_alert.scraper.scraper_client import ScraperClientError
+from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 from market_alert.scraper.types import ScrapeResult
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
@@ -37,6 +38,7 @@ from market_alert.services.services_scraper_competitor import scrape_competitor_
 
 logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()
+scraper_client = ScraperClient()
 
 #Tamanho dos lotes para rechecagens de produtos e concorrentes
 BATCH_SIZE_SCRAPING = int(os.getenv("BATCH_SIZE_SCRAPING", "10"))
@@ -222,6 +224,39 @@ def _collect_batch_competitors(db, batch: Iterable, *, task, logger_bound) -> tu
 
     return status, updated_ids
 
+async def _parse_monitored_batch(batch: Sequence) -> list:
+    """ Executa parsing assíncrono de um lote de produtos monitorados """
+    if not batch:
+        #Retornamos lista vazia para manter compatibilidade com chamadores
+        return []
+    
+    #Agrupamos as chamadas para rodarem em paralelo e reduzir a latência total
+    coroutines = [
+        scraper_client.parse(
+            url=getattr(product, "product_url"),
+            product_type="monitored",
+            monitored_id=str(getattr(product, "id", "")),
+            user_id=getattr(product, "user_id", None),
+        )
+        for product in batch
+    ]
+    return await asyncio.gather(*coroutines)
+
+async def _parse_competitor_batch(batch: Sequence) -> list:
+    """ Executa parsing assíncrono de um lote de produtos concorrentes """
+    if not batch:
+        return []
+    
+    coroutines = [
+        scraper_client.parse(
+            url=getattr(competitor, "product_url"),
+            product_type="competitor",
+            monitored_id=str(getattr(competitor, "monitored_product_id", "")),
+            user_id=getattr(competitor, "user_id", None),
+        )
+        for competitor in batch
+    ]
+    return await asyncio.gather(*coroutines)
 
 @celery_app.task(
     bind=True,

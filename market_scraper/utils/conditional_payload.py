@@ -162,7 +162,7 @@ def should_return_not_modified(
 def build_cache_headers(metadata: CachedResponseMetadata) -> dict[str, str]:
     """ Monta cabeçalhos HTTP utilizados tanto em 200 quanto 304 """
     return {
-        "Etag": metadata.quoted_etag,
+        "ETag": metadata.quoted_etag,
         "Last-Modified": metadata.http_last_modified,
         "Cache-Control": _CACHE_CONTROL_DIRECTIVE,
     }

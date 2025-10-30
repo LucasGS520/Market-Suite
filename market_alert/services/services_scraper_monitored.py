@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.schemas.schemas_scraper import ParserResponse
+from shared.utils import sanitize_media_url, sanitize_text
 
 from market_alert.core.config_alert import settings
 from market_alert.crud import crud_errors
@@ -102,11 +103,14 @@ async def _handle_response(
     )
     parsed_last_modified = _parse_last_modified(last_modified_header)
 
+    sanitized_thumbnail = sanitize_media_url(extras.get("thumbnail"))
+    sanitized_currency = sanitize_text(extras.get("currency"))
+
     scraped_info = MonitoredScrapedInfo(
         current_price=_ensure_price(payload, request_url),
-        thumbnail=extras.get("thumbnail"),
+        thumbnail=sanitized_thumbnail,
         free_shipping=bool(extras.get("free_shipping", False)),
-        currency=extras.get("currency"),
+        currency=sanitized_currency,
     )
 
     product = create_or_update_monitored_product_scraped(
@@ -115,7 +119,7 @@ async def _handle_response(
         product_data=monitored_payload,
         scraped_info=scraped_info,
         last_checked=last_checked,
-        currency=extras.get("currency"),
+        currency=sanitized_currency,
         etag=etag,
         last_modified=parsed_last_modified,
     )
@@ -145,8 +149,9 @@ async def scrape_monitored_product_async(
 
     now = datetime.now(timezone.utc)
     force_refresh = False
-    if existing and existing.last_checked:
-        delta = (now - existing.last_checked).total_seconds()
+    last_checked_ref = getattr(existing, "last_checked", None)
+    if existing and isinstance(last_checked_ref, datetime):
+        delta = (now - last_checked_ref).total_seconds()
         force_refresh = delta >= settings.SCRAPER_FORCE_REFRESH_TTL_SECONDS
 
     async with ScraperClient() as client:

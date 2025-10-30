@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from market_alert.scraper.scraper_tasks import collect_product_task, collect_competitor_task, redis_client
+from market_alert.tasks.scraper_tasks import collect_product_task, collect_competitor_task, redis_client
 
 
 class DummySession:

@@ -83,7 +83,7 @@ def fake_redis_client(monkeypatch):
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
     
     try:
-        import market_alert.scraper.scraper_tasks as scraper_tasks
+        import market_alert.tasks.scraper_tasks as scraper_tasks
     except ImportError:
         scraper_tasks = None
     if scraper_tasks is not None:

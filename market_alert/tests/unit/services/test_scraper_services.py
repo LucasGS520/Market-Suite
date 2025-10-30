@@ -153,6 +153,51 @@ async def test_scrape_monitored_async(monkeypatch: pytest.MonkeyPatch, fake_moni
     assert result.status == "success"
 
 @pytest.mark.asyncio
+async def test_scrape_monitored_sanitiza_metadados(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_monitored_payload: MonitoredProductCreateScraping,
+) -> None:
+    """ Metadados inseguros devem ser limpos antes de persistência """
+
+    payload = _build_parser_payload(
+        thumbnail="javascript:alert('x')",
+        currency="<b>BRL</b>",
+    )
+    fetch_result = ScraperFetchResult(status_code=200, payload=payload, headers={})
+    fetch_mock = AsyncMock(return_value=fetch_result)
+    close_mock = AsyncMock()
+    monkeypatch.setattr(monitored.ScraperClient, "fetch", fetch_mock)
+    monkeypatch.setattr(monitored.ScraperClient, "aclose", close_mock)
+    monkeypatch.setattr(
+        monitored,
+        "get_monitored_product_by_user_and_url",
+        Mock(return_value=None),
+    )
+
+    captured: dict[str, object] = {}
+
+    def _capture(*, scraped_info, currency, **kwargs):
+        captured["thumbnail"] = scraped_info.thumbnail
+        captured["currency_info"] = scraped_info.currency
+        captured["currency_arg"] = currency
+        return SimpleNamespace(id=uuid4(), _price_changed=False)
+
+    monkeypatch.setattr(monitored, "create_or_update_monitored_product_scraped", Mock(side_effect=_capture))
+    monkeypatch.setattr(monitored.compare_prices_task, "delay", Mock())
+
+    result = await monitored.scrape_monitored_product_async(
+        db=Mock(spec=Session),
+        url=fake_monitored_payload.product_url,
+        user_id=uuid4(),
+        payload=fake_monitored_payload,
+    )
+
+    assert result.status == "success"
+    assert captured["thumbnail"] is None
+    assert captured["currency_info"] == "BRL"
+    assert captured["currency_arg"] == "BRL"
+
+@pytest.mark.asyncio
 async def test_scrape_monitored_async_propagates_last_modified(
     monkeypatch: pytest.MonkeyPatch,
     fake_monitored_payload: MonitoredProductCreateScraping,
@@ -201,7 +246,8 @@ async def test_scrape_monitored_handles_not_modified(monkeypatch: pytest.MonkeyP
     )
     update_mock = Mock()
     monkeypatch.setattr(monitored, "create_or_update_monitored_product_scraped", update_mock)
-    monkeypatch.setattr(monitored.compare_prices_task, "delay", Mock())
+    delay_mock = Mock()
+    monkeypatch.setattr(monitored.compare_prices_task, "delay", delay_mock)
 
     result = await monitored.scrape_monitored_product_async(
         db=db,
@@ -219,6 +265,7 @@ async def test_scrape_monitored_handles_not_modified(monkeypatch: pytest.MonkeyP
     assert existing.last_checked is not None
     assert result.status == "not_modified"
     assert result.product_id == str(existing_id)
+    delay_mock.assert_not_called()
 
 # ----- TESTES PARA SERVIÇOS DE CONCORRENTES -----
 
@@ -299,4 +346,58 @@ async def test_scrape_competitor_handles_not_modified(monkeypatch: pytest.Monkey
     assert existing.last_checked is not None
     assert result.status == "not_modified"
     assert result.product_id == str(existing_id)
+
+@pytest.mark.asyncio
+async def test_scrape_competitor_sanitiza_campos(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_competitor_payload: CompetitorProductCreateScraping,
+) -> None:
+    """ Dados de concorrentes devem ser sanitizados antes do CRUD """
+
+    response = ScraperFetchResult(
+        status_code=200,
+        payload=ParserResponse(
+            name="<b>Concorrente</b>",
+            current_price=Decimal("5.00"),
+            payload={
+                "thumbnail": "javascript:alert('x')",
+                "seller": "<i>Loja</i>",
+                "currency": "<b>BRL</b>",
+            },
+            url="http://teste",
+            source="test",
+        ),
+        headers={},
+    )
+
+    fetch_mock = AsyncMock(return_value=response)
+    close_mock = AsyncMock()
+    monkeypatch.setattr(competitor.ScraperClient, "fetch", fetch_mock)
+    monkeypatch.setattr(competitor.ScraperClient, "aclose", close_mock)
+
+    captured: dict[str, object] = {}
+
+    def _capture(*, scraped_info, currency, **kwargs):
+        captured["name"] = scraped_info.name
+        captured["thumbnail"] = scraped_info.thumbnail
+        captured["seller"] = scraped_info.seller
+        captured["currency_info"] = scraped_info.currency
+        captured["currency_arg"] = currency
+        return SimpleNamespace(id=uuid4(), _price_changed=False)
+
+    monkeypatch.setattr(competitor, "create_or_update_competitor_product_scraped", Mock(side_effect=_capture))
+
+    result = await competitor.scrape_competitor_product_async(
+        db=Mock(spec=Session),
+        user_id=uuid4(),
+        url=fake_competitor_payload.product_url,
+        payload=fake_competitor_payload,
+    )
+
+    assert result.status == "success"
+    assert captured["name"] == "Concorrente"
+    assert captured["thumbnail"] is None
+    assert captured["seller"] == "Loja"
+    assert captured["currency_info"] == "BRL"
+    assert captured["currency_arg"] == "BRL"
     

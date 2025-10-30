@@ -33,6 +33,9 @@ def test_scraper_parse(monkeypatch) -> None:
     
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
     monkeypatch.setattr(url_validation, "resolve_public_addresses", lambda host: ["203.0.113.10"])
+    async def _allow(*_: object, **__: object) -> bool:
+        return True
+    monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     payload = {"url": "mercadolivre.com.br/MLB-999"}
     response = client.post("/scrape/parse", json=payload)

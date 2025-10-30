@@ -69,4 +69,25 @@ def test_normalize_product_url_rejeita_esquema_invalido() -> None:
 
     with pytest.raises(ValueError):
         normalize_product_url("ftp://www.mercadolivre.com.br/MLB-123")
+
+def test_normalize_product_url_rejeita_credenciais() -> None:
+    """URLs com usuário ou senha embutidos devem ser recusadas"""
+
+    with pytest.raises(ValueError):
+        normalize_product_url("https://user:senha@www.amazon.com.br/dp/B000000001")
+
+
+def test_normalize_product_url_rejeita_punycode_invalido() -> None:
+    """Domínios com punycode malformado são considerados inválidos"""
+
+    with pytest.raises(ValueError):
+        normalize_product_url("https://xn--exemplo-.com/MLB-123")
+
+
+def test_check_url_compatibility_rejeita_credenciais() -> None:
+    """Credenciais embutidas geram issue de URL inválida"""
+
+    issue = check_url_compatibility("https://user:senha@www.amazon.com.br/dp/B000000001")
+    assert isinstance(issue, UrlIssue)
+    assert issue.code == "invalid_url"
         

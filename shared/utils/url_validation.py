@@ -1,9 +1,9 @@
-""" Normalização e validação básica de URLs compartilhadas 
+""" Validações compartilhadas de URLs dos marketplaces suportados
 
 O módulo concentra regras de sanitização e verificação utilizadas pelos
 serviços ``market_alert`` e ``market_scraper``. O objetivo é garantir que
-ambos os serviços aceitem apenas URLs legítimas de marketplaces suportados,
-evitando duplicação de regras de negócio e reduzindo riscos de SSRF.
+ambos aceitem apenas URLs legítimas de marketplaces suportados, evitando
+duplicação de regras de negócio e reduzindo riscos de SSRF.
 """
 
 from __future__ import annotations
@@ -46,6 +46,24 @@ _PRODUCT_CHECKS: Dict[str, Callable[[ParseResult], bool]] = {
 }
 
 
+def _validate_hostname(host: str | None) -> None:
+    """ Garante que o hostname não contém labels inválidas ou punycode corrompido """
+    if not host:
+        raise ValueError("URL inválida ou malformada")
+    
+    for label in host.split("."):
+        cleaned = label.strip()
+        if not cleaned:
+            raise ValueError("Hostname inválido ou incompleto")
+        if cleaned.startswith("-") or cleaned.endswith("-"):
+            raise ValueError("Hostname inválido ou punycode malformado")
+        if len(cleaned) > 63:
+            raise ValueError("Hostname excede o limite permitido")
+        try:
+            cleaned.encode("idna")
+        except UnicodeError as exc:
+            raise ValueError("Hostname inválido ou punycode malformado") from exc
+
 def _ensure_scheme(url: str) -> str:
     """ Normaliza esquema HTTP/HTTPS mantendo consistência """
     parsed_raw = urlparse(url)
@@ -66,8 +84,13 @@ def _ensure_scheme(url: str) -> str:
     if parsed_scheme not in _ALLOWED_SCHEMES:
         raise ValueError("A URL deve utilizar HTTP ou HTTPS")
     
+    if parsed.username or parsed.password:
+        raise ValueError("Credenciais embutidas não são permitidas")
+
     if not parsed.netloc:
         raise ValueError("URL inválida ou malformada")
+    
+    _validate_hostname(parsed.hostname)
 
     sanitized = parsed._replace(scheme=parsed_scheme, fragment="")
     return urlunparse(sanitized)
@@ -120,6 +143,14 @@ def check_url_compatibility(
     if not host:
         return UrlIssue(code="invalid_url", message="URL inválida ou malformada")
     
+    if parsed.username or parsed.password:
+        return UrlIssue(code="invalid_url", message="Credenciais embutidas não são permitidas")
+
+    try:
+        _validate_hostname(host)
+    except ValueError:
+        return UrlIssue(code="invalid_url", message="URL inválida ou malformada")
+
     if not _is_supported_marketplace(host):
         return UrlIssue(code="unsupported_marketplace", message="Marketplace ainda não suportado")
     

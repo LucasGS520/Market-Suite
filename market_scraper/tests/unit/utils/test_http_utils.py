@@ -47,7 +47,7 @@ def test_parse_retry_after_http_date():
 
 def test_resolve_public_address_blocks_private_ip(monkeypatch):
     _DNS_CACHE.clear()
-    blocked_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="non_public")._value.get()
+    blocked_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="private")._value.get()
 
     monkeypatch.setattr(
         "market_scraper.utils.http_utils._resolve_host_records",
@@ -57,7 +57,55 @@ def test_resolve_public_address_blocks_private_ip(monkeypatch):
     with pytest.raises(HostResolutionError):
         resolve_public_address("intranet.local")
 
-    new_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="non_public")._value.get()
+    new_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="private")._value.get()
+    assert new_metric == blocked_metric + 1
+
+
+def test_resolve_public_address_blocks_loopback_ipv6(monkeypatch):
+    _DNS_CACHE.clear()
+    blocked_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="loopback")._value.get()
+
+    monkeypatch.setattr(
+        "market_scraper.utils.http_utils._resolve_host_records",
+        lambda host: ["::1"],
+    )
+
+    with pytest.raises(HostResolutionError):
+        resolve_public_address("loopback.test")
+
+    new_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="loopback")._value.get()
+    assert new_metric == blocked_metric + 1
+
+
+def test_resolve_public_address_blocks_ipv4_mapped_private(monkeypatch):
+    _DNS_CACHE.clear()
+    blocked_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="private")._value.get()
+
+    monkeypatch.setattr(
+        "market_scraper.utils.http_utils._resolve_host_records",
+        lambda host: ["::ffff:10.0.0.25"],
+    )
+
+    with pytest.raises(HostResolutionError):
+        resolve_public_address("ipv4-mapped.test")
+
+    new_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="private")._value.get()
+    assert new_metric == blocked_metric + 1
+
+
+def test_resolve_public_address_blocks_link_local(monkeypatch):
+    _DNS_CACHE.clear()
+    blocked_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="link_local")._value.get()
+
+    monkeypatch.setattr(
+        "market_scraper.utils.http_utils._resolve_host_records",
+        lambda host: ["fe80::1"],
+    )
+
+    with pytest.raises(HostResolutionError):
+        resolve_public_address("linklocal.test")
+
+    new_metric = SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="link_local")._value.get()
     assert new_metric == blocked_metric + 1
 
 def test_resolve_public_address_timeout(monkeypatch):

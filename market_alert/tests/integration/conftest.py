@@ -18,7 +18,7 @@ from main import app
 from market_alert.core.security import get_current_user
 from market_alert.core.password import hash_password
 from market_alert.models.models_users import User
-from market_alert.scraper import scraper_tasks
+from market_alert.tasks import scraper_tasks
 
 #Utiliza banco SQLite em memória para testes
 db_url = "sqlite:///:memory:"

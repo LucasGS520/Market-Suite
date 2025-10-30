@@ -72,6 +72,9 @@ def test_parse_returns_payload_from_json_ld(monkeypatch: pytest.MonkeyPatch) -> 
         return _load_html("amazon")
 
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+    async def _allow(*_: object, **__: object) -> bool:
+        return True
+    monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     response = client.post(
         "/scrape/parse",
@@ -106,6 +109,9 @@ def test_parse_uses_html_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         return _load_html("mercadolivre")
     
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+    async def _allow(*_: object, **__: object) -> bool:
+        return True
+    monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     response = client.post(
         "/scrape/parse",
@@ -172,6 +178,9 @@ def test_parse_records_no_result_for_js_only_page(monkeypatch: pytest.MonkeyPatc
         return _load_html("magazineluiza")
 
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+    async def _allow(*_: object, **__: object) -> bool:
+        return True
+    monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     response = client.post(
         "/scrape/parse",
@@ -202,6 +211,10 @@ def test_parse_returns_not_modified_with_matching_etag(monkeypatch: pytest.Monke
         return _load_html("amazon")
 
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+    async def _allow(*_: object, **__: object) -> bool:
+        return True
+    monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
+
 
     first = client.post(
         "/scrape/parse",
@@ -245,6 +258,9 @@ def test_parse_bypasses_cache_when_force_refresh(monkeypatch: pytest.MonkeyPatch
         return _load_html("amazon")
 
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+    async def _allow(*_: object, **__: object) -> bool:
+        return True
+    monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     first = client.post(
         "/scrape/parse",

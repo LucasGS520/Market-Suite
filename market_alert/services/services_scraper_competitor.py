@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.schemas.schemas_scraper import ParserResponse
+from shared.utils import sanitize_media_url, sanitize_text
 
 from market_alert.crud import crud_errors
 from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
@@ -86,12 +87,13 @@ def _ensure_name(payload: ParserResponse, url: str) -> str:
             status_code=500,
         )
     cleaned = payload.name.strip()
-    if not cleaned:
+    sanitized = sanitize_text(cleaned)
+    if not sanitized:
         raise ScraperClientError(
             f"Nome vazio retornado pelo scraper para a URL {url}",
             status_code=500,
         )
-    return cleaned
+    return sanitized
 
 async def scrape_competitor_product_async(
     db: Session,
@@ -154,15 +156,19 @@ async def scrape_competitor_product_async(
     etag = extras.get("etag") or headers.get("etag")
     last_modified = _parse_last_modified(headers.get("last_modified") or headers.get("last-modified"))
 
+    sanitized_thumbnail = sanitize_media_url(extras.get("thumbnail"))
+    sanitized_currency = sanitize_text(extras.get("currency"))
+    sanitized_seller = sanitize_text(extras.get("seller"))
+
     scraped_info = CompetitorScrapedInfo(
         name=_ensure_name(payload_model, url),
         current_price=_ensure_price(payload_model, url),
         old_price=_extract_decimal(extras.get("old_price")),
-        thumbnail=extras.get("thumbnail"),
+        thumbnail=sanitized_thumbnail,
         free_shipping=bool(extras.get("free_shipping", False)),
-        seller=extras.get("seller"),
+        seller=sanitized_seller,
         seller_rating=_extract_float(extras.get("seller_rating")),
-        currency=extras.get("currency"),
+        currency=sanitized_currency,
     )
 
     competitor = create_or_update_competitor_product_scraped(
@@ -170,7 +176,7 @@ async def scrape_competitor_product_async(
         product_data=payload,
         scraped_info=scraped_info,
         last_checked=now,
-        currency=extras.get("currency"),
+        currency=sanitized_currency,
         etag=etag,
         last_modified=last_modified,
     )
