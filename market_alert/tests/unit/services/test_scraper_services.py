@@ -74,6 +74,11 @@ def _patch_monitored(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Mock, 
 
     crud_mock = Mock(return_value=SimpleNamespace(id=uuid4(), _price_changed=True))
     monkeypatch.setattr(monitored, "create_or_update_monitored_product_scraped", crud_mock)
+    monkeypatch.setattr(
+        monitored,
+        "get_monitored_product_by_user_and_url",
+        Mock(return_value=None),
+    )
 
     delay_mock = Mock()
     monkeypatch.setattr(monitored.compare_prices_task, "delay", delay_mock)
@@ -146,6 +151,25 @@ async def test_scrape_monitored_async(monkeypatch: pytest.MonkeyPatch, fake_moni
     delay_mock.assert_called_once()
     close_mock.assert_awaited_once()
     assert result.status == "success"
+
+@pytest.mark.asyncio
+async def test_scrape_monitored_async_propagates_last_modified(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_monitored_payload: MonitoredProductCreateScraping,
+) -> None:
+    """Confere que o ``last_modified`` parseado é repassado para o CRUD"""
+
+    _, crud_mock, _, _ = _patch_monitored(monkeypatch)
+
+    await monitored.scrape_monitored_product_async(
+        db=Mock(spec=Session),
+        url=fake_monitored_payload.product_url,
+        user_id=uuid4(),
+        payload=fake_monitored_payload,
+    )
+
+    last_modified_arg = crud_mock.call_args.kwargs["last_modified"]
+    assert last_modified_arg == datetime(2024, 5, 1, 12, 0, tzinfo=timezone.utc)
 
 @pytest.mark.asyncio
 async def test_scrape_monitored_handles_not_modified(monkeypatch: pytest.MonkeyPatch, fake_monitored_payload: MonitoredProductCreateScraping) -> None:

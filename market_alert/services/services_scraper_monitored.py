@@ -94,7 +94,12 @@ async def _handle_response(
     extras = _extract_metadata(payload)
     normalized_headers = {k.lower(): v for k, v in headers.items()}
     etag = extras.get("etag") or normalized_headers.get("etag")
-    last_modified_header = extras.get("last_modified") or normalized_headers.get("last_modified")
+    last_modified_header = (
+        extras.get("last_modified")
+        or extras.get("last-modified") 
+        or normalized_headers.get("last_modified")
+        or normalized_headers.get("last-modified")
+    )
     parsed_last_modified = _parse_last_modified(last_modified_header)
 
     scraped_info = MonitoredScrapedInfo(
