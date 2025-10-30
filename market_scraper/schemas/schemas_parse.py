@@ -1,4 +1,4 @@
-""" Esquemas Pydantic utilizados pela rota ``/parse`` """
+""" Esquemas Pydantic utilizados pela rota ``/scraper/parse`` """
 
 from __future__ import annotations
 

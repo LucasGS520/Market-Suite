@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from market_scraper.main import app
 from market_scraper.services import pipeline_steps
-from market_scraper.utils import url_validation
+import market_scraper.utils.http_utils as http_utils
 
 
 client = TestClient(app)
@@ -27,18 +27,18 @@ def test_health_ping() -> None:
     assert response.json() == {"status": "ok"}
 
 def test_scraper_parse(monkeypatch) -> None:
-    """ Confere se o endpoint ``/parse`` entrega payload mínimo """
+    """ Confere se o endpoint ``/scraper/parse`` entrega payload mínimo """
     async def fake_download(url: str, *, timeout: float) -> str:
         return FIXTURE_PATH.read_text(encoding="utf-8")
     
     monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
-    monkeypatch.setattr(url_validation, "resolve_public_addresses", lambda host: ["203.0.113.10"])
+    monkeypatch.setattr(http_utils, "resolve_public_addresses", lambda host: "203.0.113.10")
     async def _allow(*_: object, **__: object) -> bool:
         return True
     monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     payload = {"url": "mercadolivre.com.br/MLB-999"}
-    response = client.post("/scrape/parse", json=payload)
+    response = client.post("/scraper/parse", json=payload)
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "Console Retro Game"

@@ -29,7 +29,7 @@ market_scraper/
 ## Endpoints e Fluxos Relevantes
 | Método | Rota / Fluxo | Descrição |
 |--------|--------------|-----------|
-| `POST` | `/scraper/parse` (alias `/scrape/parse`) | Recebe `ParserRequest`, executa o pipeline e devolve `ParserResponse`. Pode retornar `304 Not Modified` ou `no_result` quando não há dados novos. |
+| `POST` | `/scraper/parse` | Recebe `ParserRequest`, executa o pipeline e devolve `ParserResponse`. Pode retornar `304 Not Modified` ou `no_result` quando não há dados novos. |
 | `GET` | `/health/ping` | Retorna `{ "status": "ok" }` para monitoramento básico. |
 | `GET` | `/metrics` | Exibe métricas Prometheus do `REGISTRY` padrão. |
 | `Pipeline` | `services/synergic_pipeline.SynergicPipeline` | Coordena etapas sequenciais de parsing com timeouts individuais. |
@@ -67,7 +67,7 @@ As variáveis padrão estão em [`core/config_scraper.py`](core/config_scraper.p
 ## Principais Componentes do Serviço
 - `services/synergic_pipeline.py` – organiza execução do pipeline, métricas e tratamento de exceções.
 - `services/pipeline_steps.py` – lista etapas (`FetchHTMLStep`, `DomainSpecificParserStep`, `JsonLdParserStep`, `HtmlMetadataParserStep`, `GenericFallbackParserStep`).
-- `services/parser_runner.py` – valida dados extraídos e gera `ParseResponse` final.
+- `services/parser_runner.py` – valida dados extraídos e gera `ParserResponse` final.
 - `utils/http_utils.py` – resolve DNS com cache e previne SSRF.
 - `utils/http_download.py` – realiza download com retries configuráveis.
 - `utils/cache.py` – implementa cache LRU/TTL e métricas associadas.

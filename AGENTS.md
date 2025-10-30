@@ -95,9 +95,9 @@ Este arquivo é um guia específico para agentes de IA que interagem com o códi
   - Resposta: objeto de comparação com agregados; pode disparar notificações dependendo das regras.
 
 - Chamada direta ao serviço de scraping (opcional, para testes):
-  - `POST http://localhost:8001/parse`
+  - `POST http://localhost:8010/scraper/parse`
   - Body (JSON): `{ "url": "https://www.mercadolivre.com.br/MLB-...", "product_type": "monitored" }`
-  - Resposta: `{ "name": "...", "current_price": 1234.56, "marketplace": "..." }` ou `304 Not Modified`.
+  - Resposta: `{ "name": "...", "current_price": 1234.56, "source": "..." }` ou `304 Not Modified`.
 
 ## Como Manter o AGENTS.md Atualizado
 

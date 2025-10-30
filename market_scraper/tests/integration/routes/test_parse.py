@@ -1,4 +1,4 @@
-""" Testes de integração do endpoint ``POST /parse`` com fixtures HTML reais """
+""" Testes de integração do endpoint ``POST /scraper/parse`` com fixtures HTML reais """
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_STEP_LATENCY_SECONDS,
     SCRAPER_STEP_SUCCESS_TOTAL,
 )
-from market_scraper.utils import url_validation
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures"
 FIXTURES = {
@@ -55,8 +54,7 @@ def _reset_pipeline_metrics() -> None:
 def _patch_dns(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Evita resoluções DNS reais durante os testes de integração """
     fake_dns = lambda host: ["198.51.100.10"]
-    monkeypatch.setattr(http_utils, "resolve_public_addresses", fake_dns)
-    monkeypatch.setattr(url_validation, "resolve_public_addresses", fake_dns)
+    monkeypatch.setattr(http_utils, "resolve_public_address", fake_dns)
 
 @pytest.fixture(autouse=True)
 def _clear_caches() -> None:
@@ -77,7 +75,7 @@ def test_parse_returns_payload_from_json_ld(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     response = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
     )
     assert response.status_code == 200
@@ -114,7 +112,7 @@ def test_parse_uses_html_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     response = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         json={"url": "https://produto.mercadolivre.com.br/MLB-123456789"},
     )
 
@@ -159,7 +157,7 @@ def test_parse_respects_robots_block(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pipeline_steps, "download_html", unexpected_download)
 
     response = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
     )
 
@@ -183,7 +181,7 @@ def test_parse_records_no_result_for_js_only_page(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     response = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         json={"url": "https://www.magazineluiza.com.br/p/abc123"},
     )
 
@@ -217,7 +215,7 @@ def test_parse_returns_not_modified_with_matching_etag(monkeypatch: pytest.Monke
 
 
     first = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
     )
 
@@ -228,7 +226,7 @@ def test_parse_returns_not_modified_with_matching_etag(monkeypatch: pytest.Monke
     assert first.headers.get("Cache-Control") == "max-age=0, must-revalidate"
 
     second = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         headers={"If-None-Match": etag},
         json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
     )
@@ -239,7 +237,7 @@ def test_parse_returns_not_modified_with_matching_etag(monkeypatch: pytest.Monke
     assert second.headers.get("Cache-Control") == "max-age=0, must-revalidate"
 
     third = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         headers={"If-Modified-Since": last_modified},
         json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
     )
@@ -263,7 +261,7 @@ def test_parse_bypasses_cache_when_force_refresh(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
 
     first = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         json={"url": "https://www.amazon.com.br/dp/B08N36XNTT"},
     )
 
@@ -272,7 +270,7 @@ def test_parse_bypasses_cache_when_force_refresh(monkeypatch: pytest.MonkeyPatch
     assert etag
 
     refresh = client.post(
-        "/scrape/parse",
+        "/scraper/parse",
         headers={"If-None-Match": etag},
         json={
             "url": "https://www.amazon.com.br/dp/B08N36XNTT",

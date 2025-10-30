@@ -1,7 +1,7 @@
 """ Define as rotas responsáveis por acionar o pipeline de scraping 
 
-O módulo concentra o endpoint ``/parse`` responsável por executar o
-pipeline sequencial de scraping.
+O módulo concentra o endpoint ``/scraper/parse`` responsável por 
+executar o pipeline sequencial de scraping.
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 
 O módulo expõe um único ponto de criação do pipeline, encapsulando
 as etapas padrão, timeouts e registro de métricas. Assim, a rota
-``/parse`` pode focar apenas na validação da requisição.
+``/scraper/parse`` pode focar apenas na validação da requisição.
 """
 
 from __future__ import annotations

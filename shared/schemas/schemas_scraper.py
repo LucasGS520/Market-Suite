@@ -30,7 +30,7 @@ class _BaseUrlPayload(BaseModel):
         return value
 
 class ParserRequest(_BaseUrlPayload):
-    """ Contrato mínimo aceito pelas rotas ``/scraper/parse`` ou ``/scrape/parse`` """
+    """ Contrato mínimo aceito pela rota ``/scraper/parse`` """
     product_type: Literal["monitored", "competitor"] | None = Field(
         None,
         description="Contexto opcional indicando se a URL pertence a monitorados ou concorrentes",
