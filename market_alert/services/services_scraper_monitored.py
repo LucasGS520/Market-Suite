@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
@@ -25,6 +24,7 @@ from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.types import ScrapeResult
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
+from market_alert.utils._async_helpers import _run_sync
 from shared.enums.error_codes import ScrapingErrorType
 
 
@@ -189,23 +189,4 @@ def scrape_monitored_product(
     payload: MonitoredProductCreateScraping,
 ) -> ScrapeResult:
     """ Executa o scraping de forma síncrona reutilizando o loop corrente """
-    coro = scrape_monitored_product_async(db, url, user_id, payload)
-
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-            
-    if loop.is_running():
-        new_loop = asyncio.new_event_loop()
-        try:
-            return new_loop.run_until_complete(coro)
-        finally:
-            new_loop.close()
-
-    return loop.run_until_complete(coro)
+    return _run_sync(scrape_monitored_product_async(db, url, user_id, payload))
