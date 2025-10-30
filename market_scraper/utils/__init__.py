@@ -3,7 +3,7 @@
 import importlib
 from types import ModuleType
 
-__all__ = ["url_validation"]
+__all__: list[str] = []
 
 
 def __getattr__(name: str) -> ModuleType:

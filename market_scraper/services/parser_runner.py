@@ -1,4 +1,4 @@
-""" Serviço auxiliar para executar parsers e sicronizar resultados 
+""" Serviço auxiliar para executar parsers e sincronizar resultados 
 
 As etapas do pipeline delegam a este módulo a responsabilidade de
 invocar parsers, validar o payload e atualizar o contexto compartilhado

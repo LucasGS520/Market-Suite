@@ -1,4 +1,4 @@
-""" Pipeline sequencial e observável para o MarktScraper
+""" Pipeline sequencial e observável para o MarketScraper
 
 O módulo implementa uma versão enxuta do pipeline que processa etapas em
 sequência, respeitando limites de tempo configuráveis e registrando

@@ -72,7 +72,7 @@ As variáveis padrão estão em [`core/config_scraper.py`](core/config_scraper.p
 - `utils/http_download.py` – realiza download com retries configuráveis.
 - `utils/cache.py` – implementa cache LRU/TTL e métricas associadas.
 - `utils/robots.py` – consulta `robots.txt` respeitando bloqueios explícitos.
-- `utils/url_validation.py` – validação de domínio, esquema e normalização de URLs.
+- `shared/utils/url_validation.py` – validação de domínio, esquema e normalização de URLs utilizada por ambos os serviços.
 
 Exemplo mínimo de `.env.market_scraper`:
 ```env
@@ -91,7 +91,7 @@ SERVICE_NAME=market-scraper
 
 ## Segurança e Observabilidade
 - **Segurança:**
-  - Validação de domínio apenas marketplaces documentados em `utils/url_validation.py` são aceitos; requisições inválidas retornam `400`.
+  - Validação de domínio apenas marketplaces documentados em `shared/utils/url_validation.py` são aceitos; requisições inválidas retornam `400`.
   - Proteção contra SSRF `utils/http_utils.py` bloqueia IPs privados/loopback e reutiliza DNS com TTL configurável (`SCRAPER_DNS_CACHE_TTL`).
   - Robots.txt permissivo caso o arquivo não possa ser carregado, aplicamos fallback `allow` documentado no próprio módulo para manter disponibilidade. Bloqueios explícitos retornam `unsupported_by_robots`.
   - Cache defensivo itens são invalidados por TTL e capacidade. Métricas `SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL` auxiliam na calibração.

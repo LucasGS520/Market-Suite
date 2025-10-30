@@ -4,6 +4,7 @@ from .logging_utils import mask_identifier
 from .text_sanitization import sanitize_media_url, sanitize_text
 from . import url_validation
 from .url_validation import UrlIssue, check_url_compatibility, normalize_product_url
+from .user_agents import UserAgentProvider
 
 __all__ = [
     "mask_identifier",
@@ -13,4 +14,5 @@ __all__ = [
     "UrlIssue",
     "check_url_compatibility",
     "normalize_product_url",
+    "UserAgentProvider",
 ]
