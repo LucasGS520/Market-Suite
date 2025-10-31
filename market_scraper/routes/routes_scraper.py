@@ -18,6 +18,7 @@ from shared.utils.url_validation import (
     check_url_compatibility as shared_check_url_compatibility,
     normalize_product_url as shared_normalize_product_url,
 )
+from shared.schemas.schemas_scraper import ErrorResponse, ParserRequest, ParserResponse
 
 from market_scraper.routes.response_helpers import (
     _http_error,
@@ -26,9 +27,7 @@ from market_scraper.routes.response_helpers import (
     build_no_result_response,
     build_success_response,
 )
-from shared.schemas.schemas_scraper import ParserRequest, ParserResponse
 
-from market_scraper.schemas.schemas_parse import ErrorResponse
 from market_scraper.services.pipeline_factory import run_pipeline
 from market_scraper.services.synergic_pipeline import PipelineTimeoutError
 from market_scraper.utils.conditional_payload import (

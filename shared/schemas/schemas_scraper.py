@@ -106,6 +106,11 @@ class ParserResponse(BaseModel):
             return transformed
         return data
 
+class ErrorResponse(BaseModel):
+    """ Estrutura de erros retornados pela rota ``/scraper/parse`` """
+    message: str = Field(..., description="Descrição humanizada de erro")
+    error_code: str = Field(..., description="Código categórico que identifica o erro encontrado")
+    trace_id: str | None = Field(..., description="Identificador correlacionado com os logs estruturados")
 
 @dataclass(slots=True)
 class ScrapeResult:
@@ -125,4 +130,5 @@ class ScrapeResult:
 __all__ = [
     "ParserRequest",
     "ParserResponse",
+    "ErrorResponse",
 ]
