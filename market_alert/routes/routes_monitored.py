@@ -37,12 +37,12 @@ def create_scrape_product(request: Request, product_data: MonitoredProductCreate
         logger.warning("invalid_product_url", url=normalized_url, code=issue.code)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
 
-    #Cria um produto agendado via celery
+    #Cria um produto agendado via celery; envia target_price como string para preservar precisão ao atravessar filas
     collect_product_task.delay(
         url=normalized_url,
         user_id=str(user.id),
         name_identification=product_data.name_identification,
-        target_price=float(product_data.target_price)
+        target_price=str(product_data.target_price)
     )
 
     logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled")

@@ -1,5 +1,6 @@
 """ Testes unitários das tasks de scraping sem dependências externas """
 
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -45,7 +46,7 @@ def test_collect_product_task_send_request_and_persists(monkeypatch):
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.redis_client.set", lambda *a, **k: None)
 
-    collect_product_task.run("http://produto", VALID_UUID, "Produto", 20.0)
+    collect_product_task.run("http://produto", VALID_UUID, "Produto", Decimal("20.0"))
 
     assert chamado["url"] == "http://produto"
     assert chamado["user_id"] == VALID_UUID

@@ -8,6 +8,7 @@ as tasks mantêm métricas e tratamento de erros.
 """
 
 from uuid import UUID
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -120,7 +121,14 @@ def _compute_retry_delay(base: float, attempt: int, limit: int) -> int:
     acks_late=True,
     reject_on_worker_lost=True,
 )
-def collect_product_task(self, url: str, user_id: str, name_identification: str, target_price: float, monitored_id: str | None = None) -> None:
+def collect_product_task(
+    self, 
+    url: str, 
+    user_id: str, 
+    name_identification: str, 
+    target_price: str | Decimal, 
+    monitored_id: str | None = None,
+) -> None:
     """ Coleta dados de um produto monitorado e os salva no banco """
     SCRAPER_IN_FLIGHT.inc()
     task_logger = logger.bind(task_id=self.request.id, url=url, user_id=user_id)
@@ -129,7 +137,7 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
     status = "success"
     task_logger.info("collect_product_started")
 
-    #Checa flag de suspensão global
+    #Verifica se há suspensão global para interromper o fluxo imediatamente
     if is_scraping_suspended():
         status = "failure"
         task_logger.warning("suspended_via_flag", detail="scraping suspended flag is set")
@@ -137,13 +145,27 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
         SCRAPER_IN_FLIGHT.dec()
         return
 
-    #Validação e preparação do payload recebido
+    #Converte target_price para Decimal
+    try:
+        normalized_target_price = Decimal(str(target_price))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        status = "failure"
+        task_logger.error(
+            "invalid_target_price",
+            error=str(exc),
+            raw_value=str(target_price),
+        )
+        _observe_metrics(start, "collect_product_task", status)
+        SCRAPER_IN_FLIGHT.dec()
+        return
+
+    #Prepara payload com valores normalizados para schema Pydantic
     try:
         payload = MonitoredProductCreateScraping.model_validate(
             {
                 "name_identification": name_identification,
                 "product_url": url,
-                "target_price": target_price
+                "target_price": normalized_target_price
             }
         )
     except Exception as exc:
