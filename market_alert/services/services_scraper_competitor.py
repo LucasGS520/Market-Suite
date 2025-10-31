@@ -9,19 +9,20 @@ import structlog
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.schemas.schemas_scraper import ScrapeResult
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
 from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.crud import crud_errors
 from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.scraper.types import ScrapeResult
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 from market_alert.utils._async_helpers import _run_sync
 from market_alert.services._scraper_common import (
+    execute_scraper_fetch,
     ensure_name,
     ensure_price,
-    maybe_call_mocked_parse,
+    resolve_conditional_headers,
     to_decimal,
     to_float,
 )
@@ -49,19 +50,11 @@ async def scrape_competitor_product_async(
 ) -> ScrapeResult:
     """ Executa scraping de concorrentes retornando ``ScraperResult`` estruturado """
     normalized_url = str(url)
-    url = normalized_url
     existing = _get_existing(db, payload)
-    etag = existing.etag if existing else None
-    if etag is not None and not isinstance(etag, str):
-        etag = None
-    last_modified = existing.last_modified if existing else None
-    if isinstance(last_modified, datetime) and last_modified.tzinfo is None:
-        last_modified = last_modified.replace(tzinfo=timezone.utc)
-    elif not isinstance(last_modified, datetime):
-        last_modified = None
+    etag, last_modified = resolve_conditional_headers(existing)
 
     async with ScraperClient() as client:
-        mocked = await maybe_call_mocked_parse(
+        response = await execute_scraper_fetch(
             client,
             url=normalized_url,
             monitored_id=str(payload.monitored_product_id),
@@ -72,17 +65,6 @@ async def scrape_competitor_product_async(
             user_id=user_id,
             metadata=None,
         )
-        if mocked is not None:
-            response = mocked
-        else:
-            response = await client.fetch(
-                url=normalized_url,
-                monitored_id=str(payload.monitored_product_id),
-                etag=etag,
-                last_modified=last_modified,
-                product_type="competitor",
-                user_id=user_id,
-            )
 
     status_code = response.status_code
     now = datetime.now(timezone.utc)
@@ -101,7 +83,7 @@ async def scrape_competitor_product_async(
         crud_errors.create_scraping_error(
             db,
             payload.monitored_product_id,
-            url,
+            normalized_url,
             "pipeline retornou no_result",
             ScrapingErrorType.no_result,
         )
@@ -126,8 +108,8 @@ async def scrape_competitor_product_async(
     sanitized_seller = sanitize_text(metadata.get("seller"))
 
     scraped_info = CompetitorScrapedInfo(
-        name=ensure_name(payload_model, url),
-        current_price=ensure_price(payload_model, url),
+        name=ensure_name(payload_model, normalized_url),
+        current_price=ensure_price(payload_model, normalized_url),
         old_price=to_decimal(metadata.get("old_price")),
         thumbnail=sanitized_thumbnail,
         free_shipping=bool(metadata.get("free_shipping", False)),

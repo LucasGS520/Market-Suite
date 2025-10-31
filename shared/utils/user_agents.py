@@ -12,7 +12,7 @@ def _build_cycle(default_user_agent: str, user_agent_pool: Sequence[str]) -> Ite
     """ Monta o ciclo determinístico respeitando o pool configurado """
     filtered_pool = tuple(agent for agent in user_agent_pool if agent)
     if not filtered_pool:
-        return itertools.cycle((default_user_agent))
+        return itertools.cycle((default_user_agent,))
     return itertools.cycle(filtered_pool)
 
 def _normalize_domain(domain_or_url: str | None) -> str | None:

@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from shared.schemas.schemas_scraper import ScrapeResult
 from shared.exceptions import ScraperError
 from market_alert.scraper.scraper_client import ScraperClientError
-from market_alert.scraper.types import ScrapeResult
 from market_alert.tasks.scraper_tasks import collect_competitor_task, collect_product_task
 
 

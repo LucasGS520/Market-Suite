@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from shared.utils.http_headers import normalize_headers, parse_http_datetime
 
+if TYPE_CHECKING:
+    #Importar apenas em tempo de análise evita dependência circular em runtime
+    from shared.schemas.schemas_scraper import ParserResponse
+else:  #pragma: no cover - rótulo evita alerta de cobertura em fallback
+    ParserResponse = object
 
 @dataclass(slots=True)
 class ScraperMetadata:

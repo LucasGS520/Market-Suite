@@ -8,6 +8,7 @@ As classes expostas aqui são utilizadas diretamente pelas rotas HTTP do
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, ClassVar, Literal
 from uuid import UUID
@@ -117,6 +118,20 @@ class ScraperResponse(ParserResponse):
         None,
         description="Detalhes textuais de envio extraídos durante o parsing",
     )
+
+@dataclass(slots=True)
+class ScrapeResult:
+    """ Resultado canônico utlizado pelas rotinas do ``market_alert`` """
+    status: str
+    product_id: str | None = None
+    price_changed: bool = False
+    http_status: int | None = None
+    error_code: str | None = None
+    retry_after: int | None = None
+
+    def __getitem__(self, item: str):
+        """ Permite acesso estilo dicionário para compatibilidade retroativa """
+        return getattr(self, item)
 
 
 __all__ = [

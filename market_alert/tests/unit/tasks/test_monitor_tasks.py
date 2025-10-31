@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from market_alert.scraper.types import ScrapeResult
+from shared.schemas.schemas_scraper import ScrapeResult
 from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.tasks import monitor_tasks
 

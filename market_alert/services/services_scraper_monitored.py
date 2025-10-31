@@ -9,6 +9,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from shared.schemas.schemas_scraper import ScrapeResult
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
 from shared.enums.error_codes import ScrapingErrorType
 
@@ -19,11 +20,15 @@ from market_alert.crud.crud_monitored import (
     get_monitored_product_by_user_and_url,
 )
 from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.scraper.types import ScrapeResult
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from market_alert.utils._async_helpers import _run_sync
-from market_alert.services._scraper_common import ensure_price, maybe_call_mocked_parse
+from market_alert.services._scraper_common import (
+    compute_force_refresh,
+    ensure_price,
+    execute_scraper_fetch,
+    resolve_conditional_headers,
+)
 
 
 #Logger específico para o fluxo de monitorados
@@ -108,26 +113,19 @@ async def scrape_monitored_product_async(
 ) -> ScrapeResult:
     """ Executa scraping para produto monitorado de forma assíncrona """
     normalized_url = str(url)
-    url = normalized_url
     existing = get_monitored_product_by_user_and_url(db, user_id, str(payload.product_url))
-    etag = existing.etag if existing else None
-    if etag is not None and not isinstance(etag, str):
-        etag = None
-    last_modified = existing.last_modified if existing else None
-    if isinstance(last_modified, datetime) and last_modified.tzinfo is None:
-        last_modified = last_modified.replace(tzinfo=timezone.utc)
-    elif not isinstance(last_modified, datetime):
-        last_modified = None
+    etag, last_modified = resolve_conditional_headers(existing)
 
     now = datetime.now(timezone.utc)
-    force_refresh = False
     last_checked_ref = getattr(existing, "last_checked", None)
-    if existing and isinstance(last_checked_ref, datetime):
-        delta = (now - last_checked_ref).total_seconds()
-        force_refresh = delta >= settings.SCRAPER_FORCE_REFRESH_TTL_SECONDS
+    force_refresh = compute_force_refresh(
+        last_checked_ref if isinstance(last_checked_ref, datetime) else None,
+        now=now,
+        ttl_seconds=settings.SCRAPER_FORCE_REFRESH_TTL_SECONDS,
+    ) if existing else False
 
     async with ScraperClient() as client:
-        mocked = await maybe_call_mocked_parse(
+        result = await execute_scraper_fetch(
             client,
             url=normalized_url,
             monitored_id=str(existing.id) if existing else None,
@@ -138,18 +136,6 @@ async def scrape_monitored_product_async(
             user_id=user_id,
             metadata=None,
         )
-        if mocked is not None:
-            result = mocked
-        else:
-            result = await client.fetch(
-                url=normalized_url,
-                monitored_id=str(existing.id) if existing else None,
-                etag=etag,
-                last_modified=last_modified,
-                force_refresh=force_refresh,
-                product_type="monitored",
-                user_id=user_id,
-            )
 
     outcome = await _handle_response(
         db,
@@ -165,7 +151,7 @@ async def scrape_monitored_product_async(
         crud_errors.create_scraping_error(
             db,
             existing.id,
-            url,
+            normalized_url,
             "pipeline retornou no_result",
             ScrapingErrorType.no_result,
         )

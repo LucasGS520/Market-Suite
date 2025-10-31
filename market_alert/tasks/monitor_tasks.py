@@ -21,6 +21,7 @@ from shared.schemas.schemas_products import (
     MonitoredProductCreateScraping,
     CompetitorProductCreateScraping,
 )
+from shared.schemas.schemas_scraper import ScrapeResult
 from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.core.config_alert import settings
@@ -31,7 +32,6 @@ from market_alert.crud.crud_monitored import get_products_by_type, get_monitored
 from market_alert.crud.crud_competitor import get_all_competitor_products
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
-from market_alert.scraper.types import ScrapeResult
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 

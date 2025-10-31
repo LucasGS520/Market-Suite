@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Mapping
 from uuid import UUID
@@ -21,6 +21,44 @@ from market_alert.scraper.scraper_client import (
     ScraperFetchResult,
 )
 
+
+def resolve_conditional_headers(entity: Any) -> tuple[str | None, datetime | None]:
+    """ Normaliza campos de cache (etag e last_modified) para chamadas ao scraper """
+    if entity is None:
+        return None, None
+    
+    etag = getattr(entity, "etag", None)
+    if not isinstance(etag, str):
+        etag = None
+
+    last_modified = getattr(entity, "last_modified", None)
+    if isinstance(etag, str):
+        etag = None
+
+    last_modified = getattr(entity, "last_modified", None)
+    if isinstance(last_modified, datetime):
+        if last_modified.tzinfo is None:
+            last_modified = last_modified.replace(tzinfo=timezone.utc)
+
+        else:
+            last_modified = None
+
+        return etag, last_modified
+
+def compute_force_refresh(
+    last_checked: datetime | None,
+    *,
+    now: datetime,
+    ttl_seconds: int,
+) -> bool:
+    """ Determina se a coleta deve ignorar condicionais pelo TTL configurado """
+    if last_checked is None:
+        return False
+    
+    if last_checked.tzinfo is None:
+        last_checked = last_checked.replace(tzinfo=timezone.utc)
+
+    return (now - last_checked).total_seconds() >= ttl_seconds
 
 def ensure_price(payload: ParserResponse, url: str) -> Decimal:
     """ Garante que o payload contenha preço válido antes de persistir """
@@ -110,11 +148,53 @@ async def maybe_call_mocked_parse(
 
     return ScraperFetchResult(status_code=200, payload=parsed, headers={})
 
+async def execute_scraper_fetch(
+    client: ScraperClient,
+    *,
+    url: str,
+    product_type: str,
+    monitored_id: str | None,
+    user_id: UUID | None,
+    metadata: Mapping[str, Any] | None,
+    etag: str | None,
+    last_modified: datetime | None,
+    force_refresh: bool,
+) -> ScraperFetchResult:
+    """ Executa chamadas ao scraper respeitando mocks e condicionais HTTP """
+    result = await maybe_call_mocked_parse(
+        client,
+        url=url,
+        monitored_id=monitored_id,
+        etag=etag,
+        last_modified=last_modified,
+        force_refresh=force_refresh,
+        product_type=product_type,
+        user_id=user_id,
+        metadata=metadata,
+    )
+
+    if result is not None:
+        return result
+    
+    return await client.fetch(
+        url=url,
+        monitored_id=monitored_id,
+        etag=etag,
+        last_modified=last_modified,
+        force_refresh=force_refresh,
+        product_type=product_type,
+        user_id=user_id,
+        metadata=metadata,
+    )
+
 
 __all__ = [
     "ensure_price",
     "ensure_name",
     "to_decimal",
     "to_float",
+    "resolve_conditional_headers",
+    "compute_force_refresh",
     "maybe_call_mocked_parse",
+    "execute_scraper_fetch",
 ]
