@@ -24,8 +24,15 @@ class _DummyAsyncClient:
     def __init__(self, responses: list[httpx.Response]):
         self._responses = responses
         self.calls = 0
+        self.sent_headers: list[dict[str, str]] = []
 
-    async def post(self, url: str, json: dict[str, str], headers: dict[str, str] | None = None) -> httpx.Response:
+    async def post(
+        self, 
+        url: str, 
+        json: dict[str, str], 
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        self.sent_headers.append(dict(headers or {}))
         response = self._responses[self.calls]
         self.calls += 1
         return response
@@ -78,6 +85,35 @@ async def test_fetch_returns_not_modified(monkeypatch: pytest.MonkeyPatch) -> No
     assert result.status_code == 304
     assert result.payload is None
     await client.aclose()
+
+@pytest.mark.asyncio
+async def test_fetch_does_not_leak_conditional_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ Garante que cabeçalhos condicionais não vazem entre chamadas consecutivas """
+
+    responses = [
+        _build_response(304, None, {"ETag": "servidor-etag"}),
+        _build_response(
+            200,
+            {"name": "Produto", "current_price": 10.0, "url": "http://a", "source": "test"},
+        ),
+    ]
+
+    dummy_client = _DummyAsyncClient(responses)
+    monkeypatch.setattr(
+        "market_alert.scraper.scraper_client.httpx.AsyncClient",
+        lambda *a, **k: dummy_client,
+    )
+
+    client = ScraperClient(base_url="http://fake")
+    await client.fetch(url="http://produto", monitored_id=None, etag="abc")
+    await client.fetch(url="http://produto", monitored_id=None)
+    await client.aclose()
+
+    assert dummy_client.sent_headers[0].get("If-None-Match") == "abc"
+    assert "If-None-Match" not in dummy_client.sent_headers[1]
+    assert "If-Modified-Since" not in dummy_client.sent_headers[1]
 
 @pytest.mark.asyncio
 async def test_parse_returns_none_on_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:

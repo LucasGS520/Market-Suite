@@ -85,15 +85,18 @@ def _acquire_http_client(
     base_url: str,
     headers: dict[str, str] | None,
 ) -> tuple[httpx.AsyncClient, str]:
-    """ Retorna cliente compartilhado incrementando o contador de uso """
+    """ Retorna cliente compartilhado incrementando o contador de uso 
+    
+    Cabeçalhos adicionais são aplicados apenas na criação inicial para
+    impedir que uma chamada altere o estado global usado por outras
+    requisições reutilizadas.
+    """
     key = base_url
     with _POOL_LOCK:
         entry = _CLIENT_POOL.get(key)
         if entry:
             client, refcount = entry
             _CLIENT_POOL[key] = (client, refcount + 1)
-            if headers:
-                client.headers.update(headers)
             return client, key
         
         client = _build_async_client(base_url, headers)
