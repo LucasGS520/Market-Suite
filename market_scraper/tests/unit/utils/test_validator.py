@@ -102,6 +102,46 @@ def test_validator_uses_fallback_when_source_missing() -> None:
         "source": "exemplo.com",
     }
 
+def test_validator_normalizes_url_without_scheme() -> None:
+    """Confere que a URL resultante usa as mesmas regras do utilitário compartilhado"""
+    validator = DataQualityValidator()
+    payload = {
+        "name": "Produto",
+        "current_price": "50",
+        "url": "mercadolivre.com.br/MLB-123",
+        "source": "mercadolivre.com.br",
+    }
+    result = validator.validate(
+        step_name="json_ld_parser",
+        payload=payload,
+        url="https://mercadolivre.com.br/MLB-123",
+        source="mercadolivre.com.br",
+    )
+
+    assert result.is_valid
+    assert result.payload is not None
+    assert result.payload["url"] == "https://mercadolivre.com.br/MLB-123"
+
+def test_validator_reuses_fallback_when_parser_url_invalid() -> None:
+    """Garante resiliência quando o parser gera endereços malformados"""
+    validator = DataQualityValidator()
+    payload = {
+        "name": "Produto",
+        "current_price": "50",
+        "url": "javascript:alert(1)",
+        "source": "mercadolivre.com.br",
+    }
+    result = validator.validate(
+        step_name="json_ld_parser",
+        payload=payload,
+        url="https://mercadolivre.com.br/MLB-123",
+        source="mercadolivre.com.br",
+    )
+
+    assert result.is_valid
+    assert result.payload is not None
+    assert result.payload["url"] == "https://mercadolivre.com.br/MLB-123"
+
 def test_validator_uses_hostname_from_source_url() -> None:
     validator = DataQualityValidator()
     payload = {
