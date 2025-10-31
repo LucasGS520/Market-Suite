@@ -2,7 +2,9 @@
 
 #Registra métricas antes de iniciar o HTTP server
 import os
+import logging
 
+import structlog
 from kombu import Exchange, Queue
 from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
@@ -19,6 +21,53 @@ from market_alert.core.config_alert import settings
 
 
 SERVICE_LABEL = "market_alert_worker"
+
+def configure_worker_logging() -> None:
+    """ Configura logs estruturados e silencia bibliotecas barulhentas no worker """
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer()
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(structlog.stdlib.ProcessorFormatter(
+        processor=structlog.processors.JSONRenderer(),
+        foreign_pre_chain=[structlog.processors.TimeStamper(fmt="iso")]
+    ))
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+
+    noisy_loggers = (
+        "httpx",
+        "httpcore",
+        "anyio",
+        "uvicorn",
+        "asyncio",
+        "celery",
+        "celery.worker.pidbox",
+        "celery.worker.pool",
+        "celery.worker.consumer",
+        "celery.worker.strategy",
+        "celery.app.trace",
+        "kombu",
+    )
+
+    #Mantém logs de erro, mas oculta detalhes de debug que não ajudam na operação diária
+    for logger_name in noisy_loggers:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
+configure_worker_logging()
 
 #Cria a aplicação Celery
 celery_app = Celery(
@@ -75,6 +124,7 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="America/Sao_Paulo",
     enable_utc=True,
+    worker_hijack_root_logger=False,
 
     #Limites de tempo de execução
     task_soft_time_limit=30,

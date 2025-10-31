@@ -63,8 +63,8 @@ def collect_celery_metrics():
             CELERY_QUEUE_LENGTH.labels(service=SERVICE_LABEL, queue=queue_name).set(total_pending)
             REDIS_QUEUE_MESSAGES.labels(queue=queue_name).set(pending_redis)
 
-            logger.info("collected_celery_metrics", queue=queue_name, pending_redis=pending_redis, pending_reserved=pending_reserved, pending_scheduled=pending_scheduled,
-                        total_pending=total_pending, workers=total_workers, concurrency=total_concurrency)
+            logger.debug("collected_celery_metrics", queue=queue_name, pending_redis=pending_redis, pending_reserved=pending_reserved, pending_scheduled=pending_scheduled,
+                    total_pending=total_pending, workers=total_workers, concurrency=total_concurrency)
 
     except Exception as exc:
         logger.error("failed_collecting_celery_metrics", error=str(exc))
@@ -90,7 +90,7 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
 @shared_task(name="market_alert.tasks.metrics_tasks.collect_audit_metrics")
 def collect_audit_metrics():
     """ Task periódica de auditoria """
-    logger.info("collect_audit_metrics_noop")
+    logger.debug("collect_audit_metrics_noop")
 
 @shared_task(name="market_alert.tasks.metrics_tasks.collect_db_metrics")
 def collect_db_metrics():
