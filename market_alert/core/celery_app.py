@@ -1,4 +1,4 @@
-""" Configuração da aplicação Celery e registro de métricas """
+""" Configura a aplicação Celery do `market_alert` com métricas padronizadas """
 
 #Registra métricas antes de iniciar o HTTP server
 import os
@@ -17,6 +17,8 @@ except Exception:
 
 from market_alert.core.config_alert import settings
 
+
+SERVICE_LABEL = "market_alert_worker"
 
 #Cria a aplicação Celery
 celery_app = Celery(
@@ -47,14 +49,22 @@ def _start_prometheus_server(**kwargs):
 def handle_task_success(sender=None, **kwargs):
     """ Métricas de contagem de sucesso """
     #Incrementa contagem de tasks concluídas
-    CELERY_TASKS_TOTAL.labels(task_name=sender.name, status="success").inc()
+    CELERY_TASKS_TOTAL.labels(
+        service=SERVICE_LABEL,
+        task_name=sender.name,
+        status="success",
+    ).inc()
 
 #Incrementa em toda a falha de task
 @task_failure.connect
 def handle_task_failure(sender=None, **kwargs):
     """ Métricas de contagem de falha """
     #Incrementa em caso de falha de task
-    CELERY_TASKS_TOTAL.labels(task_name=sender.name, status="failure").inc()
+    CELERY_TASKS_TOTAL.labels(
+        service=SERVICE_LABEL,
+        task_name=sender.name,
+        status="failure",
+    ).inc()
 
 
 #Configurações adicionais do Celery

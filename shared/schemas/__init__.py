@@ -9,8 +9,7 @@ from .schemas_products import (
 from .schemas_scraper import (
     ParserRequest,
     ParserResponse,
-    ScraperRequest,
-    ScraperResponse,
+    ScrapeResult,
 )
 
 
@@ -19,6 +18,7 @@ __all__ = [
     "MonitoredScrapedInfo",
     "CompetitorProductCreateScraping",
     "CompetitorScrapedInfo",
-    "ScraperRequest",
-    "ScraperResponse",
+    "ParserRequest",
+    "ParserResponse",
+    "ScrapeResult",
 ]

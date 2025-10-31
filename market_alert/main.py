@@ -107,7 +107,11 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
         content={"detail": "Muitas requisições. Tente novamente mais tarde."}
     )
 
+SERVICE_LABEL = "market_alert"
+
 class MetricsMiddleware(BaseHTTPMiddleware):
+    """ Coleta métricas de requisição e latência a cada chamada HTTP """
+
     async def dispatch(self, request: Request, call_next):
         """ Middleware que mede latência e conta requisições """
         start = time.time()
@@ -116,14 +120,16 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
         #Incrementa contador de requisições
         HTTP_REQUESTS_TOTAL.labels(
-            method = request.method,
-            endpoint = request.url.path,
-            status_code = response.status_code
+            service=SERVICE_LABEL,
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=response.status_code
         ).inc()
 
         if response.status_code >= 400:
             try:
                 API_ERRORS_TOTAL.labels(
+                    service=SERVICE_LABEL,
                     endpoint=request.url.path,
                     status_code=response.status_code
                 ).inc()
@@ -132,6 +138,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
         #Observa latência
         HTTP_REQUESTS_LATENCY_SECONDS.labels(
+            service=SERVICE_LABEL,
             method=request.method,
             endpoint=request.url.path
         ).observe(latency)

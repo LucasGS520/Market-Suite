@@ -1,9 +1,4 @@
-""" Carrega variáveis de ambiente para o serviço de alertas
-
-Este módulo estende as configurações compartilhadas em
-`core.config_base`, adicionando apenas parâmetros específicos
-do `market_alert`.
-"""
+""" Carrega variáveis de ambiente específicas do serviço `market_alert` """
 
 import os
 from pydantic import Field

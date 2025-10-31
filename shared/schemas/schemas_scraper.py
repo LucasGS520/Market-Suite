@@ -1,9 +1,10 @@
-""" Modelos Pydantic compartilhados entre ``market_alert`` e ``market_scraper``
+""" Modelos compartilhados do contrato HTTP entre ``market_alert`` e ``market_scraper``
 
-O objetivo deste módulo é garantir que ambos os serviços conversem através
-do mesmo contrato de scraping, evitando divergências de campos ou tipos.
-As classes expostas aqui são utilizadas diretamente pelas rotas HTTP do
-``market_scraper`` e pelos consumidores no ``market_alert``.
+Este módulo evita divergências de tipagem ao centralizar os esquemas de
+requisição e resposta utilizados pelos serviços. A API pública envia
+instâncias de :class:`ParserRequest` e valida o retorno por meio de
+``ParserResponse``. O objetivo é manter um contrato único e versionado em
+``shared`` para reduzir integrações frágeis ou condicionais dispersas.
 """
 
 from __future__ import annotations
@@ -13,11 +14,13 @@ from decimal import Decimal
 from typing import Any, ClassVar, Literal
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, Field, field_validator, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import field_validator, model_validator
 
 
 class _BaseUrlPayload(BaseModel):
-    """ Normaliza campos que dependem de URL para os contratos compartilhados """
+    """ Normaliza campos baseados em URL compartilhados pelos contratos """
+    model_config = ConfigDict(extra="ignore")
     url: AnyHttpUrl = Field(..., description="Endereço do produto a ser processado")
     _http_prefixes: ClassVar[tuple[str, str]] = ("http://", "https://")
 
@@ -31,30 +34,31 @@ class _BaseUrlPayload(BaseModel):
         return value
 
 class ParserRequest(_BaseUrlPayload):
-    """ Contrato mínimo aceito pela rota ``/scraper/parse`` """
-    product_type: Literal["monitored", "competitor"] | None = Field(
-        None,
-        description="Contexto opcional indicando se a URL pertence a monitorados ou concorrentes",
-    )
-    metadata: dict[str, Any] | None = Field(
-        None,
-        description="Campos adicionais livres para auditoria ou depuração",
-    )
-
-class ScraperRequest(_BaseUrlPayload):
-    """ Contrato legado utilizado por chamadas internas do ``market_alert`` """
+    """ Contrato aceito pela rota ``/scraper/parse`` """
     product_type: Literal["monitored", "competitor"] = Field(
         "monitored",
-        description="Tipo padrão utilizado quando o cliente não especifica explicitamente",
+        description="Contexto indicando se a URL pertence a monitorados ou concorrentes",
     )
     user_id: UUID | None = Field(
         None,
-        description="Identificador do usuário ligado ao monitoramento (quando disponível)",
+        description="Identificador do usuário relacionado à requisição (quando aplicável)",
     )
     metadata: dict[str, Any] | None = Field(
         None,
-        description="Campos adicionais livres para auditoria ou depuração",
+        description="Campos adicionais livres utilizados para rastreio e auditoria",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_metadata(cls, data: Any) -> Any:
+        """ Remove metadados vazios para preservar compatibilidade """
+        if isinstance(data, dict):
+            metadata = data.get("metadata")
+            if metadata in ({}, []):
+                rewritten = dict(data)
+                rewritten.pop("metadata", None)
+                return rewritten
+        return data
 
 class ParserResponse(BaseModel):
     """ Resposta padronizada contendo os atributos essenciais do scraping """
@@ -102,22 +106,6 @@ class ParserResponse(BaseModel):
             return transformed
         return data
 
-class ScraperResponse(ParserResponse):
-    """ Contrato expandido utilizado pelos modelos internos do ``market_alert`` """
-    old_price: Decimal | None = Field(
-        None,
-        description="Preço anterior conhecido, útil para detectar oscilações",
-    )
-    thumbnail: str | None = Field(None, description="Miniatura ilustrativa do produto")
-    free_shipping: bool = Field(False, description="Indica frete grátis quando identificado")
-    seller: str | None = Field(
-        None,
-        description="Nome ou identificador do vendedor reportado pelo marketplace",
-    )
-    shipping: str | None = Field(
-        None,
-        description="Detalhes textuais de envio extraídos durante o parsing",
-    )
 
 @dataclass(slots=True)
 class ScrapeResult:
@@ -137,6 +125,4 @@ class ScrapeResult:
 __all__ = [
     "ParserRequest",
     "ParserResponse",
-    "ScraperRequest",
-    "ScraperResponse",
 ]

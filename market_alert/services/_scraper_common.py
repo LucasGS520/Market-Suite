@@ -32,18 +32,17 @@ def resolve_conditional_headers(entity: Any) -> tuple[str | None, datetime | Non
         etag = None
 
     last_modified = getattr(entity, "last_modified", None)
-    if isinstance(etag, str):
-        etag = None
-
-    last_modified = getattr(entity, "last_modified", None)
     if isinstance(last_modified, datetime):
         if last_modified.tzinfo is None:
             last_modified = last_modified.replace(tzinfo=timezone.utc)
 
         else:
-            last_modified = None
+            last_modified = last_modified.astimezone(timezone.utc)
 
-        return etag, last_modified
+    else:
+        last_modified = None
+    
+    return etag, last_modified
 
 def compute_force_refresh(
     last_checked: datetime | None,

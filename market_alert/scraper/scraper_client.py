@@ -17,7 +17,7 @@ import structlog
 
 from pydantic import ValidationError
 
-from shared.schemas.schemas_scraper import ParserResponse, ScraperRequest
+from shared.schemas.schemas_scraper import ParserRequest, ParserResponse
 from shared.utils.redis_client import get_redis_client
 
 from market_alert.core.config_alert import settings
@@ -184,7 +184,7 @@ class ScraperClient:
         if settings.SCRAPER_SERVICE_AUTH_HEADER and settings.SCRAPER_SERVICE_AUTH_TOKEN:
             headers[settings.SCRAPER_SERVICE_AUTH_HEADER] = settings.SCRAPER_SERVICE_AUTH_TOKEN
 
-        request_model = ScraperRequest(
+        request_model = ParserRequest(
             url=url,
             product_type=product_type or "monitored",
             user_id=user_id,

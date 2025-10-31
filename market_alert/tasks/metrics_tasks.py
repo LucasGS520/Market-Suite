@@ -7,7 +7,12 @@ from celery.app.control import Inspect
 
 from shared.utils.redis_client import get_redis_client
 from shared.infra.db import get_engine
-from shared.metrics.metrics_celery import CELERY_QUEUE_LENGTH, CELERY_WORKERS_TOTAL, CELERY_WORKER_CONCURRENCY, CELERY_TASK_DURATION_SECONDS
+from shared.metrics.metrics_celery import (
+    CELERY_QUEUE_LENGTH, 
+    CELERY_WORKERS_TOTAL, 
+    CELERY_WORKER_CONCURRENCY, 
+    CELERY_TASK_DURATION_SECONDS,
+)
 from shared.metrics.metrics_redis import REDIS_MEMORY_USAGE_BYTES, REDIS_QUEUE_MESSAGES
 from shared.metrics.metrics_db import DB_POOL_CHECKOUTS, DB_POOL_SIZE
 from shared.metrics.metrics_cache import CACHE_CLEANUP_TOTAL
@@ -16,6 +21,7 @@ from market_alert.core.celery_app import celery_app
 
 logger = structlog.get_logger("metrics_tasks")
 redis_client = get_redis_client()
+SERVICE_LABEL = "market_alert_worker"
 
 @shared_task(name="market_alert.tasks.metrics_tasks.collect_celery_metrics")
 def collect_celery_metrics():
@@ -39,13 +45,13 @@ def collect_celery_metrics():
         #Coleta de Workers e concorrência
         stats = insp.stats() or {}
         total_workers = len(stats)
-        CELERY_WORKERS_TOTAL.set(total_workers)
+        CELERY_WORKERS_TOTAL.labels(service=SERVICE_LABEL).set(total_workers)
 
         total_concurrency = sum(
             info.get("pool", {}).get("max-concurrency", 0)
             for info in stats.values()
         )
-        CELERY_WORKER_CONCURRENCY.set(total_concurrency)
+        CELERY_WORKER_CONCURRENCY.labels(service=SERVICE_LABEL).set(total_concurrency)
 
         for queue_name in queues:
             pending_redis = redis_client.llen(queue_name)
@@ -54,7 +60,7 @@ def collect_celery_metrics():
             else:
                 total_pending = pending_redis
 
-            CELERY_QUEUE_LENGTH.labels(queue=queue_name).set(total_pending)
+            CELERY_QUEUE_LENGTH.labels(service=SERVICE_LABEL, queue=queue_name).set(total_pending)
             REDIS_QUEUE_MESSAGES.labels(queue=queue_name).set(pending_redis)
 
             logger.info("collected_celery_metrics", queue=queue_name, pending_redis=pending_redis, pending_reserved=pending_reserved, pending_scheduled=pending_scheduled,
@@ -76,7 +82,10 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
     if start:
         duration = time.time() - start
         #Registra no histograma
-        CELERY_TASK_DURATION_SECONDS.labels(task_name=task.name).observe(duration)
+        CELERY_TASK_DURATION_SECONDS.labels(
+            service=SERVICE_LABEL,
+            task_name=task.name,
+        ).observe(duration)
 
 @shared_task(name="market_alert.tasks.metrics_tasks.collect_audit_metrics")
 def collect_audit_metrics():

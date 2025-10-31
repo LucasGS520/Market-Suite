@@ -11,29 +11,31 @@ from prometheus_client import Counter, Gauge, Histogram
 CELERY_TASKS_TOTAL = Counter(
     "celery_tasks_total",
     "Total de tarefas executadas pelo Celery",
-    ["task_name", "status"],
+    ["service", "task_name", "status"],
 )
 
 CELERY_QUEUE_LENGTH = Gauge(
     "celery_queue_length",
     "Número de tarefas pendentes na fila Celery",
-    ["queue"],
+    ["service", "queue"],
 )
 
 CELERY_WORKERS_TOTAL = Gauge(
     "celery_workers_total",
     "Total de workers Celery ativos",
+    ["service"],
 )
 
 CELERY_WORKER_CONCURRENCY = Gauge(
     "celery_worker_concurrency",
     "Grau de concorrência configurado nos workers Celery",
+    ["service"],
 )
 
 CELERY_TASK_DURATION_SECONDS = Histogram(
     "celery_task_duration_seconds",
     "Tempo de execução de cada tarefa celery (segundos)",
-    ["task_name"],
+    ["service", "task_name"],
     buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
