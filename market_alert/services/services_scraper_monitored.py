@@ -11,10 +11,8 @@ from sqlalchemy.orm import Session
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.schemas.schemas_scraper import ScrapeResult
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
-from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.core.config_alert import settings
-from market_alert.crud import crud_errors
 from market_alert.crud.crud_monitored import (
     create_or_update_monitored_product_scraped,
     get_monitored_product_by_user_and_url,
@@ -147,14 +145,6 @@ async def scrape_monitored_product_async(
         request_url=normalized_url,
     )
 
-    if outcome.status == "no_result" and existing:
-        crud_errors.create_scraping_error(
-            db,
-            existing.id,
-            normalized_url,
-            "pipeline retornou no_result",
-            ScrapingErrorType.no_result,
-        )
     return outcome
 
 def scrape_monitored_product(

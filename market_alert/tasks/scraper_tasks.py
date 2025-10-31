@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 import structlog
+from sqlalchemy.orm import Session
 
 from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
@@ -34,6 +35,38 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 
 logger = structlog.get_logger("scraper_tasks")
 redis_client = get_redis_client()
+
+def _register_scraping_error(
+    db: Session,
+    product_reference: str | UUID | None,
+    url: str,
+    message: str,
+    error_type: ScrapingErrorType,
+    *,
+    task_logger,
+) -> None:
+    """ Registra ``ScrapingError`` evitando duplicidade e cuidando do primeiro scraping """
+    #Garante que apenas IDs válidos gerem registros, evitando ruído no primeiro scraping
+    if not product_reference:
+        task_logger.info("scraping_error_skipped_no_product", url=url)
+        return
+    
+    try:
+        product_uuid = product_reference if isinstance(product_reference, UUID) else UUID(str(product_reference))
+    except (TypeError, ValueError) as exc:
+        task_logger.warning("scraping_error_invalid_product", error=str(exc), product_id=product_reference)
+        return
+    
+    try:
+        crud_errors.create_scraping_error(
+            db,
+            product_uuid,
+            url,
+            message,
+            error_type,
+        )
+    except Exception as err:
+        task_logger.warning("error_persist_failed", error=str(err))
 
 def _result_value(result: ScrapeResult | Mapping[str, Any] | Any, attr: str, default: Any = None) -> Any:
     """ Extrai atributos de ``ScrapeResult`` aceitando também mapeamentos """
@@ -137,14 +170,14 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
             if status_value == "no_result":
                 status = "failure"
                 task_logger.warning("collect_product_no_result")
-                if product_id:
-                    crud_errors.create_scraping_error(
-                        db,
-                        UUID(product_id),
-                        url,
-                        "pipeline retornou no_result",
-                        ScrapingErrorType.no_result,
-                    )
+                _register_scraping_error(
+                    db,
+                    product_id,
+                    url,
+                    "pipeline retornou no_result",
+                    ScrapingErrorType.no_result,
+                    task_logger=task_logger,
+                )
                 retry_delay = min(
                     settings.SCRAPER_NO_RESULT_RETRY_SECONDS * (self.request.retries + 1),
                     settings.SCRAPER_MAX_RETRY_DELAY_SECONDS,
@@ -170,17 +203,14 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
                 url=url,
                 status_code=req_err.status_code,
             )
-            if product_id:
-                try:
-                    crud_errors.create_scraping_error(
-                        db,
-                        UUID(product_id),
-                        url,
-                        str(req_err),
-                        ScrapingErrorType.http_error,
-                    )
-                except Exception as err:
-                    task_logger.warning("error_persist_failed", error=str(err))
+            _register_scraping_error(
+                db,
+                product_id,
+                url,
+                str(req_err),
+                ScrapingErrorType.http_error,
+                task_logger=task_logger,
+            )
             
             if req_err.status_code and 500 <= req_err.status_code < 600:
                 delay = _compute_retry_delay(
@@ -200,17 +230,14 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
         except Exception as exc:
             status = "failure"
             task_logger.error("collect_product_failed", error=str(exc))
-            if product_id:
-                try:
-                    crud_errors.create_scraping_error(
-                        db,
-                        UUID(product_id),
-                        url,
-                        str(exc),
-                        ScrapingErrorType.parsing_error,
-                    )
-                except Exception as err:
-                    task_logger.warning("error_persist_failed", error=str(err))
+            _register_scraping_error(
+                db,
+                product_id,
+                url,
+                str(exc),
+                ScrapingErrorType.parsing_error,
+                task_logger=task_logger,
+            )
         finally:
             _observe_metrics(start, "collect_product_task", status)
             SCRAPER_IN_FLIGHT.dec()
@@ -280,12 +307,13 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
 
             if status_value == "no_result":
                 status = "failure"
-                crud_errors.create_scraping_error(
+                _register_scraping_error(
                     db,
-                    UUID(monitored_product_id),
+                    monitored_product_id,
                     url,
                     "pipeline retornou no_result",
                     ScrapingErrorType.no_result,
+                    task_logger=task_logger,
                 )
                 delay = min(
                     settings.SCRAPER_NO_RESULT_RETRY_SECONDS * (self.request.retries + 1),
@@ -307,16 +335,14 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 url=url,
                 status_code=req_err.status_code,
             )
-            try:
-                crud_errors.create_scraping_error(
-                    db,
-                    UUID(monitored_product_id),
-                    url,
-                    str(req_err),
-                    ScrapingErrorType.http_error,
-                )
-            except Exception as err:
-                task_logger.warning("error_persist_failed", error=str(err))
+            _register_scraping_error(
+                db,
+                monitored_product_id,
+                url,
+                str(req_err),
+                ScrapingErrorType.http_error,
+                task_logger=task_logger,
+            )
             
             if req_err.status_code and 500 <= req_err.status_code < 600:
                 delay = _compute_retry_delay(

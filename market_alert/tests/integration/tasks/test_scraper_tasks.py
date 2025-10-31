@@ -207,6 +207,62 @@ def test_collect_product_task_no_result_dispara_retry(monkeypatch):
 
     assert captured["countdown"] is not None
 
+def test_collect_product_task_no_result_registra_um_erro(monkeypatch):
+    """Task de monitorado deve registrar um único erro por tentativa."""
+
+    def fake_service(*a, **k):
+        return ScrapeResult(status="no_result", product_id=VALID_UUID)
+
+    calls = []
+
+    def fake_retry(*_, **__):
+        raise collect_product_task.MaxRetriesExceededError()
+
+    def fake_create(db, product_id, url, message, error_type):
+        calls.append((str(product_id), url, message, error_type))
+
+    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
+    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", fake_create)
+    monkeypatch.setattr(collect_product_task, "retry", fake_retry)
+
+    collect_product_task.run(
+        "https://mercadolivre.com.br/abc",
+        VALID_UUID,
+        "Produto",
+        10.0,
+        VALID_UUID,
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] == VALID_UUID
+
+
+def test_collect_product_task_no_result_sem_id_nao_registra(monkeypatch):
+    """Primeiro scraping sem ID deve apenas reagendar sem gravar erro."""
+
+    def fake_service(*a, **k):
+        return ScrapeResult(status="no_result", product_id=None)
+
+    calls = []
+
+    def fake_retry(*_, **__):
+        raise collect_product_task.MaxRetriesExceededError()
+
+    def fake_create(*_a, **_k):
+        calls.append(True)
+
+    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
+    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", fake_create)
+    monkeypatch.setattr(collect_product_task, "retry", fake_retry)
+
+    collect_product_task.run(
+        "https://mercadolivre.com.br/abc",
+        VALID_UUID,
+        "Produto",
+        10.0,
+    )
+
+    assert calls == []
 
 def test_collect_competitor_task_not_modified(monkeypatch):
     """Resposta 304 deve evitar reprocessamento de comparação."""
@@ -225,3 +281,56 @@ def test_collect_competitor_task_not_modified(monkeypatch):
 
     assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None
     assert "called" not in captured
+
+def test_collect_competitor_task_no_result_dispara_retry(monkeypatch):
+    """Resposta ``no_result`` deve reagendar nova tentativa."""
+
+    def fake_service(*a, **k):
+        return ScrapeResult(status="no_result", product_id=VALID_UUID)
+
+    captured = {}
+
+    def fake_retry(*_, **kwargs):
+        captured["countdown"] = kwargs.get("countdown")
+        raise collect_competitor_task.MaxRetriesExceededError()
+
+    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
+    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", lambda *a, **k: None)
+    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
+    monkeypatch.setattr(collect_competitor_task, "retry", fake_retry)
+
+    collect_competitor_task.run(
+        VALID_UUID,
+        "https://mercadolivre.com.br/comp",
+    )
+
+    assert captured["countdown"] is not None
+
+
+def test_collect_competitor_task_no_result_registra_um_erro(monkeypatch):
+    """Task de concorrente registra apenas um erro por execução."""
+
+    def fake_service(*a, **k):
+        return ScrapeResult(status="no_result", product_id=VALID_UUID)
+
+    calls = []
+
+    def fake_retry(*_, **__):
+        raise collect_competitor_task.MaxRetriesExceededError()
+
+    def fake_create(db, product_id, url, message, error_type):
+        calls.append((str(product_id), url, message, error_type))
+
+    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
+    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", fake_create)
+    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
+    monkeypatch.setattr(collect_competitor_task, "retry", fake_retry)
+
+    collect_competitor_task.run(
+        VALID_UUID,
+        "https://mercadolivre.com.br/comp",
+    )
+
+    assert len(calls) == 1
+    assert calls[0][0] == VALID_UUID
+    

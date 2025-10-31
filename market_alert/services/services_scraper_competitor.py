@@ -10,10 +10,8 @@ from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.schemas.schemas_scraper import ScrapeResult
-from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
-from shared.enums.error_codes import ScrapingErrorType
 
-from market_alert.crud import crud_errors
+from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
 from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
 from market_alert.models.models_products import CompetitorProduct
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
@@ -80,13 +78,6 @@ async def scrape_competitor_product_async(
         )
 
     if status_code == 422 and response.error_code == "no_result":
-        crud_errors.create_scraping_error(
-            db,
-            payload.monitored_product_id,
-            normalized_url,
-            "pipeline retornou no_result",
-            ScrapingErrorType.no_result,
-        )
         return ScrapeResult(
             status="no_result",
             product_id=str(existing.id) if existing else None,
