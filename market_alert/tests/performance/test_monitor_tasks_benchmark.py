@@ -2,8 +2,6 @@ import asyncio
 import time
 from types import SimpleNamespace
 
-from pyarrow import duration
-
 from market_alert.tasks import monitor_tasks
 
 
@@ -24,9 +22,9 @@ def test_parse_monitored_batch_benchmark(benchmark, monkeypatch):
         asyncio.run(monitor_tasks._parse_monitored_batch(batch))
         return time.perf_counter() - start
 
-    duration = benchmark(run)
+    tempo_execucao = benchmark(run)
     #Se as tarefas rodarem em paralelo, o tempo deve ser inferior à soma sequencial
-    assert duration < 0.25
+    assert tempo_execucao < 0.25
 
 def test_parse_competitor_batch_benchmark(benchmark, monkeypatch):
     """ Verifica processamento paralelo para lotes de concorrentes """
@@ -47,6 +45,6 @@ def test_parse_competitor_batch_benchmark(benchmark, monkeypatch):
         asyncio.run(monitor_tasks._parse_competitor_batch(batch))
         return time.perf_counter() - start
 
-    duration = benchmark(run)
+    tempo_execucao = benchmark(run)
     #Se as tarefas rodarem em paralelo, o tempo deve ser inferior à soma sequencial
-    assert duration < 0.25
+    assert tempo_execucao < 0.25
