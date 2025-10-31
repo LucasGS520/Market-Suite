@@ -50,8 +50,6 @@ def _isolate_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _patch_task_attr(monkeypatch: pytest.MonkeyPatch, name: str, value) -> None:
     """Atualiza um atributo nos módulos de tasks real e de compatibilidade"""
-
-    monkeypatch.setattr(f"market_alert.scraper.scraper_tasks.{name}", value, raising=False)
     monkeypatch.setattr(f"market_alert.tasks.scraper_tasks.{name}", value, raising=False)
 
 def test_collect_product_tasks_with_invalid_payload():

@@ -12,8 +12,6 @@ httpx-cache==0.13.0
 lxml==4.9.4
 mechanicalsoup==1.4.0
 parsel==1.9.1
-playwright==1.52.0
-playwright-stealth==2.0.0
 price-parser==0.5.0
 prometheus-client==0.21.1
 pydantic==2.11.4
