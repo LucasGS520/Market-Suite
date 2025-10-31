@@ -36,7 +36,6 @@ from market_alert.models.models_alerts import AlertRule
 
 #Rotas
 from market_alert.routes.routes_users import router as users_router
-from market_alert.routes.routes_admin import router as admin_router
 from market_alert.routes.routes_monitored import router as monitored_router
 from market_alert.routes.routes_competitors import router as competitor_router
 from market_alert.routes.routes_monitoring_errors import router as monitoring_errors_router
@@ -178,7 +177,6 @@ def create_app() -> FastAPI:
 # ---------- REGISTRO DE ROTAS ----------
     #Usuários e administração
     app.include_router(users_router)
-    app.include_router(admin_router)
 
     #Autenticação
     app.include_router(login_router)

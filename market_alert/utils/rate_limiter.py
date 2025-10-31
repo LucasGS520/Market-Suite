@@ -30,7 +30,7 @@ class RateLimiter:
         try:
             return self._client_factory()
         except Exception as exc:
-            logger.warning("rate_limiter_client_error", error=str(exc))
+            logger.warning("rate_limiter_client_error: %s", exc)
             return None
         
     def allow(self, host: str) -> bool:
@@ -46,7 +46,7 @@ class RateLimiter:
             pipeline.expire(key, self._window_seconds)
             current, _ = pipeline.execute()
         except Exception as exc:
-            logger.warning("rate_limiter_redis_failure", error=str(exc))
+            logger.warning("rate_limiter_redis_failure: %s", exc)
             return True
         
         return int(current) <= self._max_requests

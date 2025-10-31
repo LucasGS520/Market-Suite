@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
-from email.utils import parsedate_to_datetime
-from typing import Any
 from uuid import UUID
 
 import structlog
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
-from shared.schemas.schemas_scraper import ParserResponse
-from shared.utils import sanitize_media_url, sanitize_text
+from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
+from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.core.config_alert import settings
 from market_alert.crud import crud_errors
@@ -26,34 +23,11 @@ from market_alert.scraper.types import ScrapeResult
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from market_alert.utils._async_helpers import _run_sync
-from shared.enums.error_codes import ScrapingErrorType
+from market_alert.services._scraper_common import ensure_price, maybe_call_mocked_parse
 
 
-#Logger especifico para o fluxo de monitorados
+#Logger específico para o fluxo de monitorados
 logger = structlog.get_logger("scraper_monitored_service")
-
-def _parse_last_modified(header_value: str | None) -> datetime | None:
-    """ Converte cabeçalho HTTP ``Last-Modified`` em ``datetime`` """
-    if not header_value:
-        return None
-    try:
-        dt = parsedate_to_datetime(header_value)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-    
-def _extract_metadata(payload: ParserResponse) -> dict[str, Any]:
-    """ Normaliza metadados opcionais enviadas pelo scraper """
-    return payload.payload or {}
-
-def _ensure_price(payload: ParserResponse, url: str) -> Decimal:
-    """ Garante presença de preço válido antes de persistir informações """
-    if payload.current_price is None:
-        raise ScraperClientError(
-            f"Payload do scraper sem preço para a URL {url}",
-            status_code=500,
-        )
-    return payload.current_price
 
 async def _handle_response(
     db: Session,
@@ -61,7 +35,6 @@ async def _handle_response(
     monitored_payload: MonitoredProductCreateScraping,
     fetch_result: ScraperFetchResult,
     *,
-    headers: dict[str, str],
     existing_id: UUID | None,
     last_checked: datetime,
     request_url: str,
@@ -92,24 +65,15 @@ async def _handle_response(
         )
 
     payload = fetch_result.payload
-    extras = _extract_metadata(payload)
-    normalized_headers = {k.lower(): v for k, v in headers.items()}
-    etag = extras.get("etag") or normalized_headers.get("etag")
-    last_modified_header = (
-        extras.get("last_modified")
-        or extras.get("last-modified") 
-        or normalized_headers.get("last_modified")
-        or normalized_headers.get("last-modified")
-    )
-    parsed_last_modified = _parse_last_modified(last_modified_header)
+    metadata = extract_scraper_metadata(payload, fetch_result.headers)
 
-    sanitized_thumbnail = sanitize_media_url(extras.get("thumbnail"))
-    sanitized_currency = sanitize_text(extras.get("currency"))
+    sanitized_thumbnail = sanitize_media_url(metadata.get("thumbnail"))
+    sanitized_currency = sanitize_text(metadata.get("currency"))
 
     scraped_info = MonitoredScrapedInfo(
-        current_price=_ensure_price(payload, request_url),
+        current_price=ensure_price(payload, request_url),
         thumbnail=sanitized_thumbnail,
-        free_shipping=bool(extras.get("free_shipping", False)),
+        free_shipping=bool(metadata.get("free_shipping", False)),
         currency=sanitized_currency,
     )
 
@@ -120,8 +84,8 @@ async def _handle_response(
         scraped_info=scraped_info,
         last_checked=last_checked,
         currency=sanitized_currency,
-        etag=etag,
-        last_modified=parsed_last_modified,
+        etag=metadata.etag,
+        last_modified=metadata.last_modified,
     )
 
     price_changed = bool(getattr(product, "_price_changed", True))
@@ -142,10 +106,18 @@ async def scrape_monitored_product_async(
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
 ) -> ScrapeResult:
-    """ Executa fluxo de scraping para produto monitorado de forma assíncrona """
+    """ Executa scraping para produto monitorado de forma assíncrona """
+    normalized_url = str(url)
+    url = normalized_url
     existing = get_monitored_product_by_user_and_url(db, user_id, str(payload.product_url))
     etag = existing.etag if existing else None
+    if etag is not None and not isinstance(etag, str):
+        etag = None
     last_modified = existing.last_modified if existing else None
+    if isinstance(last_modified, datetime) and last_modified.tzinfo is None:
+        last_modified = last_modified.replace(tzinfo=timezone.utc)
+    elif not isinstance(last_modified, datetime):
+        last_modified = None
 
     now = datetime.now(timezone.utc)
     force_refresh = False
@@ -155,26 +127,38 @@ async def scrape_monitored_product_async(
         force_refresh = delta >= settings.SCRAPER_FORCE_REFRESH_TTL_SECONDS
 
     async with ScraperClient() as client:
-        result = await client.fetch(
-            url=url,
+        mocked = await maybe_call_mocked_parse(
+            client,
+            url=normalized_url,
             monitored_id=str(existing.id) if existing else None,
             etag=etag,
             last_modified=last_modified,
             force_refresh=force_refresh,
             product_type="monitored",
             user_id=user_id,
+            metadata=None,
         )
-        
-    headers = dict(result.headers)
+        if mocked is not None:
+            result = mocked
+        else:
+            result = await client.fetch(
+                url=normalized_url,
+                monitored_id=str(existing.id) if existing else None,
+                etag=etag,
+                last_modified=last_modified,
+                force_refresh=force_refresh,
+                product_type="monitored",
+                user_id=user_id,
+            )
+
     outcome = await _handle_response(
         db,
         user_id,
         payload,
         result,
-        headers=headers,
         existing_id=existing.id if existing else None,
         last_checked=now,
-        request_url=url,
+        request_url=normalized_url,
     )
 
     if outcome.status == "no_result" and existing:

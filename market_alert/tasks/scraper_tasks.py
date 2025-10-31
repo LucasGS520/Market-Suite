@@ -9,6 +9,7 @@ as tasks mantêm métricas e tratamento de erros.
 
 from uuid import UUID
 from datetime import datetime, timezone
+from typing import Any, Mapping
 
 import structlog
 
@@ -34,6 +35,38 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 logger = structlog.get_logger("scraper_tasks")
 redis_client = get_redis_client()
 
+def _result_value(result: ScrapeResult | Mapping[str, Any] | Any, attr: str, default: Any = None) -> Any:
+    """ Extrai atributos de ``ScrapeResult`` aceitando também mapeamentos """
+    if hasattr(result, attr):
+        return getattr(result, attr)
+    if isinstance(result, Mapping):
+        return result.get(attr, default)
+    return default
+
+
+def _result_status(result: ScrapeResult | Mapping[str, Any] | Any) -> str:
+    """ Obtém status padronizado do retorno do serviço de scraping """
+    status_value = _result_value(result, "status")
+    if status_value is None:
+        return "unknown"
+    return str(status_value)
+
+
+def _result_price_changed(result: ScrapeResult | Mapping[str, Any] | Any) -> bool:
+    """ Determina se houve alteração de preço considerando legados """
+    changed = _result_value(result, "price_changed")
+    if changed is None:
+        return _result_status(result) == "success"
+    return bool(changed)
+
+
+def _result_product_id(result: ScrapeResult | Mapping[str, Any] | Any) -> str | None:
+    """ Normaliza o identificador de produto retornado pelo scraper """
+    value = _result_value(result, "product_id")
+    if value is None:
+        return None
+    return str(value)
+
 def _observe_metrics(start: datetime, task_name: str, status: str) -> None:
     """ Registra latência e contagem de tasks no Prometheus """
     duration = (datetime.now(timezone.utc) - start).total_seconds()
@@ -44,7 +77,16 @@ def _compute_retry_delay(base: float, attempt: int, limit: int) -> int:
     delay = base * (2 ** max(0, attempt - 1))
     return min(int(delay), limit)
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=30, name="collect_product_task", rate_limit=settings.SCRAPER_RATE_LIMIT, queue="scraping")
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    name="collect_product_task",
+    rate_limit=settings.SCRAPER_RATE_LIMIT,
+    queue="scraping",
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def collect_product_task(self, url: str, user_id: str, name_identification: str, target_price: float, monitored_id: str | None = None) -> None:
     """ Coleta dados de um produto monitorado e os salva no banco """
     SCRAPER_IN_FLIGHT.inc()
@@ -88,15 +130,17 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
                 user_id=UUID(user_id),
                 payload=payload,
             )
-            product_id = result.product_id
+            product_id = _result_product_id(result) or monitored_id
+            status_value = _result_status(result)
+            price_changed = _result_price_changed(result)
 
-            if result.status == "no_result":
+            if status_value == "no_result":
                 status = "failure"
                 task_logger.warning("collect_product_no_result")
-                if result.product_id:
+                if product_id:
                     crud_errors.create_scraping_error(
                         db,
-                        UUID(result.product_id),
+                        UUID(product_id),
                         url,
                         "pipeline retornou no_result",
                         ScrapingErrorType.no_result,
@@ -111,8 +155,8 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
             task_logger.info(
                 "collect_product_completed",
                 duration_ms=elapsed_ms,
-                status=result.status,
-                price_changed=result.price_changed,
+                status=status_value,
+                price_changed=price_changed,
             )
             if redis_client is not None:
                 redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
@@ -171,7 +215,16 @@ def collect_product_task(self, url: str, user_id: str, name_identification: str,
             _observe_metrics(start, "collect_product_task", status)
             SCRAPER_IN_FLIGHT.dec()
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=30, name="collect_competitor_task", rate_limit=settings.COMPETITOR_RATE_LIMIT, queue="scraping")
+@celery_app.task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    name="collect_competitor_task",
+    rate_limit=settings.COMPETITOR_RATE_LIMIT,
+    queue="scraping",
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
     """ Coleta dados de um produto concorrente e compara os preços. """
     SCRAPER_IN_FLIGHT.inc()
@@ -181,7 +234,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
     status = "success"
     task_logger.info("collect_competitor_started")
 
-    #Checa flag de suspensão global
+    #Checa flag de suspensão global antes de gastar recursos
     if is_scraping_suspended():
         task_logger.warning("suspended_via_flag", detail="scraping suspended flag is set")
         status = "failure"
@@ -189,7 +242,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
         SCRAPER_IN_FLIGHT.dec()
         return
 
-    #Preparação payload
+    #Preparação payload a partir dos parâmetros brutos
     try:
         payload = CompetitorProductCreateScraping.model_validate({
             "monitored_product_id": monitored_product_id,
@@ -215,15 +268,17 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 payload=payload,
             )
 
+            status_value = _result_status(result)
+            price_changed = _result_price_changed(result)
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
             task_logger.info(
-                "collect_competitor_completed", 
+                "collect_competitor_completed",
                 duration_ms=elapsed_ms,
-                status=result.status,
-                price_changed=result.price_changed,
+                status=status_value,
+                price_changed=price_changed,
             )
 
-            if result.status == "no_result":
+            if status_value == "no_result":
                 status = "failure"
                 crud_errors.create_scraping_error(
                     db,
@@ -238,7 +293,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 )
                 raise self.retry(countdown=delay)
             
-            if result.price_changed:
+            if price_changed:
                 compare_prices_task.delay(str(monitored_product_id))
                 task_logger.info("price_comparison_task_dispatched")
 

@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
-from email.utils import parsedate_to_datetime
-from typing import Any
 from uuid import UUID
 
 import structlog
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
-from shared.schemas.schemas_scraper import ParserResponse
-from shared.utils import sanitize_media_url, sanitize_text
+from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
+from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.crud import crud_errors
 from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
@@ -21,25 +18,17 @@ from market_alert.models.models_products import CompetitorProduct
 from market_alert.scraper.types import ScrapeResult
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 from market_alert.utils._async_helpers import _run_sync
-from shared.enums.error_codes import ScrapingErrorType
+from market_alert.services._scraper_common import (
+    ensure_name,
+    ensure_price,
+    maybe_call_mocked_parse,
+    to_decimal,
+    to_float,
+)
 
 
 #Logger específico para o scraping de concorrentes
 logger = structlog.get_logger("scraper_competitor_service")
-
-def _parse_last_modified(header: str | None) -> datetime | None:
-    """ Converte cabeçalho ``Last-Modified`` em ``datetime`` UTC """
-    if not header:
-        return None
-    try:
-        dt = parsedate_to_datetime(header)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-    
-def _extract_metadata(payload: ParserResponse) -> dict[str, Any]:
-    """ Agrupa metadados opcionais expostos pelo scraper """
-    return payload.payload or {}
     
 def _get_existing(db: Session, payload: CompetitorProductCreateScraping) -> CompetitorProduct | None:
     """ Recupera concorrente já persistido para reaproveitar metdados """
@@ -52,49 +41,6 @@ def _get_existing(db: Session, payload: CompetitorProductCreateScraping) -> Comp
         .first()
     )
 
-def _extract_decimal(value: Any) -> Decimal | None:
-    """ Converte valores numéricos opcionais em ``Decimal`` com tolerância """
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except Exception:
-        return None
-
-def _extract_float(value: Any) -> float | None:
-    """ Converte valores numéricos opcionais em ``float`` """
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except Exception:
-        return None
-    
-def _ensure_price(payload: ParserResponse, url: str) -> Decimal:
-    """ Garante que o payload retornou preço válido """
-    if payload.current_price is None:
-        raise ScraperClientError(
-            f"Payload do scraper sem preço para a URL {url}",
-            status_code=500,
-        )
-    return payload.current_price
-
-def _ensure_name(payload: ParserResponse, url: str) -> str:
-    """ Valida presença de nome do produto antes de persistir """
-    if payload.name is None:
-        raise ScraperClientError(
-            f"Payload do scraper sem nome para a URL {url}",
-            status_code=500,
-        )
-    cleaned = payload.name.strip()
-    sanitized = sanitize_text(cleaned)
-    if not sanitized:
-        raise ScraperClientError(
-            f"Nome vazio retornado pelo scraper para a URL {url}",
-            status_code=500,
-        )
-    return sanitized
-
 async def scrape_competitor_product_async(
     db: Session,
     user_id: UUID,
@@ -102,21 +48,42 @@ async def scrape_competitor_product_async(
     payload: CompetitorProductCreateScraping,
 ) -> ScrapeResult:
     """ Executa scraping de concorrentes retornando ``ScraperResult`` estruturado """
+    normalized_url = str(url)
+    url = normalized_url
     existing = _get_existing(db, payload)
     etag = existing.etag if existing else None
+    if etag is not None and not isinstance(etag, str):
+        etag = None
     last_modified = existing.last_modified if existing else None
-    
+    if isinstance(last_modified, datetime) and last_modified.tzinfo is None:
+        last_modified = last_modified.replace(tzinfo=timezone.utc)
+    elif not isinstance(last_modified, datetime):
+        last_modified = None
+
     async with ScraperClient() as client:
-        response = await client.fetch(
-            url=url,
+        mocked = await maybe_call_mocked_parse(
+            client,
+            url=normalized_url,
             monitored_id=str(payload.monitored_product_id),
             etag=etag,
             last_modified=last_modified,
+            force_refresh=False,
             product_type="competitor",
             user_id=user_id,
+            metadata=None,
         )
+        if mocked is not None:
+            response = mocked
+        else:
+            response = await client.fetch(
+                url=normalized_url,
+                monitored_id=str(payload.monitored_product_id),
+                etag=etag,
+                last_modified=last_modified,
+                product_type="competitor",
+                user_id=user_id,
+            )
 
-    headers = {k.lower(): v for k, v in response.headers.items()}
     status_code = response.status_code
     now = datetime.now(timezone.utc)
 
@@ -152,22 +119,20 @@ async def scrape_competitor_product_async(
         )
         
     payload_model = response.payload
-    extras = _extract_metadata(payload_model)
-    etag = extras.get("etag") or headers.get("etag")
-    last_modified = _parse_last_modified(headers.get("last_modified") or headers.get("last-modified"))
+    metadata = extract_scraper_metadata(payload_model, response.headers)
 
-    sanitized_thumbnail = sanitize_media_url(extras.get("thumbnail"))
-    sanitized_currency = sanitize_text(extras.get("currency"))
-    sanitized_seller = sanitize_text(extras.get("seller"))
+    sanitized_thumbnail = sanitize_media_url(metadata.get("thumbnail"))
+    sanitized_currency = sanitize_text(metadata.get("currency"))
+    sanitized_seller = sanitize_text(metadata.get("seller"))
 
     scraped_info = CompetitorScrapedInfo(
-        name=_ensure_name(payload_model, url),
-        current_price=_ensure_price(payload_model, url),
-        old_price=_extract_decimal(extras.get("old_price")),
+        name=ensure_name(payload_model, url),
+        current_price=ensure_price(payload_model, url),
+        old_price=to_decimal(metadata.get("old_price")),
         thumbnail=sanitized_thumbnail,
-        free_shipping=bool(extras.get("free_shipping", False)),
+        free_shipping=bool(metadata.get("free_shipping", False)),
         seller=sanitized_seller,
-        seller_rating=_extract_float(extras.get("seller_rating")),
+        seller_rating=to_float(metadata.get("seller_rating")),
         currency=sanitized_currency,
     )
 
@@ -177,8 +142,8 @@ async def scrape_competitor_product_async(
         scraped_info=scraped_info,
         last_checked=now,
         currency=sanitized_currency,
-        etag=etag,
-        last_modified=last_modified,
+        etag=metadata.etag,
+        last_modified=metadata.last_modified,
     )
 
     return ScrapeResult(

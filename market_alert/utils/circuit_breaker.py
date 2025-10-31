@@ -1,4 +1,4 @@
-""" Circuit breaker simples baseado em contagem de falhas por host """
+""" Circuit breaker baseado em Redis para proteger integrações externas """
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class CircuitBreaker:
         try:
             return self._client_factory()
         except Exception as exc:
-            logger.warning("circuit_breaker_client_error", error=str(exc))
+            logger.warning("circuit_breaker_client_error: %s", exc)
             return None
         
     def _failures_key(self, host: str) -> str:
@@ -50,7 +50,7 @@ class CircuitBreaker:
         try:
             ttl = client.ttl(self._open_key(host))
         except Exception as exc:
-            logger.warning("circuit_breaker_ttl_error", error=str(exc))
+            logger.warning("circuit_breaker_ttl_error: %s", exc)
             return False
         return ttl is not None and ttl > 0
     
@@ -62,7 +62,7 @@ class CircuitBreaker:
         try:
             client.delete(self._failures_key(host))
         except Exception as exc:
-            logger.warning("circuit_breaker_reset_error", error=str(exc))
+            logger.warning("circuit_breaker_reset_error: %s", exc)
 
     def record_failure(self, host: str) -> None:
         """ Incrementa contador e abre circuito quando limiar é atingido """
@@ -78,7 +78,7 @@ class CircuitBreaker:
             pipeline.expire(failures_key, self._failure_window)
             current, _ = pipeline.execute()
         except Exception as exc:  # pragma: no cover
-            logger.warning("circuit_breaker_failure_increment_error", error=str(exc))
+            logger.warning("circuit_breaker_failure_increment_error: %s", exc)
             return
 
         if int(current) >= self._failure_threshold:
@@ -94,5 +94,5 @@ class CircuitBreaker:
                     cooldown_seconds=self._cooldown_seconds,
                 )
             except Exception as exc:  # pragma: no cover
-                logger.warning("circuit_breaker_open_error", error=str(exc))
+                logger.warning("circuit_breaker_open_error: %s", exc)
                 

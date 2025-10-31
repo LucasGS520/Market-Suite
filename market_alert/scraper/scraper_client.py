@@ -7,6 +7,7 @@ import random
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import format_datetime, parsedate_to_datetime
+from threading import Lock
 from typing import Any, Mapping
 from urllib.parse import urlparse
 from uuid import UUID
@@ -60,6 +61,63 @@ def _build_timeout() -> httpx.Timeout:
         read=settings.SCRAPER_READ_TIMEOUT,
     )
 
+def _build_async_client(
+    base_url: str,
+    headers: dict[str, str] | None,
+) -> httpx.AsyncClient:
+    """ Cria ``AsyncClient`` com limites de conexão configurados """
+    limits = httpx.Limits(
+        max_connections=getattr(settings, "SCRAPER_HTTP_MAX_CONNECTIONS", 100),
+        max_keepalive_connections=getattr(settings, "SCRAPER_HTTP_MAX_KEEPALIVE", 20),
+        keepalive_expiry=getattr(settings, "SCRAPER_HTTP_KEEPALIVE_EXPIRY", 30.0),
+    )
+    return httpx.AsyncClient(
+        base_url=base_url,
+        timeout=_build_timeout(),
+        headers=headers,
+        limits=limits,
+    )
+
+_CLIENT_POOL: dict[str, tuple[httpx.AsyncClient, int]] = {}
+_POOL_LOCK = Lock()
+
+def _acquire_http_client(
+    base_url: str,
+    headers: dict[str, str] | None,
+) -> tuple[httpx.AsyncClient, str]:
+    """ Retorna cliente compartilhado incrementando o contador de uso """
+    key = base_url
+    with _POOL_LOCK:
+        entry = _CLIENT_POOL.get(key)
+        if entry:
+            client, refcount = entry
+            _CLIENT_POOL[key] = (client, refcount + 1)
+            if headers:
+                client.headers.update(headers)
+            return client, key
+        
+        client = _build_async_client(base_url, headers)
+        _CLIENT_POOL[key] = (client, 1)
+        return client, key
+    
+async def _release_http_client(key: str, client: httpx.AsyncClient) -> None:
+    """ Diminui contador de uso e encerra cliente quanado não há consumidores """
+    close_client = False
+    with _POOL_LOCK:
+        entry = _CLIENT_POOL.get(key)
+        if not entry:
+            close_client = True
+        else:
+            pooled_client, refcount = entry
+            if pooled_client is not client or refcount <= 1:
+                close_client = True
+                _CLIENT_POOL.pop(key, None)
+            else:
+                _CLIENT_POOL[key] = (pooled_client, refcount - 1)
+
+    if close_client:
+        await client.aclose()
+
 rate_limiter = RateLimiter(
     get_redis_client,
     max_requests=settings.SCRAPER_HOST_RATE_LIMIT,
@@ -78,15 +136,15 @@ class ScraperClient:
     """ Cliente HTTP assíncrono com retries, rate limit e circuit breaker """
     base_url: str = settings.SCRAPER_SERVICE_URL
     client: httpx.AsyncClient = field(init=False)
+    _client_key: str = field(init=False)
+    _closed: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         """ Inicializa o ``AsyncClient`` com parâmetros de timeout configurados """
         user_agent = getattr(settings, "HTTP_USER_AGENT", None)
         default_headers = {"User-Agent": user_agent} if user_agent else None
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=_build_timeout(),
-            headers=default_headers,
+        self.client, self._client_key = _acquire_http_client(
+            self.base_url, default_headers
         )
 
     async def fetch(
@@ -132,6 +190,10 @@ class ScraperClient:
             user_id=user_id,
         )
         request_payload = request_model.model_dump(exclude_none=True)
+        if "url" in request_payload:
+            request_payload["url"] = str(request_payload["url"])
+        if "user_id" in request_payload and request_payload["user_id"] is not None:
+            request_payload["user_id"] = str(request_payload["user_id"])
 
         extra_metadata: dict[str, Any] = dict(metadata or {})
         if monitored_id:
@@ -235,7 +297,10 @@ class ScraperClient:
 
     async def aclose(self) -> None:
         """ Encerra a sessão HTTP assíncrona para liberar recursos """
-        await self.client.aclose()
+        if self._closed:
+            return
+        self._closed = True
+        await _release_http_client(self._client_key, self.client)
 
     async def __aenter__(self) -> "ScraperClient":
         """ Permite usar ``ScraperClient`` como contexto assíncrono """

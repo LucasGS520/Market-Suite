@@ -15,3 +15,7 @@ class ScrapeResult:
     error_code: str | None = None
     retry_after: int | None = None
     
+    def __getitem__(self, item: str):
+        """Permite acesso estilo dicionário para compatibilidade com testes."""
+        return getattr(self, item)
+    

@@ -73,6 +73,15 @@ class Settings(ConfigBase):
     SCRAPER_RETRY_BACKOFF_MAX: float = float(
         os.getenv("SCRAPER_RETRY_BACKOFF_MAX", "2.0")
     ) #Valor máximo de espera exponencial entre tentativas
+    SCRAPER_HTTP_MAX_CONNECTIONS: int = int(
+        os.getenv("SCRAPER_HTTP_MAX_CONNECTIONS", "100")
+    ) #Limite global de conexões HTTP simultâneas
+    SCRAPER_HTTP_MAX_KEEPALIVE: int = int(
+        os.getenv("SCRAPER_HTTP_MAX_KEEPALIVE", "20")
+    ) #Quantidade de conexões mantidas em keep-alive
+    SCRAPER_HTTP_KEEPALIVE_EXPIRY: float = float(
+        os.getenv("SCRAPER_HTTP_KEEPALIVE_EXPIRY", "30.0")
+    ) #Tempo em segundos para expirar conexões inativas
     SCRAPER_SERVICE_AUTH_HEADER: str | None = os.getenv(
         "SCRAPER_SERVICE_AUTH_HEADER"
     ) #Nome do header opcional para autenticação interna
