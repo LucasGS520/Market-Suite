@@ -175,7 +175,6 @@ services:
       - "market_alert.core.celery_app:celery_app"
       - "worker"
       - "--loglevel=info"
-      - "--quiet"
       - "--pool=threads"
       - "--concurrency=4"
       - "-Q"
