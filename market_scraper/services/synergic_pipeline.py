@@ -1,8 +1,8 @@
-""" Pipeline sequencial e observável para o MarktScraper
+""" Pipeline sequencial e observável para o MarketScraper
 
 O módulo implementa uma versão enxuta do pipeline que processa etapas em
 sequência, respeitando limites de tempo configuráveis e registrando
-métricas por etapa. A execução linear com métricas grante previsibilidade
+métricas por etapa. A execução linear com métricas garante previsibilidade
 e observabilidade para o serviço de scraping.
 """
 

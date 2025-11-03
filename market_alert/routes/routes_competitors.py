@@ -16,7 +16,7 @@ from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, d
 from market_alert.tasks.scraper_tasks import collect_competitor_task
 from market_alert.core.security import get_current_user
 
-from market_scraper.utils.url_validation import normalize_product_url, check_url_compatibility
+from shared.utils.url_validation import check_url_compatibility, normalize_product_url
 
 
 router = APIRouter(prefix="/competitors", tags=["Concorrentes"])

@@ -90,8 +90,6 @@ packaging==24.2
 pandas==2.3.0
 pillow==11.2.1
 platformdirs==4.3.8
-playwright==1.52.0
-playwright-stealth==2.0.0
 pluggy==1.5.0
 price-parser==0.5.0
 prometheus-fastapi-instrumentator==7.1.0

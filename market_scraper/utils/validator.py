@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 import structlog
 
 from shared.utils.logging_utils import sanitize_log_data
+from shared.utils.url_validation import normalize_product_url
 from shared.metrics.metrics_scraper import (
     SCRAPER_STEP_INVALID_TOTAL,
     SCRAPER_VALIDATION_REJECT_TOTAL,
@@ -49,13 +50,18 @@ def _normalize_url(raw_url: Any, fallback: str) -> str:
         candidate = str(raw_url).strip()
 
     if candidate:
-        return candidate
-    
-    if isinstance(fallback, str):
-        return fallback
-    
-    #Garante que valores residuais não contaminem payload final
-    return str(fallback or "")
+        try:
+            #Reutilizamos a normalização compartilhada para alinhar regras entre serviços
+            return normalize_product_url(candidate)
+        except ValueError:
+            #Quando o parser produz um valor ilegítimo usamos o fallback confiável
+            pass
+
+    try:
+        return normalize_product_url(fallback)
+    except ValueError:
+        #Garante que valores residuais não contaminem payload final
+        return str(fallback or "")
 
 def _normalize_source(raw_source: Any, fallback: str) -> str:
     """ Garante que a origem represente um domínio válido """

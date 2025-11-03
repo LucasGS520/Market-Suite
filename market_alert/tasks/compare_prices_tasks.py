@@ -56,12 +56,16 @@ def compare_prices_task(self, monitored_id: str) -> None:
             if alerts:
                 send_notification_task.delay(monitored_id, alerts)
 
-            # Armazena em Redis o timestamp de última comparação bem-sucedida
-            redis_client.set(
-                f"compare:last_success:{monitored_id}",
-                datetime.now(timezone.utc).isoformat(),
-                ex=settings.COMPARISON_LAST_SUCCESS_TTL
-            )
+            #Garante que a persistência no Redis só ocorre quando o cliente estiver disponível
+            client = redis_client or get_redis_client()
+            if client is not None:
+                client.set(
+                    f"compare:last_success:{monitored_id}",
+                    datetime.now(timezone.utc).isoformat(),
+                    ex=settings.COMPARISON_LAST_SUCCESS_TTL,
+                )
+            else:
+                task_logger.warning("compare_prices_redis_unavailable")
 
         except Exception as exc:
             status = "failure"

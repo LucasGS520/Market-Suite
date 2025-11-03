@@ -21,6 +21,7 @@ class MonitoredScrapedInfo(BaseModel):
     current_price: Decimal
     thumbnail: Optional[str] = None
     free_shipping: bool = False
+    currency: Optional[str] = None
 
 
 # ----- PRODUTO CONCORRENTE -----
@@ -40,3 +41,4 @@ class CompetitorScrapedInfo(BaseModel):
     free_shipping: bool = False
     seller: Optional[str] = None
     seller_rating: Optional[float] = None
+    currency: Optional[str] = None

@@ -36,7 +36,6 @@ from market_alert.models.models_alerts import AlertRule
 
 #Rotas
 from market_alert.routes.routes_users import router as users_router
-from market_alert.routes.routes_admin import router as admin_router
 from market_alert.routes.routes_monitored import router as monitored_router
 from market_alert.routes.routes_competitors import router as competitor_router
 from market_alert.routes.routes_monitoring_errors import router as monitoring_errors_router
@@ -108,7 +107,11 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
         content={"detail": "Muitas requisições. Tente novamente mais tarde."}
     )
 
+SERVICE_LABEL = "market_alert"
+
 class MetricsMiddleware(BaseHTTPMiddleware):
+    """ Coleta métricas de requisição e latência a cada chamada HTTP """
+
     async def dispatch(self, request: Request, call_next):
         """ Middleware que mede latência e conta requisições """
         start = time.time()
@@ -117,14 +120,16 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
         #Incrementa contador de requisições
         HTTP_REQUESTS_TOTAL.labels(
-            method = request.method,
-            endpoint = request.url.path,
-            status_code = response.status_code
+            service=SERVICE_LABEL,
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=response.status_code
         ).inc()
 
         if response.status_code >= 400:
             try:
                 API_ERRORS_TOTAL.labels(
+                    service=SERVICE_LABEL,
                     endpoint=request.url.path,
                     status_code=response.status_code
                 ).inc()
@@ -133,6 +138,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
         #Observa latência
         HTTP_REQUESTS_LATENCY_SECONDS.labels(
+            service=SERVICE_LABEL,
             method=request.method,
             endpoint=request.url.path
         ).observe(latency)
@@ -178,7 +184,6 @@ def create_app() -> FastAPI:
 # ---------- REGISTRO DE ROTAS ----------
     #Usuários e administração
     app.include_router(users_router)
-    app.include_router(admin_router)
 
     #Autenticação
     app.include_router(login_router)

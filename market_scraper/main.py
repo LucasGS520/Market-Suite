@@ -1,8 +1,8 @@
 """ Ponto de entrada da aplicação FastAPI do serviço de scraping
 
 O módulo cria a instância principal do FastAPI, registra as rotas
-de saúde, scraping e expõe a rota de métricas compartilhada 
-com o restante da plataforma
+de saúde, scraping e expõe a rota de métricas compartilhada
+com o restante da plataforma.
 """
 
 from fastapi import FastAPI, Request, status
@@ -29,7 +29,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(routes_health.router)
 #Disponibiliza o endpoint com dois prefixos por compatibilidade ("/scraper" e "/scrape")
 app.include_router(routes_scraper.router, prefix="/scraper")
-app.include_router(routes_scraper.router, prefix="/scrape")
 
 @app.get("/metrics")
 async def metrics_endpoint() -> Response:

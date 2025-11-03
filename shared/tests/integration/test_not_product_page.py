@@ -29,9 +29,9 @@ def test_not_product_page_raises_bad_request():
 
     with patch.object(
         mod.ScraperClient,
-        "parse",
+        "fetch",
         AsyncMock(side_effect=HTTPException(status_code=400)),
-    ) as parse_mock:
+    ) as fetch_mock:
         with pytest.raises(HTTPException) as exc:
             scrape_competitor_product(
                 db=Mock(spec=Session),
@@ -41,4 +41,4 @@ def test_not_product_page_raises_bad_request():
             )
 
     assert exc.value.status_code == 400
-    parse_mock.assert_called_once()
+    fetch_mock.assert_called_once()

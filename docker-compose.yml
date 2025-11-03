@@ -72,8 +72,11 @@ services:
       - ./market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
     volumes:
       - ./market_alert:/market_alert
+      # Monta o pacote `shared` inteiro para que imports como `import shared` funcionem
+      - ./shared:/market_alert/shared:ro
       - ./shared/infra:/market_alert/infra
     working_dir: /market_alert
     command:
@@ -98,6 +101,7 @@ services:
       - ./market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
     command:
       - uvicorn
       - "main:app"
@@ -118,6 +122,8 @@ services:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
       - ./shared/infra:/market_alert/infra
+      # Monta o pacote `shared` para permitir imports como `import shared.infra`
+      - ./shared:/market_alert/shared:ro
     networks:
       - monitoring-net
 
@@ -131,6 +137,7 @@ services:
       - ./market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
     command:
       - python
       - "beat_with_metrics.py"
@@ -147,6 +154,7 @@ services:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
       - ./shared/infra:/market_alert/infra
+      - ./shared:/market_alert/shared:ro
     networks:
       - monitoring-net
 
@@ -160,16 +168,20 @@ services:
       - ./market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
     command:
       - celery
       - "-A"
       - "market_alert.core.celery_app:celery_app"
       - "worker"
-      - "--loglevel=debug"
+      - "--loglevel=info"
+      - "--quiet"
       - "--pool=threads"
       - "--concurrency=4"
       - "-Q"
       - "celery,scraping,monitor"
+    user: 
+      "1000:1000"
     ports:
       - "8002:8002"
     depends_on:
@@ -183,6 +195,7 @@ services:
       - ./market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
       - ./shared/infra:/market_alert/infra
+      - ./shared:/market_alert/shared:ro
     networks:
       - monitoring-net
 
@@ -327,6 +340,7 @@ services:
     volumes:
       - ./market_alert:/market_alert
       - ./shared/infra:/market_alert/infra
+      - ./shared:/market_alert/shared:ro
     working_dir: /market_alert
     command:
       - "-f"

@@ -29,6 +29,8 @@ class DummyRobotParser:
             raise RuntimeError("falha ao obter robots.txt")
         
     def can_fetch(self, user_agent: str, url: str) -> bool:
+        if self.raise_error:
+            raise RuntimeError("falha em can_fetch")
         return self.allowed
     
 @pytest.fixture(autouse=True)
@@ -102,10 +104,10 @@ async def test_is_allowed_returns_false_when_robot_blocks(
 
 
 @pytest.mark.asyncio
-async def test_is_allowed_retains_permissive_behavior_when_parser_missing(
+async def test_is_allowed_blocks_when_parser_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ Confere fallback permissivo em indisponibilidade do parser """
+    """ Parser ausente deve bloquear a coleta para evitar violações """
     async def fake_get_parser(host: str, robots_url: str, *, timeout: float) -> DummyRobotParser | None:
         return None
     
@@ -114,7 +116,27 @@ async def test_is_allowed_retains_permissive_behavior_when_parser_missing(
     error_metric = SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error")
     before = error_metric._value.get()  # type: ignore[attr-defined]
 
-    assert await robots.is_allowed("https://unstable.com/p") is True
+    assert await robots.is_allowed("https://unstable.com/p") is False
+
+    after = error_metric._value.get()  # type: ignore[attr-defined]
+    assert after == before + 1
+
+
+@pytest.mark.asyncio
+async def test_is_allowed_blocks_when_can_fetch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ Exceções de ``can_fetch`` devem impedir a coleta """
+
+    async def fake_get_parser(host: str, robots_url: str, *, timeout: float) -> DummyRobotParser:
+        return DummyRobotParser(allowed=True, raise_error=True)
+
+    monkeypatch.setattr(robots, "_get_parser", fake_get_parser)
+
+    error_metric = SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error")
+    before = error_metric._value.get()  # type: ignore[attr-defined]
+
+    assert await robots.is_allowed("https://erro.com/item") is False
 
     after = error_metric._value.get()  # type: ignore[attr-defined]
     assert after == before + 1

@@ -243,6 +243,24 @@ def _resolve_with_socket(host: str, timeout: float) -> list[str]:
             future.cancel()
             raise HostResolutionError(f"Timeout ao resolver host: {host}") from exc
 
+def _classify_non_public(
+    ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> str | None:
+    """Identifica a razão do bloqueio quando o IP não é global"""
+    if ip_obj.is_loopback:
+        return "loopback"
+    if ip_obj.is_link_local:
+        return "link_local"
+    if ip_obj.is_private:
+        return "private"
+    if ip_obj.is_reserved:
+        return "reserved"
+    if ip_obj.is_multicast:
+        return "multicast"
+    if ip_obj.is_unspecified:
+        return "unspecified"
+    return "non_global"
+
 def _validate_public_addresses(host: str, addresses: list[str]) -> list[str]:
     """ Valida se todos os IPs são globais antes de liberar o host """
     validated: list[str] = []
@@ -253,11 +271,13 @@ def _validate_public_addresses(host: str, addresses: list[str]) -> list[str]:
             raise HostResolutionError(f"Endereço IP inválido para {host}") from exc
         
         if not ip_obj.is_global:
-            SCRAPER_DNS_BLOCKED_TOTAL.labels(reason="non_public").inc()
+            reason = _classify_non_public(ip_obj)
+            SCRAPER_DNS_BLOCKED_TOTAL.labels(reason=reason).inc()
             logger.warning(
                 "dns_resolution_blocked",
                 host=host,
                 ip=ip_text,
+                reason=reason,
             )
             raise HostResolutionError(f"Endereço não público bloqueado: {ip_text}")
         

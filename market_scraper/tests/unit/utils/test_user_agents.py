@@ -39,7 +39,7 @@ def test_get_user_agent_preserva_afinidade_por_dominio() -> None:
     assert seconds_domain != first
 
 def test_get_user_agent_usa_padrao_quando_pool_vazio(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ Quando não há pool configurado deve retornar o valor padrao """
+    """ Quando não há pool configurado deve retornar o valor padrão """
     monkeypatch.setattr(settings, "SCRAPER_USER_AGENT_POOL", tuple())
     monkeypatch.setattr(settings, "SCRAPER_DEFAULT_USER_AGENT", "PADRAO")
     user_agents.reset_user_agent_state()

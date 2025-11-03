@@ -2,7 +2,7 @@
 
 O módulo isola toda a lógica responsável por obter o HTML de uma URL,
 incluindo construção de headers, métricas e tratamento de erros. Esse
-isolamneto facilita testes e reutilização sem acoplar diretamente às
+isolamento facilita testes e reutilização sem acoplar diretamente às
 etapas do pipeline.
 """
 

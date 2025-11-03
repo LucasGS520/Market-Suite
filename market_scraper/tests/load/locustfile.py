@@ -34,7 +34,7 @@ class WebsiteUser(HttpUser):
             "product_type": "monitored",
             "user_id": str(uuid.uuid4()),
         }
-        self.client.post("/scrape/parse", json=payload, headers=self._headers())
+        self.client.post("/scraper/parse", json=payload, headers=self._headers())
 
     @task(1)
     def scrape_competitor(self):
@@ -44,4 +44,4 @@ class WebsiteUser(HttpUser):
             "product_type": "competitor",
             "user_id": str(uuid.uuid4()),
         }
-        self.client.post("/scrape/parse", json=payload, headers=self._headers())
+        self.client.post("/scraper/parse", json=payload, headers=self._headers())

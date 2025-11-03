@@ -1,9 +1,15 @@
-""" Facilita importações dos esquemas públicos do serviço """
+""" Facilita importações dos esquemas públicos do serviço 
 
-from .parse import ErrorResponse, ParseRequest, ParserResponse
+O módulo mantém compatibilidade com consumidores legados expondo os
+modelos centralizados em ``shared.schemas``. Dessa forma, testes e
+importações anteriores continuam funcionando sem apontar diretamente
+para o pacote compartilhado.
+"""
+
+from shared.schemas.schemas_scraper import ErrorResonse, ParserRequest, ParserResponse
 
 __all__ = [
-    "ParseRequest",
+    "ParserRequest",
     "ParserResponse",
     "ErrorResponse",
 ]

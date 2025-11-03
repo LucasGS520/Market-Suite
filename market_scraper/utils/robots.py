@@ -1,10 +1,10 @@
-""" Utilitário centralizado para respeito ao robots.txt antes de scraping 
+""" Utilitário centralizado para respeito ao robots.txt antes de scraping
 
 O módulo valida o acesso com ``robots.txt`` de forma assíncrona reaproveitando
 limites de rede definidos nas configurações globais. O cache interno reduz
-round-trips desnecessários enquanto preserva métricas de sucesso e erro. Em
-caso de instabilidade do arquivo, a política operacional é permissiva (allow)
-para evitar falhas cascata no pipeline.
+round-trips desnecessários enquanto preserva métricas de sucesso e erro. A
+política de fallback é restritiva para impedir acessos quando o arquivo não
+pode ser validado, privilegiando conformidade legal.
 """
 
 from __future__ import annotations
@@ -181,15 +181,15 @@ async def is_allowed(
     parser = await _get_parser(host_key, robots_url, timeout=timeout_value)
 
     if parser is None:
-        #Fallback permissivo documentado para manter serviço disponível mesmo em falhas temporárias
+        #Sem parser confiável, evitamos scraping para cumprir políticas públicas do site
         SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
-        logger.info(
-            "robots_fallback_allow",
+        logger.warning(
+            "robots_fallback_block",
             host=host_key,
             url=normalized_url,
             reason="parser_unavailable",
         )
-        return True
+        return False
 
     try:
         allowed = parser.can_fetch(user_agent, normalized_url)
@@ -203,7 +203,7 @@ async def is_allowed(
         )
         SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
         #Fallback permanece permissivo para garantir disponibilidade do pipeline
-        return True
+        return False
     
     outcome = "allowed" if allowed else "disallowed"
     SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome=outcome).inc()

@@ -1,15 +1,14 @@
-""" Testes para o esquema de scraping com suporte a Decimal """
+""" Testes para o esquema de scraping com suporte a tipos nativos """
 
 from decimal import Decimal
 
-from shared.schemas.schemas_scraper import ScraperResponse
+from shared.schemas.schemas_scraper import ParserResponse
 
 def test_precisao_dos_precos() -> None:
-    dados = ScraperResponse(current_price="0.10", old_price="0.20")
+    dados = ParserResponse(current_price="0.10")
     assert isinstance(dados.current_price, Decimal)
-    assert isinstance(dados.old_price, Decimal)
-    assert dados.current_price + dados.old_price == Decimal("0.30")
+    assert dados.current_price == Decimal("0.10")
 
-def test_campo_marketplace_presente() -> None:
-    dados = ScraperResponse(current_price="1.00", marketplace="example.com")
-    assert dados.marketplace == "example.com"
+def test_campo_marketplace_preenche_source() -> None:
+    dados = ParserResponse(current_price="1.00", marketplace="example.com")
+    assert dados.source == "example.com"

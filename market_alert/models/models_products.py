@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from shared.infra.db import Base
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
+from market_alert.models.models_price_history import PriceHistory
 
 
 # ---------- PRODUTO MONITORADO ----------
@@ -37,6 +38,7 @@ class MonitoredProduct(Base):
     target_price = Column(Numeric(10,2), nullable=True)
     current_price = Column(Numeric(10,2), nullable=True)
     free_shipping = Column(Boolean, default=False)
+    currency = Column(String(8), nullable=True)
     thumbnail = Column(Text, nullable=True)
 
     #Cache condicional
@@ -53,6 +55,7 @@ class MonitoredProduct(Base):
     #Relacionamento com CompetitorProduct
     competitors = relationship("CompetitorProduct", back_populates="monitored_product", cascade="all, delete-orphan")
     scraping_errors = relationship("ScrapingError", back_populates="product", cascade="all, delete-orphan", lazy="dynamic")
+    price_history = relationship("PriceHistory", back_populates="monitored_product", cascade="all, delete-orphan")
 
     def __repr__(self):
         return (
@@ -89,6 +92,7 @@ class CompetitorProduct(Base):
     free_shipping = Column(Boolean, default=False)
     seller = Column(String, nullable=True)
     seller_rating = Column(Float, nullable=True)
+    currency = Column(String(8), nullable=True)
     thumbnail = Column(String, nullable=True)
 
     #Cache condicional
@@ -104,6 +108,7 @@ class CompetitorProduct(Base):
 
     #Relacionamento com MonitoredProduct
     monitored_product = relationship("MonitoredProduct", back_populates="competitors")
+    price_history = relationship("PriceHistory", back_populates="competitor_product", cascade="all, delete-orphan")
 
     def __repr__(self):
         return (

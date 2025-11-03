@@ -1,8 +1,11 @@
-""" Configuração da aplicação Celery e registro de métricas """
+""" Configura a aplicação Celery do `market_alert` com métricas padronizadas """
 
 #Registra métricas antes de iniciar o HTTP server
 import os
+import logging
 
+import structlog
+from structlog.typing import BindableLogger, EventDict
 from kombu import Exchange, Queue
 from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
@@ -17,6 +20,73 @@ except Exception:
 
 from market_alert.core.config_alert import settings
 
+
+SERVICE_LABEL = "market_alert_worker"
+NOISY_EVENT_NAMES = {
+    "channel_vars_missing",
+    "collected_celery_metrics",
+    "collect_audit_metrics_noop",
+}
+
+def drop_repeated_events(
+    _logger: BindableLogger,
+    _method_name: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """ Remove eventos conhecidos que apenas repetem ruído operacional """
+    #Ignora mensagens de debug conhecidos que poluem continuamente os logs do worker
+    if event_dict.get("event") in NOISY_EVENT_NAMES:
+        raise structlog.DropEvent
+    
+    return event_dict
+
+def configure_worker_logging() -> None:
+    """ Configura logs estruturados e silencia bibliotecas barulhentas no worker """
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            drop_repeated_events,
+            structlog.processors.JSONRenderer()
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(structlog.stdlib.ProcessorFormatter(
+        processor=structlog.processors.JSONRenderer(),
+        foreign_pre_chain=[structlog.processors.TimeStamper(fmt="iso")]
+    ))
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+
+    noisy_loggers = (
+        "httpx",
+        "httpcore",
+        "anyio",
+        "uvicorn",
+        "asyncio",
+        "celery",
+        "celery.worker.pidbox",
+        "celery.worker.pool",
+        "celery.worker.consumer",
+        "celery.worker.strategy",
+        "celery.app.trace",
+        "kombu",
+    )
+
+    #Mantém logs de erro, mas oculta detalhes de debug que não ajudam na operação diária
+    for logger_name in noisy_loggers:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
+configure_worker_logging()
 
 #Cria a aplicação Celery
 celery_app = Celery(
@@ -47,14 +117,22 @@ def _start_prometheus_server(**kwargs):
 def handle_task_success(sender=None, **kwargs):
     """ Métricas de contagem de sucesso """
     #Incrementa contagem de tasks concluídas
-    CELERY_TASKS_TOTAL.labels(task_name=sender.name, status="success").inc()
+    CELERY_TASKS_TOTAL.labels(
+        service=SERVICE_LABEL,
+        task_name=sender.name,
+        status="success",
+    ).inc()
 
 #Incrementa em toda a falha de task
 @task_failure.connect
 def handle_task_failure(sender=None, **kwargs):
     """ Métricas de contagem de falha """
     #Incrementa em caso de falha de task
-    CELERY_TASKS_TOTAL.labels(task_name=sender.name, status="failure").inc()
+    CELERY_TASKS_TOTAL.labels(
+        service=SERVICE_LABEL,
+        task_name=sender.name,
+        status="failure",
+    ).inc()
 
 
 #Configurações adicionais do Celery
@@ -65,6 +143,7 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="America/Sao_Paulo",
     enable_utc=True,
+    worker_hijack_root_logger=False,
 
     #Limites de tempo de execução
     task_soft_time_limit=30,
