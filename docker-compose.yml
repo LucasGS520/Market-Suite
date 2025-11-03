@@ -1,5 +1,34 @@
 services:
 
+  #Serviço de conveniência para iniciar toda a stack do backend com um único comando.
+  #Uso: `docker compose up backend` para iniciar: db, redis, migrações, API, workers (Celery) e o serviço de scraping.
+  backend:
+    image: busybox
+    entrypoint:
+      - sh
+      - -c
+      - |
+        tail -f /dev/null
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+      migrations:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+      market_scraper:
+        condition: service_started
+      celery_beat:
+        condition: service_started
+      celery-worker:
+        condition: service_started
+    networks:
+      - monitoring-net
+
   #Banco de dados PostgreSQL utilizado pela aplicação
   db:
     image: postgres:15
@@ -35,7 +64,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./shared/infra/redis-scripts:/etc/redis/scripts:ro
+      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
     restart: unless-stopped
     networks:
       - monitoring-net
@@ -57,7 +86,7 @@ services:
         until redis-cli -h redis ping | grep -q PONG; do sleep 1; done;
         redis-cli -h redis SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
     volumes:
-      - ./shared/infra/redis-scripts:/etc/redis/scripts:ro
+      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
     restart: on-failure
     networks:
       - monitoring-net
@@ -66,18 +95,18 @@ services:
   #Executa migrações de banco de dados com Alembic
   migrations:
     build:
-      context: ./market_alert
+      context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
-      - ./market_alert/.env.market_alert
+      - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
       - PYTHONPATH=/
     volumes:
-      - ./market_alert:/market_alert
+      - ./backend/market_alert:/market_alert
       # Monta o pacote `shared` inteiro para que imports como `import shared` funcionem
-      - ./shared:/market_alert/shared:ro
-      - ./shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend/shared/infra:/market_alert/infra
     working_dir: /market_alert
     command:
       - alembic
@@ -95,10 +124,10 @@ services:
   #API principal do MarketAlert
   api:
     build:
-      context: ./market_alert
+      context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
-      - ./market_alert/.env.market_alert
+      - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
       - PYTHONPATH=/
@@ -119,11 +148,11 @@ services:
       redis-init:
         condition: service_completed_successfully
     volumes:
-      - ./market_alert:/market_alert
+      - ./backend/market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
-      - ./shared/infra:/market_alert/infra
+      - ./backend/shared/infra:/market_alert/infra
       # Monta o pacote `shared` para permitir imports como `import shared.infra`
-      - ./shared:/market_alert/shared:ro
+      - ./backend/shared:/market_alert/shared:ro
     networks:
       - monitoring-net
 
@@ -131,10 +160,10 @@ services:
   #Agendador de tarefas do Celery
   celery_beat:
     build:
-      context: ./market_alert
+      context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
-      - ./market_alert/.env.market_alert
+      - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
       - PYTHONPATH=/
@@ -151,10 +180,10 @@ services:
       redis-init:
         condition: service_completed_successfully
     volumes:
-      - ./market_alert:/market_alert
+      - ./backend/market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
-      - ./shared/infra:/market_alert/infra
-      - ./shared:/market_alert/shared:ro
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
     networks:
       - monitoring-net
 
@@ -162,10 +191,10 @@ services:
   #Worker do Celery para tarefas assíncronas
   celery-worker:
     build:
-      context: ./market_alert
+      context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
-      - ./market_alert/.env.market_alert
+      - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
       - PYTHONPATH=/
@@ -191,10 +220,10 @@ services:
       redis-init:
         condition: service_completed_successfully
     volumes:
-      - ./market_alert:/market_alert
+      - ./backend/market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
-      - ./shared/infra:/market_alert/infra
-      - ./shared:/market_alert/shared:ro
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
     networks:
       - monitoring-net
 
@@ -202,10 +231,10 @@ services:
   #Serviço dedicado ao scraping de produtos
   market_scraper:
     build:
-      context: ./market_scraper
+      context: ./backend/market_scraper
       dockerfile: Dockerfile
     env_file:
-      - ./market_scraper/.env.market_scraper
+      - ./backend/market_scraper/.env.market_scraper
     environment:
       - ENV_FILE=.env.market_scraper
       - REDIS_HOST=redis
@@ -227,9 +256,9 @@ services:
       redis-init:
         condition: service_completed_successfully
     volumes:
-      - ./market_scraper:/app/market_scraper
-      - ./shared/infra:/market_scraper/infra
-      - ./shared:/app/shared
+      - ./backend/market_scraper:/app/market_scraper
+      - ./backend/shared/infra:/market_scraper/infra
+      - ./backend/shared:/app/shared
     networks:
       - monitoring-net
 
@@ -238,7 +267,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     volumes:
-      - ./shared/infra/prometheus:/etc/prometheus:ro
+      - ./backend/shared/infra/prometheus:/etc/prometheus:ro
     ports:
       - "9090:9090"
     extra_hosts:
@@ -250,11 +279,11 @@ services:
   #Gerenciador de alertas do Prometheus
   alertmanager:
     build:
-      context: ./shared/infra/alertmanager
+      context: ./backend/shared/infra/alertmanager
       dockerfile: Dockerfile
     image: alertmanager-envsubst
     volumes:
-      - ./shared/infra/alertmanager:/etc/alertmanager:ro
+      - ./backend/shared/infra/alertmanager:/etc/alertmanager:ro
     env_file:
       - .env.common
     ports:
@@ -274,7 +303,7 @@ services:
         chown -R root:root /tmp/loki && \
         exec /usr/bin/loki -config.file=/etc/loki/loki-config.yml
     volumes:
-      - ./shared/infra/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./backend/shared/infra/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/tmp/loki
     ports:
       - "3100:3100"
@@ -287,7 +316,7 @@ services:
     image: grafana/promtail:2.9.8
     command: -config.file=/etc/promtail/promtail-config.yml
     volumes:
-      - ./shared/infra/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ./backend/shared/infra/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
       - /var/log:/var/log:ro
     networks:
       - monitoring-net
@@ -323,7 +352,7 @@ services:
     env_file:
       - .env.common
     volumes:
-      - ./shared/infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./backend/shared/infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-storage:/var/lib/grafana
     ports:
       - "3000:3000"
@@ -337,9 +366,9 @@ services:
     depends_on:
       - api
     volumes:
-      - ./market_alert:/market_alert
-      - ./shared/infra:/market_alert/infra
-      - ./shared:/market_alert/shared:ro
+      - ./backend/market_alert:/market_alert
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
     working_dir: /market_alert
     command:
       - "-f"
