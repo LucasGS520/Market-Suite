@@ -175,10 +175,13 @@ services:
       - "market_alert.core.celery_app:celery_app"
       - "worker"
       - "--loglevel=info"
+      - "--quiet"
       - "--pool=threads"
       - "--concurrency=4"
       - "-Q"
       - "celery,scraping,monitor"
+    user: 
+      "1000:1000"
     ports:
       - "8002:8002"
     depends_on:

@@ -35,12 +35,13 @@ from shared import metrics
 
 logger = structlog.get_logger("alerts")
 
-def __verify_channel_settings() -> dict:
-    """  Verifica as configurações necessárias para todos os canais de notificação
+#Evita repeticão infinita de avisos sobre configurações faltantes
+WARNING_COOLDOWN_SECONDS = 300.0
+_LOGGED_MISSING_CHANNELS: dict[str, tuple[frozenset[str], float, int]] = {}
 
-    Retorna um mapeamento do nome do canal para variáveis e "logs" de ambiente
-    ausente e um aviso para cada entrada encontrada
-    """
+def __verify_channel_settings() -> dict[str, list[str]]:
+    """ Verifica variáveis obrigatórias para todos os canais de notificação """
+    #Retorna um dicionário com variáveis ausentes por canal para evitar falhas silenciosas
     missing: dict[str, list[str]] = {}
 
     if not settings.SMTP_HOST:
@@ -63,7 +64,25 @@ def __verify_channel_settings() -> dict:
         missing["slack"] = ["SLACK_WEBHOOK_URL"]
 
     for channel, vars_missing in missing.items():
-        logger.warning("channel_vars_missing", channel=channel, missing=vars_missing)
+        missing_set = frozenset(vars_missing)
+        state = _LOGGED_MISSING_CHANNELS.get(channel)
+        should_log = True
+
+        if state:
+            previous_missing, last_logged_at, last_logger_id = state
+            same_missing = previous_missing == missing_set
+            within_cooldown = (time.monotonic() - last_logged_at) < WARNING_COOLDOWN_SECONDS
+            same_logger = last_logger_id == id(logger)
+            if same_missing and within_cooldown and same_logger:
+                should_log = False
+
+        if should_log:
+            now = time.monotonic()
+            logger.warning("channel_vars_missing", channel=channel, missing=vars_missing)
+            _LOGGED_MISSING_CHANNELS[channel] = (missing_set, now, id(logger))
+        else:
+            _LOGGED_MISSING_CHANNELS[channel] = state
+
         metrics.NOTIFICATIONS_SKIPPED_TOTAL.labels(reason="missing_settings").inc()
 
     return missing

@@ -5,6 +5,7 @@ import os
 import logging
 
 import structlog
+from structlog.typing import BindableLogger, EventDict
 from kombu import Exchange, Queue
 from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
@@ -21,6 +22,23 @@ from market_alert.core.config_alert import settings
 
 
 SERVICE_LABEL = "market_alert_worker"
+NOISY_EVENT_NAMES = {
+    "channel_vars_missing",
+    "collected_celery_metrics",
+    "collect_audit_metrics_noop",
+}
+
+def drop_repeated_events(
+    _logger: BindableLogger,
+    _method_name: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """ Remove eventos conhecidos que apenas repetem ruído operacional """
+    #Ignora mensagens de debug conhecidos que poluem continuamente os logs do worker
+    if event_dict.get("event") in NOISY_EVENT_NAMES:
+        raise structlog.DropEvent
+    
+    return event_dict
 
 def configure_worker_logging() -> None:
     """ Configura logs estruturados e silencia bibliotecas barulhentas no worker """
@@ -29,6 +47,7 @@ def configure_worker_logging() -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
+            drop_repeated_events,
             structlog.processors.JSONRenderer()
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
