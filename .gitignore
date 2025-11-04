@@ -131,3 +131,4 @@ tests/integration/services/logs/
 
 # Docker environment
 infra/.env
+node_modules

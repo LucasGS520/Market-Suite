@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="pt-BR">
+  <!-- Documento HTML principal da aplicação frontend -->
+  <head>
+    <!-- Codificação de caracteres -->
+    <meta charset="UTF-8" />
+    <!-- Responsividade: largura da tela e escala máxima -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <!-- Ícone da aplicação (substituído em tempo de build pelas variáveis Vite) -->
+    <link rel="icon" type="image/png" href="%VITE_APP_LOGO%" />
+    <link rel="apple-touch-icon" href="%VITE_APP_LOGO%" />
+    <!-- Título da aba (substituído pela variável Vite) -->
+    <title>%VITE_APP_TITLE%</title>
+
+    <!--
+      Fonte do Google (exemplo). Descomente e ajuste se a aplicação precisar
+      de fontes customizadas. Mantido aqui como referência.
+      Exemplo:
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    -->
+  </head>
+
+  <body>
+    <!-- Ponto de montagem do app React -->
+    <div id="root"></div>
+
+    <!--
+      Entrada principal da aplicação em modo módulo (ESM).
+      - type="module" permite imports nativos no navegador.
+      - /src/main.tsx geralmente inicializa o framework (React).
+    -->
+    <script type="module" src="/src/main.tsx"></script>
+
+    <!--
+      Script de analytics (opcional):
+      - %VITE_ANALYTICS_ENDPOINT% e %VITE_ANALYTICS_WEBSITE_ID% são substituídos em build/env.
+      - defer: adia execução até após o parse do documento, evitando bloqueio de render.
+      - Se não usar analytics, remova ou mantenha comentado para não expor endpoints inválidos.
+    -->
+    <script
+      defer
+      src="%VITE_ANALYTICS_ENDPOINT%/umami"
+      data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
+  </body>
+</html>

@@ -1,0 +1,27 @@
+// Configuração TypeScript usada para execução/build do ambiente Node/Vite.
+// Destinado a arquivos de configuração (ex.: vite.config.ts). Não emite artefatos,
+// apenas ajusta checagem/compilação para o ambiente de desenvolvimento/build.
+{
+  "compilerOptions": {
+    "target": "ES2022", // Versão alvo do JavaScript gerado (recursos sintáticos disponíveis)
+    "lib": ["ES2023"], // Bibliotecas/ambient types a serem incluídas (API padrão disponível)
+    "module": "ESNext", // Módulo de saída compatível com bundlers modernos (ex.: Vite/Rollup)
+    "skipLibCheck": true, // Ignora checagem de tipos em arquivos de declaração (*.d.ts) de dependências
+
+    /* Modo para bundler / resolução de módulos */
+    "moduleResolution": "bundler", // Usa resolução otimizada para bundlers (evita estratégias clássicas de Node)
+    "allowImportingTsExtensions": true, // Permite importar arquivos TypeScript usando extensões (.ts/.tsx) explícitas
+    "isolatedModules": true, // Cada arquivo é tratado como um módulo isolado (útil em ferramentas de build)
+    "moduleDetection": "force", // Força detecção de módulos mesmo sem "export" explícito (útil em config files)
+    "noEmit": true,// Não gera arquivos .js — apenas validação/checagem em tempo de compilação
+
+    /* Regras de lint/checagem estrita */
+    "strict": true, // Habilita verificações estritas do compilador (ex.: null/undefined)
+    "noUnusedLocals": true, // Erro se houver variáveis locais não utilizadas
+    "noUnusedParameters": true, // Erro se houver parâmetros de função não utilizados
+    "noFallthroughCasesInSwitch": true // Evita queda de execução em switch sem 'break' (reduz bugs)
+  },
+
+  // Arquivos incluídos nesta configuração (aqui, apenas o arquivo de configuração do Vite)
+  "include": ["vite.config.ts"]
+}
