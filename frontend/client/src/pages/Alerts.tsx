@@ -1,10 +1,10 @@
 import React from 'react';
 import { useAlerts } from '@/hooks/useAlerts';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/data-display/card';
+import { Button } from '@/components/ui/button/button';
+import { Badge } from '@/components/ui/data-display/badge';
 import { AlertTriangle, Trash2, CheckCircle } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ui/data-display/skeleton';
 
 export default function Alerts() {
   const { alerts, isLoading, markAsRead, deleteAlert } = useAlerts();

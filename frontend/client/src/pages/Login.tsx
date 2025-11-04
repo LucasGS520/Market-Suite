@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button/button';
+import { Input } from '@/components/ui/inputs/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/data-display/card';
+import { Alert, AlertDescription } from '@/components/ui/feedback/alert';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { APP_LOGO, APP_TITLE } from '@/const';
 

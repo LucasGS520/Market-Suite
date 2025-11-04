@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation } from 'wouter';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/navigation/tabs';
 import { BarChart3, ShoppingCart, Plus } from 'lucide-react';
 
 /**

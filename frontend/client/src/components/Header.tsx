@@ -1,8 +1,8 @@
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
-import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/menus/dropdown-menu';
 import { Bell, Settings, LogOut, User } from 'lucide-react';
 import { APP_LOGO, APP_TITLE } from '@/const';
 

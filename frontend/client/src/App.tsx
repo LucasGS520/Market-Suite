@@ -1,8 +1,8 @@
 // Ponto de entrada dos componentes de UI e rotas da aplicação frontend.
 
 /* Importações principais de UI, contexto e páginas */
-import { Toaster } from "@/components/ui/sonner"; // Componente de notificações (toast)
-import { TooltipProvider } from "@/components/ui/tooltip"; // Provedor para tooltips
+import { Toaster } from "@/components/ui/feedback/sonner"; // Componente de notificações (toast)
+import { TooltipProvider } from "@/components/ui/overlay/tooltip"; // Provedor para tooltips
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary"; // Captura erros em árvore de componentes

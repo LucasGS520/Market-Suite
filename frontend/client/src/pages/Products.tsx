@@ -1,11 +1,11 @@
 import React from 'react';
 import { useMonitoredProducts } from '@/hooks/useMonitoredProducts';
 import { useLocation } from 'wouter';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/data-display/card';
+import { Button } from '@/components/ui/button/button';
+import { Badge } from '@/components/ui/data-display/badge';
 import { AlertCircle, TrendingUp, ExternalLink } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ui/data-display/skeleton';
 
 export default function Products() {
   const { products, isLoading } = useMonitoredProducts();

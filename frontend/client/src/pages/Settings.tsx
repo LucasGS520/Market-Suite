@@ -1,9 +1,9 @@
 import React from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/data-display/card';
+import { Button } from '@/components/ui/button/button';
+import { Separator } from '@/components/ui/data-display/separator';
 import { LogOut, User, Bell } from 'lucide-react';
 
 export default function Settings() {

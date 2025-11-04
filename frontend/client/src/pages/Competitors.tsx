@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/data-display/card';
+import { Button } from '@/components/ui/button/button';
+import { Badge } from '@/components/ui/data-display/badge';
 import { ArrowLeft, TrendingDown, TrendingUp, ExternalLink } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@/components/ui/data-display/skeleton';
 import { getCompetitors, Competitor } from '@/lib/api';
 
 export default function Competitors() {
