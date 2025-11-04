@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 // Re-exporta constantes compartilhadas do pacote `shared`
 export { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 
@@ -35,6 +37,12 @@ export const getLoginUrl = () => {
   const oauthPortalUrl = import.meta.env.VITE_OAUTH_PORTAL_URL;
   // Identificador da aplicação registrado no portal OAuth
   const appId = import.meta.env.VITE_APP_ID;
+  // Garante que as variáveis obrigatórias existam antes de montar a URL
+  if (!oauthPortalUrl || !appId) {
+    throw new Error(
+      "Configuração incompleta: defina VITE_OAUTH_PORTAL_URL e VITE_APP_ID para gerar o login.",
+    );
+  }
   // Redirect URI construído a partir da origem atual do navegador
   const redirectUri = `${window.location.origin}/api/oauth/callback`;
   // Estado usado para correlacionar requisição/resposta (simplesmente codifica o redirectUri)

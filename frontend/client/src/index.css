@@ -2,18 +2,58 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Variante customizada para modo escuro (utilizada pelo Tailwind) */
-@custom-variant dark (&:is(.dark *));
+/* Paleta base e tokens derivados utilizados pelas classes utilitárias */
+:root {
+  /* Valores padrão do projeto (light mode) */
+  --primary: var(--color-blue-700);
+  --primary-foreground: var(--color-blue-50);
+  --sidebar-primary: var(--color-blue-600);
+  --sidebar-primary-foreground: var(--color-blue-50);
 
-/* Tema inline: mapeamento de variáveis usadas pelos componentes.
-  Define tokens reutilizáveis (cores, raios, bordas, etc.) */
-@theme inline {
+  /* Paleta de charts */
+  --chart-1: var(--color-blue-300);
+  --chart-2: var(--color-blue-500);
+  --chart-3: var(--color-blue-600);
+  --chart-4: var(--color-blue-700);
+  --chart-5: var(--color-blue-800);
+
+  --radius: 0.65rem;
+
+  /* Valores de cor base (OKLCH usados para controle preciso) */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.235 0.015 65);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.235 0.015 65);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.235 0.015 65);
+
+  /* Paleta secundária / estados */
+  --secondary: oklch(0.24 0.006 286.033);
+  --secondary-foreground: oklch(0.7 0.005 65);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.92 0.005 65);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  /* Bordas, anéis e barras laterais */
+  --border: oklch(1 0 0 / 10%);
+  --ring: oklch(0.488 0.243 264.376);
+  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar-foreground: oklch(0.85 0.005 65);
+  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.488 0.243 264.376);
+
+  /* Radios personalizados derivados da variável radius */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  /* Cores genéricas usadas por componentes */
+  /* Mapeamentos de compatibilidade: componentes usam --color-* */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -31,10 +71,8 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
-  --color-input: var(--input);
+  --color-input: var(--input, var(--background)); /* fallback seguro */
   --color-ring: var(--ring);
-
-  /* Cores para gráficos e sidebar */
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -48,96 +86,67 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* Valores padrão do projeto (light mode) */
-:root {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-600);
-  --sidebar-primary-foreground: var(--color-blue-50);
-
-  /* Paleta de charts */
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --chart-4: var(--color-blue-700);
-  --chart-5: var(--color-blue-800);
-
-  /* Raio padrão para bordas */
-  --radius: 0.65rem;
-
-  /* Tokens de cor em oklch — usados pelas variáveis acima */
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.235 0.015 65);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.235 0.015 65);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.235 0.015 65);
-  --secondary: oklch(0.98 0.001 286.375);
-  --secondary-foreground: oklch(0.4 0.015 65);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.141 0.005 285.823);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.623 0.214 259.815);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.235 0.015 65);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
-  --sidebar-accent-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.623 0.214 259.815);
-}
-
-/* Modo escuro: sobrescreve tokens relevantes quando .dark estiver presente */
+/* Tema inline: mapeamento de variáveis usadas pelos componentes.
+  Define tokens reutilizáveis (cores, raios, bordas, etc.) */
 .dark {
-  --primary: var(--color-blue-700);
-  --primary-foreground: var(--color-blue-50);
-  --sidebar-primary: var(--color-blue-500);
-  --sidebar-primary-foreground: var(--color-blue-50);
+  /* Mantém as mesmas propriedades para que componentes baseados em --color-* funcionem */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 
-  /* Ajustes de contraste para o modo escuro */
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.85 0.005 65);
-  --card: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.85 0.005 65);
-  --secondary: oklch(0.24 0.006 286.033);
-  --secondary-foreground: oklch(0.7 0.005 65);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground:  oklch(0.92 0.005 65);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --ring: oklch(0.488 0.243 264.376);
-
-  /* Charts e sidebar no dark mode */
-  --chart-1: var(--color-blue-300);
-  --chart-2: var(--color-blue-500);
-  --chart-3: var(--color-blue-600);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.85 0.005 65);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground:  oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.488 0.243 264.376);
+  /* Mapeia tokens semânticos esperados pelo design system */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input, var(--background));
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
 /* Camada base: definições globais e resets leves para consistência */
 @layer base {
-  /* Aplicar borda padrão e outline de foco usando tokens */
+  /* Reinicia box-sizing e define cores padrão de borda/outline via variáveis */
   * {
-   @apply border-border outline-ring/50;
+   box-sizing: border-box;
+   border-color: var(--border);
+   outline-color: var(--ring);
   }
 
-  /* Corpo usa background e cor de texto a partir das variáveis */
+  /* Corpo: usa variáveis para background e texto (compatível com modo claro/escuro) */
   body {
-   @apply bg-background text-foreground;
+   background: var(--background);
+   color: var(--foreground);
+   margin: 0; /* reset padrão do navegador */
+   -webkit-font-smoothing: antialiased;
+   -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Elementos interativos recebem cursor de ponteiro quando habilitados */
+  /* Elementos interativos: cursor pointer quando ativos */
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   [type="button"]:not(:disabled),
@@ -147,36 +156,32 @@
   select:not(:disabled),
   input[type="checkbox"]:not(:disabled),
   input[type="radio"]:not(:disabled) {
-   @apply cursor-pointer;
+   cursor: pointer;
   }
 }
 
 /* Camada de componentes: utilitários customizados e ajustes de layout */
 @layer components {
   /**
-  * Container customizado:
-  * - Centraliza o conteúdo (mx-auto)
-  * - Adiciona padding horizontal responsivo
-  * - Define max-width em telas grandes
-  *
+  * .container
+  * Centraliza conteúdo e adiciona padding responsivo.
   * Uso: <div className="container">...</div>
-  * Para larguras personalizadas use utilitários max-w-* diretamente.
   */
   .container {
    width: 100%;
    margin-left: auto;
    margin-right: auto;
-   padding-left: 1rem; /* 16px: padding em mobile */
+   padding-left: 1rem; /* 16px - padding móvel */
    padding-right: 1rem;
   }
 
-  /* Ajuste para utilitário .flex garantindo que boxes flexíveis possam encolher */
+  /* Utilitário mínimo para evitar estouro de conteúdo em flex containers */
   .flex {
    min-height: 0;
    min-width: 0;
   }
 
-  /* Padding responsivo para container em breakpoints maiores */
+  /* Ajustes de padding responsivo */
   @media (min-width: 640px) {
    .container {
     padding-left: 1.5rem; /* 24px - tablet */
@@ -188,7 +193,7 @@
    .container {
     padding-left: 2rem; /* 32px - desktop */
     padding-right: 2rem;
-    max-width: 1280px; /* Largura máxima padrão para conteúdo */
+    max-width: 1280px; /* largura máxima padrão para conteúdo */
    }
   }
 }
