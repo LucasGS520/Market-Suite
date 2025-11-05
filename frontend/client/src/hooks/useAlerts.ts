@@ -1,16 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Alert, getAlerts, markAlertAsRead, deleteAlert } from '@/lib/api';
+import { Alert, getAlerts } from '@/lib/api';
 
 /**
  * Hook para gerenciar alertas do usuário.
  *
  * Fornece funcionalidade para:
- *  - Buscar alertas da API
- *  - Marcar um alerta como lido
- *  - Deletar um alerta
+ *  - Expõe operações locais para ocultar itens caso usuário deseje limpar a visualização.
  *
- * Retorna o estado dos alertas, sinalizadores de carregamento/erro e funções de ação.
+ * Retorna o estado dos alertas, sinalizadores de carregamento/erro e funções utilitárias.
  */
 export const useAlerts = () => {
   // Token de autenticação provido pelo contexto
@@ -18,6 +16,9 @@ export const useAlerts = () => {
 
   // Estado com a lista de alertas atualmente carregados
   const [alerts, setAlerts] = useState<Alert[]>([]);
+
+  // Conjunto com IDs ocultados manualmente para mater comportamento local de "limpeza"
+  const [hiddenAlertIds, setHiddenAlertIds] = useState<Set<string>>(new Set());
 
   // Indicador de carregamento durante chamadas à API
   const [isLoading, setIsLoading] = useState(false);
@@ -37,6 +38,8 @@ export const useAlerts = () => {
       // Chamada à API para obter alertas e atualização do estado local
       const data = await getAlerts(token);
       setAlerts(data);
+      // Ao buscar novamente, reexibe todos os itens ocultados anteriormente
+      setHiddenAlertIds(new Set());
     } catch (err) {
       // Registra mensagem de erro legível para exibição na UI
       setError(err instanceof Error ? err.message : 'Erro ao buscar alertas');
@@ -45,30 +48,12 @@ export const useAlerts = () => {
     }
   };
 
-  // Marca um alerta como lido no backend e atualiza o estado local
-  const handleMarkAsRead = async (alertId: string) => {
-    if (!token) return;
-
-    try {
-      await markAlertAsRead(token, alertId);
-      // Atualiza localmente o campo is_read para refletir a mudança
-      setAlerts(alerts.map(a => (a.id === alertId ? { ...a, is_read: true } : a)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao marcar alerta como lido');
-    }
-  };
-
-  // Deleta um alerta no backend e remove do estado local
-  const handleDeleteAlert = async (alertId: string) => {
-    if (!token) return;
-
-    try {
-      await deleteAlert(token, alertId);
-      // Remove o alerta deletado da lista local
-      setAlerts(alerts.filter(a => a.id !== alertId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao deletar alerta');
-    }
+  /** 
+   * Remove um alerta da renderização local sem chamar o backend.
+   * Mantém compatibilidade com iterações de UI enquanto a API não oferece suporte de mutação.
+   */
+  const handleHideAlert = (alertId: string) => {
+    setHiddenAlertIds((prev) => new Set(prev).add(alertId));
   };
 
   // Ao montar o hook ou quando o token mudar, busca os alertas
@@ -79,11 +64,10 @@ export const useAlerts = () => {
 
   // API pública do hook para o componente consumidor
   return {
-    alerts,
+    alerts: alerts.filter((alert) => !hiddenAlertIds.has(alert.id)),
     isLoading,
     error,
     refetch: fetchAlerts,
-    markAsRead: handleMarkAsRead,
-    deleteAlert: handleDeleteAlert,
+    hideAlert: handleHideAlert,
   };
 };

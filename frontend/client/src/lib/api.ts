@@ -102,16 +102,21 @@ export interface Competitor {
 }
 
 /**
- * Interface para alerta (Alert).
- * Útil para notificar mudanças de preço/regras disparadas.
+ * Interface de notificação (Alert) conforme NotificationLogResponse do backend.
+ * Representa cada tentativa de envio de alerta registrada, incluindo metadados do canal e status.
  */
 export interface Alert {
   id: string;
-  monitored_product_id: string;
-  type: string; // tipo/slug do alerta
-  message: string; // mensagem descritiva do alerta
-  created_at: string;
-  is_read: boolean;
+  user_id: string;
+  alert_rule_id?: string | null;
+  alert_type?: string | null;
+  channel: string;
+  subject: string;
+  message: string;
+  provider_metadata?: Record<string, unknown> | null;
+  sent_at: string;
+  success: boolean;
+  error?: string | null;
 }
 
 /**
@@ -215,31 +220,11 @@ export const scrapeCompetitor = (
   });
 
 /**
- * API: Listar alertas do usuário.
- * GET /alerts
+ * API: Listar logs de notificações do usuário.
+ * GET /notifications/logs
  */
 export const getAlerts = (token: string) =>
-  apiRequest<Alert[]>('/alerts', { token });
-
-/**
- * API: Marcar alerta como lido.
- * POST /alerts/{alertId}/read
- */
-export const markAlertAsRead = (token: string, alertId: string) =>
-  apiRequest<Alert>(`/alerts/${alertId}/read`, {
-    token,
-    method: 'POST',
-  });
-
-/**
- * API: Deletar alerta.
- * DELETE /alerts/{alertId}
- */
-export const deleteAlert = (token: string, alertId: string) =>
-  apiRequest<{ message: string }>(`/alerts/${alertId}`, {
-    token,
-    method: 'DELETE',
-  });
+  apiRequest<Alert[]>('/notifications/logs', { token });
 
 /**
  * API: Rodar comparação de preços manualmente.

@@ -1,21 +1,21 @@
 import React from 'react';
 import { useAlerts } from '@/hooks/useAlerts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/data-display/card';
-import { Button } from '@/components/ui/button/button';
 import { Badge } from '@/components/ui/data-display/badge';
-import { AlertTriangle, Trash2, CheckCircle } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/data-display/skeleton';
+import { Alert as FeedbackAlert, AlertDescription, AlertTitle } from '@/components/ui/feedback/alert';
 
 /**
  * Componente de página que lista alertas do usuário.
  *
  * - Exibe estado de carregamento com skeletons.
- * - Separa alertas em não lidos e lidos.
- * - Permite marcar como lido e deletar alertas via hooks.
+ * - Lista logs de notificações retornados pela API.
+ * - Indica que o histórico é somente leitura até que o backend permita mutações.
  */
 export default function Alerts() {
   // Hook personalizado que encapsula fetch, mutações e estado dos alerts
-  const { alerts, isLoading, markAsRead, deleteAlert } = useAlerts();
+  const { alerts, isLoading, error } = useAlerts();
 
   // Estado de carregamento: mostra skeletons para indicar carregamento de dados
   if (isLoading) {
@@ -38,19 +38,23 @@ export default function Alerts() {
     );
   }
 
-  // Agrupa alertas em não lidos e lidos para renderização separada
-  const unreadAlerts = alerts.filter((a) => !a.is_read);
-  const readAlerts = alerts.filter((a) => a.is_read);
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Alertas</h1>
-        {/* Resumo rápido do número de alertas não lidos */}
+        {/* Informativo sobre o estado atual das ações disponíveis */}
         <p className="text-muted-foreground mt-2">
-          {unreadAlerts.length} não lido{unreadAlerts.length !== 1 ? 's' : ''}
+          Histórico de notificações enviado pelo backend. Esta lista é somente leitura até disponibilizarmos ações de gestão.
         </p>
       </div>
+
+      {error && (
+        <FeedbackAlert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Erro ao carregar alertas</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </FeedbackAlert>
+      )}
 
       {alerts.length === 0 ? (
         // Estado vazio: nenhum alerta disponível
@@ -60,87 +64,44 @@ export default function Alerts() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-6">
-          {/* Alertas não lidos */}
-          {unreadAlerts.length > 0 && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold">Não Lidos</h2>
-              {unreadAlerts.map((alert) => (
-                <Card key={alert.id} className="border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-950">
-                  <CardContent className="pt-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 flex gap-3">
-                        {/* Ícone indicando alerta importante */}
-                        <AlertTriangle className="h-5 w-5 text-orange-600 flex-shrink-0 mt-0.5" />
-                        <div>
-                          {/* Mensagem do alerta */}
-                          <p className="font-medium">{alert.message}</p>
-                          {/* Data formatada para pt-BR */}
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {new Date(alert.created_at).toLocaleDateString('pt-BR')}
-                          </p>
-                        </div>
-                      </div>
+        <div className="space-y-4">
+          {alerts.map((alert) => {
+            const Icon = alert.success ? CheckCircle : AlertTriangle;
+            const badgeVariant = alert.success ? 'secondary' : 'destructive';
+            const badgeLabel = alert.success ? 'Enviado' : 'Falha';
 
-                      {/* Ações rápidas: marcar como lido e deletar */}
-                      <div className="flex gap-2 flex-shrink-0">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => markAsRead(alert.id)} // Chama ação do hook para marcar como lido
-                        >
-                          <CheckCircle className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => deleteAlert(alert.id)} // Chama ação do hook para deletar alerta
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+            return (
+              <Card key={alert.id} className={!alert.success ? 'border-red-200 dark:border-red-800' : ''}>
+                <CardContent className="pt-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex flex-1 gap-3">
+                      <Icon
+                        className={`h-5 w-5 flex-shrink-0 mt-0.5 ${
+                          alert.success ? 'text-green-600' : 'text-red-600'
+                        }`}
+                      />
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{alert.subject || alert.message}</p>
+                          <Badge variant={badgeVariant}>{badgeLabel}</Badge>
+                          <Badge variant="outline">{alert.channel}</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground whitespace-pre-line">{alert.message}</p>
+                        {alert.error && !alert.success && (
+                          <p className="text-sm text-destructive">
+                            Erro reportado: {alert.error}
+                          </p>
+                        )}
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {/* Alertas lidos */}
-          {readAlerts.length > 0 && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold">Lidos</h2>
-              {readAlerts.map((alert) => (
-                <Card key={alert.id} className="opacity-75">
-                  <CardContent className="pt-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 flex gap-3">
-                        {/* Ícone indicando status lido */}
-                        <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-                        <div>
-                          {/* Mensagem do alerta com estilo atenuado */}
-                          <p className="font-medium text-muted-foreground">{alert.message}</p>
-                          {/* Data do alerta */}
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {new Date(alert.created_at).toLocaleDateString('pt-BR')}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Ação de deletar para alertas já lidos */}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => deleteAlert(alert.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                    <div className="text-sm text-muted-foreground text-right sm:text-left">
+                      {new Date(alert.sent_at).toLocaleString('pt-BR')}
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

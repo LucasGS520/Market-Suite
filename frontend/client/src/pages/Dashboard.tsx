@@ -53,8 +53,9 @@ export default function Dashboard() {
     fetchStats();
   }, [token]);
 
-  // Filtra os alertas não lidos e limita a exibição (por exemplo, 5 itens)
-  const urgentAlerts = alerts.filter(a => !a.is_read).slice(0, 5);
+  // Seleciona alertas recentes, priorizando falhas para dar visibilidade imediata
+  const failedAlerts = alerts.filter((alert) => !alert.success).slice(0, 5);
+  const recentAlerts = failedAlerts.length > 0 ? failedAlerts : alerts.slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -98,26 +99,39 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Alertas Urgentes — exibidos quando há alertas não lidos */}
-      {urgentAlerts.length > 0 && (
+      {/* Alertas Recentes — prioriza falhas para orientar ações futuras */}
+      {recentAlerts.length > 0 && (
         <Card className="border-red-200 dark:border-red-800">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Zap className="h-5 w-5 text-orange-500" />
-              Alertas Urgentes
+              Últimos Alertas
             </CardTitle>
-            <CardDescription>Ações recomendadas para seus produtos</CardDescription>
+            <CardDescription>
+              {failedAlerts.length > 0
+                ? 'Falhas de envio ou regras que exigem acompanhamento atento'
+                : 'Histórico recente das notificações enviadas'}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {urgentAlerts.map((alert) => (
-              // Cada alerta renderizado com ícone e descrição — chave baseada em alert.id
-              <Alert key={alert.id} className="bg-orange-50 dark:bg-orange-950 border-orange-200 dark:border-orange-800">
-                <AlertTriangle className="h-4 w-4 text-orange-600" />
-                <AlertDescription className="text-orange-800 dark:text-orange-200">
-                  {alert.message}
-                </AlertDescription>
-              </Alert>
-            ))}
+            {recentAlerts.map((alert) => {
+              const Icon = alert.success ? CheckCircle : AlertTriangle;
+
+              return (
+                // Cada alerta renderizado com ícone e descrição — chave baseada em alert.id
+                <Alert key={alert.id} className="bg-orange-50 dark:bg-orange-950 border-orange-200 dark:border-orange-800">
+                  <Icon className={`h-4 w-4 ${alert.success ? 'text-green-600' : 'text-orange-600'}`} />
+                  <AlertDescription className="text-orange-800 dark:text-orange-200">
+                    <span className="font-medium block">
+                      {alert.subject || alert.message}
+                    </span>
+                    <span className="text-sm opacity-80 block">
+                      {new Date(alert.sent_at).toLocaleString('pt-BR')}
+                    </span>
+                  </AlertDescription>
+                </Alert>
+              );
+            })}
             {/* Botão que leva à lista completa de alertas */}
             <Button variant="outline" className="w-full" onClick={() => navigate('/alerts')}>
               Ver todos os alertas
