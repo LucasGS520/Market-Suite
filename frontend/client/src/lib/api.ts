@@ -5,6 +5,8 @@
  * tipos/contratos usados pelo frontend para consumir a API.
  */
 
+import Products from "@/pages/Products";
+
 /**
  * Retorna a URL base da API (variável de ambiente Vite ou fallback).
  */
@@ -77,16 +79,81 @@ export interface PaginatedResponse<T> {
  * Interface para produto monitorado (MonitoredProduct).
  * Representa um item que o usuário deseja monitorar preços.
  */
+/**
+ * Estrutura textual retornada pelo backend para indicar o estado de um produto monitorado.
+ */
+export type MonitoredStatus = 'active' | 'inactive' | 'pending' | 'failed';
+
+/**
+ * Estrutura extra recebida o backend para produtos monitorados (snake_case e Decimals em string).
+ */
+export interface MonitoredProductApiResponse {
+  id: string;
+  user_id: string;
+  name_identification?: string | null;
+  monitoring_type: 'api' | 'scraping';
+  search_query?: string | null;
+  product_url?: string | null;
+  target_price: string | number;
+  current_price: string | number;
+  free_shipping?: boolean | null;
+  thumbnail?: string | null;
+  status: MonitoredStatus;
+  last_checked?: string | null;
+  competitors_count?: number | string | null;
+}
+
+/**
+ * Interface utilizada pelo frontend após normalizar tipos numéricos e opcionais da API
+ */
 export interface MonitoredProduct {
   id: string;
-  name_identification: string;
-  product_url: string;
-  current_price: number;
-  target_price: number;
-  status: 'alert' | 'ok'; // 'alert' quando está abaixo do target/critério
-  last_update: string; // ISO timestamp da última coleta
-  competitors_count: number; // número de concorrentes cadastrados
+  user_id: string;
+  name_identification: string | null;
+  monitoring_type: 'api' | 'scraping';
+  search_query: string | null;
+  product_url: string | null;
+  current_price: number | null;
+  target_price: number | null;
+  free_shipping: boolean | null;
+  thumbnail: string | null;
+  status: MonitoredStatus;
+  last_checked: string | null;
+  competitors_count?: number | null;
 }
+
+/**
+ * Converte valores decimais/strings em números ou null quando invalido.
+ */
+const toNumberOrNull = (value: string | number | null | undefined): number | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Normaliza o payload recebido da API para o formato consumido na UI 
+ */
+export const mapMonitoredProductFromApi = (
+  product: MonitoredProductApiResponse,
+): MonitoredProduct => ({
+  id: product.id,
+  user_id: product.user_id,
+  name_identification: product.name_identification ?? null,
+  monitoring_type: product.monitoring_type,
+  search_query: product.search_query ?? null,
+  product_url: product.product_url ?? null,
+  current_price: toNumberOrNull(product.current_price),
+  target_price: toNumberOrNull(product.target_price),
+  free_shipping: product.free_shipping ?? null,
+  thumbnail: product.thumbnail ?? null,
+  status: product.status,
+  last_checked: product.last_checked ?? null,
+  competitors_count: product.competitors_count !== undefined && product.competitors_count !== null ? toNumberOrNull(product.competitors_count) : undefined,
+});
 
 /**
  * Interface para concorrente (Competitor).
@@ -137,27 +204,32 @@ export interface PriceComparison {
  * API: Listar produtos monitorados do usuário.
  * GET /monitored
  */
-export const getMonitoredProducts = (token: string) =>
-  apiRequest<MonitoredProduct[]>('/monitored', { token });
+export const getMonitoredProducts = async (token: string): Promise<MonitoredProduct[]> => {
+  const data = await apiRequest<MonitoredProductApiResponse[]>('/monitored', { token });
+  return data.map(mapMonitoredProductFromApi);
+};
 
 /**
  * API: Criar novo produto monitorado.
  * POST /monitored
  * Body esperado: { name_identification, product_url, target_price }
  */
-export const createMonitoredProduct = (
+export const createMonitoredProduct = async (
   token: string,
   data: {
     name_identification: string;
     product_url: string;
     target_price: number;
   }
-) =>
-  apiRequest<MonitoredProduct>('/monitored', {
+): Promise<MonitoredProduct> => {
+  const response = await apiRequest<MonitoredProductApiResponse>('/monitored', {
     token,
     method: 'POST',
     body: JSON.stringify(data),
   });
+
+  return mapMonitoredProductFromApi(response);
+};
 
 /**
  * API: Agendar scraping de produto monitorado (coleta imediata via backend).

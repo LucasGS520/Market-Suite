@@ -4,8 +4,9 @@ import { useLocation } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/data-display/card';
 import { Button } from '@/components/ui/button/button';
 import { Badge } from '@/components/ui/data-display/badge';
-import { AlertCircle, TrendingUp, ExternalLink } from 'lucide-react';
+import { TrendingUp, ExternalLink } from 'lucide-react';
 import { Skeleton } from '@/components/ui/data-display/skeleton';
+import type { MonitoredStatus } from '@/lib/api';
 
 /**
  * Products.tsx
@@ -14,6 +15,53 @@ import { Skeleton } from '@/components/ui/data-display/skeleton';
  * - Mostra skeletons enquanto carrega
  * - Permite navegar para adicionar produto ou ver concorrentes
  */
+
+/**
+ * Mapeia o enum de status para rótulo exibido e estilo visual
+ */
+const statusDisplayConfig: Record<
+  MonitoredStatus,
+  { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; highlight?: boolean }
+> = {
+  active: { label: 'Ativo', variant: 'default' },
+  inactive: { label: 'Inativo', variant: 'secondary'},
+  pending: { label: 'Pendente', variant: 'outline' },
+  failed: { label: 'Falha', variant: 'destructive', highlight: true },
+};
+
+/** Configuração fallback para futuros status desconhecidos */
+const unknownStatusDisplay = { label: 'Desconhecido', variant: 'outline' as const };
+
+/** 
+ * Formata valores numéricos em moeda brasileira tratando dados ausentes
+ */
+const formatCurrency = (value: number | null | undefined): string => {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return 'Valor indisponível';
+  }
+
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+  }).format(value);
+};
+
+/**
+ * Descreve a data/hora da última coleta considerando payloads sem informação
+ */
+const describeLastChecked = (timestamp: string | null | undefined): string => {
+  if (!timestamp) {
+    return 'Nenhuma coleta registrada';
+  }
+
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Data inválida';
+  }
+
+  return parsed.toLocaleString('pt-BR');
+};
 
 /** Componente principal que renderiza a lista de produtos monitorados */
 export default function Products() {
@@ -68,74 +116,82 @@ export default function Products() {
       ) : (
         // Lista de produtos: cada item é um Card com informações e ações
         <div className="space-y-4">
-          {products.map((product) => (
-            // Marca visual quando o produto está em alerta (bordas vermelhas)
-            <Card key={product.id} className={product.status === 'alert' ? 'border-red-200 dark:border-red-800' : ''}>
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    {/* Identificação do produto */}
-                    <CardTitle className="text-lg">{product.name_identification}</CardTitle>
-                    {/* Data da última atualização formatada para pt-BR */}
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Última atualização: {new Date(product.last_update).toLocaleDateString('pt-BR')}
-                    </p>
+          {products.map((product) => {
+            const statusInfo = statusDisplayConfig[product.status] ?? unknownStatusDisplay;            
+            const showCompetitors = product.competitors_count !== undefined && product.competitors_count !== null;
+            const infoGridCols = `grid grid-cols-1 gap-4 sm:grid-cols-2 ${showCompetitors ? 'lg:grid-cols-3' : ''}`;
+            const highlightBorder = statusInfo.highlight ? 'border-red-200 dark:border-red-800' : '';
+          
+            return (
+              <Card key={product.id} className={highlightBorder}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      {/* Identificação do produto com fallback para ausência de nome */}
+                      <CardTitle className="text-lg">
+                        {product.name_identification ?? 'Produto sem identificação'}
+                      </CardTitle>
+                      {/* Data da última atualização considerando payloads nulos */}
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Última atualização: {describeLastChecked(product.last_checked)}
+                      </p>
+                    </div>
+
+                    {/* Badge traduzindo o enum do backend para rótulos em português */}
+                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className={infoGridCols}>
+                    {/* Exibe preço atual retornado pelo scraping/API com tratamento de vazio */}
+                    <div>
+                      <p className="text-xs text-muted-foreground">Seu Preço</p>
+                      <p className="text-xl font-bold">{formatCurrency(product.current_price)}</p>
+                    </div>
+
+                    {/* Exibe preço alvo configurado pelo usuário */}
+                    <div>
+                      <p className="text-xs text-muted-foreground">Preço Alvo</p>
+                      <p className="text-xl font-bold">{formatCurrency(product.target_price)}</p>
+                    </div>
+
+                    {/* Número de concorrentes monitorados quando a API fornecer a métrica */}
+                    {showCompetitors && (
+                      <div>
+                        <p className="text-xs text-muted-foreground">Concorrentes</p>
+                        <p className="text-xl font-bold">{product.competitors_count}</p>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Badge que indica status do produto (Alerta / OK) */}
-                  <Badge variant={product.status === 'alert' ? 'destructive' : 'default'}>
-                    {product.status === 'alert' ? 'Alerta' : 'OK'}
-                  </Badge>
-                </div>
-              </CardHeader>
+                  <div className="flex gap-2 pt-2">
+                    {/* Abre o anúncio original em nova aba apenas quando a URL estiver disponível */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      disabled={!product.product_url}
+                      onClick={() => product.product_url && window.open(product.product_url, '_blank')}
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Ver Anúncio
+                    </Button>
 
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-3 gap-4">
-                  {/* Exibe preço atual do usuário */}
-                  <div>
-                    <p className="text-xs text-muted-foreground">Seu Preço</p>
-                    <p className="text-xl font-bold">R$ {product.current_price.toFixed(2)}</p>
+                    {/* Navega para a lista de concorrentes do produto */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => navigate(`/competitors/${product.id}`)}
+                    >
+                      <TrendingUp className="mr-2 h-4 w-4" />
+                      Ver Concorrentes
+                    </Button>
                   </div>
-
-                  {/* Exibe preço alvo configurado para monitoramento */}
-                  <div>
-                    <p className="text-xs text-muted-foreground">Preço Alvo</p>
-                    <p className="text-xl font-bold">R$ {product.target_price.toFixed(2)}</p>
-                  </div>
-
-                  {/* Número de concorrentes monitorados para este produto */}
-                  <div>
-                    <p className="text-xs text-muted-foreground">Concorrentes</p>
-                    <p className="text-xl font-bold">{product.competitors_count}</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-2 pt-2">
-                  {/* Abre o anúncio original em uma nova aba */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => window.open(product.product_url, '_blank')}
-                  >
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Ver Anúncio
-                  </Button>
-
-                  {/* Navega para a lista de concorrentes do produto */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => navigate(`/competitors/${product.id}`)}
-                  >
-                    <TrendingUp className="mr-2 h-4 w-4" />
-                    Ver Concorrentes
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>
