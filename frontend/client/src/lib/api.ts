@@ -5,10 +5,6 @@
  * tipos/contratos usados pelo frontend para consumir a API.
  */
 
-import Products from "@/pages/Products";
-import { on } from "events";
-import { parse } from "path";
-
 /**
  * Retorna a URL base da API (variável de ambiente Vite ou fallback).
  */
