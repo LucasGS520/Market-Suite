@@ -162,10 +162,18 @@ export const mapMonitoredProductFromApi = (
 export interface Competitor {
   id: string;
   monitored_product_id: string;
+  name_competitor: string;
   product_url: string;
-  name: string;
-  current_price: number;
-  last_update: string;
+  current_price: string | number | null;
+  old_price?: string | number | null;
+  free_shipping?: boolean | null;
+  seller?: string | null;
+  seller_rating?: number | null;
+  thumbnail?: string | null;
+  status: 'available' | 'unavailable' | 'removed';
+  last_checked?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 /**

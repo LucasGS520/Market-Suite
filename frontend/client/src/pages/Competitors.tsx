@@ -11,6 +11,33 @@ import { ArrowLeft, TrendingDown, TrendingUp, ExternalLink } from 'lucide-react'
 import { Skeleton } from '@/components/ui/data-display/skeleton';
 import { getCompetitors, Competitor } from '@/lib/api';
 
+type UiCompetitor = {
+  id: string;
+  name: string;
+  productUrl: string;
+  currentPrice: number | null;
+  lastChecked: Date | null;
+  status: Competitor['status'];
+};
+
+/**
+ * Converte um concorrente recebido da API para a estrutura exibida na UI.
+ */
+const mapCompetitorToUi = (competitor: Competitor): UiCompetitor => {
+  const hasCurrentPrice = competitor.current_price !== null && competitor.current_price !== undefined;
+  const parsedPrice = hasCurrentPrice ? Number(competitor.current_price) : null;
+  const currentPrice = parsedPrice !== null && Number.isFinite(parsedPrice) ? parsedPrice : null;
+
+  return {
+    id: competitor.id,
+    name: competitor.name_competitor,
+    productUrl: competitor.product_url,
+    currentPrice,
+    lastChecked: competitor.last_checked ? new Date(competitor.last_checked) : null,
+    status: competitor.status,
+  };
+};
+
 export default function Competitors() {
   // Recupera token do contexto de autenticação
   const { token } = useAuth();
@@ -19,7 +46,7 @@ export default function Competitors() {
   const [location, navigate] = useLocation();
 
   // Estado local: lista de concorrentes
-  const [competitors, setCompetitors] = useState<Competitor[]>([]);
+  const [competitors, setCompetitors] = useState<UiCompetitor[]>([]);
   // Estado de carregamento para mostrar skeletons enquanto busca dados
   const [isLoading, setIsLoading] = useState(true);
   // Mensagem de erro simples para exibição em UI
@@ -36,7 +63,8 @@ export default function Competitors() {
       try {
         // Chamada ao client API que retorna a lista de concorrentes
         const data = await getCompetitors(token, productId);
-        setCompetitors(data);
+        const normalizedCompetitors = data.map(mapCompetitorToUi);
+        setCompetitors(normalizedCompetitors);
       } catch (err) {
         // Normaliza mensagem de erro para string exibível
         setError(err instanceof Error ? err.message : 'Erro ao buscar concorrentes');
@@ -109,7 +137,7 @@ export default function Competitors() {
           {competitors.map((competitor) => {
             // Cálculo simples de mudança de preço (placeholder).
             // Observação: lógica real deveria comparar com preço anterior salvo.
-            const priceChange = competitor.current_price > 0 ? 'stable' : 'unknown';
+            const priceChange = competitor.currentPrice !== null && competitor.currentPrice > 0 ? 'stable' : 'unknown';
 
             return (
               <Card key={competitor.id}>
@@ -118,7 +146,8 @@ export default function Competitors() {
                     <div className="flex-1">
                       <CardTitle className="text-lg">{competitor.name}</CardTitle>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Última atualização: {new Date(competitor.last_update).toLocaleDateString('pt-BR')}
+                        Última atualização:{' '}
+                        {competitor.lastChecked ? competitor.lastChecked.toLocaleDateString('pt-BR') : 'Sem registro'}
                       </p>
                     </div>
                     <Badge variant="outline">Concorrente</Badge>
@@ -128,7 +157,9 @@ export default function Competitors() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs text-muted-foreground">Preço</p>
-                      <p className="text-2xl font-bold">R$ {competitor.current_price.toFixed(2)}</p>
+                      <p className="text-2xl font-bold">
+                        {competitor.currentPrice !== null ? `R$ ${competitor.currentPrice.toFixed(2)}` : 'Preço indisponível'}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Status</p>
@@ -148,7 +179,7 @@ export default function Competitors() {
                   <Button
                     variant="outline"
                     className="w-full"
-                    onClick={() => window.open(competitor.product_url, '_blank')}
+                    onClick={() => window.open(competitor.productUrl, '_blank')}
                   >
                     <ExternalLink className="mr-2 h-4 w-4" />
                     Ver Anúncio do Concorrente
