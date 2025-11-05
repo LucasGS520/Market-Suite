@@ -102,7 +102,14 @@ logger = structlog.get_logger("marketalert")
 limiter = Limiter(key_func=get_remote_address)
 
 #Origens liberadas em desenvolviemento para permitir cominicação frontend/backend
-DEV_ALLOWED_ORIGINS = []
+DEV_ALLOWED_ORIGINS = [
+    #URL do servidor Vite em modo desenvolvimento
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    #URL do servidor Express utilizado no build de produção local
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
 
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """ Handler global para requisição excessiva """
