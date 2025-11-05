@@ -9,6 +9,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "path";
+import process from "node:process";
 import { defineConfig } from "vite";
 import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
 
@@ -50,10 +51,10 @@ export default defineConfig({
 
   // Configurações do servidor de desenvolvimento (vite dev server)
   server: {
-    // Porta padrão para desenvolvimento
-    port: 3000,
+    // Porta utilizada pelo servidor de desenvolvimento (FRONTEND_PORT ou 5173)
+    port: Number(process.env.FRONTEND_PORT ?? 5173),
     // Se false, falha ao tentar ligar na porta; true permite tentar a próxima porta livre
-    strictPort: false, // Encontrará a próxima porta disponível se 3000 estiver em uso
+    strictPort: false, // Encontrará a próxima porta disponível se a porta alvo estiver em uso
     // Habilita binding do host para acessos externos (útil em containers)
     host: true,
     // Hosts permitidos para requisições durante o desenvolvimento

@@ -276,7 +276,7 @@ services:
         corepack enable && \
         corepack prepare pnpm@10.4.1 --activate && \
         pnpm install --frozen-lockfile=false && \
-        pnpm run dev -- --host 0.0.0.0 --port "$${FRONTEND_PORT}"
+        pnpm exec vite --host 0.0.0.0 --port "$${FRONTEND_PORT}"
     ports:
       - "5173:5173"
     volumes:
