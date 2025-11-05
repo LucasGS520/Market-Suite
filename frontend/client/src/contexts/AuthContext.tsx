@@ -4,13 +4,16 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
  * Tipo de dados do usuário autenticado
  */
 export interface User {
+  /** Identificador único do usuário */
   id: string;
+  /** Email do usuário (usado para login/autenticação) */
   email: string;
+  /** Nome opcional do usuário para exibição */
   name?: string;
 }
 
 /**
- * Tipo do contexto de autenticação
+ * Tipo do contexto de autenticação contendo estado e ações.
  */
 interface AuthContextType {
   user: User | null;
@@ -24,20 +27,26 @@ interface AuthContextType {
 }
 
 /**
- * Criando o contexto de autenticação
+ * Contexto de autenticação (inicialmente indefinido até o Provider envolver a árvore).
  */
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /**
- * Provider de autenticação que envolve a aplicação
+ * Provider de autenticação que envolve a aplicação e disponibiliza
+ * estado e ações de login/logout para componentes filhos.
  */
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Estado do usuário autenticado (ou null quando deslogado)
   const [user, setUser] = useState<User | null>(null);
+  // Token JWT recebido do backend (ou null quando ausente)
   const [token, setToken] = useState<string | null>(null);
+  // Indicador de carregamento inicial (leitura do localStorage)
   const [isLoading, setIsLoading] = useState(true);
 
   /**
-   * Carregando o token e usuário do localStorage ao montar o componente
+   * Ao montar, tenta carregar credenciais do localStorage.
+   * Se os dados estiverem presentes e válidos, restaura o estado.
+   * Em caso de erro (parse inválido), limpa o localStorage.
    */
   useEffect(() => {
     const storedToken = localStorage.getItem('auth_token');
@@ -48,17 +57,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
       } catch (error) {
+        // Em caso de dados corrompidos, remove itens para evitar loops futuros
         console.error('Erro ao carregar autenticação:', error);
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth_user');
       }
     }
 
+    // Carregamento inicial concluído
     setIsLoading(false);
   }, []);
 
   /**
-   * Função de login
+   * Função de login:
+   * - Faz POST para /auth usando form-urlencoded para obter access_token
+   * - Armazena token no estado e localStorage
+   * - Em seguida consulta /user com o token para obter dados do usuário
+   *
+   * Lança erro em falha de autenticação para que o chamador possa tratar.
    */
   const login = async (email: string, password: string) => {
     try {
@@ -75,20 +91,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (!response.ok) {
+        // Propaga erro para UI (ex.: mostrar mensagem ao usuário)
         throw new Error('Falha na autenticação');
       }
 
       const data = await response.json();
       const newToken = data.access_token;
 
-      // Salvando o token
+      // Salva token no estado e persistência local
       setToken(newToken);
       localStorage.setItem('auth_token', newToken);
 
-      // Buscando informações do usuário
+      // Busca informações do usuário com o token obtido
       const userResponse = await fetch(`${apiUrl}/user`, {
         headers: {
-          'Authorization': `Bearer ${newToken}`,
+          Authorization: `Bearer ${newToken}`,
         },
       });
 
@@ -98,13 +115,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem('auth_user', JSON.stringify(userData));
       }
     } catch (error) {
+      // Loga o erro e repassa para o chamador tratar (ex.: mostrar toast)
       console.error('Erro ao fazer login:', error);
       throw error;
     }
   };
 
   /**
-   * Função de logout
+   * Função de logout:
+   * - Limpa estado do usuário e token
+   * - Remove credenciais do localStorage
    */
   const logout = () => {
     setUser(null);
@@ -113,10 +133,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('auth_user');
   };
 
+  // Valor do contexto disponibilizado para consumidores
   const value: AuthContextType = {
     user,
     token,
     isLoading,
+    // isAuthenticated verdadeiro somente se houver token e usuário carregados
     isAuthenticated: !!token && !!user,
     login,
     logout,
@@ -128,7 +150,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 };
 
 /**
- * Hook para usar o contexto de autenticação
+ * Hook useAuth:
+ * - Facilita o acesso ao contexto de autenticação
+ * - Lança erro se usado fora do AuthProvider para ajudar no desenvolvimento
  */
 export const useAuth = () => {
   const context = useContext(AuthContext);

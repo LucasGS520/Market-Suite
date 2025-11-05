@@ -3,26 +3,31 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/data-display/card';
 import { Button } from '@/components/ui/button/button';
-import { Separator } from '@/components/ui/data-display/separator';
 import { LogOut, User, Bell } from 'lucide-react';
 
+// Página de configurações do usuário.
+// Contém seções para perfil, notificações, segurança e informações sobre o app.
 export default function Settings() {
+  // Obtém dados do usuário e ação de logout a partir do AuthContext
   const { user, logout } = useAuth();
+  // useLocation retorna [location, navigate]; usamos apenas navigate para redirecionar
   const [, navigate] = useLocation();
 
+  // Handler responsável por encerrar a sessão e redirecionar para a tela de login
   const handleLogout = () => {
-    logout();
-    navigate('/login');
+    logout(); // limpa sessão/estado de autenticação
+    navigate('/login'); // redireciona o usuário para a rota de login
   };
 
   return (
     <div className="space-y-6">
+      {/* Cabeçalho da página */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
         <p className="text-muted-foreground mt-2">Gerencie suas preferências e conta</p>
       </div>
 
-      {/* Perfil do Usuário */}
+      {/* Perfil do Usuário: exibe email e nome (quando disponível) */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -45,7 +50,7 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* Notificações */}
+      {/* Notificações: placeholder informativo enquanto a funcionalidade é desenvolvida */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -61,7 +66,7 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* Segurança */}
+      {/* Segurança: opção de encerrar sessão (logout) do usuário */}
       <Card>
         <CardHeader>
           <CardTitle>Segurança</CardTitle>
@@ -78,7 +83,7 @@ export default function Settings() {
         </CardContent>
       </Card>
 
-      {/* Sobre */}
+      {/* Sobre: informações de versão e descrição curta do produto */}
       <Card>
         <CardHeader>
           <CardTitle>Sobre</CardTitle>

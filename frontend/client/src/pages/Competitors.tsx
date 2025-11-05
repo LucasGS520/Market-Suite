@@ -1,3 +1,6 @@
+// Componente de página que lista concorrentes de um produto monitorado.
+// Contém carregamento, tratamento de erro e ações para abrir o anúncio do concorrente.
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
@@ -9,32 +12,45 @@ import { Skeleton } from '@/components/ui/data-display/skeleton';
 import { getCompetitors, Competitor } from '@/lib/api';
 
 export default function Competitors() {
+  // Recupera token do contexto de autenticação
   const { token } = useAuth();
+
+  // Hook do roteamento (wouter): location atual e função de navegação
   const [location, navigate] = useLocation();
+
+  // Estado local: lista de concorrentes
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
+  // Estado de carregamento para mostrar skeletons enquanto busca dados
   const [isLoading, setIsLoading] = useState(true);
+  // Mensagem de erro simples para exibição em UI
   const [error, setError] = useState<string | null>(null);
 
-  // Extraindo o ID do produto da URL
+  // Extraindo o ID do produto da URL (assume que o ID vem como última parte da rota)
   const productId = location.split('/').pop() || '';
 
   useEffect(() => {
+    // Só tenta buscar se tivermos token e productId válidos
     if (!token || !productId) return;
 
     const fetchCompetitors = async () => {
       try {
+        // Chamada ao client API que retorna a lista de concorrentes
         const data = await getCompetitors(token, productId);
         setCompetitors(data);
       } catch (err) {
+        // Normaliza mensagem de erro para string exibível
         setError(err instanceof Error ? err.message : 'Erro ao buscar concorrentes');
       } finally {
+        // Finaliza estado de loading independente do resultado
         setIsLoading(false);
       }
     };
 
     fetchCompetitors();
+    // Reexecuta quando token ou productId mudarem
   }, [token, productId]);
 
+  // UI de carregamento com skeletons
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -57,6 +73,7 @@ export default function Competitors() {
     );
   }
 
+  // UI principal da página
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
@@ -69,6 +86,7 @@ export default function Competitors() {
         </div>
       </div>
 
+      {/* Exibe cartão de erro quando houver mensagem */}
       {error && (
         <Card className="border-red-200 dark:border-red-800">
           <CardContent className="pt-6">
@@ -77,6 +95,7 @@ export default function Competitors() {
         </Card>
       )}
 
+      {/* Quando não houver concorrentes cadastrados */}
       {competitors.length === 0 ? (
         <Card>
           <CardContent className="pt-6 text-center">
@@ -85,8 +104,11 @@ export default function Competitors() {
           </CardContent>
         </Card>
       ) : (
+        // Lista de cartões, um por concorrente
         <div className="space-y-4">
           {competitors.map((competitor) => {
+            // Cálculo simples de mudança de preço (placeholder).
+            // Observação: lógica real deveria comparar com preço anterior salvo.
             const priceChange = competitor.current_price > 0 ? 'stable' : 'unknown';
 
             return (
@@ -111,6 +133,7 @@ export default function Competitors() {
                     <div>
                       <p className="text-xs text-muted-foreground">Status</p>
                       <div className="flex items-center gap-2 mt-1">
+                        {/* Ícone e label indicando direção de preço (apenas visual neste momento) */}
                         {priceChange === 'stable' ? (
                           <TrendingDown className="h-4 w-4 text-green-600" />
                         ) : (
@@ -121,6 +144,7 @@ export default function Competitors() {
                     </div>
                   </div>
 
+                  {/* Botão que abre o link do anúncio em nova aba */}
                   <Button
                     variant="outline"
                     className="w-full"
