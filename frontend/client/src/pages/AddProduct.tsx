@@ -25,7 +25,6 @@ export default function AddProduct() {
   const [formData, setFormData] = useState({
     name_identification: '',
     product_url: '',
-    competitor_url: '',
     target_price: '',
   });
   const [isLoading, setIsLoading] = useState(false); // indicador de requisição em progresso
@@ -79,7 +78,6 @@ export default function AddProduct() {
       setFormData({
         name_identification: '',
         product_url: '',
-        competitor_url: '',
         target_price: '',
       });
 
@@ -100,14 +98,18 @@ export default function AddProduct() {
     <div className="space-y-6">
       {/* Cabeçalho da página */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Adicionar Novo Produto</h1>
-        <p className="text-muted-foreground mt-2">Configure um novo produto para monitoramento de preços</p>
+        <h1 className="text-3xl font-bold tracking-tight">Adicionar Novo Produto Monitorado</h1>
+        <p className="text-muted-foreground mt-2">
+          Cadastre apenas o produto que será monitorado enquanto a integração com concorrentes não estiver disponível.
+        </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Informações do Produto</CardTitle>
-          <CardDescription>Preencha os dados do seu produto e do concorrente</CardDescription>
+          <CardTitle>Informações do Produto Monitorado</CardTitle>
+          <CardDescription>
+            Informe os dados do seu produto para acompanhar preços. A inclusão de concorrentes estará disponível em breve.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -177,22 +179,6 @@ export default function AddProduct() {
                 onChange={handleChange}
                 disabled={isLoading}
                 required
-              />
-            </div>
-
-            {/* Campo opcional: URL do concorrente */}
-            <div className="space-y-2">
-              <label htmlFor="competitor_url" className="text-sm font-medium">
-                URL do Concorrente (Opcional)
-              </label>
-              <Input
-                id="competitor_url"
-                name="competitor_url"
-                type="url"
-                placeholder="https://produto.mercadolivre.com.br/..."
-                value={formData.competitor_url}
-                onChange={handleChange}
-                disabled={isLoading}
               />
             </div>
 
