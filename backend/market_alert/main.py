@@ -14,6 +14,7 @@ import logging
 import time
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 
@@ -99,6 +100,8 @@ logger = structlog.get_logger("marketalert")
 #Rate limiter configurado por IP
 limiter = Limiter(key_func=get_remote_address)
 
+#Origens liberadas em desenvolviemento para permitir cominicação frontend/backend
+DEV_ALLOWED_ORIGINS = []
 
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """ Handler global para requisição excessiva """
@@ -152,6 +155,15 @@ def create_app() -> FastAPI:
         description="API para monitoramento e comparação de preços",
         version="1.0.0",
         debug=getattr(settings, "debug", False)
+    )
+
+    #Habilita CORS para ambientes de desenvolvimento do frontend
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=DEV_ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     if FastAPIInstrumentor:
