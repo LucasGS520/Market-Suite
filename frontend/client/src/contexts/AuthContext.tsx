@@ -72,7 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * Função de login:
    * - Faz POST para /auth usando form-urlencoded para obter access_token
    * - Armazena token no estado e localStorage
-   * - Em seguida consulta /user com o token para obter dados do usuário
+   * - Em seguida consulta /users/me com o token para obter dados do usuário
    *
    * Lança erro em falha de autenticação para que o chamador possa tratar.
    */
@@ -103,7 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('auth_token', newToken);
 
       // Busca informações do usuário com o token obtido
-      const userResponse = await fetch(`${apiUrl}/user`, {
+      const userResponse = await fetch(`${apiUrl}/users/me`, {
         headers: {
           Authorization: `Bearer ${newToken}`,
         },
@@ -113,6 +113,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const userData = await userResponse.json();
         setUser(userData);
         localStorage.setItem('auth_user', JSON.stringify(userData));
+      } else if (userResponse.status === 401) {
+        // Limpa credenciais inválidas para evitar sessão inconsistente
+        logout();
+        throw new Error('Sessão expirada. Faça login novamente.');
+      } else {
+        throw new Error('Falha ao carregar dados do usuário');
       }
     } catch (error) {
       // Loga o erro e repassa para o chamador tratar (ex.: mostrar toast)
