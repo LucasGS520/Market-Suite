@@ -6,6 +6,8 @@
  */
 
 import Products from "@/pages/Products";
+import { on } from "events";
+import { parse } from "path";
 
 /**
  * Retorna a URL base da API (variável de ambiente Vite ou fallback).
@@ -51,10 +53,101 @@ export const apiRequest = async <T = any>(
     headers,
   });
 
-  // Tratamento simples de erro: tenta extrair mensagem JSON, fallback para genérico
+  // Tratamento aprimorado de erro: prioriza mensagens do backend antes do fallback genérico
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Erro desconhecido' }));
-    throw new Error(error.message || `Erro ${response.status}`);
+    const prioritizedFields: Array<'detail' | 'message' | 'msg'> = ['detail', 'message', 'msg'];
+
+    // Função recursiva para transformar qualquer estrutura em uma mensagem legível
+    const toReadableMessage = (value: unknown): string | null => {
+      if (value === null || value === undefined) {
+        return null;
+      }
+
+      if (typeof value === 'string') {
+        return value.trim() || null;
+      }
+
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+      }
+
+      if (Array.isArray(value)) {
+        const aggregated = value
+          .map((item) => toReadableMessage(item))
+          .filter((message): message is string => Boolean(message));
+
+        return aggregated.length > 0 ? aggregated.join(' | '): null;
+      }
+
+      if (typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+
+        for (const field of prioritizedFields) {
+          if (field in record) {
+            const nested = toReadableMessage(record[field]);
+
+            if (nested) {
+              return nested;
+            }
+          }
+        }
+
+        const fallbackMessages = Object.values(record)
+          .map((item) => toReadableMessage(item))
+          .filter((message): message is string => Boolean(message));
+
+        return fallbackMessages.length > 0 ? fallbackMessages.join(' | ') : null;
+      }
+
+      return null;
+    };
+
+    let parsedBody: unknown = null;
+
+    try {
+      // Clonamos a resposta para evitar perder o body caso não seja JSON
+      parsedBody = await response.clone().json();
+    } catch (error) {
+      // Manteremos parsedBody como null quando backend não retornar JSON
+      parsedBody = null;
+    }
+
+    let extractedMessage: string | null = null;
+
+    if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)) {
+      const bodyRecord = parsedBody as Record<string, unknown>;
+
+      for (const field of prioritizedFields) {
+        if (field in bodyRecord) {
+          extractedMessage = toReadableMessage(bodyRecord[field]);
+
+          if (extractedMessage) {
+            break;
+          }
+        }
+      }
+
+      if (!extractedMessage) {
+        extractedMessage = toReadableMessage(bodyRecord);
+      }
+    } else {
+      extractedMessage = toReadableMessage(parsedBody);
+    }
+
+    if (!extractedMessage) {
+      try {
+        const textBody = await response.text();
+        extractedMessage = textBody.trim() || null;
+      } catch (error) {
+        // Se nem texto conseguir obter, mantem fallback genérico
+        extractedMessage = null;
+      }
+    }
+
+    const message = extractedMessage || `Erro ${response.status}`;
+
+    // Ao lançar a exceção, garantimos que a mensagem reflita o conteúdo retornado pelo backend
+    throw new Error(message);
   }
 
   // Deserializa o corpo JSON da resposta
