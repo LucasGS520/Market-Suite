@@ -262,6 +262,32 @@ services:
     networks:
       - monitoring-net
 
+  #Interface web do MarketAlert executada com Vite para testes locais rápidos.
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      - VITE_FRONTEND_FORGE_API_URL=http://localhost:8000
+      - FRONTEND_PORT=5173
+    entrypoint:
+      - sh
+      - -c
+      - |
+        corepack enable && \
+        corepack prepare pnpm@10.4.1 --activate && \
+        pnpm install --frozen-lockfile=false && \
+        pnpm run dev -- --host 0.0.0.0 --port "$${FRONTEND_PORT}"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+      - frontend-pnpm-store:/root/.local/share/pnpm/store
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - monitoring-net
 
   #Servidor Prometheus para coleta de métricas
   prometheus:
@@ -386,6 +412,8 @@ volumes:
   grafana-storage:
   audit-logs:
   loki-data:
+  frontend-node-modules:
+  frontend-pnpm-store:
 
 networks:
   monitoring-net:
