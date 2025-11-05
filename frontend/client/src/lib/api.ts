@@ -311,28 +311,6 @@ export const getMonitoredProducts = async (token: string): Promise<MonitoredProd
 };
 
 /**
- * API: Criar novo produto monitorado.
- * POST /monitored
- * Body esperado: { name_identification, product_url, target_price }
- */
-export const createMonitoredProduct = async (
-  token: string,
-  data: {
-    name_identification: string;
-    product_url: string;
-    target_price: number;
-  }
-): Promise<MonitoredProduct> => {
-  const response = await apiRequest<MonitoredProductApiResponse>('/monitored', {
-    token,
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-
-  return mapMonitoredProductFromApi(response);
-};
-
-/**
  * API: Agendar scraping de produto monitorado (coleta imediata via backend).
  * POST /monitored/scrape
  */
@@ -356,24 +334,6 @@ export const scrapeMonitoredProduct = (
  */
 export const getCompetitors = (token: string, monitoredProductId: string) =>
   apiRequest<Competitor[]>(`/competitors/${monitoredProductId}`, { token });
-
-/**
- * API: Adicionar concorrente a um monitorado.
- * POST /competitors
- * Body esperado: { monitored_product_id, product_url }
- */
-export const addCompetitor = (
-  token: string,
-  data: {
-    monitored_product_id: string;
-    product_url: string;
-  }
-) =>
-  apiRequest<Competitor>('/competitors', {
-    token,
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
 
 /**
  * API: Agendar scraping de concorrente.
