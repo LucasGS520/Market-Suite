@@ -1,4 +1,8 @@
-""" Compara preços entre produtos monitorados e concorrentes """
+""" Compara preços entre produtos monitorados e concorrentes 
+
+Fornece estruturas com discrepâncias e alertas para o frontend consumir
+com fidelidade aos campos disponibilizados pela API de comparação.
+"""
 
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any, Optional
@@ -102,7 +106,16 @@ def detect_listing_status(competitor: CompetitorProduct) -> Optional[Dict[str, A
     return None
 
 def compare_prices(monitored: MonitoredProduct, competitors: List[CompetitorProduct], tolerance: Decimal = Decimal("0.01"), price_change_threshold: Optional[Decimal] = None) -> Dict[str, Any]:
-    """ Compara preços de um produto monitorado com seus concorrentes """
+    """ Compara preços de um produto monitorado com seus concorrentes 
+    
+    Estrutura de retorno:
+    - monitored_price: preço atual do produto monitorado
+    - target_price: preço alvo configurado para o monitorado
+    - average_competitor_price: média dos preços válidos dos concorrentes ou `None`
+    - lowest_competitor/highest_competitor: discrepâncias completas do menor e do maior preço
+    - discrepancies: discrepâncias de todos os concorrentes com preço válido
+    - alerts: alertas sobre disponibilidade, variações e valores abaixo da meta
+    """
     #Valor base para referência durante a comparação
     monitored_price = monitored.current_price or Decimal("0")
     target_price = monitored.target_price or Decimal("0")

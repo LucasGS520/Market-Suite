@@ -317,17 +317,51 @@ export interface Alert {
 }
 
 /**
+ * Estrutura da discrepância por concorrente retornada pelo backend.
+ * Mantém campos monetários e percentuais para cálculos em UI.
+ */
+export interface PriceDiscrepancy {
+  competitor_id: string;
+  name: string;
+  price: number;
+  pct_x_target: number | null;
+  pct_x_monitored: number | null;
+  delta_x_min_competitor: number;
+  delta_x_monitored: number;
+  old_price: number | null;
+  change_from_old: number | null;
+  pct_change_from_old: number | null;
+}
+
+/**
+ * Estrutura de alertas retornada pela comparação de preços.
+ * Os campos são opcionais porque variam conforme o tipo de alerta emitido.
+ */
+export interface PriceComparisonAlert {
+  competitor_id?: string;
+  product_id?: string;
+  name?: string;
+  status?: 'unavailable' | 'removed';
+  price?: number;
+  pct_below_target?: number;
+  old_price?: number;
+  change?: number;
+  pct_change?: number | null;
+  type?: 'price_increase' | 'price_decrease';
+}
+
+/**
  * Interface para resultado de comparação de preços (PriceComparison).
- * Agrega preços do monitorado e dos concorrentes e lista alertas decorrentes.
+ * Reflete fielmente os campos emitidos pelo endpoint `/comparisons/{id}run`.
  */
 export interface PriceComparison {
-  monitored_product_id: string;
   monitored_price: number;
-  competitors_prices: number[];
-  average_competitor_price: number;
-  price_difference: number;
-  price_difference_percentage: number;
-  alerts: Alert[];
+  target_price: number;
+  average_competitor_price: number | null;
+  lowest_competitor: PriceDiscrepancy | null;
+  highest_competitor: PriceDiscrepancy | null;
+  discrepancies: PriceDiscrepancy[];
+  alerts: PriceComparisonAlert[];
 }
 
 /**

@@ -53,7 +53,12 @@ def get_comparison(request: Request, comparison_id: UUID, db: Session = Depends(
 
 @router.post("/{monitored_id}/run", response_model=dict)
 def run_comparison_endpoint(request: Request, monitored_id: UUID, tolerance: float | None = Query(None), price_change_threshold: float | None = Query(None), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """ Execute uma nova comparação de preços para o produto monitorado """
+    """ Execute uma nova comparação de preços para o produto monitorado 
+    
+    O payload contém preços agregados (média, menor, maior), discrepâncias por concorrente
+    e alertas de disponibilidade/variação para que o frontend reproduza o comportamento esperado
+    observado na API legada.
+    """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_id))
 
     mp = get_monitored_product_by_id(db, monitored_id)
