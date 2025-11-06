@@ -52,9 +52,23 @@ def create_scrape_product(request: Request, product_data: MonitoredProductCreate
 def list_monitored_products(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Endpoint para listar produtos monitorados """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id))
-    products = get_all_monitored_products(db, user.id)
-    logger.info("route_completed", path=request.url.path, method=request.method, status="success", count=len(products))
-    return products
+    products_with_count = get_all_monitored_products(db, user.id)
+
+    #Transforma o resultado anotado da consulta em modelos Pydantic incluindo a contagem de concorrentes
+    response_payload = [
+        MonitoredProductResponse.model_validate(product).model_copy(
+            update={"competitors_count": competitors_count}
+        )
+        for product, competitors_count in products_with_count
+    ]
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        count=len(response_payload),
+    )
+    return response_payload
 
 @router.get("/{product_id}", response_model=MonitoredProductResponse)
 def get_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

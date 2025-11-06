@@ -28,7 +28,7 @@ class MonitoredProductResponse(BaseModel):
     thumbnail: Optional[HttpUrl]
     status: MonitoredStatus
     last_checked: Optional[datetime] = None
-
+    competitors_count: int | None = None
 
 class CompetitorProductResponse(BaseModel):
     """ Informações de produtos concorrentes extraídas do scrapping """

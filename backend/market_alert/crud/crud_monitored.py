@@ -1,16 +1,17 @@
 """ Operações CRUD para produtos monitorados pelo sistema """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from unicodedata import normalize
 from uuid import UUID
 from datetime import datetime
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 
-from market_alert.models.models_products import MonitoredProduct
+from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_alerts import AlertType
 from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
@@ -119,17 +120,29 @@ def create_or_update_monitored_product_scraped(
         )
     return new
 
-def get_all_monitored_products(db: Session, user_id: UUID, monitoring_type: Optional[MonitoringType] = None) -> List[MonitoredProduct]:
-    """ Retorna todos os produtos monitorados de um usuário """
+def get_all_monitored_products(
+    db: Session, 
+    user_id: UUID, 
+    monitoring_type: Optional[MonitoringType] = None,
+) -> List[Tuple[MonitoredProduct, int]]:
+    """ Retorna todos os produtos monitorados de um usuário com contagem de concorrentes """
     query = (
-        db.query(MonitoredProduct)
-        .filter(
-            MonitoredProduct.user_id == user_id
+        db.query(
+            MonitoredProduct,
+            func.count(CompetitorProduct.id).label("competitors_count"),
         )
+        .outerjoin(
+            CompetitorProduct,
+            MonitoredProduct.id == CompetitorProduct.monitored_product_id,
+        )
+        .filter(MonitoredProduct.user_id == user_id)
     )
 
     if monitoring_type:
         query = query.filter(MonitoredProduct.monitoring_type == monitoring_type)
+    
+    #Agrupa por todas as colunas para evitar resultados inconsistentes em bancos estritos como PostgreSQL
+    query = query.group_by(*MonitoredProduct.__table__.c)
     return query.all()
 
 def get_products_by_type(db: Session, monitoring_type: MonitoringType) -> List[MonitoredProduct]:
