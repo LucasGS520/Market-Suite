@@ -94,7 +94,8 @@ export const apiRequest = async <T = any>(
   }
 
   if (token) {
-    Object.assign(headers, { Authorization: `Bearer ${token}` });
+    // Utilizamos set para garantir que o header Authorization seja persistido no objeto Headers
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   const response = await fetch(url, {
