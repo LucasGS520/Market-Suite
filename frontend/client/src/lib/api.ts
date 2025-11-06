@@ -6,11 +6,60 @@
  */
 
 /**
- * Retorna a URL base da API (variável de ambiente Vite ou fallback).
+ * URL padrão usada quando nenhuma variável de ambiente é fornecida.
  */
-const getApiUrl = () => {
-  // import.meta.env é injetado pelo Vite em tempo de build
-  return import.meta.env.VITE_FRONTEND_FORGE_API_URL || 'http://localhost:8000';
+const DEFAULT_API_URL = 'http://localhost:8000';
+
+/**
+ * Normaliza e valida a URL base da API informada via variável de ambiente.
+ * 
+ * - Remove espaços em branco acidentais
+ * - Garante a presença de esquema/host válidos utilizando URL nativa do navegador
+ * - Força o término com uma única barra para simplificar a concatenação de endpoints
+ */
+const normalizeBaseApiUrl = (rawUrl?: string): string => {
+  const trimmed = rawUrl?.trim();
+
+  if (!trimmed) {
+    return DEFAULT_API_URL;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    // Limpa query/hash passados inadvertidamente
+    parsed.search = '';
+    parsed.hash = '';
+
+    // Garante que pathname termine com apenas uma barra
+    parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/`;
+
+    return parsed.toString();
+  } catch (error) {
+    // Caso a URL seja inválida, retornamos o fallback para evitar falhas silenciosas na aplicação
+    console.warn('URL base da API inválida, retornamos o fallback padrão.', error);
+    return DEFAULT_API_URL;
+  }
+};
+
+/**
+ * Retorna a URL base da API (variável de ambiente Vite normalizada ou fallback).
+ */
+const getApiUrl = () => normalizeBaseApiUrl(import.meta.env.VITE_FRONTEND_FORGE_API_URL);
+
+/**
+ * Monta a URL final da requisição garantindo que o endpoint tenha formato consistente.
+ */
+const buildApiUrl = (endpoint: string): string => {
+  const sanitizedEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+  const base = getApiUrl();
+
+  try {
+    return new URL(sanitizedEndpoint, base).toString();
+  } catch (error) {
+    // Em navegadores antigos sem suporte total ao construtor URL usamos concatenação segura
+    const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+    return `${normalizedBase}${sanitizedEndpoint}`;
+  }
 };
 
 /**
@@ -26,7 +75,7 @@ export const apiRequest = async <T = any>(
   options: RequestInit & { token?: string } = {}
 ): Promise<T> => {
   const { token, ...fetchOptions } = options;
-  const url = `${getApiUrl()}${endpoint}`;
+  const url = buildApiUrl(endpoint);
 
   // Cabeçalhos padrão para enviar/receber JSON
   const headers: HeadersInit = {

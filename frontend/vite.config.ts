@@ -57,13 +57,19 @@ export default defineConfig({
     strictPort: false, // Encontrará a próxima porta disponível se a porta alvo estiver em uso
     // Habilita binding do host para acessos externos (útil em containers)
     host: true,
+    // Configuração explícita do HMR para ambientes Docker/WSL onde localhost não resolve dentro do container
+    hmr: {
+      // Porta exposta pelo container; reutilizamos a mesma porta do servidor HTTP
+      port: Number(process.env.HMR_PORT ?? process.env.FRONTEND_PORT ?? 5173),
+      // Porta que o cliente no navegador deve usar para abrir o websocket (necessário quando há mapeamento de portas)
+      clientPort: Number(process.env.HMR_CLIENT_PORT ?? process.env.FRONTEND_PORT ?? 5173),
+      // Host utilizado pelo cliente; localhost funciona no navegador do host mesmo quando vite roda em container
+      host: process.env.HMR_HOST ?? "localhost",
+      // Protocolo padrão do websocket em desenvolvimento
+      protocol: process.env.HMR_PROTOCOL === "wss" ? "wss" : "ws",
+    },
     // Hosts permitidos para requisições durante o desenvolvimento
     allowedHosts: [
-      ".manuspre.computer",
-      ".manus.computer",
-      ".manus-asia.computer",
-      ".manuscomputer.ai",
-      ".manusvm.computer",
       "localhost",
       "127.0.0.1",
     ],
