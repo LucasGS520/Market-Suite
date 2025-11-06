@@ -38,6 +38,35 @@ def create_competitor_scrape(request: Request, product_data: CompetitorProductCr
         logger.warning("invalid_competitor_url", url=normalized_url, code=issue.code)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
 
+    #Valida se o produto monitorado existe e pertence ao usuário antes de agendar scraping
+    mp = get_monitored_product_by_id(db, product_data.monitored_product_id)
+    if mp is None:
+        logger.warning(
+            "route_error",
+            path=request.url.path,
+            method=request.method,
+            reason="not_found",
+            monitored_id=str(product_data.monitored_product_id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Produto monitorado não encontrado.",
+        )
+    
+    if mp.user_id != user.id:
+        logger.warning(
+            "route_error",
+            path=request.url.path,
+            method=request.method,
+            reason="forbidden",
+            monitored_id=str(product_data.monitored_product_id),
+            owner_id=str(mp.user_id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuário não possui permissão para acessar este produto monitorado.",
+        )
+
     #Cria um produto concorrente via Celery
     collect_competitor_task.delay(
         monitored_product_id=str(product_data.monitored_product_id),
