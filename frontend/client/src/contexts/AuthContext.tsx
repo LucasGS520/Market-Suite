@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { apiRequest, login as loginRequest } from '@/lib/api';
 
 /**
  * Tipo de dados do usuário autenticado
@@ -70,60 +71,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   /**
    * Função de login:
-   * - Faz POST para /auth usando form-urlencoded para obter access_token
+   * - Usa o utilitário login da camada de API para obter o access_token preservando mensagens do backend
    * - Armazena token no estado e localStorage
    * - Em seguida consulta /users/me com o token para obter dados do usuário
    *
-   * Lança erro em falha de autenticação para que o chamador possa tratar.
+   * Lança erro em falha de autenticação preservando o detail vindo da API quando disponível.
    */
   const login = async (email: string, password: string) => {
+    let newToken: string | null = null;
     try {
-      const apiUrl = import.meta.env.VITE_FRONTEND_FORGE_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/auth`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          username: email,
-          password: password,
-        }),
-      });
+      newToken = await loginRequest(email, password);
 
-      if (!response.ok) {
-        // Propaga erro para UI (ex.: mostrar mensagem ao usuário)
-        throw new Error('Falha na autenticação');
-      }
-
-      const data = await response.json();
-      const newToken = data.access_token;
-
-      // Salva token no estado e persistência local
+      // Persistimos o token imediatamente para habilitar chamadas autenticadas subsequentes
       setToken(newToken);
       localStorage.setItem('auth_token', newToken);
 
-      // Busca informações do usuário com o token obtido
-      const userResponse = await fetch(`${apiUrl}/users/me`, {
-        headers: {
-          Authorization: `Bearer ${newToken}`,
-        },
+      const userData = await apiRequest<User>('/users/me', {
+        token: newToken,
       });
 
-      if (userResponse.ok) {
-        const userData = await userResponse.json();
-        setUser(userData);
-        localStorage.setItem('auth_user', JSON.stringify(userData));
-      } else if (userResponse.status === 401) {
-        // Limpa credenciais inválidas para evitar sessão inconsistente
-        logout();
-        throw new Error('Sessão expirada. Faça login novamente.');
-      } else {
-        throw new Error('Falha ao carregar dados do usuário');
-      }
+      setUser(userData);
+      localStorage.setItem('auth_user', JSON.stringify(userData));
     } catch (error) {
-      // Loga o erro e repassa para o chamador tratar (ex.: mostrar toast)
+      // Limpa credenciais temporárias caso o fluxo tenha falhado após obter o token
+      if (newToken) {
+        logout();
+      }
       console.error('Erro ao fazer login:', error);
-      throw error;
+      
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error('Erro desconhecido ao fazer login');
     }
   };
 

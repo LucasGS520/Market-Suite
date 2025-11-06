@@ -151,6 +151,39 @@ export const apiRequest = async <T = any>(
 };
 
 /**
+ * Estrutura da resposta de autenticação que contém o token JWT.
+ */
+interface AuthResponse {
+  access_token: string;
+  token_type: string;
+}
+
+/**
+ * Realiza login no backend enviando credenciais em formato form-urlencoded.
+ * 
+ * A função utiliza apiRequest para reaproveitar o tratamento de erros centralizado,
+ * garantindo que mensagens vindas do backend (como detail) sejam preservadas.
+ */
+export const login = async (email: string, password: string): Promise<string> => {
+  // Utilizamos URLSearchParams para garantir a codificação correta dos campos de fomulário
+  const body = new URLSearchParams({
+    username: email,
+    password: password,
+  });
+
+  const response = await apiRequest<AuthResponse>('/auth', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    // toString assegura que o corpo seja enviado como string, respeitando o content-type configurado
+    body: body.toString(),
+  });
+
+  return response.access_token;
+};
+
+/**
  * Interface para resposta paginada genérica.
  * - items: lista de itens da página
  * - total: total de itens disponíveis
