@@ -4,9 +4,10 @@ import { useLocation } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/data-display/card';
 import { Button } from '@/components/ui/button/button';
 import { Badge } from '@/components/ui/data-display/badge';
-import { TrendingUp, ExternalLink } from 'lucide-react';
+import { TrendingUp, ExternalLink, AlertCircle, RotateCcw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/data-display/skeleton';
 import type { MonitoredStatus } from '@/lib/api';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/feedback/alert';
 
 /**
  * Products.tsx
@@ -65,11 +66,19 @@ const describeLastChecked = (timestamp: string | null | undefined): string => {
 
 /** Componente principal que renderiza a lista de produtos monitorados */
 export default function Products() {
-  // Hook que retorna os produtos e estado de carregamento
-  const { products, isLoading } = useMonitoredProducts();
+  // Hook que retorna os produtos, estado de carregamento e erro da API
+  const { products, isLoading, error, refetch } = useMonitoredProducts();
 
   // Hook do wouter para navegação (navigate)
   const [, navigate] = useLocation();
+
+  /**
+   * Acionador manual para tentar novamente a busca de produtos.
+   * Mantido inline para evitar recriações denecessárias e facilitar o binding no botão.
+   */
+  const handleRetry = () => {
+    refetch();
+  };
 
   // Estado de carregamento: mostra skeletons representando cards em loading
   if (isLoading) {
@@ -104,6 +113,21 @@ export default function Products() {
         {/* Botão para navegar até a tela de adicionar produto */}
         <Button onClick={() => navigate('/add')}>Adicionar Produto</Button>
       </div>
+
+      {error && (
+        // Alertamos falha de carregamento antes de avaliar estados vazios para orientar ações imediatas
+        <Alert variant="destructive" className="items-start">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Erro ao carregar produtos</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{error}</p>
+            <Button variant="outline" size="sm" onClick={handleRetry} className="gap-2" type="button">
+              <RotateCcw className="h-4 w-4" />
+              Tentar Novamente
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {products.length === 0 ? (
         // Estado vazio: orienta o usuário a adicionar o primeiro produto
