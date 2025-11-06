@@ -100,7 +100,7 @@ export default function AddProduct() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Adicionar Novo Produto Monitorado</h1>
         <p className="text-muted-foreground mt-2">
-          Cadastre apenas o produto que será monitorado enquanto a integração com concorrentes não estiver disponível.
+          Cadastre o produto principal para iniciar o acompanhamento e, depois, adicione concorrentes na página dedicada.
         </p>
       </div>
 
@@ -108,7 +108,8 @@ export default function AddProduct() {
         <CardHeader>
           <CardTitle>Informações do Produto Monitorado</CardTitle>
           <CardDescription>
-            Informe os dados do seu produto para acompanhar preços. A inclusão de concorrentes estará disponível em breve.
+            Informe os dados do seu produto para acompanhar preços.
+            A coleta dos concorrentes pode levar alguns minutos após o cadastro para ser concluída.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -1,7 +1,7 @@
 // Componente de página que lista concorrentes de um produto monitorado.
 // Contém carregamento, tratamento de erro e ações para abrir o anúncio do concorrente.
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation, useRoute } from 'wouter';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/data-display/card';
@@ -9,7 +9,17 @@ import { Button } from '@/components/ui/button/button';
 import { Badge } from '@/components/ui/data-display/badge';
 import { ArrowLeft, TrendingDown, TrendingUp, ExternalLink, RotateCcw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/data-display/skeleton';
-import { getCompetitors, Competitor, runComparison, PriceComparison, PriceDiscrepancy, PriceComparisonAlert } from '@/lib/api';
+import { Input } from '@/components/ui/inputs/input';
+import { toast } from 'sonner';
+import {
+  getCompetitors,
+  Competitor,
+  runComparison,
+  PriceComparison,
+  PriceDiscrepancy,
+  PriceComparisonAlert,
+  scrapeCompetitor,
+} from '@/lib/api';
 
 type UiCompetitor = {
   id: string;
@@ -61,6 +71,16 @@ export default function Competitors() {
   // Obtém ID do produto usando parâmetros do Wouter
   const productId = sanitizedProductId(routeParams?.id ?? null);
 
+  // Ref para evitar atualização de estado após desmontagem
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    // Marca componente como desmontado ao sair para evitar leaks
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Estado local: lista de concorrentes
   const [competitors, setCompetitors] = useState<UiCompetitor[]>([]);
   // Estado de carregamento para mostrar skeletons enquanto busca dados
@@ -71,60 +91,76 @@ export default function Competitors() {
   const [comparison, setComparison] = useState<PriceComparison | null>(null);
   const [isRunningComparison, setIsRunningComparison] = useState(false);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
+  // Estado do formulário de cadastro de concorrente
+  const [competitorUrl, setCompetitorUrl] = useState('');
+  const [isSchedulingCompetitor, setIsSchedulingCompetitor] = useState(false);
 
-  useEffect(() => {
-    // Só tenta buscar se tivermos token e productId válidos
-    if (!token) return;
+  /**
+   * Busca concorrentes usando a API e atualiza os estados de feedback.
+   */
+  const loadCompetitors = useCallback(
+    async (options?: { preserveComparison?: boolean }) => {
+      const preserveComparison = options?.preserveComparison ?? false;
+      
+      if (!token) {
+        return;
+      }
 
-    if (!productId) {
-      setError('Identificador do produto ausente na rota.');
-      setCompetitors([]);
-      setIsLoading(false);
-      setComparison(null);
-      setComparisonError(null);
-      return;
-    }
+      if (!productId) {
+        if (!isMountedRef.current) {
+          return;
+        }
 
-    setIsLoading(true);
-    setError(null);
-    setComparison(null);
-    setComparisonError(null);
+        setError('Identificador do produto ausente na rota.');
+        setCompetitors([]);
+        setIsLoading(false);
+        if (!preserveComparison) {
+          setComparison(null);
+          setComparisonError(null);
+        }
+        return;
+      }
+      
+      if (isMountedRef.current) {
+        setIsLoading(true);
+        setError(null);
+        if (!preserveComparison) {
+          setComparison(null);
+          setComparisonError(null);
+        }
+      }
 
-    let isMounted = true;
-
-    const fetchCompetitors = async () => {
       try {
         // Chamada ao client API que retorna a lista de concorrentes
         const data = await getCompetitors(token, productId);
-        if (!isMounted) {
+        if (!isMountedRef.current) {
           return;
         }
         
         const normalizedCompetitors = data.map(mapCompetitorToUi);
         setCompetitors(normalizedCompetitors);
       } catch (err) {
-        // Normaliza mensagem de erro para string exibível
-        if (!isMounted) {
+        if (!isMountedRef.current) {
           return;
         }
         
+        // Normaliza mensagem de erro para string exibível
         setError(err instanceof Error ? err.message : 'Erro ao buscar concorrentes');
       } finally {
-        // Finaliza estado de loading independente do resultado
-        if (!isMounted) {
+        if (!isMountedRef.current) {
           return;
         }
         
+        // Finaliza estado de carregamento independente de sucesso ou falha
         setIsLoading(false);
       }
-    };
+    },
+    [productId, token],
+  );
 
-    fetchCompetitors();
-    // Reexecuta quando token ou productId mudarem
-    return () => {
-      isMounted = false;
-    };
-  }, [token, productId]);
+  useEffect(() => {
+    loadCompetitors();
+  }, [loadCompetitors]);
 
   /**
    * Dispara a comparação manual e guarda o payload completo retornado pela API
@@ -146,6 +182,46 @@ export default function Competitors() {
       setComparisonError(err instanceof Error ? err.message : 'Erro ao executar comparação');
     } finally {
       setIsRunningComparison(false);
+    }
+  };
+
+  /**
+   * Agenda scraping de um concorrente utilizando a URL informada
+   */
+  const handleScheduleCompetitor = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!token || !productId) {
+      setError('Não foi possível identificar o produto monitorado.');
+      return;
+    }
+
+    if (!competitorUrl.trim()) {
+      setError('Informe a URL do concorrente.');
+      return;
+    }
+
+    setIsSchedulingCompetitor(true);
+    setError(null);
+
+    try {
+      // Reutiliza cliente de API para agendar scraping do concorrente
+      const response = await scrapeCompetitor(token, {
+        monitored_product_id: productId,
+        product_url: competitorUrl.trim(),
+      });
+
+      toast.success(response.message ?? 'Coleta de concorrente agendada.');
+      setCompetitorUrl('');
+
+      // Recarrega lista após agendamento para refletir status atualizado
+      await loadCompetitors({ preserveComparison: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao agendar scraping do concorrente';
+      setError(message);
+      toast.error('Não foi possível agendar a coleta do concorrente.');
+    } finally {
+      setIsSchedulingCompetitor(false);
     }
   };
 
@@ -263,6 +339,39 @@ export default function Competitors() {
           {isRunningComparison ? 'Executando comparação...' : 'Executar comparação agora'}
         </Button>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Adicionar novo concorrente</CardTitle>
+          <CardDescription>
+            Informe a URL para agendar a coleta. O processamento ocorre em segundo plano e pode levar alguns minutos para
+            aparecer na lista.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={handleScheduleCompetitor}>
+            <div className="space-y-2">
+              <label htmlFor="competitor_url" className="text-sm font-medium">
+                URL do Concorrente
+              </label>
+              <Input
+                id="competitor_url"
+                name="competitor_url"
+                type="url"
+                placeholder="https://www.siteconcorrente.com/produto"
+                value={competitorUrl}
+                onChange={(event) => setCompetitorUrl(event.target.value)}
+                disabled={isSchedulingCompetitor}
+                required
+              />
+            </div>
+
+            <Button type="submit" className="w-full" disabled={isSchedulingCompetitor}>
+              {isSchedulingCompetitor ? 'Agendando coleta...' : 'Agendar coleta de concorrente'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Exibe cartão de erro quando houver mensagem */}
       {error && (
