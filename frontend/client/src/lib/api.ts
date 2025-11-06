@@ -8,7 +8,7 @@
 /**
  * URL padrão usada quando nenhuma variável de ambiente é fornecida.
  */
-const DEFAULT_API_URL = 'http://localhost:8000';
+const DEFAULT_API_URL = 'http://localhost:8000/';
 
 /**
  * Normaliza e valida a URL base da API informada via variável de ambiente.
@@ -17,7 +17,7 @@ const DEFAULT_API_URL = 'http://localhost:8000';
  * - Garante a presença de esquema/host válidos utilizando URL nativa do navegador
  * - Força o término com uma única barra para simplificar a concatenação de endpoints
  */
-const normalizeBaseApiUrl = (rawUrl?: string): string => {
+export const normalizeBaseApiUrl = (rawUrl?: string): string => {
   const trimmed = rawUrl?.trim();
 
   if (!trimmed) {
@@ -30,12 +30,11 @@ const normalizeBaseApiUrl = (rawUrl?: string): string => {
     parsed.search = '';
     parsed.hash = '';
 
-    // Garante que pathname termine com apenas uma barra
-    parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/`;
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    parsed.pathname = normalizedPath ? `${normalizedPath}/` : '/';
 
     return parsed.toString();
   } catch (error) {
-    // Caso a URL seja inválida, retornamos o fallback para evitar falhas silenciosas na aplicação
     console.warn('URL base da API inválida, retornamos o fallback padrão.', error);
     return DEFAULT_API_URL;
   }
@@ -44,7 +43,7 @@ const normalizeBaseApiUrl = (rawUrl?: string): string => {
 /**
  * Retorna a URL base da API (variável de ambiente Vite normalizada ou fallback).
  */
-const getApiUrl = () => normalizeBaseApiUrl(import.meta.env.VITE_FRONTEND_FORGE_API_URL);
+export const getApiUrl = () => normalizeBaseApiUrl(import.meta.env.VITE_FRONTEND_FORGE_API_URL);
 
 /**
  * Monta a URL final da requisição garantindo que o endpoint tenha formato consistente.
@@ -56,7 +55,6 @@ const buildApiUrl = (endpoint: string): string => {
   try {
     return new URL(sanitizedEndpoint, base).toString();
   } catch (error) {
-    // Em navegadores antigos sem suporte total ao construtor URL usamos concatenação segura
     const normalizedBase = base.endsWith('/') ? base : `${base}/`;
     return `${normalizedBase}${sanitizedEndpoint}`;
   }
@@ -74,25 +72,31 @@ export const apiRequest = async <T = any>(
   endpoint: string,
   options: RequestInit & { token?: string } = {}
 ): Promise<T> => {
-  const { token, ...fetchOptions } = options;
+  const { token, headers: requestHeaders, ...fetchOptions } = options;
   const url = buildApiUrl(endpoint);
 
-  // Cabeçalhos padrão para enviar/receber JSON
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-  };
+  const headers = new Headers(requestHeaders as HeadersInit | undefined);
 
-  // Mescla headers passados via fetchOptions (se houver)
-  if (fetchOptions.headers) {
-    Object.assign(headers, fetchOptions.headers);
+  if (!headers.has('Accept')) {
+    headers.set('Accept', 'application/json');
   }
 
-  // Adiciona token no Authorization quando fornecido
+  const body = fetchOptions.body;
+  const shouldSetJsonContentType =
+    body !== undefined &&
+    !headers.has('Content-Type') &&
+    !(body instanceof FormData) &&
+    !(body instanceof URLSearchParams) &&
+    !(body instanceof Blob);
+
+  if (shouldSetJsonContentType) {
+    headers.set('Content-Type', 'application/json');
+  }
+
   if (token) {
     Object.assign(headers, { Authorization: `Bearer ${token}` });
   }
 
-  // Executa a requisição usando fetch padrão do navegador
   const response = await fetch(url, {
     ...fetchOptions,
     headers,
@@ -220,7 +224,7 @@ export const login = async (email: string, password: string): Promise<string> =>
     password: password,
   });
 
-  const response = await apiRequest<AuthResponse>('/auth', {
+  const response = await apiRequest<AuthResponse>('/auth/', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
