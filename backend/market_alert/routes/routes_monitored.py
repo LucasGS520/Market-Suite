@@ -46,7 +46,7 @@ def create_scrape_product(request: Request, product_data: MonitoredProductCreate
     )
 
     logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled")
-    return {"msg": "Scraping agendado com sucesso. O produto será salvo em breve."}
+    return {"message": "Scraping agendado com sucesso. O produto será salvo em breve."}
 
 @router.get("/", response_model=List[MonitoredProductResponse])
 def list_monitored_products(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

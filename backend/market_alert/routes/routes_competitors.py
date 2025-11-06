@@ -45,7 +45,7 @@ def create_competitor_scrape(request: Request, product_data: CompetitorProductCr
     )
 
     logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled")
-    return {"msg": "Scraping de concorrente agendado com sucesso."}
+    return {"message": "Scraping de concorrente agendado com sucesso."}
 
 @router.get("/{monitored_product_id}", response_model=List[CompetitorProductResponse])
 def list_competitors(request: Request, monitored_product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
