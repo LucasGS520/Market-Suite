@@ -20,6 +20,16 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   // useLocation do wouter retorna [location, navigate]; usamos apenas a função de navegação.
   const [, navigate] = useLocation();
 
+  // Evitamos executar navegação diretamente durante a renderização para não causar efeitos colaterais.
+  // Usamos useEffect para realizar o redirecionamento quando não autenticado, garantindo a ordem fixa de hooks.
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      // Redireciona o usuário para a página de login assim que a verificação terminar
+      navigate('/login');
+    }
+    // dependências: reexecutar quando mudar o estado de autenticação ou o carregamento
+  }, [isLoading, isAuthenticated, navigate]);
+
   // Enquanto carregando, mostramos um indicador de loading centralizado.
   if (isLoading) {
     return (
@@ -28,16 +38,6 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
       </div>
     );
   }
-
-  // Evitamos executar navegação diretamente durante a renderização para não causar efeitos colaterais.
-  // Usamos useEffect para realizar o redirecionamento quando não autenticado.
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      // Redireciona o usuário para a página de login
-      navigate('/login');
-    }
-    // dependências: reexecutar quando mudar o estado de autenticação ou o carregamento
-  }, [isLoading, isAuthenticated, navigate]);
 
   // Enquanto o redirect não acontece (ou logo após ele), não renderizamos a rota protegida.
   if (!isAuthenticated) {
