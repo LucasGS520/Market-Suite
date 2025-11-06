@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useLocation } from 'wouter';
+import { useLocation, useRoute } from 'wouter';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/data-display/card';
 import { Button } from '@/components/ui/button/button';
 import { Badge } from '@/components/ui/data-display/badge';
@@ -38,12 +38,28 @@ const mapCompetitorToUi = (competitor: Competitor): UiCompetitor => {
   };
 };
 
+/**
+ * Normaliza o ID do produto removendo barras finais e querystrings
+ */
+export const sanitizedProductId = (rawId: string | undefined | null): string => {
+  if (!rawId) {
+    return '';
+  }
+
+  const [withoutQuery] = rawId.split('?');
+  return withoutQuery.replace(/\/+$/, '');
+};
+
 export default function Competitors() {
   // Recupera token do contexto de autenticação
   const { token } = useAuth();
 
-  // Hook do roteamento (wouter): location atual e função de navegação
-  const [location, navigate] = useLocation();
+  // Hook do roteamento (wouter): função de navegação
+  const [, navigate] = useLocation();
+  const [, routeParams] = useRoute<{ id?: string; rest?: string }>('/competitors/:id/:rest*');
+
+  // Obtém ID do produto usando parâmetros do Wouter
+  const productId = sanitizedProductId(routeParams?.id ?? null);
 
   // Estado local: lista de concorrentes
   const [competitors, setCompetitors] = useState<UiCompetitor[]>([]);
@@ -56,30 +72,58 @@ export default function Competitors() {
   const [isRunningComparison, setIsRunningComparison] = useState(false);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
 
-  // Extraindo o ID do produto da URL (assume que o ID vem como última parte da rota)
-  const productId = location.split('/').pop() || '';
-
   useEffect(() => {
     // Só tenta buscar se tivermos token e productId válidos
-    if (!token || !productId) return;
+    if (!token) return;
+
+    if (!productId) {
+      setError('Identificador do produto ausente na rota.');
+      setCompetitors([]);
+      setIsLoading(false);
+      setComparison(null);
+      setComparisonError(null);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setComparison(null);
+    setComparisonError(null);
+
+    let isMounted = true;
 
     const fetchCompetitors = async () => {
       try {
         // Chamada ao client API que retorna a lista de concorrentes
         const data = await getCompetitors(token, productId);
+        if (!isMounted) {
+          return;
+        }
+        
         const normalizedCompetitors = data.map(mapCompetitorToUi);
         setCompetitors(normalizedCompetitors);
       } catch (err) {
         // Normaliza mensagem de erro para string exibível
+        if (!isMounted) {
+          return;
+        }
+        
         setError(err instanceof Error ? err.message : 'Erro ao buscar concorrentes');
       } finally {
         // Finaliza estado de loading independente do resultado
+        if (!isMounted) {
+          return;
+        }
+        
         setIsLoading(false);
       }
     };
 
     fetchCompetitors();
     // Reexecuta quando token ou productId mudarem
+    return () => {
+      isMounted = false;
+    };
   }, [token, productId]);
 
   /**
