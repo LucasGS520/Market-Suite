@@ -35,7 +35,6 @@ class MonitoredProduct(Base):
     search_query = Column(String, nullable=True, index=True)
     product_url = Column(Text, nullable=False)
 
-    target_price = Column(Numeric(10,2), nullable=True)
     current_price = Column(Numeric(10,2), nullable=True)
     free_shipping = Column(Boolean, default=False)
     currency = Column(String(8), nullable=True)

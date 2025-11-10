@@ -24,7 +24,6 @@ class AlertRule(Base):
     rule_type = Column(PgEnum(AlertType, name="alert_rule_type_enum"), nullable=False)
     threshold_value = Column(Numeric(10, 2), nullable=True)
     threshold_percent = Column(Float, nullable=True)
-    target_price = Column(Numeric(10, 2), nullable=True)
     product_status = Column(PgEnum(ProductStatus, name="product_status_enum"), nullable=True)
     enabled = Column(Boolean, default=True, nullable=False)
 
