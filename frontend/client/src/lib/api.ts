@@ -270,7 +270,6 @@ export interface MonitoredProductApiResponse {
   monitoring_type: 'api' | 'scraping';
   search_query?: string | null;
   product_url?: string | null;
-  target_price: string | number;
   current_price: string | number;
   free_shipping?: boolean | null;
   thumbnail?: string | null;
@@ -290,7 +289,6 @@ export interface MonitoredProduct {
   search_query: string | null;
   product_url: string | null;
   current_price: number | null;
-  target_price: number | null;
   free_shipping: boolean | null;
   thumbnail: string | null;
   status: MonitoredStatus;
@@ -323,7 +321,6 @@ export const mapMonitoredProductFromApi = (
   search_query: product.search_query ?? null,
   product_url: product.product_url ?? null,
   current_price: toNumberOrNull(product.current_price),
-  target_price: toNumberOrNull(product.target_price),
   free_shipping: product.free_shipping ?? null,
   thumbnail: product.thumbnail ?? null,
   status: product.status,
@@ -410,7 +407,6 @@ export interface PriceComparisonAlert {
  */
 export interface PriceComparison {
   monitored_price: number;
-  target_price: number;
   average_competitor_price: number | null;
   lowest_competitor: PriceDiscrepancy | null;
   highest_competitor: PriceDiscrepancy | null;
@@ -436,7 +432,6 @@ export const scrapeMonitoredProduct = (
   data: {
     name_identification: string;
     product_url: string;
-    target_price: number;
   }
 ) =>
   apiRequest<{ message: string }>('/monitored/scrape', {

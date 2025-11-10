@@ -98,7 +98,6 @@ def _build_monitored_paylaod(product) -> MonitoredProductCreateScraping:
     return MonitoredProductCreateScraping(
         name_identification=product.name_identification,
         product_url=product.product_url,
-        target_price=product.target_price,
     )
 
 def _build_competitor_payload(competitor) -> CompetitorProductCreateScraping:

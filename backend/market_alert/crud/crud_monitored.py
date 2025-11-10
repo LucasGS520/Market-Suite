@@ -2,11 +2,11 @@
 
 from typing import List, Optional, Tuple
 
-from unicodedata import normalize
 from uuid import UUID
 from datetime import datetime
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
@@ -32,6 +32,55 @@ def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_ur
         .first()
     )
 
+def create_pending_monitored_product(
+    db: Session,
+    user_id: UUID,
+    name_identification: str,
+    product_url: str,
+) -> MonitoredProduct:
+    """ Cria registro pendente garantindo unicidade por usuário e URL """
+
+    normalized_url = str(product_url).strip()
+    existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
+
+    if existing:
+        if name_identification and existing.name_identification != name_identification:
+            #Atualiza o nome quando o usuário reenfileira com identificação diferente
+            existing.name_identification = name_identification
+            db.commit()
+            db.refresh(existing)
+        return existing
+
+    pending = MonitoredProduct(
+        user_id=user_id,
+        name_identification=name_identification,
+        monitoring_type=MonitoringType.scraping,
+        search_query=None,
+        product_url=normalized_url,
+        current_price=None,
+        thumbnail=None,
+        free_shipping=False,
+        status=MonitoredStatus.pending,
+        last_checked=None,
+    )
+    db.add(pending)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing_retry = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
+        if existing_retry:
+            return existing_retry
+        raise
+    db.refresh(pending)
+
+    if pending.last_checked is not None:
+        pending.last_checked = None
+        db.commit()
+        db.refresh(pending)
+    return pending
+
 def create_or_update_monitored_product_scraped(
     db: Session,
     user_id: UUID,
@@ -51,6 +100,8 @@ def create_or_update_monitored_product_scraped(
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
 
     if existing:
+        if product_data.name_identification and existing.name_identification != product_data.name_identification:
+            existing.name_identification = product_data.name_identification
         previous_price = existing.current_price
         existing.current_price = scraped_info.current_price
         existing.thumbnail = scraped_info.thumbnail
@@ -80,7 +131,6 @@ def create_or_update_monitored_product_scraped(
         name_identification=product_data.name_identification,
         search_query=None,
         product_url=normalized_url,
-        target_price=product_data.target_price,
         current_price=scraped_info.current_price,
         thumbnail=scraped_info.thumbnail,
         free_shipping=scraped_info.free_shipping,

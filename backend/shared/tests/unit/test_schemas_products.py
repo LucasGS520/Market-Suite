@@ -27,25 +27,14 @@ def test_monitored_product_required_fields():
     mensagens = str(exc.value)
     assert "name_identification" in mensagens
     assert "product_url" in mensagens
-    assert "target_price" in mensagens
 
 def test_monitored_product_invalid_url():
     with pytest.raises(ValidationError) as exc:
         MonitoredProductCreateScraping(
             name_identification="Teste",
             product_url="nao-e-url",
-            target_price=Decimal("10"),
         )
     assert "url" in str(exc.value).lower()
-
-def test_monitored_product_invalid_type():
-    with pytest.raises(ValidationError) as exc:
-        MonitoredProductCreateScraping(
-            name_identification="Teste",
-            product_url="https://example.com/produto",
-            target_price="dez",
-        )
-    assert "target_price" in str(exc.value)
 
 def test_competitor_product_invalid_url():
     from uuid import uuid4

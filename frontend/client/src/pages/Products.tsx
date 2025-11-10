@@ -8,6 +8,7 @@ import { TrendingUp, ExternalLink, AlertCircle, RotateCcw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/data-display/skeleton';
 import type { MonitoredStatus } from '@/lib/api';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/feedback/alert';
+import { format } from 'path';
 
 /**
  * Products.tsx
@@ -26,7 +27,7 @@ const statusDisplayConfig: Record<
 > = {
   active: { label: 'Ativo', variant: 'default' },
   inactive: { label: 'Inativo', variant: 'secondary'},
-  pending: { label: 'Pendente', variant: 'outline' },
+  pending: { label: 'Agendado', variant: 'outline' },
   failed: { label: 'Falha', variant: 'destructive', highlight: true },
 };
 
@@ -141,11 +142,11 @@ export default function Products() {
         // Lista de produtos: cada item é um Card com informações e ações
         <div className="space-y-4">
           {products.map((product) => {
-            const statusInfo = statusDisplayConfig[product.status] ?? unknownStatusDisplay;            
+            const statusInfo = statusDisplayConfig[product.status] ?? unknownStatusDisplay;
             const showCompetitors = product.competitors_count !== undefined && product.competitors_count !== null;
             const infoGridCols = `grid grid-cols-1 gap-4 sm:grid-cols-2 ${showCompetitors ? 'lg:grid-cols-3' : ''}`;
             const highlightBorder = statusInfo.highlight ? 'border-red-200 dark:border-red-800' : '';
-          
+            
             return (
               <Card key={product.id} className={highlightBorder}>
                 <CardHeader className="pb-3">
@@ -173,12 +174,6 @@ export default function Products() {
                       <p className="text-xl font-bold">{formatCurrency(product.current_price)}</p>
                     </div>
 
-                    {/* Exibe preço alvo configurado pelo usuário */}
-                    <div>
-                      <p className="text-xs text-muted-foreground">Preço Alvo</p>
-                      <p className="text-xl font-bold">{formatCurrency(product.target_price)}</p>
-                    </div>
-
                     {/* Número de concorrentes monitorados quando a API fornecer a métrica */}
                     {showCompetitors && (
                       <div>
@@ -187,6 +182,12 @@ export default function Products() {
                       </div>
                     )}
                   </div>
+
+                  {product.status === 'pending' && (
+                    <p className="text-sm text-muted-foreground">
+                      Coleta inicial agendada. Atualize a página em alguns minutos para ver os preços.
+                    </p>
+                  )}
 
                   <div className="flex gap-2 pt-2">
                     {/* Abre o anúncio original em nova aba apenas quando a URL estiver disponível */}

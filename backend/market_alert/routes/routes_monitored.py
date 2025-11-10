@@ -2,6 +2,7 @@
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
@@ -11,7 +12,13 @@ from shared.schemas.schemas_products import MonitoredProductCreateScraping
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import MonitoredProductResponse
-from market_alert.crud.crud_monitored import get_all_monitored_products, get_monitored_product_by_id, delete_monitored_product
+from market_alert.crud.crud_monitored import (
+    get_all_monitored_products, 
+    get_monitored_product_by_id, 
+    delete_monitored_product,
+    create_pending_monitored_product,
+    get_monitored_product_by_user_and_url,
+)
 from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
 
@@ -23,7 +30,7 @@ logger = structlog.get_logger("http_route")
 
 @router.post("/scrape", status_code=status.HTTP_202_ACCEPTED, response_model=None)
 def create_scrape_product(request: Request, product_data: MonitoredProductCreateScraping, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """ Endpoint para monitorar um produto por meio de um link direto (scraping) """
+    """ Agenda coleta assíncrona de produto monitorado validando URL e duplicidade """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitoring_type="scraping")
 
     try:
@@ -37,16 +44,46 @@ def create_scrape_product(request: Request, product_data: MonitoredProductCreate
         logger.warning("invalid_product_url", url=normalized_url, code=issue.code)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
 
-    #Cria um produto agendado via celery; envia target_price como string para preservar precisão ao atravessar filas
+    existing = get_monitored_product_by_user_and_url(db, user.id, normalized_url)
+
+    if existing:
+        logger.info(
+            "scrape_skipped_existing",
+            path=request.url.path,
+            method=request.method,
+            status="already_monitored",
+            monitored_id=str(existing.id),
+        )
+        collect_product_task.delay(
+            url=normalized_url,
+            user_id=str(user.id),
+            name_identification=existing.name_identification or product_data.name_identification,
+            monitored_id=str(existing.id),
+        )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"message": "Produto já monitorado. Nova coleta agendada."},
+        )
+
+    pending = create_pending_monitored_product(
+        db=db,
+        user_id=user.id,
+        name_identification=product_data.name_identification,
+        product_url=normalized_url,
+    )
+    
     collect_product_task.delay(
         url=normalized_url,
         user_id=str(user.id),
-        name_identification=product_data.name_identification,
-        target_price=str(product_data.target_price)
+        name_identification=pending.name_identification,
+        monitored_id=str(pending.id),
     )
 
-    logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled")
-    return {"message": "Scraping agendado com sucesso. O produto será salvo em breve."}
+    logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled", monitored_id=str(pending.id))
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={"message": "Scraping agendado com sucesso. O produto será salvo em breve."},
+    )
 
 @router.get("/", response_model=List[MonitoredProductResponse])
 def list_monitored_products(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

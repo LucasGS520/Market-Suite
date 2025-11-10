@@ -4,16 +4,16 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 
 
 # ----- PRODUTO MONITORADO -----
 class MonitoredProductCreateScraping(BaseModel):
-    """ Esquema compartilhado para criação de produto monitorado via scraping """
+    """ Esquema compartilhado para criação de produto monitorado via scraping sem preço alvo """
 
+    model_config = ConfigDict(extra="ignore")
     name_identification: str = Field(..., description="Nome do produto para identificação")
     product_url: HttpUrl = Field(..., description="link do produto que deseja monitorar")
-    target_price: Decimal = Field(..., description="Preço-alvo definido")
 
 class MonitoredScrapedInfo(BaseModel):
     """ Informações de scraping compartilhadas para produto monitorado """

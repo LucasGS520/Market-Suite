@@ -8,7 +8,6 @@ as tasks mantêm métricas e tratamento de erros.
 """
 
 from uuid import UUID
-from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -122,11 +121,10 @@ def _compute_retry_delay(base: float, attempt: int, limit: int) -> int:
     reject_on_worker_lost=True,
 )
 def collect_product_task(
-    self, 
-    url: str, 
-    user_id: str, 
-    name_identification: str, 
-    target_price: str | Decimal, 
+    self,
+    url: str,
+    user_id: str,
+    name_identification: str,
     monitored_id: str | None = None,
 ) -> None:
     """ Coleta dados de um produto monitorado e os salva no banco """
@@ -145,27 +143,12 @@ def collect_product_task(
         SCRAPER_IN_FLIGHT.dec()
         return
 
-    #Converte target_price para Decimal
-    try:
-        normalized_target_price = Decimal(str(target_price))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        status = "failure"
-        task_logger.error(
-            "invalid_target_price",
-            error=str(exc),
-            raw_value=str(target_price),
-        )
-        _observe_metrics(start, "collect_product_task", status)
-        SCRAPER_IN_FLIGHT.dec()
-        return
-
     #Prepara payload com valores normalizados para schema Pydantic
     try:
         payload = MonitoredProductCreateScraping.model_validate(
             {
                 "name_identification": name_identification,
                 "product_url": url,
-                "target_price": normalized_target_price
             }
         )
     except Exception as exc:

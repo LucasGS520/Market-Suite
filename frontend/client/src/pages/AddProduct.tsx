@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button/button';
 import { Input } from '@/components/ui/inputs/input';
 import { Alert, AlertDescription } from '@/components/ui/feedback/alert';
-import { Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { scrapeMonitoredProduct } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -13,9 +13,8 @@ import { toast } from 'sonner';
   Página/Componente: AddProduct
   Objetivo: Formulário para adicionar um novo produto ao monitoramento de preços.
   Observações:
-    - Validações básicas de entrada (preço alvo numérico e > 0).
-    - Chama a API cliente scrapeMonitoredProduct para agendar/registrar o monitoramento.
-    - Mostra feedback (erro / sucesso) e redireciona para /products após sucesso.
+    - O fluxo envia apenas nome e URL, o backend agenda scraping assíncrono.
+    - Mostra feedback imediato via toast e redireciona para /products.
 */
 
 export default function AddProduct() {
@@ -25,11 +24,9 @@ export default function AddProduct() {
   const [formData, setFormData] = useState({
     name_identification: '',
     product_url: '',
-    target_price: '',
   });
   const [isLoading, setIsLoading] = useState(false); // indicador de requisição em progresso
   const [error, setError] = useState<string | null>(null); // mensagem de erro para o usuário
-  const [success, setSuccess] = useState(false); // flag para exibir mensagem de sucesso
 
   // Atualiza o estado do formulário para inputs controlados
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -44,7 +41,6 @@ export default function AddProduct() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setSuccess(false);
     setIsLoading(true);
 
     // Verifica se usuário está autenticado
@@ -55,36 +51,27 @@ export default function AddProduct() {
     }
 
     try {
-      // Converte e valida o preço alvo
-      const targetPrice = parseFloat(formData.target_price);
-
-      if (isNaN(targetPrice) || targetPrice <= 0) {
-        setError('Preço alvo inválido');
-        setIsLoading(false);
-        return;
-      }
-
       // Chamada ao cliente API que agenda/registrará o monitoramento
-      await scrapeMonitoredProduct(token, {
+      const response = await scrapeMonitoredProduct(token, {
         name_identification: formData.name_identification,
         product_url: formData.product_url,
-        target_price: targetPrice,
       });
 
-      // Sucesso: feedback ao usuário e limpeza do formulário
-      setSuccess(true);
-      toast.success('Produto adicionado com sucesso!');
+      const normalizedMessage = response.message ?? 'Scraping agendado com sucesso';
+      const isDuplicate = normalizedMessage.toLowerCase().includes('já está sendo monitorado');
+
+      if (isDuplicate) {
+        toast.info(normalizedMessage);
+      } else {
+        toast.success(normalizedMessage);
+      }
 
       setFormData({
         name_identification: '',
         product_url: '',
-        target_price: '',
       });
 
-      // Redireciona para a lista de produtos após curto delay para o usuário ler a mensagem
-      setTimeout(() => {
-        navigate('/products');
-      }, 2000);
+      navigate('/products');
     } catch (err) {
       // Mostra mensagem de erro genérica ou específica quando disponível
       setError(err instanceof Error ? err.message : 'Erro ao adicionar produto');
@@ -122,16 +109,6 @@ export default function AddProduct() {
               </Alert>
             )}
 
-            {/* Mensagem de sucesso */}
-            {success && (
-              <Alert className="bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800">
-                <CheckCircle className="h-4 w-4 text-green-600" />
-                <AlertDescription className="text-green-800 dark:text-green-200">
-                  Produto adicionado com sucesso! Redirecionando...
-                </AlertDescription>
-              </Alert>
-            )}
-
             {/* Campo: Nome do produto */}
             <div className="space-y-2">
               <label htmlFor="name_identification" className="text-sm font-medium">
@@ -159,24 +136,6 @@ export default function AddProduct() {
                 type="url"
                 placeholder="https://produto.mercadolivre.com.br/..."
                 value={formData.product_url}
-                onChange={handleChange}
-                disabled={isLoading}
-                required
-              />
-            </div>
-
-            {/* Campo: Preço alvo */}
-            <div className="space-y-2">
-              <label htmlFor="target_price" className="text-sm font-medium">
-                Preço Alvo (R$)
-              </label>
-              <Input
-                id="target_price"
-                name="target_price"
-                type="number"
-                placeholder="100.00"
-                step="0.01"
-                value={formData.target_price}
                 onChange={handleChange}
                 disabled={isLoading}
                 required

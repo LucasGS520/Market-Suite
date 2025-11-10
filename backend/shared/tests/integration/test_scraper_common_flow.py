@@ -1,6 +1,5 @@
 """ Teste de integração do fluxo principal do ``services_scraper_common`` """
 
-from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 from unittest.mock import patch, Mock
@@ -60,7 +59,6 @@ def test_scrape_product_common_consulta_redis_client():
     payload = MonitoredProductCreateScraping(
         name_identification="Produto Teste",
         product_url="https://example.com/item",
-        target_price=Decimal("10.00"),
     )
 
     fake_redis = type("FakeRedis", (), {"exists": lambda self, k: 0})()

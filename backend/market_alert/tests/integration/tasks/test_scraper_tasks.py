@@ -56,10 +56,9 @@ def _patch_task_attr(monkeypatch: pytest.MonkeyPatch, name: str, value) -> None:
 def test_collect_product_tasks_with_invalid_payload():
     """ Quando o payload é inválido (Pydantic), a task encerra sem exceção """
     result = collect_product_task.run(
-        "https://mercadolivre.com.br/abc",
+        "url-invalida",
         VALID_UUID,
         "Nome Produto",
-        "not-a-decimal",
     )
     assert result is None
 
@@ -76,7 +75,6 @@ def test_collect_product_task_scraping_http_exception(monkeypatch):
             "https://mercadolivre.com.br/abc",
             VALID_UUID,
             "Produto A",
-            Decimal("99.0"),
         )
     assert exc.value.status_code == 429
 
@@ -107,7 +105,6 @@ def test_collect_product_task_generic_exception_creates_error(monkeypatch):
         "https://ml.com/x",
         VALID_UUID,
         "Prod",
-        Decimal("99.0"),
         VALID_UUID,
     )
 
@@ -161,7 +158,6 @@ def test_collect_competitor_task_http_5xx_retorna_retry(monkeypatch):
             "https://mercadolivre.com.br/abc",
             VALID_UUID,
             "Produto",
-            Decimal("10.0"),
         )
 
     assert "retry" in str(exc.value)
@@ -179,7 +175,6 @@ def test_collect_product_task_processa_sucesso(monkeypatch):
         "https://mercadolivre.com.br/abc",
         VALID_UUID,
         "Produto",
-        Decimal("10.0"),
         VALID_UUID,
     ) is None
 
@@ -203,7 +198,6 @@ def test_collect_product_task_no_result_dispara_retry(monkeypatch):
         "https://mercadolivre.com.br/abc",
         VALID_UUID,
         "Produto",
-        Decimal("10.0"),
     )
 
     assert captured["countdown"] is not None
@@ -230,7 +224,6 @@ def test_collect_product_task_no_result_registra_um_erro(monkeypatch):
         "https://mercadolivre.com.br/abc",
         VALID_UUID,
         "Produto",
-        Decimal("10.0"),
         VALID_UUID,
     )
 
@@ -260,7 +253,6 @@ def test_collect_product_task_no_result_sem_id_nao_registra(monkeypatch):
         "https://mercadolivre.com.br/abc",
         VALID_UUID,
         "Produto",
-        Decimal("10.0"),
     )
 
     assert calls == []

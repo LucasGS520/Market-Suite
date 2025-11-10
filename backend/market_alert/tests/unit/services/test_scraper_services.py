@@ -27,10 +27,8 @@ from market_alert.services import services_scraper_monitored as monitored
 def fake_monitored_payload() -> MonitoredProductCreateScraping:
     """ Cria payload de monitorado utilizado em diferentes cenários """
     return MonitoredProductCreateScraping(
-        monitored_product_id=str(uuid4()),
         name_identification="Produto",
         product_url="http://teste",
-        target_price=Decimal("10.00"),
     )
 
 @pytest.fixture

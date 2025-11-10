@@ -79,7 +79,6 @@ def test_default_rule_on_product_creation(monkeypatch):
     payload = MonitoredProductCreateScraping(
         name_identification="Prod",
         product_url="http://example.com",
-        target_price=Decimal("1.00")
     )
     info = MonitoredScrapedInfo(current_price=Decimal("1.10"), thumbnail=None, free_shipping=False)
 

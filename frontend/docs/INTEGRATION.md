@@ -72,7 +72,6 @@ O frontend utiliza os seguintes endpoints do backend:
   {
     "name_identification": "Farol Uno Mille Fire",
     "product_url": "https://www.mercadolivre.com.br/MLB-...",
-    "target_price": 189.90
   }
   ```
 
