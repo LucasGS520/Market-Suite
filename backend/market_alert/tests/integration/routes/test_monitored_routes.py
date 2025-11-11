@@ -152,7 +152,7 @@ def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_sessi
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 409
     message = response.json()["message"]
     assert "já está sendo monitorado" in message.lower()
 
@@ -161,6 +161,6 @@ def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_sessi
         .filter(MonitoredProduct.id == existing.id)
         .one()
     )
-    assert reloaded.name_identification == "Console PS5"
-    assert captured["monitored_id"] == str(existing.id)
+    assert reloaded.name_identification == "Console Atualizado"
+    assert captured == {}
     

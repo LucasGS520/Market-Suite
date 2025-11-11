@@ -28,7 +28,11 @@ from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
 from market_alert.crud import crud_errors
-from market_alert.crud.crud_monitored import get_monitored_product_by_id, get_monitored_product_by_user_and_url
+from market_alert.crud.crud_monitored import (
+    get_monitored_product_by_id,
+    get_monitored_product_by_user_and_url,
+    mark_monitored_product_failed,
+)
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
@@ -36,6 +40,39 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 
 logger = structlog.get_logger("scraper_tasks")
 redis_client = get_redis_client()
+
+def _mark_failed_product(
+    product_reference: str | UUID | None,
+    *,
+    db: Session | None = None,
+    task_logger,
+) -> None:
+    """ Marca produto como ``failed`` tolerando referências ausentes ou inválidas """
+    if not product_reference:
+        task_logger.info("mark_failed_skipped", reason="missing_reference")
+        return
+    
+    try:
+        product_uuid = product_reference if isinstance(product_reference, UUID) else UUID(str(product_reference))
+    except (TypeError, ValueError) as exc:
+        task_logger.warning("mark_failed_invalid_reference", error=str(exc), product_id=product_reference)
+        return
+    
+    try:
+        if db is None:
+            with SessionLocal() as session:
+                if not hasattr(session, "query"):
+                    task_logger.info("mark_failed_skipped", reason="session_without_query")
+                    return
+                mark_monitored_product_failed(session, product_uuid)
+        else:
+            if not hasattr(db, "query"):
+                task_logger.info("mark_failed_skipped", reason="session_without_query")
+                return
+            mark_monitored_product_failed(db, product_uuid)
+        task_logger.info("monitored_marked_failed", product_id=str(product_uuid))
+    except Exception as exc:
+        task_logger.warning("mark_failed_persuist_error", error=str(exc), product_id=str(product_uuid))
 
 def _register_scraping_error(
     db: Session,
@@ -149,6 +186,7 @@ def collect_product_task(
     except ValueError as exc:
         status = "failure"
         task_logger.error("invalid_url_payload", error=str(exc))
+        _mark_failed_product(product_id, task_logger=task_logger)
         _observe_metrics(start, "collect_product_task", status)
         SCRAPER_IN_FLIGHT.dec()
         return
@@ -167,6 +205,7 @@ def collect_product_task(
     except Exception as exc:
         status = "failure"
         task_logger.error("invalid_payload", error=str(exc))
+        _mark_failed_product(product_id, task_logger=task_logger)
         _observe_metrics(start, "collect_product_task", status)
         SCRAPER_IN_FLIGHT.dec()
         return
@@ -179,11 +218,16 @@ def collect_product_task(
         except (TypeError, ValueError) as exc:
             status = "failure"
             task_logger.error("invalid_user_reference", error=str(exc))
+            _mark_failed_product(product_id, task_logger=task_logger)
             _observe_metrics(start, "collect_product_task", status)
             SCRAPER_IN_FLIGHT.dec()
             return
         
-        existing = get_monitored_product_by_user_and_url(db, user_uuid, normalized_url)
+        existing = None
+        if hasattr(db, "query"):
+            existing = get_monitored_product_by_user_and_url(db, user_uuid, normalized_url)
+        else:
+            task_logger.info("monitored_lookup_skipped", reason="session_without_query")
         if existing and monitored_id and str(existing.id) != str(monitored_id):
             task_logger.info(
                 "monitored_reference_reconciled",
@@ -265,10 +309,12 @@ def collect_product_task(
             if req_err.status_code == 429 and req_err.retry_after:
                 raise self.retry(countdown=req_err.retry_after)
             
+            _mark_failed_product(product_id, db=db, task_logger=task_logger)
             raise ScraperError(status_code=req_err.status_code or 500, detail=str(req_err))
         except self.MaxRetriesExceededError as exc:
             status = "failure"
             task_logger.error("max_retries_exceeded", error=str(exc))
+            _mark_failed_product(product_id, db=db, task_logger=task_logger)
         except Exception as exc:
             status = "failure"
             task_logger.error("collect_product_failed", error=str(exc))
@@ -280,6 +326,7 @@ def collect_product_task(
                 ScrapingErrorType.parsing_error,
                 task_logger=task_logger,
             )
+            _mark_failed_product(product_id, db=db, task_logger=task_logger)
         finally:
             _observe_metrics(start, "collect_product_task", status)
             SCRAPER_IN_FLIGHT.dec()
@@ -338,8 +385,12 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
     #Scraping propriamente dito e agendamento de comparação de preços
     with SessionLocal() as db:
         try:
-            monitored = get_monitored_product_by_id(db, UUID(monitored_product_id))
-            user_id = monitored.user_id if monitored else UUID(int=0)
+            monitored = None
+            if hasattr(db, "query"):
+                monitored = get_monitored_product_by_id(db, UUID(monitored_product_id))
+            else:
+                task_logger.info("competitor_lookup_skipped", reason="session_without_query")
+            user_id = monitored.user_id if monitored is not None else UUID(int=0)
 
             result: ScrapeResult = scrape_competitor_product(
                 db=db,

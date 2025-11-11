@@ -28,7 +28,11 @@ from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
 from market_alert.enums.enums_products import MonitoringType
 from market_alert.crud import crud_errors
-from market_alert.crud.crud_monitored import get_products_by_type, get_monitored_product_by_id
+from market_alert.crud.crud_monitored import (
+    get_products_by_type,
+    get_monitored_product_by_id,
+    mark_monitored_product_failed,
+)
 from market_alert.crud.crud_competitor import get_all_competitor_products
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
@@ -58,6 +62,18 @@ def _compute_no_result_delay(attempt: int) -> int:
     delay = settings.SCRAPER_NO_RESULT_RETRY_SECONDS * attempt
     return min(delay, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS)
 
+def _mark_monitored_failed(db, product_id, *, logger_bound) -> None:
+    """ Atualiza status do produto para ``failed`` registrando timestamp atual """
+    if not hasattr(db, "query"):
+        logger_bound.info("mark_failed_skipped", reason="session_without_query")
+        return
+    
+    try:
+        mark_monitored_product_failed(db, product_id, touched_at=datetime.now(timezone.utc))
+        logger_bound.info("monitored_marked_failed", monitored_id=str(product_id))
+    except Exception as exc:
+        logger_bound.warning("mark_failed_persist_error", monitored_id=str(product_id), error=str(exc))
+
 def _persist_scraping_error(db, product_id, url: str, message: str, error_type: ScrapingErrorType, *, logger_bound) -> None:
     """ Guarda o erro de scraping com tolerância a falhas de persistência """
     try:
@@ -72,10 +88,14 @@ def _handle_http_error(task, db, product_id, url: str, error: ScraperClientError
 
     status_code = error.status_code or 0
     attempt = task.request.retries + 1
+    max_retries = getattr(task, "max_retries", None) or 0
 
     #Se o scraper sinaliza retry-after, usamos o mesmo intervalo e suspendemos coletas
     if status_code == 429:
         countdown = error.retry_after or _compute_retry_delay(settings.SCRAPER_RETRY_BACKOFF_MIN, attempt, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS)
+        if max_retries and attempt >= max_retries:
+            logger_bound.warning("scraping_retry_exhausted", status_code=status_code, url=url)
+            return
         if countdown > 0:
             suspend_scraping(countdown)
         raise task.retry(countdown=countdown)
@@ -83,15 +103,21 @@ def _handle_http_error(task, db, product_id, url: str, error: ScraperClientError
     #Falhas 5xx merecem retry exponencial
     if 500 <= status_code < 600:
         countdown = _compute_retry_delay(settings.SCRAPER_RETRY_BACKOFF_MIN, attempt, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS)
+        if max_retries and attempt >= max_retries:
+            logger_bound.warning("scraping_retry_exhausted", status_code=status_code, url=url)
+            _mark_monitored_failed(db, product_id, logger_bound=logger_bound)
+            return
         raise task.retry(countdown=countdown)
     
     #Bloqueios explícitos por robots exigem apenas log para diagnóstico
     if status_code in {403, 451}:
         logger_bound.warning("scraping_blocked_by_robots", status_code=status_code, url=url)
+        _mark_monitored_failed(db, product_id, logger_bound=logger_bound)
         return
     
     #Demais erros 4xx não possuem ação automática além de log estruturado
     logger_bound.error("scraping_http_error", status_code=status_code, url=url)
+    _mark_monitored_failed(db, product_id, logger_bound=logger_bound)
 
 def _build_monitored_paylaod(product) -> MonitoredProductCreateScraping:
     """ Constrói o payload compatível com o serviço de monitorados """
@@ -140,6 +166,7 @@ def _collect_batch_products(db, batch: Iterable, *, task, logger_bound) -> str:
             status = "failure"
             product_logger.error("recheck_monitored_unexpected_error", error=str(exc))
             _persist_scraping_error(db, product.id, product.product_url, str(exc), ScrapingErrorType.parsing_error, logger_bound=product_logger)
+            _mark_monitored_failed(db, product.id, logger_bound=product_logger)
             continue
 
         if result.status == "no_result":
@@ -153,7 +180,12 @@ def _collect_batch_products(db, batch: Iterable, *, task, logger_bound) -> str:
                 ScrapingErrorType.no_result,
                 logger_bound=product_logger,
             )
-            countdown = _compute_no_result_delay(task.request.retries + 1)
+            attempt = task.request.retries + 1
+            max_retries = getattr(task, "max_retries", None) or 0
+            if max_retries and attempt >= max_retries:
+                _mark_monitored_failed(db, product.id, logger_bound=product_logger)
+                continue
+            countdown = _compute_no_result_delay(attempt)
             raise task.retry(countdown=countdown)
         
     return status

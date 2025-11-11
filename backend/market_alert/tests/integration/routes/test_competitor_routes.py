@@ -62,12 +62,12 @@ def test_create_competitor_scrape_usuario_diferente_recebe_erro(
     monkeypatch,
 ):
     """ Assegura que a rota negue acesso quando o monitorado pertence a outro usuário """
-
+    unique_suffix = uuid4().hex[:8]
     outro_user = User(
         id=uuid4(),
         name="Outro Usuário",
-        email="outro@example.com",
-        phone_number="11999999999",
+        email=f"outro_{unique_suffix}@example.com",
+        phone_number=f"119{unique_suffix}",
         password=hash_password("senha123"),
     )
     db_session.add(outro_user)

@@ -3,7 +3,7 @@
 from typing import List, Optional, Tuple
 
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse
 
 from sqlalchemy import func
@@ -240,6 +240,7 @@ def create_or_update_monitored_product_scraped(
                 user_id=user_id,
                 monitored_product_id=new.id,
                 rule_type=AlertType.PRICE_TARGET,
+                threshold_percent=5.0,
                 enabled=True
             )
         )
@@ -296,4 +297,21 @@ def delete_monitored_product(db: Session, product_id: UUID) -> Optional[Monitore
     if product:
         db.delete(product)
         db.commit()
+    return product
+
+def mark_monitored_product_failed(
+    db: Session,
+    product_id: UUID,
+    *,
+    touched_at: datetime | None = None,
+) -> MonitoredProduct | None:
+    """ Atualiza o status de um produto monitorado para ``failed`` registrando o último contato """
+    product = get_monitored_product_by_id(db, product_id)
+    if product is None:
+        return None
+    
+    product.status = MonitoredStatus.failed
+    product.last_checked = touched_at or datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(product)
     return product

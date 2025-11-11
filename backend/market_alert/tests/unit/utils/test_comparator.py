@@ -72,7 +72,7 @@ def test_price_change_detection():
     assert any(a.get("type") == "price_event" for a in result["alerts"])
 
 def test_listing_status_alert():
-    monitored = SimpleNamespace(id="m1", current_price=Decimal("10.00"), target_price=None, status=ProductStatus.available)
+    monitored = SimpleNamespace(id="m1", current_price=Decimal("10.00"), status=ProductStatus.available)
     c1 = SimpleNamespace(id="c1", name_competitor="A", current_price=Decimal("12.00"), old_price=Decimal("12.00"), status=ProductStatus.unavailable)
 
     result = compare_prices(monitored, [c1])

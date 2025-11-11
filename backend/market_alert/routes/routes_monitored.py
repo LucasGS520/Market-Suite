@@ -55,15 +55,18 @@ def create_scrape_product(request: Request, product_data: MonitoredProductCreate
             status="already_monitored",
             monitored_id=str(existing.id),
         )
-        collect_product_task.delay(
-            url=normalized_url,
-            user_id=str(user.id),
-            name_identification=existing.name_identification or product_data.name_identification,
-            monitored_id=str(existing.id),
-        )
+        if (
+            product_data.name_identification
+            and existing.name_identification != product_data.name_identification
+        ):
+            #Atualiza a identificação quando o usuário ajusta o nome manualmente
+            existing.name_identification = product_data.name_identification
+            db.commit()
+            db.refresh(existing)
+
         return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={"message": "Este produto já está sendo monitorado. Nova coleta agendada."},
+            status_code=status.HTTP_409_CONFLICT,
+            content={"message": "Este produto já está sendo monitorado."},
         )
 
     pending = create_pending_monitored_product(
