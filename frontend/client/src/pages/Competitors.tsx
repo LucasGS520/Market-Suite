@@ -269,8 +269,8 @@ export default function Competitors() {
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="text-sm font-medium">{discrepancy.name}</p>
         <p className="text-xs text-muted-foreground">Preço: {formatCurrency(discrepancy.price)}</p>
-        <p className="text-xs text-muted-foreground">Δ vs alvo: {formatPercentage(discrepancy.pct_x_target)}</p>
-        <p className="text-xs text-muted-foreground">Δ vs monitorado: {formatPercentage(discrepancy.pct_x_monitored)}</p>
+        <p className="text-xs text-muted-foreground">Δ % vs monitorado: {formatPercentage(discrepancy.pct_x_monitored)}</p>
+        <p className="text-xs text-muted-foreground">Abaixo do monitorado: {formatPercentage(discrepancy.pct_below_monitored)}</p>
       </div>
     );
   };
@@ -290,8 +290,23 @@ export default function Competitors() {
       return `${baseLabel} - ${direction} de ${formatCurrency(alert.change)} (${formatPercentage(alert.pct_change ?? null)})`;
     }
 
-    if (alert.pct_below_target !== undefined) {
-      return `${baseLabel} - ${formatCurrency(alert.price ?? null)} (${formatPercentage(alert.pct_below_target)} abaixo da meta)`;
+    if (alert.type === 'price_event') {
+      const detalhes: string[] = [];
+
+      if (alert.delta_x_monitored !== null && alert.delta_x_monitored !== undefined) {
+        detalhes.push(`Δ vs monitorado: ${formatCurrency(alert.delta_x_monitored)}`);
+      }
+
+      if (alert.pct_below_monitored !== null && alert.pct_below_monitored !== undefined) {
+        detalhes.push(`${formatPercentage(alert.pct_below_monitored)} abaixo`);
+      }
+
+      const sufixo = detalhes.length > 0 ? ` (${detalhes.join(' | ')})` : '';
+      return `${baseLabel} - Preço ${formatCurrency(alert.price ?? null)}${sufixo}`;
+    }
+
+    if (alert.pct_below_monitored !== undefined) {
+      return `${baseLabel} - ${formatCurrency(alert.price ?? null)} (${formatPercentage(alert.pct_below_monitored)} abaixo do monitorado)`;
     }
 
     return baseLabel;
@@ -463,7 +478,7 @@ export default function Competitors() {
           <CardHeader>
             <CardTitle>Resultado da comparação mais recente</CardTitle>
             <CardDescription>
-              {`Preço monitorado: ${formatCurrency(comparison.monitored_price)} | Preço alvo: ${formatCurrency(comparison.target_price)}`}
+              {`Preço monitorado: ${formatCurrency(comparison.monitored_price)} | Concorrentes analisados: ${comparison.discrepancies.length}`}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -488,7 +503,7 @@ export default function Competitors() {
                       <p className="text-xs text-muted-foreground">Preço: {formatCurrency(item.price)}</p>
                       <p className="text-xs text-muted-foreground">Δ vs menor: {formatCurrency(item.delta_x_min_competitor)}</p>
                       <p className="text-xs text-muted-foreground">Δ vs monitorado: {formatCurrency(item.delta_x_monitored)}</p>
-                      <p className="text-xs text-muted-foreground">Variação vs alvo: {formatPercentage(item.pct_x_target)}</p>
+                      <p className="text-xs text-muted-foreground">Percentual abaixo do monitorado: {formatPercentage(item.pct_below_monitored)}</p>
                     </div>
                   ))}
                 </div>

@@ -375,8 +375,8 @@ export interface PriceDiscrepancy {
   competitor_id: string;
   name: string;
   price: number;
-  pct_x_target: number | null;
   pct_x_monitored: number | null;
+  pct_below_monitored: number | null;
   delta_x_min_competitor: number;
   delta_x_monitored: number;
   old_price: number | null;
@@ -394,11 +394,12 @@ export interface PriceComparisonAlert {
   name?: string;
   status?: 'unavailable' | 'removed';
   price?: number;
-  pct_below_target?: number;
+  delta_x_monitored?: number | null;
+  pct_below_monitored?: number | null;
   old_price?: number;
   change?: number;
   pct_change?: number | null;
-  type?: 'price_increase' | 'price_decrease';
+  type?: 'price_event' | 'price_increase' | 'price_decrease';
 }
 
 /**

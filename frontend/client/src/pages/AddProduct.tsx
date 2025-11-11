@@ -119,7 +119,7 @@ export default function AddProduct() {
               <Input
                 id="name_identification"
                 name="name_identification"
-                placeholder="Ex: Farol Uno Mille Fire"
+                placeholder="Ex: Produto a ser monitorado - Opcional"
                 value={formData.name_identification}
                 onChange={handleChange}
                 disabled={isLoading}
