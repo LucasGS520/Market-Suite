@@ -20,7 +20,6 @@ def create_alert_rule(db: Session, rule_data: AlertRuleCreate) -> AlertRule:
         rule_type=rule_data.rule_type,
         threshold_value=rule_data.threshold_value,
         threshold_percent=rule_data.threshold_percent,
-        target_price=rule_data.target_price,
         product_status=rule_data.product_status,
         enabled=rule_data.enabled
     )
@@ -73,6 +72,9 @@ def get_alert_rules_or_default(db: Session, user_id: UUID, monitored_product_id:
             user_id=user_id,
             monitored_product_id=monitored_product_id,
             rule_type=AlertType.PRICE_TARGET,
+            threshold_value=None,
+            threshold_percent=None,
+            product_status=None,
             enabled=True
         )
     ]

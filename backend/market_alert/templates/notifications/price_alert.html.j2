@@ -1,3 +1,3 @@
 <p>Produto: <strong>{{ monitored.name_identification }}</strong><br>
 Concorrente: {{ alert.name }}<br>
-Preço: {{ alert.price|currency }}{% if alert.pct_below_target is not none %}<br>{{ alert.pct_below_target }}% abaixo do alvo definido{% endif %}</p>
+Preço: {{ alert.price|currency }}{% if alert.pct_below_threshold is not none %}<br>{{ alert.pct_below_threshold }}% abaixo do limiar configurado{% elif alert.pct_below_monitored is not none %}<br>{{ alert.pct_below_monitored }}% abaixo do preço monitorado{% endif %}</p>

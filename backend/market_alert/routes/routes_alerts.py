@@ -34,7 +34,6 @@ def create_rule(request: Request, payload: QuickAlertRuleCreate, db: Session = D
         rule_type=payload.rule_type,
         threshold_value=payload.threshold_value,
         threshold_percent=payload.threshold_percent,
-        target_price=payload.target_price,
         enabled=True
     )
     rule = create_alert_rule(db, rule_in)

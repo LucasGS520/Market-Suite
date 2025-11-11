@@ -10,7 +10,6 @@ def test_update_alert_rule_success(monkeypatch):
         id="r1",
         threshold_value=5,
         threshold_percent=None,
-        target_price=None,
         product_status=None,
         enabled=True
     )
@@ -28,7 +27,6 @@ def test_update_alert_rule_success(monkeypatch):
     update = {
         "threshold_value": 10,
         "threshold_percent": 1.5,
-        "target_price": 20,
         "product_status": ProductStatus.available
     }
 
@@ -37,7 +35,6 @@ def test_update_alert_rule_success(monkeypatch):
     assert result is rule
     assert rule.threshold_value == 10
     assert rule.threshold_percent == 1.5
-    assert rule.target_price == 20
     assert rule.product_status == ProductStatus.available
     assert db_called.get("commit") is True
     assert db_called.get("refresh") is rule

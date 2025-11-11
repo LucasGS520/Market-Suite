@@ -2,30 +2,42 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
+
 from market_alert.enums.enums_alerts import AlertType
 from market_alert.enums.enums_products import ProductStatus
 
 
 def alert_matches_rule(alert: dict, rule) -> bool:
     """ Retorna ``True`` se o alerta satisfaz a regra fornecida """
-    price = alert.get("price")
-    if getattr(rule, "target_price", None) is not None:
-        if price is None or price > rule.target_price:
-            return False
-
     if getattr(rule, "product_status", None) is not None:
         status = alert.get("status")
         if status != rule.product_status.value:
             return False
 
     if rule.rule_type == AlertType.PRICE_TARGET:
+        if alert.get("type") not in (None, "price_event"):
+            return False
+        price = alert.get("price")
         if price is None:
             return False
-        if rule.threshold_value is not None and price > rule.threshold_value:
-            return False
+        if rule.threshold_value is not None:
+            target = Decimal(str(rule.threshold_value))
+            current = Decimal(str(price))
+            if current > target:
+                return False
+            alert.setdefault("threshold_value", rule.threshold_value)
+            if target:
+                diff = target - current
+                alert["pct_below_threshold"] = (
+                    diff / target * Decimal("100")
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         if rule.threshold_percent is not None:
-            pct = alert.get("pct_below_target")
-            if pct is None or pct < rule.threshold_percent:
+            pct = alert.get("pct_below_monitored")
+            if pct is None:
+                return False
+            pct_decimal = Decimal(str(pct))
+            if pct_decimal < Decimal(str(rule.threshold_percent)):
                 return False
         return True
 

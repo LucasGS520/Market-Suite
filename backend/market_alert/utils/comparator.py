@@ -14,21 +14,25 @@ from market_alert.enums.enums_products import ProductStatus
 
 logger = structlog.get_logger("price_comparator")
 
-def calculate_discrepancies(competitor: CompetitorProduct, monitored_price: Decimal, target_price: Decimal, min_price: Decimal, tolerance: Decimal) -> Dict[str, Any]:
+def calculate_discrepancies(
+    competitor: CompetitorProduct,
+    monitored_price: Decimal,
+    min_price: Decimal,
+    tolerance: Decimal,
+) -> Dict[str, Any]:
     """ Retorna informações de discrepâncias de um unico concorrente """
     price: Decimal = competitor.current_price
 
-    pct_x_target: Optional[Decimal] = None
-    if target_price > 0:
-        pct_x_target = (
-            (price - target_price) / target_price * 100
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
     pct_x_monitored: Optional[Decimal] = None
+    pct_below_monitored: Optional[Decimal] = None
     if monitored_price > 0:
         pct_x_monitored = (
             (price - monitored_price) / monitored_price * 100
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if price < monitored_price:
+            pct_below_monitored = (
+                (monitored_price - price) / monitored_price * 100
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     delta_x_min = (price - min_price).quantize(tolerance, rounding=ROUND_HALF_UP)
 
@@ -52,8 +56,8 @@ def calculate_discrepancies(competitor: CompetitorProduct, monitored_price: Deci
         "competitor_id": str(competitor.id),
         "name": competitor.name_competitor,
         "price": price,
-        "pct_x_target": pct_x_target,
         "pct_x_monitored": pct_x_monitored,
+        "pct_below_monitored": pct_below_monitored,
         "delta_x_min_competitor": delta_x_min,
         "delta_x_monitored": delta_x_monitored,
         "old_price": old_price,
@@ -105,27 +109,29 @@ def detect_listing_status(competitor: CompetitorProduct) -> Optional[Dict[str, A
         }
     return None
 
-def compare_prices(monitored: MonitoredProduct, competitors: List[CompetitorProduct], tolerance: Decimal = Decimal("0.01"), price_change_threshold: Optional[Decimal] = None) -> Dict[str, Any]:
+def compare_prices(
+    monitored: MonitoredProduct,
+    competitors: List[CompetitorProduct],
+    tolerance: Decimal = Decimal("0.01"),
+    price_change_threshold: Optional[Decimal] = None,
+) -> Dict[str, Any]:
     """ Compara preços de um produto monitorado com seus concorrentes 
     
     Estrutura de retorno:
     - monitored_price: preço atual do produto monitorado
-    - target_price: preço alvo configurado para o monitorado
     - average_competitor_price: média dos preços válidos dos concorrentes ou `None`
     - lowest_competitor/highest_competitor: discrepâncias completas do menor e do maior preço
     - discrepancies: discrepâncias de todos os concorrentes com preço válido
-    - alerts: alertas sobre disponibilidade, variações e valores abaixo da meta
+    - alerts: eventos de preço, disponibilidade e variação para avaliação das regras
     """
     #Valor base para referência durante a comparação
     monitored_price = monitored.current_price or Decimal("0")
-    target_price = monitored.target_price or Decimal("0")
 
     #Se não houver concorrentes cadastrados, retorna um resultado vazio
     if not competitors:
         logger.info("no_competitors", monitored_id=str(monitored.id))
         return {
             "monitored_price": monitored_price,
-            "target_price": target_price,
             "average_competitor_price": None,
             "lowest_competitor": None,
             "highest_competitor": None,
@@ -141,7 +147,6 @@ def compare_prices(monitored: MonitoredProduct, competitors: List[CompetitorProd
         logger.info("no_competitor_prices", monitored_id=str(monitored.id))
         return {
             "monitored_price": monitored_price,
-            "target_price": target_price,
             "average_competitor_price": None,
             "lowest_competitor": None,
             "highest_competitor": None,
@@ -176,7 +181,7 @@ def compare_prices(monitored: MonitoredProduct, competitors: List[CompetitorProd
         logger.debug("price_diff", monitored_id=str(monitored.id), competitor_id=str(c.id), base_price=str(monitored_price), competitor_price=str(price), diff=str(diff_x_monitored))
 
         discrepancies.append(
-            calculate_discrepancies( c, monitored_price, target_price, min_price, tolerance)
+            calculate_discrepancies(c, monitored_price, min_price, tolerance)
         )
 
         status_alert = detect_listing_status(c)
@@ -187,17 +192,23 @@ def compare_prices(monitored: MonitoredProduct, competitors: List[CompetitorProd
         if price_change_alert:
             alerts.append(price_change_alert)
 
-        #Gera alertas para quem está abaixo do preço-alvo
-        if target_price > 0 and price < (target_price - tolerance):
-            pct_below = (
-                (target_price - price) / target_price * 100
+        pct_below_monitored = None
+        if monitored_price > 0 and price < monitored_price:
+            pct_below_monitored = (
+                (monitored_price - price) / monitored_price * 100
             ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            alerts.append({
+            
+        #Registra evento base de preço para que as regras apliquem thresholds dinâmicos
+        alerts.append(
+            {
+                "type": "price_event",
                 "competitor_id": str(c.id),
                 "name": c.name_competitor,
                 "price": price,
-                "pct_below_target": pct_below
-            })
+                "delta_x_monitored": diff_x_monitored,
+                "pct_below_monitored": pct_below_monitored
+            }
+        )
 
     monitored_status = getattr(monitored, "status", ProductStatus.available)
     if monitored_status == ProductStatus.unavailable:
@@ -213,13 +224,12 @@ def compare_prices(monitored: MonitoredProduct, competitors: List[CompetitorProd
 
     result = {
         "monitored_price": monitored_price,
-        "target_price": target_price,
         "average_competitor_price": avg_price,
         "lowest_competitor": calculate_discrepancies(
-            lowest, monitored_price, target_price, min_price, tolerance
+            lowest, monitored_price, min_price, tolerance
         ),
         "highest_competitor": calculate_discrepancies(
-            highest, monitored_price, target_price, min_price, tolerance
+            highest, monitored_price, min_price, tolerance
         ),
         "discrepancies": discrepancies,
         "alerts": alerts

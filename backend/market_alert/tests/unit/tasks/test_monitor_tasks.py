@@ -27,7 +27,6 @@ class DummyProduct:
         self.user_id = user_id
         self.product_url = url
         self.name_identification = name
-        self.target_price = 0
 
 
 class DummyCompetitor:

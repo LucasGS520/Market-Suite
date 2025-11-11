@@ -87,7 +87,6 @@ def dispatch_price_alerts(db: Session | None, monitored_product, alerts: list, m
                 rule_type=AlertType.PRICE_TARGET,
                 threshold_value=None,
                 threshold_percent=None,
-                target_price=None,
                 product_status=None,
                 enabled=True,
                 last_notified_at=None

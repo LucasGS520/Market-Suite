@@ -12,6 +12,7 @@ from market_alert.core.security import get_current_user
 from market_alert.models import User
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.models.models_alerts import AlertRule
+from market_alert.enums.enums_alerts import AlertType
 from market_alert.enums.enums_products import MonitoredStatus
 
 
@@ -56,37 +57,60 @@ def get_dashboard_stats(
         or 0
     )
 
+    #Relaciona produtos a seus menores limiares configurados para alertas de preço
+    price_thresholds = (
+        db.query(
+            AlertRule.monitored_product_id.label("product_id"),
+            func.min(AlertRule.threshold_value).label("threshold_value"),
+        )
+        .filter(
+            AlertRule.user_id == user.id,
+            AlertRule.enabled.is_(True),
+            AlertRule.rule_type == AlertType.PRICE_TARGET,
+            AlertRule.threshold_value.isnot(None),
+        )
+        .group_by(AlertRule.monitored_product_id)
+        .subquery()
+    )
+
     ok_prices = (
-        db.query(func.count(MonitoredProduct.id))
+        db.query(func.count(func.distinct(MonitoredProduct.id)))
+        .join(
+            price_thresholds,
+            MonitoredProduct.id == price_thresholds.c.product_id,
+        )
         .filter(
             MonitoredProduct.user_id == user.id,
             MonitoredProduct.status == MonitoredStatus.active,
-            MonitoredProduct.target_price.isnot(None),
             MonitoredProduct.current_price.isnot(None),
-            MonitoredProduct.current_price <= MonitoredProduct.target_price,
+            MonitoredProduct.current_price <= price_thresholds.c.threshold_value,
         )
         .scalar()
         or 0
     )
 
-    #Calcula somente a diferença de preço para itens cujo valor atual excede a meta definida
+    #Calcula economia apenas quando o preço atual excede o menor limiar do produto
     savings_case = case(
         (
-            MonitoredProduct.target_price.isnot(None)
-            & MonitoredProduct.current_price.isnot(None)
-            & (MonitoredProduct.current_price > MonitoredProduct.target_price),
-            MonitoredProduct.current_price - MonitoredProduct.target_price,
+            MonitoredProduct.current_price.isnot(None)
+            & (MonitoredProduct.current_price > price_thresholds.c.threshold_value),
+            MonitoredProduct.current_price - price_thresholds.c.threshold_value,
         ),
         else_=0,
     )
 
     potential_savings_raw = (
         db.query(func.coalesce(func.sum(savings_case), 0))
+        .join(
+            price_thresholds,
+            MonitoredProduct.id == price_thresholds.c.product_id,
+        )
         .filter(
             MonitoredProduct.user_id == user.id,
             MonitoredProduct.status == MonitoredStatus.active,
         )
         .scalar()
+        or 0
     )
 
     stats = {

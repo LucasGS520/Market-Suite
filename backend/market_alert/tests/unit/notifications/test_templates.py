@@ -3,12 +3,13 @@ from market_alert.notifications.templates import render_price_alert, render_pric
 
 def test_render_price_alert_includes_information():
     monitored = SimpleNamespace(name_identification="Produto X")
-    alert = {"name": "Loja Y", "price": 10.0, "pct_below_target": 5}
+    alert = {"name": "Loja Y", "price": 10.0, "pct_below_threshold": 5}
 
     msg = render_price_alert(monitored, alert)
 
     assert "Produto X" in msg
     assert "Loja Y" in msg
+    assert "limiar" in msg
 
     html = render_price_alert(monitored, alert, html=True)
     assert "<strong>" in html
