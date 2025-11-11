@@ -41,9 +41,13 @@
       - defer: adia execução até após o parse do documento, evitando bloqueio de render.
       - Se não usar analytics, remova ou mantenha comentado para não expor endpoints inválidos.
     -->
+    <!--
+      Script desabilitado para evitar erros de build sem dependências externas configuradas.
+      Reative adicionando type="module" ou import dedicado quando o endpoint estiver disponível.
     <script
       defer
       src="%VITE_ANALYTICS_ENDPOINT%/umami"
       data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
+    -->
   </body>
 </html>

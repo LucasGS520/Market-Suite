@@ -8,7 +8,6 @@ import { TrendingUp, ExternalLink, AlertCircle, RotateCcw } from 'lucide-react';
 import { Skeleton } from '@/components/ui/data-display/skeleton';
 import type { MonitoredStatus } from '@/lib/api';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/feedback/alert';
-import { format } from 'path';
 
 /**
  * Products.tsx
