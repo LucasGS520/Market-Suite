@@ -22,7 +22,7 @@ from market_alert.crud.crud_monitored import (
 from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
 
-from shared.utils.url_validation import check_url_compatibility, normalize_product_url
+from shared.utils.url_validation import normalize_and_validate_product_url
 
 
 router = APIRouter(prefix="/monitored", tags=["Monitoramento"])
@@ -34,12 +34,11 @@ def create_scrape_product(request: Request, product_data: MonitoredProductCreate
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitoring_type="scraping")
 
     try:
-        normalized_url = normalize_product_url(str(product_data.product_url))
+        normalized_url, issue = normalize_and_validate_product_url(str(product_data.product_url))
     except ValueError as exc:
         logger.warning("invalid_product_url", url=str(product_data.product_url), error=str(exc))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    issue = check_url_compatibility(normalized_url)
     if issue:
         logger.warning("invalid_product_url", url=normalized_url, code=issue.code)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
@@ -62,7 +61,7 @@ def create_scrape_product(request: Request, product_data: MonitoredProductCreate
         )
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={"message": "Produto já monitorado. Nova coleta agendada."},
+            content={"message": "Este produto já está sendo monitorado. Nova coleta agendada."},
         )
 
     pending = create_pending_monitored_product(
@@ -82,7 +81,7 @@ def create_scrape_product(request: Request, product_data: MonitoredProductCreate
     logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled", monitored_id=str(pending.id))
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
-        content={"message": "Scraping agendado com sucesso. O produto será salvo em breve."},
+        content={"message": "Scraping agendado. O produto será salvo em breve."},
     )
 
 @router.get("/", response_model=List[MonitoredProductResponse])

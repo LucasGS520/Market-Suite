@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.schemas.schemas_scraper import ScrapeResult
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
+from shared.utils.url_validation import normalize_product_url
 
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import (
@@ -46,7 +47,16 @@ async def _handle_response(
     status_code = fetch_result.status_code
     if status_code == 304:
         if existing_id:
-            product = get_monitored_product_by_user_and_url(db, user_id, str(monitored_payload.product_url))
+            try:
+                lookup_url = normalize_product_url(str(monitored_payload.product_url))
+            except ValueError:
+                lookup_url = str(monitored_payload.product_url)
+
+            product = get_monitored_product_by_user_and_url(
+                db,
+                user_id,
+                lookup_url,
+            )
             if product:
                 product.last_checked = last_checked
                 product.status = MonitoredStatus.active
@@ -110,8 +120,21 @@ async def scrape_monitored_product_async(
     payload: MonitoredProductCreateScraping,
 ) -> ScrapeResult:
     """ Executa scraping para produto monitorado de forma assíncrona """
-    normalized_url = str(url)
-    existing = get_monitored_product_by_user_and_url(db, user_id, str(payload.product_url))
+    try:
+        normalized_url = normalize_product_url(str(url))
+    except ValueError:
+        normalized_url = str(url)
+
+    try:
+        lookup_payload_url = normalize_product_url(str(payload.product_url))
+    except ValueError:
+        lookup_payload_url = str(payload.product_url)
+
+    existing = get_monitored_product_by_user_and_url(
+        db,
+        user_id,
+        lookup_payload_url,
+    )
     etag, last_modified = resolve_conditional_headers(existing)
 
     now = datetime.now(timezone.utc)

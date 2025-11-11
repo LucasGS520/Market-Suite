@@ -14,7 +14,6 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
         name_identification="Notebook Gamer",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/produto-1",
-        target_price=Decimal("4000.00"),
         current_price=Decimal("4200.00"),
         status=MonitoredStatus.active,
     )
@@ -42,7 +41,6 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
         name_identification="Monitor Ultrawide",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/produto-2",
-        target_price=Decimal("2500.00"),
         current_price=Decimal("2550.00"),
         status=MonitoredStatus.active,
     )
@@ -121,7 +119,8 @@ def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_sessi
     )
 
     assert response.status_code == 200
-    assert "Produto já monitorado" in response.json()["message"]
+    message = response.json()["message"]
+    assert "já está sendo monitorado" in message.lower()
 
     reloaded = (
         db_session.query(MonitoredProduct)

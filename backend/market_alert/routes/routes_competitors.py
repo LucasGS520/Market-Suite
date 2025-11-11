@@ -16,7 +16,7 @@ from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, d
 from market_alert.tasks.scraper_tasks import collect_competitor_task
 from market_alert.core.security import get_current_user
 
-from shared.utils.url_validation import check_url_compatibility, normalize_product_url
+from shared.utils.url_validation import normalize_and_validate_product_url
 
 
 router = APIRouter(prefix="/competitors", tags=["Concorrentes"])
@@ -28,12 +28,11 @@ def create_competitor_scrape(request: Request, product_data: CompetitorProductCr
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(product_data.monitored_product_id))
 
     try:
-        normalized_url = normalize_product_url(str(product_data.product_url))
+        normalized_url, issue = normalize_and_validate_product_url(str(product_data.product_url))
     except ValueError as exc:
         logger.warning("invalid_competitor_url", url=str(product_data.product_url), error=str(exc))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    issue = check_url_compatibility(normalized_url)
     if issue:
         logger.warning("invalid_competitor_url", url=normalized_url, code=issue.code)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)

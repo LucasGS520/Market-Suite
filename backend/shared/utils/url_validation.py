@@ -164,9 +164,16 @@ def check_url_compatibility(
     
     return None
 
+def normalize_and_validate_product_url(url: str) -> tuple[str, UrlIssue | None]:
+    """ Normaliza e valida URLs de produto retornando possível inconsistência """
+    normalized = normalize_product_url(url)
+    issue = check_url_compatibility(normalized)
+    return normalized, issue
+
 __all__ = [
     "UrlIssue",
     "normalize_product_url",
+    "normalize_and_validate_product_url",
     "check_url_compatibility",
     "SUPPORTED_DOMAINS",
 ]

@@ -21,13 +21,14 @@ from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS, SCRAPER_HEA
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.schemas.schemas_scraper import ScrapeResult
 from shared.enums.error_codes import ScrapingErrorType
+from shared.utils.url_validation import normalize_product_url
 
 from market_alert.scraper.scraper_client import ScraperClientError
 
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
 from market_alert.crud import crud_errors
-from market_alert.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.crud.crud_monitored import get_monitored_product_by_id, get_monitored_product_by_user_and_url
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
@@ -143,12 +144,23 @@ def collect_product_task(
         SCRAPER_IN_FLIGHT.dec()
         return
 
+    try:
+        normalized_url = normalize_product_url(url)
+    except ValueError as exc:
+        status = "failure"
+        task_logger.error("invalid_url_payload", error=str(exc))
+        _observe_metrics(start, "collect_product_task", status)
+        SCRAPER_IN_FLIGHT.dec()
+        return
+    
+    task_logger = task_logger.bind(url=normalized_url)
+
     #Prepara payload com valores normalizados para schema Pydantic
     try:
         payload = MonitoredProductCreateScraping.model_validate(
             {
                 "name_identification": name_identification,
-                "product_url": url,
+                "product_url": normalized_url,
             }
         )
     except Exception as exc:
@@ -162,10 +174,34 @@ def collect_product_task(
     product_id = monitored_id
     with SessionLocal() as db:
         try:
+            user_uuid = UUID(user_id)
+        except (TypeError, ValueError) as exc:
+            status = "failure"
+            task_logger.error("invalid_user_reference", error=str(exc))
+            _observe_metrics(start, "collect_product_task", status)
+            SCRAPER_IN_FLIGHT.dec()
+            return
+        
+        existing = get_monitored_product_by_user_and_url(db, user_uuid, normalized_url)
+        if existing and monitored_id and str(existing.id) != str(monitored_id):
+            task_logger.info(
+                "monitored_reference_reconciled",
+                provided_id=monitored_id,
+                existing_id=str(existing.id),
+            )
+            product_id = str(existing.id)
+        elif existing and not monitored_id:
+            task_logger.info(
+                "monitored_reference_resolved",
+                existing_id=str(existing.id),
+            )
+            product_id = str(existing.id)
+        
+        try:
             result: ScrapeResult = scrape_monitored_product(
                 db=db,
-                url=url,
-                user_id=UUID(user_id),
+                url=normalized_url,
+                user_id=user_uuid,
                 payload=payload,
             )
             product_id = _result_product_id(result) or monitored_id
@@ -178,7 +214,7 @@ def collect_product_task(
                 _register_scraping_error(
                     db,
                     product_id,
-                    url,
+                    normalized_url,
                     "pipeline retornou no_result",
                     ScrapingErrorType.no_result,
                     task_logger=task_logger,
@@ -205,13 +241,13 @@ def collect_product_task(
                 "collect_product_http_error",
                 error=str(req_err),
                 monitored_product_id=product_id,
-                url=url,
+                url=normalized_url,
                 status_code=req_err.status_code,
             )
             _register_scraping_error(
                 db,
                 product_id,
-                url,
+                normalized_url,
                 str(req_err),
                 ScrapingErrorType.http_error,
                 task_logger=task_logger,
@@ -238,7 +274,7 @@ def collect_product_task(
             _register_scraping_error(
                 db,
                 product_id,
-                url,
+                normalized_url,
                 str(exc),
                 ScrapingErrorType.parsing_error,
                 task_logger=task_logger,
@@ -274,11 +310,22 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
         SCRAPER_IN_FLIGHT.dec()
         return
 
+    try:
+        normalized_url = normalize_product_url(url)
+    except ValueError as exc:
+        status = "failure"
+        task_logger.error("invalid_url_payload", error=str(exc))
+        _observe_metrics(start, "collect_competitor_task", status)
+        SCRAPER_IN_FLIGHT.dec()
+        return
+    
+    task_logger = task_logger.bind(url=normalized_url)
+
     #Preparação payload a partir dos parâmetros brutos
     try:
         payload = CompetitorProductCreateScraping.model_validate({
             "monitored_product_id": monitored_product_id,
-            "product_url": url
+            "product_url": normalized_url
         })
     except Exception as exc:
         status = "failure"
@@ -296,7 +343,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
             result: ScrapeResult = scrape_competitor_product(
                 db=db,
                 user_id=user_id,
-                url=url,
+                url=normalized_url,
                 payload=payload,
             )
 
@@ -315,7 +362,7 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 _register_scraping_error(
                     db,
                     monitored_product_id,
-                    url,
+                    normalized_url,
                     "pipeline retornou no_result",
                     ScrapingErrorType.no_result,
                     task_logger=task_logger,
@@ -337,13 +384,13 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 "collect_competitor_http_error",
                 error=str(req_err),
                 monitored_product_id=monitored_product_id,
-                url=url,
+                url=normalized_url,
                 status_code=req_err.status_code,
             )
             _register_scraping_error(
                 db,
                 monitored_product_id,
-                url,
+                normalized_url,
                 str(req_err),
                 ScrapingErrorType.http_error,
                 task_logger=task_logger,
