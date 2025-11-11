@@ -270,7 +270,7 @@ export interface MonitoredProductApiResponse {
   monitoring_type: 'api' | 'scraping';
   search_query?: string | null;
   product_url?: string | null;
-  current_price: string | number;
+  current_price?: string | number | null;
   free_shipping?: boolean | null;
   thumbnail?: string | null;
   status: MonitoredStatus;

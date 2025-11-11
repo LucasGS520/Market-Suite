@@ -22,7 +22,7 @@ class MonitoredProductResponse(BaseModel):
     monitoring_type: MonitoringType
     search_query: Optional[str] = None
     product_url: Optional[HttpUrl] = None
-    current_price: Decimal
+    current_price: Optional[Decimal] = None
     free_shipping: Optional[bool]
     thumbnail: Optional[HttpUrl]
     status: MonitoredStatus
