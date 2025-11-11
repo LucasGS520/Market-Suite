@@ -157,9 +157,16 @@ async def test_scrape_monitored_sanitiza_metadados(
 ) -> None:
     """ Metadados inseguros devem ser limpos antes de persistência """
 
-    payload = _build_parser_payload(
-        thumbnail="javascript:alert('x')",
-        currency="<b>BRL</b>",
+    payload = ParserResponse(
+        name="<b>Produto</b>",
+        current_price=Decimal("10.00"),
+        payload={
+            "thumbnail": "javascript:alert('x')",
+            "free_shipping": True,
+            "currency": "<b>BRL</b>",
+        },
+        source="test",
+        url="http://teste",
     )
     fetch_result = ScraperFetchResult(status_code=200, payload=payload, headers={})
     fetch_mock = AsyncMock(return_value=fetch_result)
@@ -174,10 +181,11 @@ async def test_scrape_monitored_sanitiza_metadados(
 
     captured: dict[str, object] = {}
 
-    def _capture(*, scraped_info, currency, **kwargs):
+    def _capture(*, scraped_info, currency, scraped_name, **kwargs):
         captured["thumbnail"] = scraped_info.thumbnail
         captured["currency_info"] = scraped_info.currency
         captured["currency_arg"] = currency
+        captured["scraped_name"] = scraped_name
         return SimpleNamespace(id=uuid4(), _price_changed=False)
 
     monkeypatch.setattr(monitored, "create_or_update_monitored_product_scraped", Mock(side_effect=_capture))
@@ -194,6 +202,7 @@ async def test_scrape_monitored_sanitiza_metadados(
     assert captured["thumbnail"] is None
     assert captured["currency_info"] == "BRL"
     assert captured["currency_arg"] == "BRL"
+    assert captured["scraped_name"] == "Produto"
 
 @pytest.mark.asyncio
 async def test_scrape_monitored_async_propagates_last_modified(

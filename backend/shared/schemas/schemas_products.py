@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl, ConfigDict
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict, field_validator
 
 
 # ----- PRODUTO MONITORADO -----
@@ -12,8 +12,19 @@ class MonitoredProductCreateScraping(BaseModel):
     """ Esquema compartilhado para criação de produto monitorado via scraping sem preço alvo """
 
     model_config = ConfigDict(extra="ignore")
-    name_identification: str = Field(..., description="Nome do produto para identificação")
+    name_identification: str | None = Field(
+        default=None,
+        description="Nome do produto para identificação"
+    )
     product_url: HttpUrl = Field(..., description="link do produto que deseja monitorar")
+
+    @field_validator("name_identification", mode="before")
+    @classmethod
+    def _empty_string_to_none(cls, value: str | None) -> str | None:
+        """ Converte strings vazias em ``None`` para acionar fallbacks posteriores """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 class MonitoredScrapedInfo(BaseModel):
     """ Informações de scraping compartilhadas para produto monitorado """

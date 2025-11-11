@@ -430,7 +430,7 @@ export const getMonitoredProducts = async (token: string): Promise<MonitoredProd
 export const scrapeMonitoredProduct = (
   token: string,
   data: {
-    name_identification: string;
+    name_identification: string | null;
     product_url: string;
   }
 ) =>

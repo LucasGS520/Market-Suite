@@ -25,8 +25,20 @@ def test_monitored_product_required_fields():
         MonitoredProductCreateScraping()
 
     mensagens = str(exc.value)
-    assert "name_identification" in mensagens
     assert "product_url" in mensagens
+
+def test_monitored_product_optional_name():
+    data = MonitoredProductCreateScraping(
+        product_url="https://example.com/produto",
+    )
+    assert data.name_identification is None
+
+def test_monitored_product_blank_name_becomes_none():
+    data = MonitoredProductCreateScraping(
+        name_identification="   ",
+        product_url="https://example.com/produto",
+    )
+    assert data.name_identification is None
 
 def test_monitored_product_invalid_url():
     with pytest.raises(ValidationError) as exc:

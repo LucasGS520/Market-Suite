@@ -79,6 +79,7 @@ async def _handle_response(
 
     payload = fetch_result.payload
     metadata = extract_scraper_metadata(payload, fetch_result.headers)
+    sanitized_name = sanitize_text(payload.name)
 
     sanitized_thumbnail = sanitize_media_url(metadata.get("thumbnail"))
     sanitized_currency = sanitize_text(metadata.get("currency"))
@@ -99,6 +100,7 @@ async def _handle_response(
         currency=sanitized_currency,
         etag=metadata.etag,
         last_modified=metadata.last_modified,
+        scraped_name=sanitized_name,
     )
 
     price_changed = bool(getattr(product, "_price_changed", True))

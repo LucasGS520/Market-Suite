@@ -4,12 +4,14 @@ from typing import List, Optional, Tuple
 
 from uuid import UUID
 from datetime import datetime
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url
 
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
@@ -29,6 +31,50 @@ def _normalize_for_lookup(product_url: str) -> str:
         #Mantemos fallback em cado de dado legado que não respeita normalização
         return raw_value
 
+def _derive_name_from_url(product_url: str) -> str:
+    """ Extrai um identificador legível da URL quando o usuário não fornece nome """
+    parsed = urlparse(product_url)
+    #Utiliza o último segmento do path como base do nome
+    path_segment = unquote(parsed.path or "").strip("/")
+    last_piece = path_segment.split("/")[-1] if path_segment else ""
+    candidate = last_piece or parsed.netloc or str(product_url)
+    normalized = candidate.replace("-", " ").replace("_", " ").strip()
+    sanitized = sanitize_text(normalized)
+    if sanitized:
+        return sanitized
+    host = sanitize_text(parsed.netloc)
+    if host:
+        return host
+    #Fallback amigável para evitar persistir string vazia
+    return "Produto monitorado"
+
+def _prepare_effective_name(
+    provided_name: str | None,
+    scraped_name: str | None,
+    product_url: str,
+) -> tuple[str, str]:
+    """ Determina o nome final aplicando prioridade usuário → scraping → URL """
+    fallback = _derive_name_from_url(product_url)
+    sanitized_scraped = sanitize_text(scraped_name)
+    if provided_name:
+        return provided_name, fallback
+    if sanitized_scraped:
+        return sanitized_scraped, fallback
+    return fallback, fallback
+
+def _should_replace_with_scraped(
+    existing_name: str | None,
+    fallback_name: str,
+    scraped_name: str | None,
+) -> bool:
+    """ Decide se devemos substituir nome atual pela identificação vinda do scraping """
+    sanitized_scraped = sanitize_text(scraped_name)
+    if not sanitized_scraped:
+        return False
+    if existing_name is None:
+        return True
+    return existing_name.strip().casefold() == fallback_name.strip().casefold()
+
 def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_url: str) -> MonitoredProduct | None:
     """ Busca produto específico combinando usuário e URL normalizada """
 
@@ -45,7 +91,7 @@ def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_ur
 def create_pending_monitored_product(
     db: Session,
     user_id: UUID,
-    name_identification: str,
+    name_identification: str | None,
     product_url: str,
 ) -> MonitoredProduct:
     """ Cria registro pendente garantindo unicidade por usuário e URL """
@@ -60,10 +106,17 @@ def create_pending_monitored_product(
             db.commit()
             db.refresh(existing)
         return existing
+    
+    effective_name, _ = _prepare_effective_name(
+        name_identification,
+        scraped_name=None,
+        product_url=normalized_url,
+    )
 
+    #Substituímos o nome derivado da URL apenas após o scraping devolver informação confiável
     pending = MonitoredProduct(
         user_id=user_id,
-        name_identification=name_identification,
+        name_identification=effective_name,
         monitoring_type=MonitoringType.scraping,
         search_query=None,
         product_url=normalized_url,
@@ -101,6 +154,7 @@ def create_or_update_monitored_product_scraped(
     currency: str | None = None,
     etag: str | None = None,
     last_modified: datetime | None = None,
+    scraped_name: str | None = None,
 ) -> MonitoredProduct:
     """ Cria ou atualiza um produto monitorado a partir de dados de scraping """
     normalized_url = _normalize_for_lookup(product_data.product_url)
@@ -109,9 +163,20 @@ def create_or_update_monitored_product_scraped(
     #Verifica se o produto já existe para o usuário
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
 
+    resolved_name, fallback_name = _prepare_effective_name(
+        product_data.name_identification,
+        scraped_name,
+        normalized_url,
+    )
+
     if existing:
         if product_data.name_identification and existing.name_identification != product_data.name_identification:
             existing.name_identification = product_data.name_identification
+        elif _should_replace_with_scraped(existing.name_identification, fallback_name, scraped_name):
+            #Substituímos o placeholder por nome real vindo do scraping
+            existing.name_identification = sanitize_text(scraped_name) or fallback_name
+        elif existing.name_identification is None:
+            existing.name_identification = resolved_name
         previous_price = existing.current_price
         existing.current_price = scraped_info.current_price
         existing.thumbnail = scraped_info.thumbnail
@@ -138,7 +203,7 @@ def create_or_update_monitored_product_scraped(
     #Se não existir, cria o registro
     new = MonitoredProduct(
         user_id=user_id,
-        name_identification=product_data.name_identification,
+        name_identification=resolved_name,
         search_query=None,
         product_url=normalized_url,
         current_price=scraped_info.current_price,

@@ -51,6 +51,22 @@ def test_collect_product_task_send_request_and_persists(monkeypatch):
     assert chamado["user_id"] == VALID_UUID
     assert chamado["payload"].name_identification == "Produto"
 
+def test_collect_product_task_accepts_missing_name(monkeypatch):
+    """ Garante que o payload não falha quando o nome está ausente """
+    chamado = {}
+
+    def fake_service(db, url, user_id, payload):
+        chamado["payload"] = payload
+        return {"status": "success", "product_id": "xyz"}
+
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.redis_client.set", lambda *a, **k: None)
+
+    collect_product_task.run("http://produto", VALID_UUID, None)
+
+    assert chamado["payload"].name_identification is None
+
 def test_collect_competitor_task_send_request_and_persist(monkeypatch):
     """ Confere a delegação ao serviço de scraping de concorrentes """
     chamado = {}

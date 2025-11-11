@@ -125,7 +125,7 @@ def collect_product_task(
     self,
     url: str,
     user_id: str,
-    name_identification: str,
+    name_identification: str | None,
     monitored_id: str | None = None,
 ) -> None:
     """ Coleta dados de um produto monitorado e os salva no banco """
@@ -157,12 +157,13 @@ def collect_product_task(
 
     #Prepara payload com valores normalizados para schema Pydantic
     try:
-        payload = MonitoredProductCreateScraping.model_validate(
-            {
-                "name_identification": name_identification,
-                "product_url": normalized_url,
-            }
-        )
+        payload_data = {
+            "product_url": normalized_url,
+        }
+        if name_identification is not None:
+            payload_data["name_identification"] = name_identification
+
+        payload = MonitoredProductCreateScraping.model_validate(payload_data)
     except Exception as exc:
         status = "failure"
         task_logger.error("invalid_payload", error=str(exc))

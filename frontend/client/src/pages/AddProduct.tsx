@@ -52,8 +52,10 @@ export default function AddProduct() {
 
     try {
       // Chamada ao cliente API que agenda/registrará o monitoramento
+      // Normalizamos o nome para enviar ``null`` quando vazio
+      const normalizedName = formData.name_identification.trim();
       const response = await scrapeMonitoredProduct(token, {
-        name_identification: formData.name_identification,
+        name_identification: normalizedName ? normalizedName : null,
         product_url: formData.product_url,
       });
 
@@ -121,7 +123,6 @@ export default function AddProduct() {
                 value={formData.name_identification}
                 onChange={handleChange}
                 disabled={isLoading}
-                required
               />
             </div>
 

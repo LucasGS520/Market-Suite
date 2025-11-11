@@ -79,7 +79,10 @@ def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_se
 
     created = (
         db_session.query(MonitoredProduct)
-        .filter(MonitoredProduct.user_id == test_user.id)
+        .filter(
+            MonitoredProduct.user_id == test_user.id,
+            MonitoredProduct.product_url == "https://produto.mercadolivre.com.br/MLB-0001",
+        )
         .one()
     )
 
@@ -89,6 +92,37 @@ def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_se
     assert captured["monitored_id"] == str(created.id)
     assert captured["name_identification"] == "Console PS5"
 
+def test_create_scrape_product_sem_nome_aplica_fallback(monkeypatch, client, db_session, test_user, prepare_test_database):
+    """Confere que o cadastro aceita nome ausente e gera fallback legível"""
+
+    captured = {}
+
+    def fake_delay(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(scraper_tasks.collect_product_task, "delay", fake_delay)
+
+    response = client.post(
+        "/monitored/scrape",
+        json={
+            "name_identification": None,
+            "product_url": "https://produto.mercadolivre.com.br/MLB-9999-produto-incrivel-123",
+        },
+    )
+
+    assert response.status_code == 202
+
+    created = (
+        db_session.query(MonitoredProduct)
+        .filter(
+            MonitoredProduct.user_id == test_user.id,
+            MonitoredProduct.product_url == "https://produto.mercadolivre.com.br/MLB-9999-produto-incrivel-123",
+        )
+        .one()
+    )
+
+    assert created.name_identification == "MLB 9999 produto incrivel 123"
+    assert captured["name_identification"] == "MLB 9999 produto incrivel 123"
 
 def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_session, test_user, prepare_test_database):
     """Confere que duplicidade devolve mensagem informativa e reusa registro"""
