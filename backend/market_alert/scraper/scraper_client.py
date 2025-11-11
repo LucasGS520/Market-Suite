@@ -17,7 +17,7 @@ import structlog
 
 from pydantic import ValidationError
 
-from shared.schemas.schemas_scraper import ParserRequest, ParserResponse
+from backend.shared.schemas.shared_schemas_scraper import ParserRequest, ParserResponse
 from shared.utils.redis_client import get_redis_client
 
 from market_alert.core.config_alert import settings

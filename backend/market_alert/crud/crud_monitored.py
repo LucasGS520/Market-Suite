@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url
 

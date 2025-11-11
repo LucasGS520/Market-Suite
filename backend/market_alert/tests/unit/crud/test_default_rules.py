@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 
 from market_alert.crud import crud_user, crud_monitored, crud_alert_rules
 from market_alert.models.models_users import User

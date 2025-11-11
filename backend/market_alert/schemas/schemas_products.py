@@ -28,6 +28,13 @@ class MonitoredProductResponse(BaseModel):
     status: MonitoredStatus
     last_checked: Optional[datetime] = None
     competitors_count: int | None = None
+    average_competitor_price: Optional[str] = None
+    min_competitor_price: Optional[str] = None
+    max_competitor_price: Optional[str] = None
+    position_rank: Optional[int] = None
+    last_comparison_at: Optional[datetime] = None
+    is_new: Optional[bool] = None
+    comparison_insights: Optional[str] = None
 
 class CompetitorProductResponse(BaseModel):
     """ Informações de produtos concorrentes extraídas do scrapping """

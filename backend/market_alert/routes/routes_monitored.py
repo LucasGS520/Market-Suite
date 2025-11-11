@@ -8,21 +8,23 @@ from typing import List
 from uuid import UUID
 
 from shared.infra.db import get_db
-from shared.schemas.schemas_products import MonitoredProductCreateScraping
+from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
+from shared.utils.url_validation import normalize_and_validate_product_url
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import MonitoredProductResponse
 from market_alert.crud.crud_monitored import (
-    get_all_monitored_products, 
-    get_monitored_product_by_id, 
+    get_all_monitored_products,
+    get_monitored_product_by_id,
     delete_monitored_product,
     create_pending_monitored_product,
     get_monitored_product_by_user_and_url,
 )
+from market_alert.crud.crud_comparison import get_latest_comparisons_for_products
 from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
-
-from shared.utils.url_validation import normalize_and_validate_product_url
+from market_alert.enums.enums_products import MonitoredStatus
+from market_alert.services.services_comparison import build_comparison_summary
 
 
 router = APIRouter(prefix="/monitored", tags=["Monitoramento"])
@@ -90,13 +92,34 @@ def list_monitored_products(request: Request, db: Session = Depends(get_db), use
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id))
     products_with_count = get_all_monitored_products(db, user.id)
 
-    #Transforma o resultado anotado da consulta em modelos Pydantic incluindo a contagem de concorrentes
-    response_payload = [
-        MonitoredProductResponse.model_validate(product).model_copy(
-            update={"competitors_count": competitors_count}
+    product_ids = [product.id for product, _ in products_with_count]
+    latest_comparisons = get_latest_comparisons_for_products(db, product_ids)
+
+    response_payload = []
+    for product, competitors_count in products_with_count:
+        comparison = latest_comparisons.get(product.id)
+        summary = build_comparison_summary(
+            comparison,
+            competitors_count=competitors_count,
         )
-        for product, competitors_count in products_with_count
-    ]
+        is_new = product.status == MonitoredStatus.pending or summary["last_comparison_at"] is None
+
+        #Propaga campos agregados para o contrato exposto ao frontend
+        response_payload.append(
+            MonitoredProductResponse.model_validate(product).model_copy(
+                update={
+                    "competitors_count": competitors_count,
+                    "average_competitor_price": summary["average_competitor_price"],
+                    "min_competitor_price": summary["min_competitor_price"],
+                    "max_competitor_price": summary["max_competitor_price"],
+                    "position_rank": summary["position_rank"],
+                    "last_comparison_at": summary["last_comparison_at"],
+                    "is_new": is_new,
+                    "comparison_insights": summary["comparison_insights"],
+                }
+            )
+        )
+
     logger.info(
         "route_completed",
         path=request.url.path,
@@ -114,8 +137,26 @@ def get_product(request: Request, product_id: UUID, db: Session = Depends(get_db
     if not product or product.user_id != user.id:
         logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", product_id=str(product_id))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado.")
+    latest_comparison = get_latest_comparisons_for_products(db, [product.id]).get(product.id)
+    competitors_count = len(getattr(product, "competitors", []) or [])
+    summary = build_comparison_summary(
+        latest_comparison,
+        competitors_count=competitors_count,
+    )
+    is_new = product.status == MonitoredStatus.pending or summary["last_comparison_at"] is None
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
-    return product
+    return MonitoredProductResponse.model_validate(product).model_copy(
+        update={
+            "competitors_count": competitors_count,
+            "average_competitor_price": summary["average_competitor_price"],
+            "min_competitor_price": summary["min_competitor_price"],
+            "max_competitor_price": summary["max_competitor_price"],
+            "position_rank": summary["position_rank"],
+            "last_comparison_at": summary["last_comparison_at"],
+            "is_new": is_new,
+            "comparison_insights": summary["comparison_insights"],
+        }
+    )
 
 @router.delete("/{product_id}", response_model=MonitoredProductResponse)
 def delete_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

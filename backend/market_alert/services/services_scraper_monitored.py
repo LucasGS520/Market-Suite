@@ -8,8 +8,8 @@ from uuid import UUID
 import structlog
 from sqlalchemy.orm import Session
 
-from shared.schemas.schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
-from shared.schemas.schemas_scraper import ScrapeResult
+from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
 from shared.utils.url_validation import normalize_product_url
 

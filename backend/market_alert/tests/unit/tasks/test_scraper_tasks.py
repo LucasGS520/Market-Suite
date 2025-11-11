@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from shared.schemas.schemas_scraper import ScrapeResult
+from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from market_alert.tasks.scraper_tasks import (
     _compute_retry_delay,

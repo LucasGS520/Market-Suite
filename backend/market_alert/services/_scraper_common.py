@@ -12,7 +12,7 @@ try:
 except ImportError:
     AsyncMock = None
 
-from shared.schemas.schemas_scraper import ParserResponse
+from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 from shared.utils import sanitize_text
 
 from market_alert.scraper.scraper_client import (

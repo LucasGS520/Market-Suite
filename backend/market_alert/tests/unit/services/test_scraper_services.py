@@ -11,11 +11,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.orm import Session
 
-from shared.schemas.schemas_products import (
+from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
     MonitoredProductCreateScraping,
 )
-from shared.schemas.schemas_scraper import ParserResponse
+from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperFetchResult

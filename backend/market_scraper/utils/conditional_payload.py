@@ -19,7 +19,7 @@ import structlog
 
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils import cache
-from shared.schemas.schemas_scraper import ParserResponse
+from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 
 
 logger = structlog.get_logger("conditional_payload")

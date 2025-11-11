@@ -6,7 +6,7 @@ from typing import List
 
 from sqlalchemy.orm import Session
 
-from shared.schemas.schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
+from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType

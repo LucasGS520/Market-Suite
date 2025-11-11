@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta, timezone
 from decimal import Decimal
 
-from shared.schemas.schemas_scraper import ParserResponse
+from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 
 from market_scraper.utils import cache
 from market_scraper.utils.conditional_payload import (

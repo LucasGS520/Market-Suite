@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from shared.schemas.schemas_scraper import ParserResponse
+from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 
 def test_precisao_dos_precos() -> None:
     dados = ParserResponse(current_price="0.10")

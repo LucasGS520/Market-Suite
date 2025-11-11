@@ -17,11 +17,11 @@ import structlog
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL
 from shared.utils.redis_client import  get_redis_client, is_scraping_suspended, suspend_scraping
-from shared.schemas.schemas_products import (
+from backend.shared.schemas.shared_schemas_products import (
     MonitoredProductCreateScraping,
     CompetitorProductCreateScraping,
 )
-from shared.schemas.schemas_scraper import ScrapeResult
+from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.enums.error_codes import ScrapingErrorType
 
 from market_alert.core.config_alert import settings

@@ -7,7 +7,7 @@ from typing import List
 from uuid import UUID
 
 from shared.infra.db import get_db
-from shared.schemas.schemas_products import CompetitorProductCreateScraping
+from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import CompetitorProductResponse

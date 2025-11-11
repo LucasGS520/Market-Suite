@@ -8,7 +8,7 @@ import pytest
 
 from shared.tests.conftest import fake_redis
 from shared.metrics import SCRAPING_SUSPENDED_FLAG
-from shared.schemas.schemas_products import MonitoredProductCreateScraping
+from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
 
 try:
     from market_scraper.services import pipeline_factory as mod

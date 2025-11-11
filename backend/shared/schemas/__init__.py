@@ -1,12 +1,12 @@
 """ Exporta esquemas Pydantic compartilhados entre os serviços """
 
-from .schemas_products import (
+from .shared_schemas_products import (
     MonitoredProductCreateScraping,
     MonitoredScrapedInfo,
     CompetitorProductCreateScraping,
     CompetitorScrapedInfo,
 )
-from .schemas_scraper import (
+from .shared_schemas_scraper import (
     ParserRequest,
     ParserResponse,
     ErrorResponse,

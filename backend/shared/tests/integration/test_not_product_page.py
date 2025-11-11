@@ -5,7 +5,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from shared.schemas.schemas_products import CompetitorProductCreateScraping
+from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
 import pytest
 
 try:

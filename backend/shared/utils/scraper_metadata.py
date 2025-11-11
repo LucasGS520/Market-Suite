@@ -10,7 +10,7 @@ from shared.utils.http_headers import normalize_headers, parse_http_datetime
 
 if TYPE_CHECKING:
     #Importar apenas em tempo de análise evita dependência circular em runtime
-    from shared.schemas.schemas_scraper import ParserResponse
+    from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 else:  #pragma: no cover - rótulo evita alerta de cobertura em fallback
     ParserResponse = object
 
@@ -51,7 +51,7 @@ def extract_scraper_metadata(
     headers: Mapping[str, str],
 ) -> ScraperMetadata:
     """ Monta ``ScraperMetadata`` a partir do payload e dos cabeçalhos """
-    from shared.schemas.schemas_scraper import ParserResponse
+    from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 
     if not isinstance(payload, ParserResponse):
         raise TypeError("payload precisa ser ParserResponse")
