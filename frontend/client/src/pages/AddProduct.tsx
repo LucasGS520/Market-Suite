@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/data-display/card';
@@ -25,6 +25,9 @@ type ScheduledProductSummary = {
   agendadoEm: Date;
 };
 
+const DUPLICATE_MESSAGE_SNIPPET = 'já está sendo monitorado';
+const DEFAULT_POST_SUBMIT_MESSAGE = 'Produto agendado. Escolha uma ação para continuar.';
+
 export default function AddProduct() {
   const { token } = useAuth(); // token de autenticação do usuário (context)
   const [, navigate] = useLocation(); // navegação via wouter
@@ -38,7 +41,35 @@ export default function AddProduct() {
   const [error, setError] = useState<string | null>(null); // mensagem de erro para o usuário
   const [showPostSubmitActions, setShowPostSubmitActions] = useState(false); // controla exibição dos botões pós-submissão
   const [scheduledProduct, setScheduledProduct] = useState<ScheduledProductSummary | null>(null); // resumo do último agendamento
-  const safeScheduledProductUrl = scheduledProduct ? sanitizeExternalUrl(scheduledProduct.url) : null; // URL validada para abrir anúncio 
+  const [postSubmitMessage, setPostSubmitMessage] = useState(DEFAULT_POST_SUBMIT_MESSAGE); // mensagem exibida junto das ações pós-submissão
+  const safeScheduledProductUrl = scheduledProduct ? sanitizeExternalUrl(scheduledProduct.url) : null; // URL validada para abrir anúncio
+
+  /**
+   * Identifica mensagens vindas da API que sinalizam duplicidade de monitoramento.
+   */
+  const isDuplicateMessage = useCallback(
+    (message: string | null | undefined) => {
+      return message?.toLowerCase().includes(DUPLICATE_MESSAGE_SNIPPET) ?? false;
+    },
+    []
+  );
+
+  /**
+   * Exibe o feedback positivo/informativo quando o produto já estava monitorado previamente.
+   */
+  const handleDuplicateFeedback = useCallback(
+    (message: string) => {
+      // Mantém o usuário informado sem sinalizar erro, pois o produto já está monitorado pelo sistema.
+      toast.info(message);
+      setError(null);
+      setPostSubmitMessage(message);
+      setShowPostSubmitActions(true);
+      setTimeout(() => {
+        nameInputRef.current?.focus();
+      }, 0);
+    },
+    [nameInputRef]
+  );
 
   // Atualiza o estado do formulário para inputs controlados
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -82,11 +113,9 @@ export default function AddProduct() {
       });
 
       const normalizedMessage = response.message ?? 'Scraping agendado com sucesso';
-      const isDuplicate = normalizedMessage.toLowerCase().includes('já está sendo monitorado');
 
-      if (isDuplicate) {
-        toast.info(normalizedMessage);
-        setScheduledProduct(null);
+      if (isDuplicateMessage(normalizedMessage)) {
+        handleDuplicateFeedback(normalizedMessage);
       } else {
         toast.success(normalizedMessage);
         setScheduledProduct({
@@ -95,23 +124,27 @@ export default function AddProduct() {
           mensagem: normalizedMessage,
           agendadoEm: new Date(),
         });
+        setPostSubmitMessage(normalizedMessage);
+        setShowPostSubmitActions(true);
+        setTimeout(() => {
+          nameInputRef.current?.focus();
+        }, 0);
       }
 
       setFormData({
         name_identification: '',
         product_url: '',
       });
-      setShowPostSubmitActions(true);
-
-      setTimeout(() => {
-        nameInputRef.current?.focus();
-      }, 0);
     } catch (err) {
       // Mostra mensagem de erro genérica ou específica quando disponível
       const message = err instanceof Error ? err.message : 'Erro ao adicionar produto';
-      setError(message);
-      setShowPostSubmitActions(false);
-      toast.error(message);
+      if (isDuplicateMessage(message)) {
+        handleDuplicateFeedback(message);
+      } else {
+        setError(message);
+        setShowPostSubmitActions(false);
+        toast.error(message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -130,6 +163,7 @@ export default function AddProduct() {
   const handleAddAnother = () => {
     setShowPostSubmitActions(false);
     setError(null);
+    setPostSubmitMessage(DEFAULT_POST_SUBMIT_MESSAGE);
     nameInputRef.current?.focus();
   };
 
@@ -219,9 +253,7 @@ export default function AddProduct() {
         </CardContent>
         {showPostSubmitActions && (
           <CardFooter className="flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-muted-foreground">
-              {scheduledProduct?.mensagem ?? 'Produto agendado. Escolha uma ação para continuar.'}
-            </p>
+            <p className="text-sm text-muted-foreground">{postSubmitMessage}</p>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <Button type="button" variant="outline" onClick={handleViewProducts}>
                 Ver produtos monitorados
