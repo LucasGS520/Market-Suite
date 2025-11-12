@@ -247,29 +247,52 @@ def create_or_update_monitored_product_scraped(
     return new
 
 def get_all_monitored_products(
-    db: Session, 
-    user_id: UUID, 
+    db: Session,
+    user_id: UUID,
     monitoring_type: Optional[MonitoringType] = None,
-) -> List[Tuple[MonitoredProduct, int]]:
-    """ Retorna todos os produtos monitorados de um usuário com contagem de concorrentes """
-    query = (
-        db.query(
-            MonitoredProduct,
-            func.count(CompetitorProduct.id).label("competitors_count"),
-        )
-        .outerjoin(
-            CompetitorProduct,
-            MonitoredProduct.id == CompetitorProduct.monitored_product_id,
-        )
-        .filter(MonitoredProduct.user_id == user_id)
+    *,
+    page: int = 1,
+    per_page: int = 50,
+) -> tuple[list[tuple[MonitoredProduct, int]], int]:
+    """ Retorna produtos monitorados com contagem de concorrentes e suporte a paginação """
+    normalized_page = max(page, 1)
+    normalized_per_page = max(per_page, 1)
+
+    base_query = db.query(MonitoredProduct).filter(MonitoredProduct.user_id == user_id)
+    if monitoring_type:
+        base_query = base_query.filter(MonitoredProduct.monitoring_type == monitoring_type)
+
+    total = base_query.count()
+    if total == 0:
+        return [], 0
+
+    offset = (normalized_page - 1) * normalized_per_page
+    products = (
+        base_query.order_by(MonitoredProduct.created_at.desc())
+        .offset(offset)
+        .limit(normalized_per_page)
+        .all()
     )
 
-    if monitoring_type:
-        query = query.filter(MonitoredProduct.monitoring_type == monitoring_type)
-    
-    #Agrupa por todas as colunas para evitar resultados inconsistentes em bancos estritos como PostgreSQL
-    query = query.group_by(*MonitoredProduct.__table__.c)
-    return query.all()
+    if not products:
+        return [], total
+    product_ids = [product.id for product in products]
+
+    competitor_rows = (
+        db.query(
+            CompetitorProduct.monitored_product_id,
+            func.count(CompetitorProduct.id).label("competitors_count"),
+        )
+        .filter(CompetitorProduct.monitored_product_id.in_(product_ids))
+        .group_by(CompetitorProduct.monitored_product_id)
+        .all()
+    )
+    competitors_map = {
+        row.monitored_product_id: int(row.competitors_count) for row in competitor_rows
+    }
+
+    items = [(product, competitors_map.get(product.id, 0)) for product in products]
+    return items, total
 
 def get_products_by_type(db: Session, monitoring_type: MonitoringType) -> List[MonitoredProduct]:
     """ Lista todos os produtos monitorados conforme o tipo """

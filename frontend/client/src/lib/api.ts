@@ -476,12 +476,44 @@ export interface PriceComparison {
 }
 
 /**
+ * Parâmetros aceitos na listagem de produtos monitorados.
+ */
+export interface MonitoredProductsQueryParams {
+  page?: number;
+  per_page?: number;
+}
+
+/**
+ * Resposta paginada padronizada para produtos monitorados.
+ */
+export type PaginatedMonitoredProducts = PaginatedResponse<MonitoredProduct>;
+
+/**
  * API: Listar produtos monitorados do usuário.
  * GET /monitored
  */
-export const getMonitoredProducts = async (token: string): Promise<MonitoredProduct[]> => {
-  const data = await apiRequest<MonitoredProductApiResponse[]>('/monitored', { token });
-  return data.map(mapMonitoredProductFromApi);
+export const getMonitoredProducts = async (
+  token: string,
+  params?: MonitoredProductsQueryParams,
+): Promise<PaginatedMonitoredProducts> => {
+  const searchParams = new URLSearchParams();
+
+  if (params?.page) {
+    searchParams.set('page', params.page.toString());
+  }
+
+  if (params?.per_page) {
+    searchParams.set('per_page', params.per_page.toString());
+  }
+
+  const queryString = searchParams.toString();
+  const endpoint = queryString ? `/monitored?${queryString}` : '/monitored';
+
+  const data = await apiRequest<PaginatedResponse<MonitoredProductApiResponse>>(endpoint, { token });
+  return {
+    ...data,
+    items: data.items.map(mapMonitoredProductFromApi),
+  };
 };
 
 /**

@@ -1,90 +1,96 @@
-import { useState, useEffect } from 'react';
+import { useMemo } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { MonitoredProduct, getMonitoredProducts } from '@/lib/api';
+import { MonitoredProduct, PaginatedMonitoredProducts, getMonitoredProducts } from '@/lib/api';
+
+/** 
+ * Número padrão de itens buscados por página ao paginar produtos monitorados. 
+ */
+export const MONITORED_PRODUCTS_PER_PAGE = 50;
+
+/** 
+ * Estrutura de retorno padronizada pelo hook para facilitar o consumo na UI. 
+ */
+type UseMonitoredProductsResult = {
+  products: MonitoredProduct[];
+  total: number;
+  perPage: number;
+  isLoading: boolean;
+  isFetching: boolean;
+  isFetchingNextPage: boolean;
+  hasNextPage: boolean;
+  error: string | null;
+  fetchNextPage: () => Promise<unknown>;
+  refetch: () => Promise<void>;
+};
 
 /**
- * Hook para gerenciar lista de produtos monitorados do usuário.
+ * Hook para gerenciar lista de produtos monitorados com páginação infinita.
  *
- * - Faz a chamada ao endpoint que retorna os produtos monitorados.
- * - Expõe estado de carregamento, erro e função para refazer a requisição.
- * - Recarrega automaticamente quando o token de autenticação muda.
+ * - Utiliza React Query para armazenar em cache e invalidar resultados.
+ * - Concatena páginas já carregadas expondo a lista total para a UI.
+ * - Oferece estados de carregamento globais e auxiliares para carregamento incremental.
  */
-export const useMonitoredProducts = () => {
-  // Token JWT do contexto de autenticação (necessário para chamadas autenticadas)
+export const useMonitoredProducts = (): UseMonitoredProductsResult => {
   const { token } = useAuth();
 
-  // Lista de produtos monitorados carregados da API
-  const [products, setProducts] = useState<MonitoredProduct[]>([]);
-
-  // Indicador de loading para UI (true enquanto a chamada estiver em andamento)
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Indicador exclusivo para refetch manuais (não bloqueia render inicial)
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Mensagem de erro (em caso de falha na requisição)
-  const [error, setError] = useState<string | null>(null);
-
-  /**
-   * Função que realiza a requisição para buscar os produtos monitorados.
-   *
-   * - Retorna imediatamente se não houver token (não autenticado).
-   * - Atualiza estados de loading/erro/produtos conforme o resultado.
-   * - Trata erros genéricos e instanciais de Error para obter a mensagem.
-   */
-  const fetchProducts = async ({ isRefetch = false }: { isRefetch?: boolean } = {}) => {
-    if (!token) {
-      setProducts([]);
-      setIsLoading(false);
-      setIsRefreshing(false);
-      return [] as MonitoredProduct[];
-    }
-
-    if (isRefetch) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-    setError(null);
-
-    try {
-      const data = await getMonitoredProducts(token);
-      // Atualiza lista com os dados retornados da API
-      setProducts(data);
-      return data;
-    } catch (err) {
-      // Normaliza o erro para uma string legível na UI
-      const normalizedError = err instanceof Error ? err : new Error('Erro ao buscar produtos');
-      setError(normalizedError.message);
-
-      if (isRefetch) {
-        throw normalizedError;
+  const query = useInfiniteQuery<PaginatedMonitoredProducts>({
+    queryKey: ['monitored-products', token] as const,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+    queryFn: async ({ pageParam = 1 }): Promise<PaginatedMonitoredProducts> => {
+      const currentPage = typeof pageParam === 'number' && Number.isFinite(pageParam) ? pageParam : 1;
+      if (!token) {
+        return {
+          items: [],
+          total: 0,
+          page: currentPage,
+          per_page: MONITORED_PRODUCTS_PER_PAGE,
+        };
       }
-
-      return [] as MonitoredProduct[];
-    } finally {
-      if (isRefetch) {
-        setIsRefreshing(false);
-      } else {
-        setIsLoading(false);
+      return getMonitoredProducts(token, {
+        page: currentPage,
+        per_page: MONITORED_PRODUCTS_PER_PAGE,
+      });
+    },
+    getNextPageParam: (lastPage) => {
+      const totalPages = lastPage.per_page > 0 ? Math.ceil(lastPage.total / lastPage.per_page) : 0;
+      if (totalPages === 0) {
+        return undefined;
       }
+      return lastPage.page < totalPages ? lastPage.page + 1 : undefined;
+    },
+  });
+
+  const aggregatedPages = query.data?.pages ?? ([] as PaginatedMonitoredProducts[]);
+  const products = useMemo(
+    () => aggregatedPages.flatMap((page: PaginatedMonitoredProducts) => page.items),
+    [aggregatedPages],
+  );
+
+  const total = aggregatedPages[0]?.total ?? 0;
+  const perPage = aggregatedPages[0]?.per_page ?? MONITORED_PRODUCTS_PER_PAGE;
+  const errorMessage = query.error instanceof Error ? query.error.message : null;
+
+  const refetch = async () => {
+    const result = await query.refetch();
+    if (result.error) {
+      throw result.error;
     }
+    return;
   };
 
-  /**
-   * Efeito que dispara o carregamento inicial e sempre que o token mudar.
-   * Útil para recarregar a lista quando o usuário faz login/logout.
-   */
-  useEffect(() => {
-    void fetchProducts();
-  }, [token]);
-
-  // API pública do hook: estados e função para refazer a requisição manualmente
   return {
     products,
-    isLoading,
-    isRefreshing,
-    error,
-    refetch: () => fetchProducts({ isRefetch: true }),
+    total,
+    perPage,
+    isLoading: query.status === 'loading',
+    isFetching: query.isFetching,
+    isFetchingNextPage: query.isFetchingNextPage,
+    hasNextPage: Boolean(query.hasNextPage),
+    error: errorMessage,
+    fetchNextPage: () => query.fetchNextPage(),
+    refetch,
   };
 };

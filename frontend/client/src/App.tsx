@@ -1,6 +1,7 @@
 // Ponto de entrada dos componentes de UI e rotas da aplicação frontend.
 
 /* Importações principais de UI, contexto e páginas */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"; // Gerenciamento de estado assíncrono
 import { Toaster } from "@/components/ui/feedback/sonner"; // Componente de notificações (toast)
 import { TooltipProvider } from "@/components/ui/overlay/tooltip"; // Provedor para tooltips
 import NotFound from "@/pages/NotFound";
@@ -17,6 +18,18 @@ import AddProduct from "./pages/AddProduct";
 import Competitors from "./pages/Competitors";
 import Alerts from "./pages/Alerts";
 import Settings from "./pages/Settings";
+
+/**
+ * Cliente global do React Query compartilhado por toda a aplicação
+ */
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false, // Desativa refetch automático ao focar a janela
+      retry: 1, // Tenta refazer requisições falhas 1 vez antes de falhar
+    },
+  },
+});
 
 /* Componente Router:
   - Define as rotas da aplicação usando wouter
@@ -108,10 +121,12 @@ function App() {
       // switchable
     >
       <AuthProvider>
-       <TooltipProvider>
-        <Toaster />
-        <Router />
-       </TooltipProvider>
+       <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+         <Toaster />
+         <Router />
+        </TooltipProvider>
+       </QueryClientProvider>
       </AuthProvider>
     </ThemeProvider>
    </ErrorBoundary>

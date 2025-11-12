@@ -36,6 +36,13 @@ class MonitoredProductResponse(BaseModel):
     is_new: Optional[bool] = None
     comparison_insights: Optional[str] = None
 
+class PaginatedMonitoredProductsResponse(BaseModel):
+    """ Envelope de paginação utilizado na listagem de produtos monitorados """
+    items: list[MonitoredProductResponse]
+    total: int
+    page: int
+    per_page: int
+
 class CompetitorProductResponse(BaseModel):
     """ Informações de produtos concorrentes extraídas do scrapping """
     model_config = ConfigDict(from_attributes=True)
