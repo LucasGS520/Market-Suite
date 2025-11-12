@@ -16,3 +16,26 @@ import { twMerge } from "tailwind-merge"; // twMerge: resolve conflitos de class
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
+
+/**
+ * Sanitiza URLs externas para evitar abertura de links com esquemas inseguros ou inválidos.
+ *
+ * - Aceita valores nulos/indefinidos sem lançar exceção.
+ * - Garante que apenas protocolos http/https sejam mantidos.
+ * - Retorna a URL normalizada ou ``null`` quando não for possível validar o link.
+ */
+export function sanitizeExternalUrl(rawUrl: string | null | undefined): string | null {
+  if (!rawUrl) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(rawUrl.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return parsed.toString();
+  } catch (error) {
+    return null;
+  }
+}

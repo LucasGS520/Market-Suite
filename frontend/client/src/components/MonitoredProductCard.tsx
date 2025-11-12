@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/data-display/badge';
 import { Button } from '@/components/ui/button/button';
 import { AlertCircle, ChevronDown, ChevronUp, Clock, ExternalLink, Loader2, RefreshCw, UserPlus, Users } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, sanitizeExternalUrl } from '@/lib/utils';
 import { MonitoredProduct, getCompetitors, Competitor } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
@@ -98,25 +98,6 @@ const describeTimestamp = (timestamp: string | null): string => {
   }
 
   return parsed.toLocaleString('pt-BR');
-};
-
-/**
- * Sanitiza URLs externas garantindo protocolos seguros.
- */
-const sanitizeExternalUrl = (rawUrl: string | null): string | null => {
-  if (!rawUrl) {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(rawUrl.trim());
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return null;
-    }
-    return parsed.toString();
-  } catch (error) {
-    return null;
-  }
 };
 
 /**

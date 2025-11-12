@@ -5,17 +5,25 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from '@/components/ui/button/button';
 import { Input } from '@/components/ui/inputs/input';
 import { Alert, AlertDescription } from '@/components/ui/feedback/alert';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Badge } from '@/components/ui/data-display/badge';
+import { Loader2, AlertCircle, Clock, ExternalLink } from 'lucide-react';
 import { scrapeMonitoredProduct } from '@/lib/api';
 import { toast } from 'sonner';
+import { sanitizeExternalUrl } from '@/lib/utils';
 
-/*
-  Página/Componente: AddProduct
-  Objetivo: Formulário para adicionar um novo produto ao monitoramento de preços.
-  Observações:
-    - O fluxo envia apenas nome e URL, o backend agenda scraping assíncrono.
-    - Após submissão permanecemos na página exibindo ações rápidas (ver produtos / adicionar outro).
-*/
+/**
+ * Página responsável por cadastrar um novo produto monitorado e orientar o usuário sobre os próximos passos.
+ * 
+ * - Agenda o scraping inicial via POST `/monitored/scrape`.
+ * - Mantém o usuário na tela oferecendo atalhos para listar produtos ou cadastrar outro item.
+ * - Destaca o último produto agendado para reforçar o estado "Agendado" imediatamente.
+ */
+type ScheduledProductSummary = {
+  nome: string | null;
+  url: string;
+  mensagem: string;
+  agendadoEm: Date;
+};
 
 export default function AddProduct() {
   const { token } = useAuth(); // token de autenticação do usuário (context)
@@ -29,6 +37,8 @@ export default function AddProduct() {
   const [isLoading, setIsLoading] = useState(false); // indicador de requisição em progresso
   const [error, setError] = useState<string | null>(null); // mensagem de erro para o usuário
   const [showPostSubmitActions, setShowPostSubmitActions] = useState(false); // controla exibição dos botões pós-submissão
+  const [scheduledProduct, setScheduledProduct] = useState<ScheduledProductSummary | null>(null); // resumo do último agendamento
+  const safeScheduledProductUrl = scheduledProduct ? sanitizeExternalUrl(scheduledProduct.url) : null; // URL validada para abrir anúncio 
 
   // Atualiza o estado do formulário para inputs controlados
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -76,8 +86,15 @@ export default function AddProduct() {
 
       if (isDuplicate) {
         toast.info(normalizedMessage);
+        setScheduledProduct(null);
       } else {
         toast.success(normalizedMessage);
+        setScheduledProduct({
+          nome: normalizedName ? normalizedName : null,
+          url: trimmedUrl,
+          mensagem: normalizedMessage,
+          agendadoEm: new Date(),
+        });
       }
 
       setFormData({
@@ -114,6 +131,22 @@ export default function AddProduct() {
     setShowPostSubmitActions(false);
     setError(null);
     nameInputRef.current?.focus();
+  };
+
+  /**
+   * Abre o anúncio do produto recém-agendado garantindo URL segura.
+   */
+  const handleOpenScheduledProduct = () => {
+    if (!scheduledProduct) {
+      return;
+    }
+
+    if (!safeScheduledProductUrl) {
+      toast.error('Não foi possível abrir o anúncio cadastrado.');
+      return;
+    }
+
+    window.open(safeScheduledProductUrl, '_blank', 'noopener');
   };
 
   return (
@@ -187,7 +220,7 @@ export default function AddProduct() {
         {showPostSubmitActions && (
           <CardFooter className="flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
-              Produto agendado. Escolha uma ação para continuar.
+              {scheduledProduct?.mensagem ?? 'Produto agendado. Escolha uma ação para continuar.'}
             </p>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <Button type="button" variant="outline" onClick={handleViewProducts}>
@@ -200,6 +233,43 @@ export default function AddProduct() {
           </CardFooter>
         )}
       </Card>
+
+      {scheduledProduct && (
+        <Card role="status" aria-live="polite">
+          <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-lg">Último produto agendado</CardTitle>
+              <CardDescription>
+                Coleta inicial agendada em {scheduledProduct.agendadoEm.toLocaleString('pt-BR')}.
+              </CardDescription>
+            </div>
+            <Badge variant="outline" className="flex items-center gap-1 whitespace-nowrap text-amber-700 dark:text-amber-300">
+              <Clock className="h-3.5 w-3.5" /> Agendado
+            </Badge>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Nome do produto</p>
+              <p className="text-base font-semibold">
+                {scheduledProduct.nome?.trim() || 'Produto sem identificação informada'}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">URL informada</p>
+              <p className="break-all text-sm text-muted-foreground">{scheduledProduct.url}</p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-2"
+              onClick={handleOpenScheduledProduct}
+              disabled={!safeScheduledProductUrl}
+            >
+              <ExternalLink className="h-4 w-4" /> Abrir anúncio
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
