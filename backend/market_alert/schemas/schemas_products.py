@@ -28,10 +28,13 @@ class MonitoredProductResponse(BaseModel):
     status: MonitoredStatus
     last_checked: Optional[datetime] = None
     competitors_count: int | None = None
-    average_competitor_price: Optional[str] = None
-    min_competitor_price: Optional[str] = None
-    max_competitor_price: Optional[str] = None
+    competitors_mean: Optional[str] = None
+    competitors_min: Optional[str] = None
+    competitors_max: Optional[str] = None
     position_rank: Optional[int] = None
+    potential_savings: Optional[str] = None
+    competitors_with_price_count: Optional[int] = None
+    latest_comparison_id: Optional[UUID] = None
     last_comparison_at: Optional[datetime] = None
     is_new: Optional[bool] = None
     comparison_insights: Optional[str] = None

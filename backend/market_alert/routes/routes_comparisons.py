@@ -19,6 +19,7 @@ from market_alert.crud.crud_comparison import (
     get_latest_comparisons,
     get_comparison_by_id,
     get_latest_comparisons_for_products,
+    get_latest_summary,
 )
 from market_alert.services.services_comparison import (
     run_price_comparison,
@@ -54,10 +55,12 @@ def get_comparison_summary(request: Request, monitored_id: UUID, db: Session = D
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto monitorado não encontrado.")
     
     latest_comparison = get_latest_comparisons_for_products(db, [monitored_id]).get(monitored_id)
+    stored_summary = get_latest_summary(db, monitored_id)
     competitors_count = len(getattr(mp, "competitors", []) or [])
     summary = build_comparison_summary(
         latest_comparison,
         competitors_count=competitors_count,
+        stored_summary=stored_summary,
     )
 
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", monitored_id=str(monitored_id))

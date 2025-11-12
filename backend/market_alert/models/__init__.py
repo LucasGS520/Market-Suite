@@ -5,5 +5,5 @@ from .models_users import User
 from .models_products import MonitoredProduct, CompetitorProduct
 from .models_price_history import PriceHistory
 from .models_scraping_errors import ScrapingError
-from .models_comparisons import PriceComparison
+from .models_comparisons import PriceComparison, PriceComparisonSummary
 from .models_alerts import AlertRule, NotificationLog

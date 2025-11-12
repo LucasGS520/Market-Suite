@@ -23,13 +23,16 @@ class PriceComparisonResponse(BaseModel):
 class PriceComparisonSummaryResponse(BaseModel):
     """ Resumo consolidado da última comparação executada para um produto monitorado """
     monitored_product_id: UUID
+    comparison_id: Optional[UUID] = None
     last_comparison_at: Optional[datetime] = None
-    average_competitor_price: Optional[str] = None
-    min_competitor_price: Optional[str] = None
-    max_competitor_price: Optional[str] = None
-    position_rank: Optional[int] = None
-    competitors_count: int = 0
-    comparison_insights: Optional[str] = None
     monitored_price: Optional[str] = None
+    competitors_count: int = 0
+    competitors_with_price_count: int = 0
+    competitors_mean: Optional[str] = None
+    competitors_min: Optional[str] = None
+    competitors_max: Optional[str] = None
+    position_rank: Optional[int] = None
+    potential_savings: Optional[str] = None
+    comparison_insights: Optional[str] = None
     discrepancies: list[Dict[str, Any]] = Field(default_factory=list)
     alerts: List[Dict[str, Any]] = Field(default_factory=list)

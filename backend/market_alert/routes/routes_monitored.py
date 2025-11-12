@@ -22,7 +22,10 @@ from market_alert.crud.crud_monitored import (
     create_pending_monitored_product,
     get_monitored_product_by_user_and_url,
 )
-from market_alert.crud.crud_comparison import get_latest_comparisons_for_products
+from market_alert.crud.crud_comparison import (
+    get_latest_comparisons_for_products,
+    get_latest_summaries_for_products,
+)
 from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
 from market_alert.enums.enums_products import MonitoredStatus
@@ -141,6 +144,7 @@ def list_monitored_products(
         )
     
     latest_comparisons = get_latest_comparisons_for_products(db, product_ids)
+    latest_summaries = get_latest_summaries_for_products(db, product_ids)
 
     response_payload: list[MonitoredProductResponse] = []
     for product, competitors_count in products_with_count:
@@ -148,6 +152,7 @@ def list_monitored_products(
         summary = build_comparison_summary(
             comparison,
             competitors_count=competitors_count,
+            stored_summary=latest_summaries.get(product.id),
         )
         is_new = product.status == MonitoredStatus.pending or summary["last_comparison_at"] is None
 
@@ -156,10 +161,13 @@ def list_monitored_products(
             MonitoredProductResponse.model_validate(product).model_copy(
                 update={
                     "competitors_count": competitors_count,
-                    "average_competitor_price": summary["average_competitor_price"],
-                    "min_competitor_price": summary["min_competitor_price"],
-                    "max_competitor_price": summary["max_competitor_price"],
+                    "competitors_mean": summary["competitors_mean"],
+                    "competitors_min": summary["competitors_min"],
+                    "competitors_max": summary["competitors_max"],
                     "position_rank": summary["position_rank"],
+                    "potential_savings": summary["potential_savings"],
+                    "competitors_with_price_count": summary["competitors_with_price_count"],
+                    "latest_comparison_id": summary["comparison_id"],
                     "last_comparison_at": summary["last_comparison_at"],
                     "is_new": is_new,
                     "comparison_insights": summary["comparison_insights"],
@@ -193,20 +201,25 @@ def get_product(request: Request, product_id: UUID, db: Session = Depends(get_db
         logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", product_id=str(product_id))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado.")
     latest_comparison = get_latest_comparisons_for_products(db, [product.id]).get(product.id)
+    latest_summary = get_latest_summaries_for_products(db, [product.id]).get(product.id)
     competitors_count = len(getattr(product, "competitors", []) or [])
     summary = build_comparison_summary(
         latest_comparison,
         competitors_count=competitors_count,
+        stored_summary=latest_summary,
     )
     is_new = product.status == MonitoredStatus.pending or summary["last_comparison_at"] is None
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
     return MonitoredProductResponse.model_validate(product).model_copy(
         update={
             "competitors_count": competitors_count,
-            "average_competitor_price": summary["average_competitor_price"],
-            "min_competitor_price": summary["min_competitor_price"],
-            "max_competitor_price": summary["max_competitor_price"],
+            "competitors_mean": summary["competitors_mean"],
+            "competitors_min": summary["competitors_min"],
+            "competitors_max": summary["competitors_max"],
             "position_rank": summary["position_rank"],
+            "potential_savings": summary["potential_savings"],
+            "competitors_with_price_count": summary["competitors_with_price_count"],
+            "latest_comparison_id": summary["comparison_id"],
             "last_comparison_at": summary["last_comparison_at"],
             "is_new": is_new,
             "comparison_insights": summary["comparison_insights"],

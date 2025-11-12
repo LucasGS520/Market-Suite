@@ -1,6 +1,7 @@
 """ Testes unitários para o resumo de comparações de preço """
 
 from datetime import datetime, timezone
+import uuid
 
 from market_alert.services.services_comparison import build_comparison_summary
 
@@ -11,6 +12,15 @@ class _DummyComparison:
     def __init__(self, data: dict, timestamp: datetime | None = None) -> None:
         self.data = data
         self.timestamp = timestamp or datetime.now(timezone.utc)
+        self.id = uuid.uuid4()
+
+class _DummySummary:
+    """ Estrutura simples para simular PriceComparisonSummary """
+
+    def __init__(self, aggregates: dict, comparison_id: uuid.UUID | None = None) -> None:
+        self.aggregates = aggregates
+        self.timestamp = datetime.now(timezone.utc)
+        self.comparison_id = comparison_id or uuid.uuid4()
 
 
 def test_build_comparison_summary_without_data() -> None:
@@ -18,9 +28,10 @@ def test_build_comparison_summary_without_data() -> None:
 
     summary = build_comparison_summary(None, competitors_count=0)
 
-    assert summary["average_competitor_price"] is None
+    assert summary["competitors_mean"] is None
     assert summary["discrepancies"] == []
     assert summary["competitors_count"] == 0
+    assert summary["competitors_with_price_count"] == 0
 
 
 def test_build_comparison_summary_with_metrics() -> None:
@@ -42,10 +53,37 @@ def test_build_comparison_summary_with_metrics() -> None:
 
     summary = build_comparison_summary(comparison, competitors_count=2)
 
-    assert summary["average_competitor_price"] == "90.00"
-    assert summary["min_competitor_price"] == "80.00"
-    assert summary["max_competitor_price"] == "120.00"
+    assert summary["competitors_mean"] == "90.00"
+    assert summary["competitors_min"] == "80.00"
+    assert summary["competitors_max"] == "120.00"
     assert summary["position_rank"] == 2
+    assert summary["potential_savings"] == "20.00"
+    assert summary["competitors_with_price_count"] == 2
     assert summary["comparison_insights"] == "Preço monitorado acima da média dos concorrentes."
     assert summary["alerts"] == [{"type": "price_event"}]
+    
+def test_build_comparison_summary_with_stored_snapshot() -> None:
+    """ Usa resumo persistido quando disponível """
+
+    stored = _DummySummary(
+        aggregates={
+            "competitors_mean": "95.00",
+            "competitors_min": "90.00",
+            "competitors_max": "110.00",
+            "potential_savings": None,
+            "competitors_with_price_count": 3,
+            "alerts": [],
+            "discrepancies": [],
+        }
+    )
+
+    summary = build_comparison_summary(
+        None,
+        competitors_count=4,
+        stored_summary=stored,
+    )
+
+    assert summary["competitors_count"] == 4
+    assert summary["competitors_mean"] == "95.00"
+    assert summary["competitors_with_price_count"] == 3
     
