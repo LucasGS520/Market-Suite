@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/data-display/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/feedback/alert';
 import MonitoredProductCard from '@/components/MonitoredProductCard';
 import { toast } from 'sonner';
+import type { MonitoredProduct } from '@/lib/api';
 
 /**
  * Página: Produtos Monitorados
@@ -196,7 +197,7 @@ export default function Products() {
             ),
           }}
           // Renderiza cada item usando o componente MonitoredProductCard
-          itemContent={(index, product) => (
+          itemContent={(_index: number, product: MonitoredProduct) => (
             <div key={product.id} className="pb-4">
               <MonitoredProductCard
                 product={product}
