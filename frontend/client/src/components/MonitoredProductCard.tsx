@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/data-display/badge';
 import { Button } from '@/components/ui/button/button';
 import { AlertCircle, ChevronDown, ChevronUp, Clock, ExternalLink, Loader2, RefreshCw, UserPlus, Users } from 'lucide-react';
 import { cn, sanitizeExternalUrl } from '@/lib/utils';
-import { MonitoredProduct, getCompetitors, Competitor } from '@/lib/api';
+import { MonitoredProduct, getCompetitors, Competitor, getComparisonSummary, ComparisonSummary } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
@@ -127,6 +127,10 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
   const [competitorsError, setCompetitorsError] = useState<string | null>(null);
   const hasLoadedCompetitorsRef = useRef(false);
   const previousCompetitorCountRef = useRef<number | null>(product.competitors_count ?? null);
+  const [comparisonSummary, setComparisonSummary] = useState<ComparisonSummary | null>(null);
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const summaryRequestTimeoutRef = useRef<number | null>(null);
 
   const statusDisplay = statusDisplayConfig[product.status];
   const detailsId = `monitored-${product.id}-details`;
@@ -140,6 +144,40 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
     const remaining = total - competitorPreview.length;
     return remaining > 0 ? remaining : 0;
   }, [competitorPreview.length, competitors.length, product.competitors_count]);
+
+  const needsComparisonSummary = useMemo(
+    () =>
+      [
+        product.average_competitor_price,
+        product.min_competitor_price,
+        product.max_competitor_price,
+        product.position_rank,
+      ].some((value) => value === null || value === undefined),
+    [
+      product.average_competitor_price,
+      product.min_competitor_price,
+      product.max_competitor_price,
+      product.position_rank,
+    ],
+  );
+
+  const mergedMetrics = useMemo(
+    () => ({
+      average: product.average_competitor_price ?? comparisonSummary?.average_competitor_price ?? null,
+      min: product.min_competitor_price ?? comparisonSummary?.min_competitor_price ?? null,
+      max: product.max_competitor_price ?? comparisonSummary?.max_competitor_price ?? null,
+      position: product.position_rank ?? comparisonSummary?.position_rank ?? null,
+      insights: product.comparison_insights ?? comparisonSummary?.comparison_insights ?? null,
+    }),
+    [
+      product.average_competitor_price,
+      product.min_competitor_price,
+      product.max_competitor_price,
+      product.position_rank,
+      product.comparison_insights,
+      comparisonSummary,
+    ],
+  );
 
   /**
    * Carrega concorrentes apenas quando necessário, evitando requisições redundantes.
@@ -178,6 +216,40 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
     }
   };
 
+  /**
+   * Obtém resumo competitivo com debounce para evitar chamadas repetidas.
+   */
+  const fetchComparisonSummary = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+
+    setIsLoadingSummary(true);
+    setSummaryError(null);
+
+    try {
+      const summary = await getComparisonSummary(token, product.id);
+      setComparisonSummary(summary);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Erro ao carregar resumo competitivo.';
+      setSummaryError(message);
+    } finally {
+      setIsLoadingSummary(false);
+    }
+  }, [product.id, token]);
+
+  /**
+   * Permite nova tentativa manual quando o carregamento do resumo falha.
+   */
+  const handleRetrySummary = useCallback(() => {
+    if (isLoadingSummary || !token) {
+      return;
+    }
+
+    void fetchComparisonSummary();
+  }, [fetchComparisonSummary, isLoadingSummary, token]);
+
   useEffect(() => {
     if (!isExpanded || !hasLoadedCompetitorsRef.current) {
       previousCompetitorCountRef.current = product.competitors_count ?? null;
@@ -196,6 +268,55 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
 
     previousCompetitorCountRef.current = current;
   }, [isExpanded, loadCompetitors, product.competitors_count]);
+
+  useEffect(() => {
+    if (summaryRequestTimeoutRef.current !== null) {
+      window.clearTimeout(summaryRequestTimeoutRef.current);
+      summaryRequestTimeoutRef.current = null;
+    }
+
+    if (
+      !isExpanded ||
+      !needsComparisonSummary ||
+      comparisonSummary !== null ||
+      isLoadingSummary ||
+      !token ||
+      summaryError !== null
+    ) {
+      return;
+    }
+
+    summaryRequestTimeoutRef.current = window.setTimeout(() => {
+      summaryRequestTimeoutRef.current = null;
+      void fetchComparisonSummary();
+    }, 300);
+
+    return () => {
+      if (summaryRequestTimeoutRef.current !== null) {
+        window.clearTimeout(summaryRequestTimeoutRef.current);
+        summaryRequestTimeoutRef.current = null;
+      }
+    };
+  }, [
+    comparisonSummary,
+    fetchComparisonSummary,
+    isExpanded,
+    isLoadingSummary,
+    needsComparisonSummary,
+    summaryError,
+    token,
+  ]);
+
+  useEffect(() => {
+    setComparisonSummary(null);
+    setSummaryError(null);
+    setIsLoadingSummary(false);
+
+    if (summaryRequestTimeoutRef.current !== null) {
+      window.clearTimeout(summaryRequestTimeoutRef.current);
+      summaryRequestTimeoutRef.current = null;
+    }
+  }, [product.id]);
 
   /**
    * Abre o anúncio sanitizando a URL para evitar execuções indevidas.
@@ -278,13 +399,13 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Preço médio concorrentes</p>
-            <p className="text-lg font-medium">{formatCurrency(product.average_competitor_price)}</p>
+            <p className="text-lg font-medium">{formatCurrency(mergedMetrics.average)}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Posição no ranking</p>
             <p className="text-lg font-medium">
-              {product.position_rank !== null && product.position_rank > 0
-                ? `#${product.position_rank}`
+              {mergedMetrics.position !== null && mergedMetrics.position > 0
+                ? `#${mergedMetrics.position}`
                 : 'Sem posição'}
             </p>
           </div>
@@ -355,19 +476,41 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
 
         {isExpanded && (
           <div className="space-y-4 border-t pt-4" id={detailsId}>
+            {isLoadingSummary && (
+              <div className="flex items-center gap-2 rounded-md border border-dashed border-muted-foreground/40 bg-muted/40 p-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Carregando resumo competitivo...
+              </div>
+            )}
+            {summaryError && (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                <AlertCircle className="h-4 w-4" />
+                <span>{summaryError}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={handleRetrySummary}
+                  disabled={isLoadingSummary}
+                >
+                  Tentar novamente
+                </Button>
+              </div>
+            )}
             <div className="grid gap-4 lg:grid-cols-3">
               <div>
                 <p className="text-xs text-muted-foreground">Menor preço concorrente</p>
-                <p className="text-sm font-medium">{formatCurrency(product.min_competitor_price)}</p>
+                <p className="text-sm font-medium">{formatCurrency(mergedMetrics.min)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Maior preço concorrente</p>
-                <p className="text-sm font-medium">{formatCurrency(product.max_competitor_price)}</p>
+                <p className="text-sm font-medium">{formatCurrency(mergedMetrics.max)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Insight mais recente</p>
                 <p className="text-sm">
-                  {product.comparison_insights ?? 'Sem insights disponíveis no momento.'}
+                  {mergedMetrics.insights ?? 'Sem insights disponíveis no momento.'}
                 </p>
               </div>
             </div>

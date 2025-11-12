@@ -347,6 +347,28 @@ export interface MonitoredProduct {
 }
 
 /**
+ * Estrutura bruta do resumo competitivo retornado pelo backend.
+ */
+export interface ComparisonSummaryApiResponse {
+  average_competitor_price?: string | number | null;
+  min_competitor_price?: string | number | null;
+  max_competitor_price?: string | number | null;
+  position_rank?: string | number | null;
+  comparison_insights?: string | null;
+}
+
+/**
+ * Estrutura normalizada do resumo competitivo consumido pelo frontend.
+ */
+export interface ComparisonSummary {
+  average_competitor_price: number | null;
+  min_competitor_price: number | null;
+  max_competitor_price: number | null;
+  position_rank: number | null;
+  comparison_insights: string | null;
+}
+
+/**
  * Converte valores decimais/strings em números ou null quando invalido.
  */
 const toNumberOrNull = (value: string | number | null | undefined): number | null => {
@@ -386,6 +408,19 @@ export const mapMonitoredProductFromApi = (
   last_comparison_at: product.last_comparison_at ?? null,
   is_new: Boolean(product.is_new),
   comparison_insights: product.comparison_insights ?? null,
+});
+
+/**
+ * Normaliza o resumo competitivo retornado pelo backend.
+ */
+const mapComparisonSummaryFromApi = (
+  summary: ComparisonSummaryApiResponse,
+): ComparisonSummary => ({
+  average_competitor_price: toNumberOrNull(summary.average_competitor_price),
+  min_competitor_price: toNumberOrNull(summary.min_competitor_price),
+  max_competitor_price: toNumberOrNull(summary.max_competitor_price),
+  position_rank: toNumberOrNull(summary.position_rank),
+  comparison_insights: summary.comparison_insights ?? null,
 });
 
 /**
@@ -563,6 +598,22 @@ export const scrapeCompetitor = (
  */
 export const getAlerts = (token: string) =>
   apiRequest<Alert[]>('/notifications/logs', { token });
+
+/**
+ * API: Obter resumo competitivo quando dados agregados não vierem no monitorado.
+ * GET /comparisons/{monitoredId}/summary
+ */
+export const getComparisonSummary = async (
+  token: string,
+  monitoredId: string,
+): Promise<ComparisonSummary> => {
+  const response = await apiRequest<ComparisonSummaryApiResponse>(
+    `/comparisons/${monitoredId}/summary`,
+    { token },
+  );
+
+  return mapComparisonSummaryFromApi(response);
+};
 
 /**
  * API: Rodar comparação de preços manualmente.
