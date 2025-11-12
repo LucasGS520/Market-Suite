@@ -81,6 +81,20 @@ export default function Competitors() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.location.hash !== '#novo-concorrente') {
+      return;
+    }
+
+    const focusTimeout = window.setTimeout(() => {
+      document.getElementById('competitor_url')?.focus();
+    }, 120);
+
+    return () => {
+      window.clearTimeout(focusTimeout);
+    };
+  }, []);
+
   // Estado local: lista de concorrentes
   const [competitors, setCompetitors] = useState<UiCompetitor[]>([]);
   // Estado de carregamento para mostrar skeletons enquanto busca dados
@@ -355,7 +369,7 @@ export default function Competitors() {
         </Button>
       </div>
 
-      <Card>
+      <Card id="novo-concorrente" tabIndex={-1}>
         <CardHeader>
           <CardTitle>Adicionar novo concorrente</CardTitle>
           <CardDescription>

@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { apiRequest, login as loginRequest } from '@/lib/api';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'wouter';
+import { toast } from 'sonner';
+import { SESSION_EXPIRED_EVENT, apiRequest, login as loginRequest } from '@/lib/api';
 
 /**
  * Tipo de dados do usuário autenticado
@@ -43,6 +45,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(null);
   // Indicador de carregamento inicial (leitura do localStorage)
   const [isLoading, setIsLoading] = useState(true);
+  // Função de navegação do Wouter para redirecionamentos globais
+  const [, navigate] = useLocation();
 
   /**
    * Ao montar, tenta carregar credenciais do localStorage.
@@ -112,12 +116,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * - Limpa estado do usuário e token
    * - Remove credenciais do localStorage
    */
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null);
     setToken(null);
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
-  };
+  }, []);
+
+  useEffect(() => {
+    /**
+     * Listener global que trata respostas 401 emitidas pelo cliente HTTP.
+     *
+     * - Executa logout para limpar estado local/localStorage
+     * - Redireciona para a tela de login
+     * - Exibe toast informando a expiração de sessão
+     */
+    const handleSessionExpired = () => {
+      logout();
+      toast.error('Sessão expirada');
+      navigate('/login');
+    };
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => {
+      window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    };
+  }, [logout, navigate]);
 
   // Valor do contexto disponibilizado para consumidores
   const value: AuthContextType = {

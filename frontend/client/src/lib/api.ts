@@ -10,6 +10,9 @@
  */
 const DEFAULT_API_URL = 'http://localhost:8000/';
 
+/** Nome do evento emitido globalmente quando a sessão expira (401) */
+export const SESSION_EXPIRED_EVENT = 'session-expired';
+
 /**
  * Normaliza e valida a URL base da API informada via variável de ambiente.
  * 
@@ -70,9 +73,9 @@ const buildApiUrl = (endpoint: string): string => {
  */
 export const apiRequest = async <T = any>(
   endpoint: string,
-  options: RequestInit & { token?: string } = {}
+  options: RequestInit & { token?: string; timeoutMs?: number } = {},
 ): Promise<T> => {
-  const { token, headers: requestHeaders, ...fetchOptions } = options;
+  const { token, headers: requestHeaders, timeoutMs, signal: callerSignal, ...fetchOptions } = options;
   const url = buildApiUrl(endpoint);
 
   const headers = new Headers(requestHeaders as HeadersInit | undefined);
@@ -98,10 +101,38 @@ export const apiRequest = async <T = any>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(url, {
-    ...fetchOptions,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeout = typeof timeoutMs === 'number' ? timeoutMs : 15_000;
+
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort();
+    } else {
+      callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
+
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeout);
+
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      ...fetchOptions,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Tempo limite atingido. Verifique sua conexão e tente novamente.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   // Tratamento aprimorado de erro: prioriza mensagens do backend antes do fallback genérico
   if (!response.ok) {
@@ -194,7 +225,12 @@ export const apiRequest = async <T = any>(
       }
     }
 
-    const message = extractedMessage || `Erro ${response.status}`;
+    if (token && response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    }
+
+    const message =
+      extractedMessage || (response.status === 401 ? 'Sessão expirada' : `Erro ${response.status}`);
 
     // Ao lançar a exceção, garantimos que a mensagem reflita o conteúdo retornado pelo backend
     throw new Error(message);
@@ -276,6 +312,13 @@ export interface MonitoredProductApiResponse {
   status: MonitoredStatus;
   last_checked?: string | null;
   competitors_count?: number | string | null;
+  average_competitor_price?: string | number | null;
+  min_competitor_price?: string | number | null;
+  max_competitor_price?: string | number | null;
+  position_rank?: number | string | null;
+  last_comparison_at?: string | null;
+  is_new?: boolean | null;
+  comparison_insights?: string | null;
 }
 
 /**
@@ -293,7 +336,14 @@ export interface MonitoredProduct {
   thumbnail: string | null;
   status: MonitoredStatus;
   last_checked: string | null;
-  competitors_count?: number | null;
+  competitors_count: number | null;
+  average_competitor_price: number | null;
+  min_competitor_price: number | null;
+  max_competitor_price: number | null;
+  position_rank: number | null;
+  last_comparison_at: string | null;
+  is_new: boolean;
+  comparison_insights: string | null;
 }
 
 /**
@@ -325,7 +375,17 @@ export const mapMonitoredProductFromApi = (
   thumbnail: product.thumbnail ?? null,
   status: product.status,
   last_checked: product.last_checked ?? null,
-  competitors_count: product.competitors_count !== undefined && product.competitors_count !== null ? toNumberOrNull(product.competitors_count) : undefined,
+  competitors_count:
+    product.competitors_count !== undefined && product.competitors_count !== null
+      ? toNumberOrNull(product.competitors_count)
+      : null,
+  average_competitor_price: toNumberOrNull(product.average_competitor_price),
+  min_competitor_price: toNumberOrNull(product.min_competitor_price),
+  max_competitor_price: toNumberOrNull(product.max_competitor_price),
+  position_rank: toNumberOrNull(product.position_rank),
+  last_comparison_at: product.last_comparison_at ?? null,
+  is_new: Boolean(product.is_new),
+  comparison_insights: product.comparison_insights ?? null,
 });
 
 /**

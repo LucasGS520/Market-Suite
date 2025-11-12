@@ -17,7 +17,10 @@ export const useMonitoredProducts = () => {
   const [products, setProducts] = useState<MonitoredProduct[]>([]);
 
   // Indicador de loading para UI (true enquanto a chamada estiver em andamento)
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Indicador exclusivo para refetch manuais (não bloqueia render inicial)
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Mensagem de erro (em caso de falha na requisição)
   const [error, setError] = useState<string | null>(null);
@@ -29,24 +32,42 @@ export const useMonitoredProducts = () => {
    * - Atualiza estados de loading/erro/produtos conforme o resultado.
    * - Trata erros genéricos e instanciais de Error para obter a mensagem.
    */
-  const fetchProducts = async () => {
+  const fetchProducts = async ({ isRefetch = false }: { isRefetch?: boolean } = {}) => {
     if (!token) {
-      // Se não há token, não tentamos buscar dados
-      return;
+      setProducts([]);
+      setIsLoading(false);
+      setIsRefreshing(false);
+      return [] as MonitoredProduct[];
     }
 
-    setIsLoading(true);
+    if (isRefetch) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
 
     try {
       const data = await getMonitoredProducts(token);
       // Atualiza lista com os dados retornados da API
       setProducts(data);
+      return data;
     } catch (err) {
       // Normaliza o erro para uma string legível na UI
-      setError(err instanceof Error ? err.message : 'Erro ao buscar produtos');
+      const normalizedError = err instanceof Error ? err : new Error('Erro ao buscar produtos');
+      setError(normalizedError.message);
+
+      if (isRefetch) {
+        throw normalizedError;
+      }
+
+      return [] as MonitoredProduct[];
     } finally {
-      setIsLoading(false);
+      if (isRefetch) {
+        setIsRefreshing(false);
+      } else {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -55,9 +76,15 @@ export const useMonitoredProducts = () => {
    * Útil para recarregar a lista quando o usuário faz login/logout.
    */
   useEffect(() => {
-    fetchProducts();
+    void fetchProducts();
   }, [token]);
 
   // API pública do hook: estados e função para refazer a requisição manualmente
-  return { products, isLoading, error, refetch: fetchProducts };
+  return {
+    products,
+    isLoading,
+    isRefreshing,
+    error,
+    refetch: () => fetchProducts({ isRefetch: true }),
+  };
 };

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/data-display/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/data-display/card';
 import { Button } from '@/components/ui/button/button';
 import { Input } from '@/components/ui/inputs/input';
 import { Alert, AlertDescription } from '@/components/ui/feedback/alert';
@@ -14,12 +14,13 @@ import { toast } from 'sonner';
   Objetivo: Formulário para adicionar um novo produto ao monitoramento de preços.
   Observações:
     - O fluxo envia apenas nome e URL, o backend agenda scraping assíncrono.
-    - Mostra feedback imediato via toast e redireciona para /products.
+    - Após submissão permanecemos na página exibindo ações rápidas (ver produtos / adicionar outro).
 */
 
 export default function AddProduct() {
   const { token } = useAuth(); // token de autenticação do usuário (context)
   const [, navigate] = useLocation(); // navegação via wouter
+  const nameInputRef = useRef<HTMLInputElement | null>(null); // referência para focar no campo após submissão
   // Estado do formulário (campos controlados)
   const [formData, setFormData] = useState({
     name_identification: '',
@@ -27,10 +28,12 @@ export default function AddProduct() {
   });
   const [isLoading, setIsLoading] = useState(false); // indicador de requisição em progresso
   const [error, setError] = useState<string | null>(null); // mensagem de erro para o usuário
+  const [showPostSubmitActions, setShowPostSubmitActions] = useState(false); // controla exibição dos botões pós-submissão
 
   // Atualiza o estado do formulário para inputs controlados
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
+    setShowPostSubmitActions(false);
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -54,9 +57,18 @@ export default function AddProduct() {
       // Chamada ao cliente API que agenda/registrará o monitoramento
       // Normalizamos o nome para enviar ``null`` quando vazio
       const normalizedName = formData.name_identification.trim();
+      const trimmedUrl = formData.product_url.trim();
+
+      if (!trimmedUrl) {
+        const validationMessage = 'Informe uma URL válida para o produto.';
+        setError(validationMessage);
+        toast.error(validationMessage);
+        setIsLoading(false);
+        return;
+      }
       const response = await scrapeMonitoredProduct(token, {
         name_identification: normalizedName ? normalizedName : null,
-        product_url: formData.product_url,
+        product_url: trimmedUrl,
       });
 
       const normalizedMessage = response.message ?? 'Scraping agendado com sucesso';
@@ -72,15 +84,36 @@ export default function AddProduct() {
         name_identification: '',
         product_url: '',
       });
+      setShowPostSubmitActions(true);
 
-      navigate('/products');
+      setTimeout(() => {
+        nameInputRef.current?.focus();
+      }, 0);
     } catch (err) {
       // Mostra mensagem de erro genérica ou específica quando disponível
-      setError(err instanceof Error ? err.message : 'Erro ao adicionar produto');
-      toast.error('Erro ao adicionar produto');
+      const message = err instanceof Error ? err.message : 'Erro ao adicionar produto';
+      setError(message);
+      setShowPostSubmitActions(false);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  /**
+   * Redireciona para a lista de produtos monitorados mantendo o contexto após submissão.
+   */
+  const handleViewProducts = () => {
+    navigate('/products');
+  };
+
+  /**
+   * Limpa indicadores de pós-submissão e direciona foco para cadastrar outro produto rapidamente.
+   */
+  const handleAddAnother = () => {
+    setShowPostSubmitActions(false);
+    setError(null);
+    nameInputRef.current?.focus();
   };
 
   return (
@@ -123,6 +156,7 @@ export default function AddProduct() {
                 value={formData.name_identification}
                 onChange={handleChange}
                 disabled={isLoading}
+                ref={nameInputRef}
               />
             </div>
 
@@ -150,6 +184,21 @@ export default function AddProduct() {
             </Button>
           </form>
         </CardContent>
+        {showPostSubmitActions && (
+          <CardFooter className="flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              Produto agendado. Escolha uma ação para continuar.
+            </p>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <Button type="button" variant="outline" onClick={handleViewProducts}>
+                Ver produtos monitorados
+              </Button>
+              <Button type="button" onClick={handleAddAnother}>
+                Adicionar outro produto
+              </Button>
+            </div>
+          </CardFooter>
+        )}
       </Card>
     </div>
   );
