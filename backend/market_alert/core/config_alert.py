@@ -107,6 +107,9 @@ class Settings(ConfigBase):
     SCRAPER_MAX_RETRY_DELAY_SECONDS: int = int(
         os.getenv("SCRAPER_MAX_RETRY_DELAY_SECONDS", str(5 * 60))
     ) #Limite superior para backoff de Celery
+    MAX_COMPETITORS_PER_MONITORED: int = int(
+        os.getenv("MAX_COMPETITORS_PER_MONITORED", "10")
+    ) #Limite padrão de concorrentes por produto monitorado
 
 
 #Instância única de settings para a aplicação

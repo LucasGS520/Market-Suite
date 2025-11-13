@@ -1,22 +1,61 @@
 """ Funções CRUD para manipular produtos concorrentes """
-from unicodedata import normalize
+from __future__ import annotations
+
 from uuid import UUID
 from datetime import datetime
 from typing import List
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.utils.url_validation import normalize_product_url
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
 
 
+def _normalize_for_lookup(product_url: str) -> str:
+    """ Canonicaliza URLs de concorrentes para comparação e persistência """
+    raw_value = str(product_url).strip()
+    try:
+        return normalize_product_url(raw_value)
+    except ValueError:
+        #Mnatém fallback para cenários legados já sanitizados manualmente
+        return raw_value
+    
+def get_competitor_by_monitored_and_url(
+    db: Session,
+    monitored_product_id: UUID,
+    product_url: str,
+) -> CompetitorProduct | None:
+    """ Recupera concorrente usando URL canônica vinculada ao monitorado """
+    normalized_url = _normalize_for_lookup(product_url)
+    return (
+        db.query(CompetitorProduct)
+        .filter(
+            CompetitorProduct.monitored_product_id == monitored_product_id,
+            CompetitorProduct.product_url == normalized_url,
+        )
+        .first()
+    )
+
+def count_competitors_by_monitored(db: Session, monitored_product_id: UUID) -> int:
+    """ Conta quantos concorrentes estão associados ao monitorado informado """
+    if not hasattr(db, "query"):
+        return 0
+    return int(
+        db.query(func.count(CompetitorProduct.id))
+        .filter(CompetitorProduct.monitored_product_id == monitored_product_id)
+        .scalar()
+        or 0
+    )
+
 def create_or_update_competitor_product_scraped(
-    db: Session, 
-    product_data: CompetitorProductCreateScraping, 
-    scraped_info: CompetitorScrapedInfo, 
+    db: Session,
+    product_data: CompetitorProductCreateScraping,
+    scraped_info: CompetitorScrapedInfo,
     last_checked: datetime,
     *,
     currency: str | None = None,
@@ -24,22 +63,19 @@ def create_or_update_competitor_product_scraped(
     last_modified: datetime | None = None,
 ) -> CompetitorProduct:
     """ Atualiza ou cria um produto concorrente a partir dos dados do scraping manual com link direto """
-    normalized_url = str(product_data.product_url).strip()
-    #Mantemos a URL informada para que duplicidades reflitam a visão do usuário
-
-    #Verifica se já existe um concorrente com mesmo monitored_product_id e URL
-    existing = (
-        db.query(CompetitorProduct)
-        .filter(
-            CompetitorProduct.monitored_product_id == product_data.monitored_product_id,
-            CompetitorProduct.product_url == normalized_url
-        )
-        .first()
+    normalized_url = _normalize_for_lookup(product_data.product_url)
+    
+    #Verifica se já existe um concorrentes com mesmo monitored_product_id e URL canônica
+    existing = get_competitor_by_monitored_and_url(
+        db,
+        product_data.monitored_product_id,
+        normalized_url
     )
 
     if existing:
         #Atualiza somente campos relevantes
         previous_price = existing.current_price
+        previous_status = existing.status
         existing.old_price = existing.current_price
         existing.current_price = scraped_info.current_price
         existing.thumbnail = scraped_info.thumbnail
@@ -49,6 +85,7 @@ def create_or_update_competitor_product_scraped(
         existing.last_modified = last_modified or existing.last_modified
         existing.last_checked = last_checked
         existing.status = ProductStatus.available
+        existing.product_url = normalized_url
         db.commit()
         db.refresh(existing)
 
@@ -61,6 +98,7 @@ def create_or_update_competitor_product_scraped(
                 last_checked,
             )
         existing._price_changed = previous_price != scraped_info.current_price
+        existing._availability_changed = previous_status != ProductStatus.available
         return existing
 
     #Caso não exista, cria um registro
@@ -79,7 +117,7 @@ def create_or_update_competitor_product_scraped(
         currency=currency or scraped_info.currency,
         etag=etag,
         last_modified=last_modified,
-    )
+        )
     db.add(new)
     db.commit()
     db.refresh(new)
@@ -92,6 +130,7 @@ def create_or_update_competitor_product_scraped(
             last_checked,
         )
     new._price_changed = True
+    new._availability_changed = True
     return new
 
 def get_all_competitor_products(db: Session) -> List[CompetitorProduct]:

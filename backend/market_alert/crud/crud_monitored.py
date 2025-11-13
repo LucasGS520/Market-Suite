@@ -178,6 +178,7 @@ def create_or_update_monitored_product_scraped(
         elif existing.name_identification is None:
             existing.name_identification = resolved_name
         previous_price = existing.current_price
+        previous_status = existing.status
         existing.current_price = scraped_info.current_price
         existing.thumbnail = scraped_info.thumbnail
         existing.free_shipping = scraped_info.free_shipping
@@ -198,6 +199,7 @@ def create_or_update_monitored_product_scraped(
                 last_checked,
             )
         existing._price_changed = previous_price != scraped_info.current_price
+        existing._availability_changed = previous_status != MonitoredStatus.active
         return existing
 
     #Se não existir, cria o registro
@@ -230,6 +232,7 @@ def create_or_update_monitored_product_scraped(
         )
 
     new._price_changed = True
+    new._availability_changed = True
 
     #Se não houver regras ativas para este produto, cria um padrão
     rules = crud_alert_rules.get_active_alert_rules_for_product(db, user_id, new.id)

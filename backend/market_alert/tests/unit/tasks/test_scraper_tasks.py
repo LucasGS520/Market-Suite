@@ -8,6 +8,7 @@ from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from market_alert.tasks.scraper_tasks import (
     _compute_retry_delay,
+    _result_availability_changed,
     _result_price_changed,
     _result_product_id,
     _result_status,
@@ -97,6 +98,7 @@ def test_result_helpers_accept_result_and_mapping():
     assert _result_status(result) == "success"
     assert _result_product_id(result) == "xyz"
     assert _result_price_changed(result) is False
+    assert _result_availability_changed(result) is False
 
     #Cenário legado onde a task recebe um mapeamento simples
     legacy_mapping = {"status": "not_modified", "product_id": "abc"}
@@ -104,7 +106,7 @@ def test_result_helpers_accept_result_and_mapping():
     assert _result_status(legacy_mapping) == "not_modified"
     assert _result_product_id(legacy_mapping) == "abc"
     assert _result_price_changed(legacy_mapping) is False
-
+    assert _result_availability_changed(legacy_mapping) is False
 
 def test_result_price_changed_defaults_by_status():
     """Sem flag explícita, o status ``success`` implica alteração de preço."""
@@ -113,6 +115,13 @@ def test_result_price_changed_defaults_by_status():
     assert _result_price_changed({"status": "no_result"}) is False
     assert _result_status({}) == "unknown"
 
+def test_result_availability_changed_defaults():
+    """Sem flag explícita, mudanças de disponibilidade não são assumidas."""
+
+    assert _result_availability_changed({}) is False
+    assert _result_availability_changed({"availability_changed": True}) is True
+    result = ScrapeResult(status="success", availability_changed=True)
+    assert _result_availability_changed(result) is True
 
 def test_compute_retry_delay_caps_maximum():
     """Confere limite superior aplicado ao backoff exponencial."""

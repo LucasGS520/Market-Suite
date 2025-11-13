@@ -70,7 +70,7 @@ def _patch_monitored(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Mock, 
     monkeypatch.setattr(monitored.ScraperClient, "fetch", fetch_mock)
     monkeypatch.setattr(monitored.ScraperClient, "aclose", close_mock)
 
-    crud_mock = Mock(return_value=SimpleNamespace(id=uuid4(), _price_changed=True))
+    crud_mock = Mock(return_value=SimpleNamespace(id=uuid4(), _price_changed=True, _availability_changed=False))
     monkeypatch.setattr(monitored, "create_or_update_monitored_product_scraped", crud_mock)
     monkeypatch.setattr(
         monitored,
@@ -78,10 +78,7 @@ def _patch_monitored(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Mock, 
         Mock(return_value=None),
     )
 
-    delay_mock = Mock()
-    monkeypatch.setattr(monitored.compare_prices_task, "delay", delay_mock)
-    
-    return fetch_mock, crud_mock, delay_mock, close_mock
+    return fetch_mock, crud_mock, close_mock
 
 def _patch_competitor(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Mock, AsyncMock]:
     """Prepara dependências dos serviços de concorrentes"""
@@ -106,7 +103,7 @@ def _patch_competitor(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Mock,
     monkeypatch.setattr(competitor.ScraperClient, "fetch", fetch_mock)
     monkeypatch.setattr(competitor.ScraperClient, "aclose", close_mock)
 
-    crud_mock = Mock(return_value=SimpleNamespace(id=uuid4(), _price_changed=True))
+    crud_mock = Mock(return_value=SimpleNamespace(id=uuid4(), _price_changed=True, _availability_changed=False))
     monkeypatch.setattr(competitor, "create_or_update_competitor_product_scraped", crud_mock)
 
     return fetch_mock, crud_mock, close_mock
@@ -116,7 +113,7 @@ def _patch_competitor(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Mock,
 def test_scrape_monitored_sync(monkeypatch: pytest.MonkeyPatch, fake_monitored_payload: MonitoredProductCreateScraping) -> None:
     """Confere se o fluxo síncrono de monitorados persiste dados com sucesso"""
 
-    fetch_mock, crud_mock, delay_mock, close_mock = _patch_monitored(monkeypatch)
+    fetch_mock, crud_mock, close_mock = _patch_monitored(monkeypatch)
 
     result = monitored.scrape_monitored_product(
         db=Mock(spec=Session),
@@ -127,15 +124,18 @@ def test_scrape_monitored_sync(monkeypatch: pytest.MonkeyPatch, fake_monitored_p
 
     fetch_mock.assert_awaited_once()
     crud_mock.assert_called_once()
-    delay_mock.assert_called_once()
     close_mock.assert_awaited_once()
     assert result.status == "success"
+    assert result.price_changed is True
+    assert result.availability_changed is False
+    assert result.price_changed is True
+    assert result.availability_changed is False
 
 @pytest.mark.asyncio
 async def test_scrape_monitored_async(monkeypatch: pytest.MonkeyPatch, fake_monitored_payload: MonitoredProductCreateScraping) -> None:
     """Garante que a versão assíncrona chama o scraper e atualiza registros"""
 
-    fetch_mock, crud_mock, delay_mock, close_mock = _patch_monitored(monkeypatch)
+    fetch_mock, crud_mock, close_mock = _patch_monitored(monkeypatch)
 
     result = await monitored.scrape_monitored_product_async(
         db=Mock(spec=Session),
@@ -146,9 +146,13 @@ async def test_scrape_monitored_async(monkeypatch: pytest.MonkeyPatch, fake_moni
 
     fetch_mock.assert_awaited_once()
     crud_mock.assert_called_once()
-    delay_mock.assert_called_once()
     close_mock.assert_awaited_once()
     assert result.status == "success"
+    assert result.price_changed is True
+    assert result.availability_changed is False
+    assert result.price_changed is True
+    assert result.availability_changed is False
+
 
 @pytest.mark.asyncio
 async def test_scrape_monitored_sanitiza_metadados(
@@ -186,10 +190,9 @@ async def test_scrape_monitored_sanitiza_metadados(
         captured["currency_info"] = scraped_info.currency
         captured["currency_arg"] = currency
         captured["scraped_name"] = scraped_name
-        return SimpleNamespace(id=uuid4(), _price_changed=False)
+        return SimpleNamespace(id=uuid4(), _price_changed=False, _availability_changed=False)
 
     monkeypatch.setattr(monitored, "create_or_update_monitored_product_scraped", Mock(side_effect=_capture))
-    monkeypatch.setattr(monitored.compare_prices_task, "delay", Mock())
 
     result = await monitored.scrape_monitored_product_async(
         db=Mock(spec=Session),
@@ -199,6 +202,8 @@ async def test_scrape_monitored_sanitiza_metadados(
     )
 
     assert result.status == "success"
+    assert result.price_changed is False
+    assert result.availability_changed is False
     assert captured["thumbnail"] is None
     assert captured["currency_info"] == "BRL"
     assert captured["currency_arg"] == "BRL"
@@ -253,8 +258,6 @@ async def test_scrape_monitored_handles_not_modified(monkeypatch: pytest.MonkeyP
     )
     update_mock = Mock()
     monkeypatch.setattr(monitored, "create_or_update_monitored_product_scraped", update_mock)
-    delay_mock = Mock()
-    monkeypatch.setattr(monitored.compare_prices_task, "delay", delay_mock)
 
     result = await monitored.scrape_monitored_product_async(
         db=db,
@@ -272,7 +275,8 @@ async def test_scrape_monitored_handles_not_modified(monkeypatch: pytest.MonkeyP
     assert existing.last_checked is not None
     assert result.status == "not_modified"
     assert result.product_id == str(existing_id)
-    delay_mock.assert_not_called()
+    assert result.price_changed is False
+    assert result.availability_changed is False
 
 # ----- TESTES PARA SERVIÇOS DE CONCORRENTES -----
 

@@ -138,9 +138,10 @@ def _observe_latency(source: str, started_at: float) -> None:
     duration = time.time() - started_at
     SCRAPING_LATENCY_SECONDS.labels(source=source).observe(duration)
 
-def _collect_batch_products(db, batch: Iterable, *, task, logger_bound) -> str:
+def _collect_batch_products(db, batch: Iterable, *, task, logger_bound) -> tuple[str, set]:
     """ Processa lote de produtos monitorados retornando status agregado """
     status = "success"
+    updated_ids: set[str] = set()
     for product in batch:
         product_logger = logger_bound.bind(monitored_id=str(product.id))
         payload = _build_monitored_paylaod(product)
@@ -188,7 +189,10 @@ def _collect_batch_products(db, batch: Iterable, *, task, logger_bound) -> str:
             countdown = _compute_no_result_delay(attempt)
             raise task.retry(countdown=countdown)
         
-    return status
+        if getattr(result, "price_changed", False) or getattr(result, "availability_changed", False):
+            updated_ids.add(str(product.id))
+
+    return status, updated_ids
 
 def _collect_batch_competitors(db, batch: Iterable, *, task, logger_bound) -> tuple[str, set]:
     """ Processa lote de concorrentes retornando status agregado e IDs atualizados """
@@ -250,7 +254,7 @@ def _collect_batch_competitors(db, batch: Iterable, *, task, logger_bound) -> tu
             countdown = _compute_no_result_delay(task.request.retries + 1)
             raise task.retry(countdown=countdown)
         
-        if result.price_changed:
+        if getattr(result, "price_changed", False) or getattr(result, "availability_changed", False):
             updated_ids.add(competitor.monitored_product_id)
 
     return status, updated_ids
@@ -312,7 +316,10 @@ def recheck_monitored_products(self) -> None:
             products = get_products_by_type(db, MonitoringType.scraping)
             batch = products[:BATCH_SIZE_SCRAPING]
 
-            status = _collect_batch_products(db, batch, task=self, logger_bound=task_logger)
+            status, updated_ids = _collect_batch_products(db, batch, task=self, logger_bound=task_logger)
+
+            for monitored_id in updated_ids:
+                compare_prices_task.delay(str(monitored_id))
 
             elapsed_ms = int((time.time() - started_at) * 1000)
             task_logger.info("recheck_monitored_completed", status=status, duration_ms=elapsed_ms, dispatched=len(batch))

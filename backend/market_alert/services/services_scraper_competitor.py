@@ -12,7 +12,10 @@ from backend.shared.schemas.shared_schemas_products import CompetitorProductCrea
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
-from market_alert.crud.crud_competitor import create_or_update_competitor_product_scraped
+from market_alert.crud.crud_competitor import (
+    create_or_update_competitor_product_scraped,
+    get_competitor_by_monitored_and_url,
+)
 from market_alert.models.models_products import CompetitorProduct
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 from market_alert.utils._async_helpers import _run_sync
@@ -31,13 +34,10 @@ logger = structlog.get_logger("scraper_competitor_service")
     
 def _get_existing(db: Session, payload: CompetitorProductCreateScraping) -> CompetitorProduct | None:
     """ Recupera concorrente já persistido para reaproveitar metdados """
-    return (
-        db.query(CompetitorProduct)
-        .filter(
-            CompetitorProduct.monitored_product_id == payload.monitored_product_id,
-            CompetitorProduct.product_url == str(payload.product_url).strip(),
-        )
-        .first()
+    return get_competitor_by_monitored_and_url(
+        db,
+        payload.monitored_product_id,
+        str(payload.product_url),
     )
 
 async def scrape_competitor_product_async(
@@ -123,6 +123,7 @@ async def scrape_competitor_product_async(
         status="success",
         product_id=str(competitor.id),
         price_changed=bool(getattr(competitor, "_price_changed", True)),
+        availability_changed=bool(getattr(competitor, "_availability_changed", True)),
         http_status=200,
     )
 

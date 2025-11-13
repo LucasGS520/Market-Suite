@@ -12,9 +12,15 @@ from backend.shared.schemas.shared_schemas_products import CompetitorProductCrea
 from market_alert.models import User
 from market_alert.schemas.schemas_products import CompetitorProductResponse
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, delete_competitors_by_monitored_id
+from market_alert.crud.crud_competitor import (
+    get_competitors_by_monitored_id,
+    delete_competitors_by_monitored_id,
+    get_competitor_by_monitored_and_url,
+    count_competitors_by_monitored,
+)
 from market_alert.tasks.scraper_tasks import collect_competitor_task
 from market_alert.core.security import get_current_user
+from market_alert.core.config_alert import settings
 
 from shared.utils.url_validation import normalize_and_validate_product_url
 
@@ -64,6 +70,35 @@ def create_competitor_scrape(request: Request, product_data: CompetitorProductCr
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuário não possui permissão para acessar este produto monitorado.",
+        )
+
+    #Checa duplicidade com base na URL canônica
+    existing = get_competitor_by_monitored_and_url(db, mp.id, normalized_url)
+    if existing:
+        logger.info(
+            "competitor_existis",
+            path=request.url.path,
+            method=request.method,
+            monitored_id=str(mp.id),
+            competitor_id=str(existing.id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Concorrente já cadastrado para este produto monitorado.",
+        )
+    
+    competitors_total = count_competitors_by_monitored(db, mp.id)
+    if competitors_total >= settings.MAX_COMPETITORS_PER_MONITORED:
+        logger.warning(
+            "competitor_limit_reached",
+            path=request.url.path,
+            method=request.method,
+            monitored_id=str(mp.id),
+            limit=settings.MAX_COMPETITORS_PER_MONITORED,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Limite de concorrentes atingido para este produto monitorado.",
         )
 
     #Cria um produto concorrente via Celery

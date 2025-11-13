@@ -130,6 +130,12 @@ def _result_price_changed(result: ScrapeResult | Mapping[str, Any] | Any) -> boo
         return _result_status(result) == "success"
     return bool(changed)
 
+def _result_availability_changed(result: ScrapeResult | Mapping[str, Any] | Any) -> bool:
+    """ Determina se houve mudança de disponibilidade, considerando defaults """
+    changed = _result_value(result, "availability_changed")
+    if changed is None:
+        return False
+    return bool(changed)
 
 def _result_product_id(result: ScrapeResult | Mapping[str, Any] | Any) -> str | None:
     """ Normaliza o identificador de produto retornado pelo scraper """
@@ -252,6 +258,7 @@ def collect_product_task(
             product_id = _result_product_id(result) or monitored_id
             status_value = _result_status(result)
             price_changed = _result_price_changed(result)
+            availability_changed = _result_availability_changed(result)
 
             if status_value == "no_result":
                 status = "failure"
@@ -276,9 +283,19 @@ def collect_product_task(
                 duration_ms=elapsed_ms,
                 status=status_value,
                 price_changed=price_changed,
+                availability_changed=availability_changed,
             )
             if redis_client is not None:
                 redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
+
+            if product_id and (price_changed or availability_changed):
+                compare_prices_task.delay(str(product_id))
+                task_logger.info(
+                    "price_comparison_task_dispatched",
+                    reason="product_change",
+                    availability_changed=availability_changed,
+                )
+
         except ScraperClientError as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
@@ -401,12 +418,14 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
 
             status_value = _result_status(result)
             price_changed = _result_price_changed(result)
+            availability_changed = _result_availability_changed(result)
             elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
             task_logger.info(
                 "collect_competitor_completed",
                 duration_ms=elapsed_ms,
                 status=status_value,
                 price_changed=price_changed,
+                availability_changed=availability_changed,
             )
 
             if status_value == "no_result":
@@ -425,9 +444,12 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 )
                 raise self.retry(countdown=delay)
             
-            if price_changed:
+            if price_changed or availability_changed:
                 compare_prices_task.delay(str(monitored_product_id))
-                task_logger.info("price_comparison_task_dispatched")
+                task_logger.info(
+                    "price_comparison_task_dispatched",
+                    availability_changed=availability_changed,
+                )
 
         except ScraperClientError as req_err:
             status = "failure"

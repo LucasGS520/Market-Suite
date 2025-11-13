@@ -169,7 +169,13 @@ def test_collect_product_task_processa_sucesso(monkeypatch):
     def fake_service(*a, **k):
         return ScrapeResult(status="success", product_id=VALID_UUID, price_changed=True)
 
+    captured = {}
+
     _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
+    monkeypatch.setattr(
+        "market_alert.tasks.scraper_tasks.compare_prices_task",
+        SimpleNamespace(delay=lambda value: captured.setdefault("id", value)),
+    )
 
     assert collect_product_task.run(
         "https://mercadolivre.com.br/abc",
@@ -177,7 +183,33 @@ def test_collect_product_task_processa_sucesso(monkeypatch):
         "Produto",
         VALID_UUID,
     ) is None
+    assert captured["id"] == VALID_UUID
 
+def test_collect_product_task_availability_change(monkeypatch):
+    """ Alterações de disponibilidade deve disparar comparação mesmo sem preço """
+    def fake_service(*a, **k):
+        return ScrapeResult(
+            status="success",
+            product_id=VALID_UUID,
+            price_changed=False,
+            availability_changed=True,
+        )
+
+    captured = {}
+
+    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
+    monkeypatch.setattr(
+        "market_alert.tasks.scraper_tasks.compare_prices_task",
+        SimpleNamespace(delay=lambda value: captured.setdefault("id", value)),
+    )
+
+    assert collect_product_task.run(
+        "https://mercadolivre.com.br/abc",
+        VALID_UUID,
+        "Produto",
+        VALID_UUID,
+    ) is None
+    assert captured["id"] == VALID_UUID
 
 def test_collect_product_task_no_result_dispara_retry(monkeypatch):
     """Cenário ``no_result`` deve solicitar reexecução posterior."""
@@ -274,6 +306,29 @@ def test_collect_competitor_task_not_modified(monkeypatch):
 
     assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None
     assert "called" not in captured
+
+def test_collect_competitor_task_availability_change(monkeypatch):
+    """Mudança de disponibilidade do concorrente deve disparar comparação."""
+
+    captured = {}
+
+    def fake_service(*a, **k):
+        return ScrapeResult(
+            status="success",
+            product_id=VALID_UUID,
+            price_changed=False,
+            availability_changed=True,
+        )
+
+    def fake_compare(arg):
+        captured["called_with"] = arg
+
+    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
+    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.compare_prices_task", SimpleNamespace(delay=fake_compare))
+
+    assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None
+    assert captured["called_with"] == VALID_UUID
 
 def test_collect_competitor_task_no_result_dispara_retry(monkeypatch):
     """Resposta ``no_result`` deve reagendar nova tentativa."""

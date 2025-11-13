@@ -118,6 +118,7 @@ class ScrapeResult:
     status: str
     product_id: str | None = None
     price_changed: bool = False
+    availability_changed: bool = False
     http_status: int | None = None
     error_code: str | None = None
     retry_after: int | None = None

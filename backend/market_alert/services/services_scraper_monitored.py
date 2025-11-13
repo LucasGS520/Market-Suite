@@ -20,7 +20,6 @@ from market_alert.crud.crud_monitored import (
 )
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
-from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from market_alert.utils._async_helpers import _run_sync
 from market_alert.services._scraper_common import (
     compute_force_refresh,
@@ -104,14 +103,13 @@ async def _handle_response(
     )
 
     price_changed = bool(getattr(product, "_price_changed", True))
-
-    if price_changed:
-        compare_prices_task.delay(str(product.id))
+    availability_changed = bool(getattr(product, "_availability_changed", True))
 
     return ScrapeResult(
         status="success",
         product_id=str(product.id),
         price_changed=price_changed,
+        availability_changed=availability_changed,
         http_status=200,
     )
 

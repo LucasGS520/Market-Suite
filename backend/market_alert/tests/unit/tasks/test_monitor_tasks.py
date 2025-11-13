@@ -54,7 +54,7 @@ def test_heartbeat_expire(monkeypatch, fake_redis_client, task, key):
     monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
     monkeypatch.setattr(monitor_tasks, "get_products_by_type", lambda db, mt: [])
     monkeypatch.setattr(monitor_tasks, "get_all_competitor_products", lambda db: [])
-    monkeypatch.setattr(monitor_tasks, "_collect_batch_products", lambda *a, **k: "success")
+    monkeypatch.setattr(monitor_tasks, "_collect_batch_products", lambda *a, **k: ("success", set()))
     monkeypatch.setattr(monitor_tasks, "_collect_batch_competitors", lambda *a, **k: ("success", set()))
     monkeypatch.setattr(monitor_tasks, "compare_prices_task", SimpleNamespace(delay=lambda *a, **k: None))
     monkeypatch.setattr(
@@ -189,6 +189,37 @@ def test_recheck_monitored_products_handles_robots_block(monkeypatch):
     assert counter["inc"] == 1
     assert created["error_type"].value == "http_error"
 
+def test_recheck_monitored_products_triggers_compare(monkeypatch):
+    """Alterações detectadas no lote devem agendar comparação."""
+
+    dummy_id = UUID("123e4567-e89b-12d3-a456-426655440099")
+    product = DummyProduct(dummy_id, dummy_id, "http://produto", "Produto")
+
+    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(monitor_tasks, "get_products_by_type", lambda db, mt: [product])
+    monkeypatch.setattr(monitor_tasks, "redis_client", SimpleNamespace(set=lambda *a, **k: None))
+
+    def fake_scrape(*args, **kwargs):
+        return ScrapeResult(
+            status="success",
+            product_id=str(dummy_id),
+            price_changed=False,
+            availability_changed=True,
+        )
+
+    compare_calls = {}
+
+    monkeypatch.setattr(monitor_tasks, "scrape_monitored_product", fake_scrape)
+    monkeypatch.setattr(
+        monitor_tasks,
+        "compare_prices_task",
+        SimpleNamespace(delay=lambda value: compare_calls.setdefault("id", value)),
+    )
+
+    monitor_tasks.recheck_monitored_products.run()
+
+    assert compare_calls["id"] == str(dummy_id)
 
 def test_recheck_competitor_products_retry_on_5xx(monkeypatch):
     """ Valida retry exponencial para erros 5xx em concorrentes """
