@@ -106,6 +106,7 @@ export default function Products() {
   /** Abre modal card-first para adicionar concorrente ao produto escolhido. */
   const handleAddCompetitor = (productId: string) => {
     setSelectedProductId(productId);
+  };
 
   /** Navega para a lista completa de concorrentes daquele produto. */
   const handleViewCompetitors = (productId: string) => {
