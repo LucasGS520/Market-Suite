@@ -170,10 +170,23 @@ def normalize_and_validate_product_url(url: str) -> tuple[str, UrlIssue | None]:
     issue = check_url_compatibility(normalized)
     return normalized, issue
 
+def normalize_product_url_for_storage(url: str) -> str:
+    """ Normaliza URLs para armazenamento tolerando entradas já sanitizadas """
+    raw_value = str(url or "").strip()
+    if not raw_value:
+        return ""
+    
+    try:
+        return normalize_product_url(raw_value)
+    except ValueError:
+        #Mater o valor original evita quebrar dados legados já persistidos
+        return raw_value
+
 __all__ = [
     "UrlIssue",
     "normalize_product_url",
     "normalize_and_validate_product_url",
+    "normalize_product_url_for_storage",
     "check_url_compatibility",
     "SUPPORTED_DOMAINS",
 ]

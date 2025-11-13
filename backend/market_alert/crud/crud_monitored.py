@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
-from shared.utils.url_validation import normalize_product_url
+from shared.utils.url_validation import normalize_product_url_for_storage
 
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
@@ -21,15 +21,6 @@ from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
 from market_alert.crud import crud_alert_rules
 from market_alert.crud import crud_price_history
 
-
-def _normalize_for_lookup(product_url: str) -> str:
-    """ Normaliza a URL para comparações internas tolerando entradas já sanitizadas """
-    raw_value = str(product_url).strip()
-    try:
-        return normalize_product_url(raw_value)
-    except ValueError:
-        #Mantemos fallback em cado de dado legado que não respeita normalização
-        return raw_value
 
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
@@ -78,7 +69,7 @@ def _should_replace_with_scraped(
 def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_url: str) -> MonitoredProduct | None:
     """ Busca produto específico combinando usuário e URL normalizada """
 
-    normalized_url = _normalize_for_lookup(product_url)
+    normalized_url = normalize_product_url_for_storage(product_url)
     return (
         db.query(MonitoredProduct)
         .filter(
@@ -96,7 +87,7 @@ def create_pending_monitored_product(
 ) -> MonitoredProduct:
     """ Cria registro pendente garantindo unicidade por usuário e URL """
 
-    normalized_url = _normalize_for_lookup(product_url)
+    normalized_url = normalize_product_url_for_storage(product_url)
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
 
     if existing:
@@ -157,7 +148,7 @@ def create_or_update_monitored_product_scraped(
     scraped_name: str | None = None,
 ) -> MonitoredProduct:
     """ Cria ou atualiza um produto monitorado a partir de dados de scraping """
-    normalized_url = _normalize_for_lookup(product_data.product_url)
+    normalized_url = normalize_product_url_for_storage(product_data.product_url)
     #A URL chega validada pela API e é preservada para manter unicidade baseada na entrada do usuário
 
     #Verifica se o produto já existe para o usuário

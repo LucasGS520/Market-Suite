@@ -9,21 +9,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
-from shared.utils.url_validation import normalize_product_url
+from shared.utils.url_validation import normalize_product_url_for_storage
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
 
-
-def _normalize_for_lookup(product_url: str) -> str:
-    """ Canonicaliza URLs de concorrentes para comparação e persistência """
-    raw_value = str(product_url).strip()
-    try:
-        return normalize_product_url(raw_value)
-    except ValueError:
-        #Mnatém fallback para cenários legados já sanitizados manualmente
-        return raw_value
     
 def get_competitor_by_monitored_and_url(
     db: Session,
@@ -31,7 +22,7 @@ def get_competitor_by_monitored_and_url(
     product_url: str,
 ) -> CompetitorProduct | None:
     """ Recupera concorrente usando URL canônica vinculada ao monitorado """
-    normalized_url = _normalize_for_lookup(product_url)
+    normalized_url = normalize_product_url_for_storage(product_url)
     return (
         db.query(CompetitorProduct)
         .filter(
@@ -63,7 +54,7 @@ def create_or_update_competitor_product_scraped(
     last_modified: datetime | None = None,
 ) -> CompetitorProduct:
     """ Atualiza ou cria um produto concorrente a partir dos dados do scraping manual com link direto """
-    normalized_url = _normalize_for_lookup(product_data.product_url)
+    normalized_url = normalize_product_url_for_storage(product_data.product_url)
     
     #Verifica se já existe um concorrentes com mesmo monitored_product_id e URL canônica
     existing = get_competitor_by_monitored_and_url(
