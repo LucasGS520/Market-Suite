@@ -248,45 +248,50 @@ def test_bulk_pause_and_resume_competitors(
         status=ProductStatus.available,
     )
     db_session.add_all([competitor_a, competitor_b])
+    db_session.flush()
+
+    monitored_id = monitored.id
+    competitor_a_id = competitor_a.id
+    competitor_b_id = competitor_b.id
     db_session.commit()
 
     pause_response = client.post(
         "/competitors/bulk/pause",
         json={
-            "monitored_product_id": str(monitored.id),
-            "competitor_ids": [str(competitor_a.id), str(competitor_b.id)],
+            "monitored_product_id": str(monitored_id),
+            "competitor_ids": [str(competitor_a_id), str(competitor_b_id)],
         },
     )
 
     assert pause_response.status_code == 200
-    db_session.refresh(competitor_a)
-    db_session.refresh(competitor_b)
+    competitor_a = db_session.get(CompetitorProduct, competitor_a_id)
+    competitor_b = db_session.get(CompetitorProduct, competitor_b_id)
     assert competitor_a.is_paused is True
     assert competitor_b.is_paused is True
 
     resume_response = client.post(
         "/competitors/bulk/resume",
         json={
-            "monitored_product_id": str(monitored.id),
-            "competitor_ids": [str(competitor_a.id)],
+            "monitored_product_id": str(monitored_id),
+            "competitor_ids": [str(competitor_a_id)],
         },
     )
 
     assert resume_response.status_code == 200
-    db_session.refresh(competitor_a)
-    db_session.refresh(competitor_b)
+    competitor_a = db_session.get(CompetitorProduct, competitor_a_id)
+    competitor_b = db_session.get(CompetitorProduct, competitor_b_id)
     assert competitor_a.is_paused is False
     assert competitor_b.is_paused is True
 
     remove_response = client.post(
         "/competitors/bulk/remove",
         json={
-            "monitored_product_id": str(monitored.id),
-            "competitor_ids": [str(competitor_b.id)],
+            "monitored_product_id": str(monitored_id),
+            "competitor_ids": [str(competitor_b_id)],
         },
     )
 
     assert remove_response.status_code == 200
-    remaining = db_session.query(CompetitorProduct).filter_by(monitored_product_id=monitored.id).all()
+    remaining = db_session.query(CompetitorProduct).filter_by(monitored_product_id=monitored_id).all()
     assert len(remaining) == 1
-    assert remaining[0].id == competitor_a.id
+    assert remaining[0].id == competitor_a_id
