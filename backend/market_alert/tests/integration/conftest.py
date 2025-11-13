@@ -103,7 +103,15 @@ def client(db_session, test_user):
             db_session.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_current_user] = lambda: test_user
+    user_id = test_user.id
+
+    def override_get_current_user():
+        """Retorna o usuário sempre reanexado à sessão de teste"""
+
+        # Garante que o usuário utilizado na autenticação esteja associado ao db_session atual
+        return db_session.get(User, user_id)
+
+    app.dependency_overrides[get_current_user] = override_get_current_user
 
     with TestClient(app) as c:
         yield c

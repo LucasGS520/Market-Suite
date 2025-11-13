@@ -167,6 +167,51 @@ def test_list_competitors_returns_paginated_items(
     }
     assert first_item["monitored_product_id"] == str(monitored.id)
 
+def test_bulk_pause_competitors_marks_entries_as_paused(
+    client,
+    db_session,
+    test_user,
+    prepare_test_database,
+):
+    """Certifica que a rota de pausa em massa marca cada concorrente como pausado"""
+
+    monitored = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Headset Gamer",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/headset",
+        status=MonitoredStatus.active,
+    )
+    db_session.add(monitored)
+    db_session.flush()
+
+    competitors = [
+        CompetitorProduct(
+            monitored_product_id=monitored.id,
+            name_competitor=f"Loja Teste {index}",
+            product_url=f"https://example.com/loja-{index}",
+            current_price=Decimal("50.00"),
+            old_price=Decimal("55.00"),
+            status=ProductStatus.available,
+        )
+        for index in range(2)
+    ]
+    db_session.add_all(competitors)
+    db_session.flush()
+
+    monitored_id = monitored.id
+    competitor_ids = [item.id for item in competitors]
+    db_session.commit()
+
+    payload = {
+        "monitored_product_id": str(monitored_id),
+        "competitor_ids": [str(item_id) for item_id in competitor_ids],
+    }
+    response = client.post("/competitors/bulk/pause", json=payload)
+
+    assert response.status_code == 200
+    reloaded = [db_session.get(CompetitorProduct, item.id) for item in competitors]
+    assert all(item.is_paused is True for item in reloaded)
 
 def test_bulk_pause_and_resume_competitors(
     client,
@@ -245,4 +290,3 @@ def test_bulk_pause_and_resume_competitors(
     remaining = db_session.query(CompetitorProduct).filter_by(monitored_product_id=monitored.id).all()
     assert len(remaining) == 1
     assert remaining[0].id == competitor_a.id
-    

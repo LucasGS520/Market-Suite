@@ -243,6 +243,60 @@ def resume_competitors(
         total_processed=len(processed_ids),
     )
 
+@router.post("/bulk/pause", response_model=BulkCompetitorActionResult)
+def pause_competitors(
+    request: Request,
+    payload: BulkCompetitorActionRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """ Pausa o monitoramento dos concorrentes informados """
+
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        monitored_id=str(payload.monitored_product_id),
+        competitors=len(payload.competitor_ids),
+    )
+
+    ensure_user_can_access_monitored(
+        db=db,
+        product_id=payload.monitored_product_id,
+        user=user,
+        context={
+            "path": request.url.path,
+            "method": request.method,
+        },
+    )
+
+    competitors = load_competitors_for_action(
+        db=db,
+        monitored_product_id=payload.monitored_product_id,
+        competitor_ids=payload.competitor_ids,
+    )
+
+    # Reutiliza a função de atualização em massa para marcar os concorrentes como pausados
+    updated = bulk_update_paused_status(db, competitors, paused=True)
+    processed_ids = [item.id for item in updated]
+    skipped = [cid for cid in payload.competitor_ids if cid not in processed_ids]
+
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        processed=len(processed_ids),
+        skipped=len(skipped),
+    )
+
+    return BulkCompetitorActionResult(
+        processed_ids=processed_ids,
+        skipped_ids=skipped,
+        total_processed=len(processed_ids),
+    )
+
 @router.post("/bulk/remove", response_model=BulkCompetitorActionResult)
 def remove_competitors(
     request: Request,
