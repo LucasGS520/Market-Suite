@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from uuid import UUID
 from datetime import datetime
-from typing import List
+from typing import Iterable, List, Sequence
 
-from sqlalchemy import func
+from sqlalchemy import asc, desc, func
 from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
@@ -32,17 +32,17 @@ def get_competitor_by_monitored_and_url(
         .first()
     )
 
-def count_competitors_by_monitored(db: Session, monitored_product_id: UUID) -> int:
+def count_competitors_by_monitored(db: Session, monitored_product_id: UUID, *, include_paused: bool = False) -> int:
     """ Conta quantos concorrentes estão associados ao monitorado informado """
     if not hasattr(db, "query"):
         return 0
-    return int(
-        db.query(func.count(CompetitorProduct.id))
-        .filter(CompetitorProduct.monitored_product_id == monitored_product_id)
-        .scalar()
-        or 0
+    query = db.query(func.count(CompetitorProduct.id)).filter(
+        CompetitorProduct.monitored_product_id == monitored_product_id,
     )
-
+    if not include_paused:
+        query = query.filter(CompetitorProduct.is_paused.is_(False))
+    return int(query.scalar() or 0)
+ 
 def create_or_update_competitor_product_scraped(
     db: Session,
     product_data: CompetitorProductCreateScraping,
@@ -124,9 +124,12 @@ def create_or_update_competitor_product_scraped(
     new._availability_changed = True
     return new
 
-def get_all_competitor_products(db: Session) -> List[CompetitorProduct]:
+def get_all_competitor_products(db: Session, *, include_paused: bool = False) -> List[CompetitorProduct]:
     """ Retorna todos os produtos concorrentes cadastrados no banco """
-    return db.query(CompetitorProduct).all()
+    query = db.query(CompetitorProduct)
+    if not include_paused:
+        query = query.filter(CompetitorProduct.is_paused.is_(False))
+    return query.all()
 
 def get_competitor_products_by_user(db: Session, user_id: UUID) -> List[CompetitorProduct]:
     """ Lista os concorrentes pertencentes a determinado usuário """
@@ -148,18 +151,109 @@ def get_competitor_products_by_type(db: Session, user_id: UUID, monitoring_type:
         ).all()
     )
 
-def get_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) -> List[CompetitorProduct]:
+def get_competitors_by_monitored_id(
+    db: Session,
+    monitored_product_id: UUID,
+    *,
+    include_paused: bool = False,
+) -> List[CompetitorProduct]:
     """ Lista todos os produtos concorrentes associados a um produto monitorado pelo ID """
-    return (
-        db.query(CompetitorProduct)
-        .filter(CompetitorProduct.monitored_product_id == monitored_product_id)
-        .all()
+    query = db.query(CompetitorProduct).filter(
+        CompetitorProduct.monitored_product_id == monitored_product_id,
     )
+    if not include_paused:
+        query = query.filter(CompetitorProduct.is_paused.is_(False))
+    return query.all()
 
 def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) -> List[CompetitorProduct]:
     """ Remove todos os produtos concorrentes vinculados a um produto monitorado """
-    competitors = get_competitors_by_monitored_id(db, monitored_product_id)
+    competitors = get_competitors_by_monitored_id(db, monitored_product_id, include_paused=True)
     for item in competitors:
         db.delete(item)
     db.commit()
     return competitors
+
+def paginate_competitors(
+    db: Session,
+    monitored_product_id: UUID,
+    *,
+    page: int,
+    per_page: int,
+    search: str | None = None,
+    status: ProductStatus | None = None,
+    include_paused: bool = True,
+    sort_by: str = "last_checked",
+    sort_direction: str = "desc",
+) -> tuple[int, List[CompetitorProduct]]:
+    """ Retorna lista paginada de concorrentes considerando filtros e ordenação """
+
+    query = db.query(CompetitorProduct).filter(
+        CompetitorProduct.monitored_product_id == monitored_product_id,
+    )
+
+    if not include_paused:
+        query = query.filter(CompetitorProduct.is_paused.is_(False))
+
+    if search:
+        like_pattern = f"%{search.strip()}%"
+        query = query.filter(CompetitorProduct.name_competitor.ilike(like_pattern))
+
+    if status:
+        query = query.filter(CompetitorProduct.status == status)
+
+    total = int(query.count())
+
+    sort_key = sort_by or "last_checked"
+    price_change_expr = CompetitorProduct.current_price - func.coalesce(
+        CompetitorProduct.old_price,
+        CompetitorProduct.current_price,
+    )
+    order_mapping = {
+        "price": CompetitorProduct.current_price,
+        "last_checked": CompetitorProduct.last_checked,
+        "price_change": price_change_expr,
+    }
+
+    order_column = order_mapping.get(sort_key, CompetitorProduct.last_checked)
+    direction = sort_direction.lower() if sort_direction else "desc"
+    order_clause = desc(order_column) if direction == "desc" else asc(order_column)
+
+    offset_value = max(page - 1, 0) * per_page
+    items = (
+        query.order_by(order_clause, CompetitorProduct.id)
+        .offset(offset_value)
+        .limit(per_page)
+        .all()
+    )
+
+    return total, items
+
+
+def bulk_update_paused_status(
+    db: Session,
+    competitors: Sequence[CompetitorProduct],
+    *,
+    paused: bool,
+) -> Sequence[CompetitorProduct]:
+    """ Atualiza o status de pausa para os concorrentes informados """
+
+    for competitor in competitors:
+        competitor.is_paused = paused
+    db.commit()
+    for competitor in competitors:
+        db.refresh(competitor)
+    return competitors
+
+
+def bulk_delete_competitors(
+    db: Session,
+    competitors: Iterable[CompetitorProduct],
+) -> int:
+    """ Remove concorrentes informados em lote """
+
+    removed = 0
+    for competitor in competitors:
+        db.delete(competitor)
+        removed += 1
+    db.commit()
+    return removed

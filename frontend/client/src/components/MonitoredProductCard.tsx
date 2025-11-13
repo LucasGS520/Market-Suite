@@ -141,8 +141,8 @@ const formatRelativeTime = (timestamp: string | null): string => {
  */
 const mapCompetitorToSummary = (competitor: Competitor): CompetitorSummary => ({
   id: competitor.id,
-  name: competitor.name_competitor,
-  currentPrice: toNumberOrNull(competitor.current_price),
+  name: competitor.name,
+  currentPrice: competitor.current_price,
 });
 
 /**
@@ -324,8 +324,13 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
     setCompetitorsError(null);
 
     try {
-      const response = await getCompetitors(token, product.id);
-      const summary = response.map(mapCompetitorToSummary);
+      const response = await getCompetitors(token, product.id, {
+        per_page: COMPETITOR_HIGHLIGHT_COUNT,
+        sort_by: 'price',
+        sort_direction: 'asc',
+        include_paused: false,
+      });
+      const summary = response.items.map(mapCompetitorToSummary);
       setCompetitors(summary);
       hasLoadedCompetitorsRef.current = true;
     } catch (error) {

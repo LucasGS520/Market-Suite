@@ -64,3 +64,39 @@ class CompetitorProductResponse(BaseModel):
     last_checked: Optional[datetime]
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
+    is_paused: bool
+
+class CompetitorListItemResponse(BaseModel):
+    """ Estrutura resumida usada na listagem paginada de concorrentes """
+    id: UUID
+    monitored_product_id: UUID
+    name: str
+    product_url: HttpUrl
+    current_price: Optional[str]
+    previous_price: Optional[str]
+    price_change: Optional[str]
+    price_change_percentage: Optional[str]
+    status: ProductStatus
+    last_checked: Optional[datetime]
+    is_paused: bool
+
+
+class PaginatedCompetitorResponse(BaseModel):
+    """ Envelope padronizado para retornar concorrentes paginados """
+    items: list[CompetitorListItemResponse]
+    total: int
+    page: int
+    per_page: int
+
+
+class BulkCompetitorActionRequest(BaseModel):
+    """ Entrada de ações em massa sobre concorrentes específicos """
+    monitored_product_id: UUID
+    competitor_ids: list[UUID] = Field(..., min_length=1)
+
+
+class BulkCompetitorActionResult(BaseModel):
+    """ Resultado das ações em massa executadas para concorrentes """
+    processed_ids: list[UUID]
+    skipped_ids: list[UUID]
+    total_processed: int

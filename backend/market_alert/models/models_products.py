@@ -100,6 +100,7 @@ class CompetitorProduct(Base):
 
     #Controle de status
     status = Column(PgEnum(ProductStatus, name="product_status_enum"), nullable=False, default=ProductStatus.available)
+    is_paused = Column(Boolean, nullable=False, default=False)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

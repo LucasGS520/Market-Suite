@@ -477,24 +477,85 @@ const mapComparisonSummaryFromApi = (
 };
 
 /**
- * Interface para concorrente (Competitor).
- * Representa um produto similar cadastrado como concorrente de um monitorado.
+ * Interface para concorrente na listagem card-first.
+ * Mantém números já convertidos para facilitar cálculos na camada de UI.
  */
 export interface Competitor {
   id: string;
   monitored_product_id: string;
-  name_competitor: string;
+  name: string;
+  product_url: string;
+  current_price: number | null;
+  previous_price: number | null;
+  price_change: number | null;
+  price_change_percentage: number | null;
+  status: 'available' | 'unavailable' | 'removed';
+  last_checked: string | null;
+  is_paused: boolean;
+}
+
+/**
+ * Parâmetros aceitos pela listagem paginada de concorrentes.
+ */
+export interface CompetitorQueryParams {
+  page?: number;
+  per_page?: number;
+  search?: string;
+  status?: Competitor['status'];
+  include_paused?: boolean;
+  sort_by?: 'price' | 'last_checked' | 'price_change';
+  sort_direction?: 'asc' | 'desc';
+}
+
+/**
+ * Resposta paginada de concorrentes convertida para tipos amigáveis.
+ */
+export interface PaginatedCompetitors {
+  items: Competitor[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+/**
+ * Payload padrão para ações em massa sobre concorrentes.
+ */
+export interface CompetitorBulkActionPayload {
+  monitored_product_id: string;
+  competitor_ids: string[];
+}
+
+/**
+ * Estrutura de retorno das ações em massa executadas pelo backend.
+ */
+export interface CompetitorBulkActionResult {
+  processed_ids: string[];
+  skipped_ids: string[];
+  total_processed: number;
+}
+
+/**
+ * Estrutura bruta retornada pelo backend para cada concorrente da listagem.
+ */
+interface CompetitorListItemApiResponse {
+  id: string;
+  monitored_product_id: string;
+  name: string;
   product_url: string;
   current_price: string | number | null;
-  old_price?: string | number | null;
-  free_shipping?: boolean | null;
-  seller?: string | null;
-  seller_rating?: number | null;
-  thumbnail?: string | null;
-  status: 'available' | 'unavailable' | 'removed';
-  last_checked?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
+  previous_price: string | number | null;
+  price_change: string | number | null;
+  price_change_percentage: string | number | null;
+  status: Competitor['status'];
+  last_checked: string | null;
+  is_paused: boolean;
+}
+
+interface PaginatedCompetitorsApiResponse {
+  items: CompetitorListItemApiResponse[];
+  total: number;
+  page: number;
+  per_page: number;
 }
 
 /**
@@ -605,6 +666,15 @@ export const getMonitoredProducts = async (
 };
 
 /**
+ * API: Obter detalhes de um produto monitorado pelo ID.
+ * GET /monitored/{id}
+ */
+export const getMonitoredProduct = async (token: string, id: string): Promise<MonitoredProduct> => {
+  const data = await apiRequest<MonitoredProductApiResponse>(`/monitored/${id}`, { token });
+  return mapMonitoredProductFromApi(data);
+};
+
+/**
  * API: Agendar scraping de produto monitorado (coleta imediata via backend).
  * POST /monitored/scrape
  */
@@ -622,11 +692,92 @@ export const scrapeMonitoredProduct = (
   });
 
 /**
- * API: Listar concorrentes de um produto monitorado.
- * GET /competitors/{monitoredProductId}
+ * Converte um item bruto de concorrente em estrutura amigável para UI.
  */
-export const getCompetitors = (token: string, monitoredProductId: string) =>
-  apiRequest<Competitor[]>(`/competitors/${monitoredProductId}`, { token });
+const mapCompetitorFromApi = (item: CompetitorListItemApiResponse): Competitor => ({
+  id: item.id,
+  monitored_product_id: item.monitored_product_id,
+  name: item.name,
+  product_url: item.product_url,
+  current_price: toNumberOrNull(item.current_price),
+  previous_price: toNumberOrNull(item.previous_price),
+  price_change: toNumberOrNull(item.price_change),
+  price_change_percentage: toNumberOrNull(item.price_change_percentage),
+  status: item.status,
+  last_checked: item.last_checked,
+  is_paused: item.is_paused,
+});
+
+/**
+ * API: Listar concorrentes de um produto monitorado com filtros e paginação.
+ * GET /competitors?monitored_id=...
+ */
+export const getCompetitors = async (
+  token: string,
+  monitoredProductId: string,
+  params?: CompetitorQueryParams,
+): Promise<PaginatedCompetitors> => {
+  const searchParams = new URLSearchParams();
+  searchParams.set('monitored_id', monitoredProductId);
+
+  if (params?.page) searchParams.set('page', params.page.toString());
+  if (params?.per_page) searchParams.set('per_page', params.per_page.toString());
+  if (params?.search) searchParams.set('search', params.search);
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.include_paused !== undefined) searchParams.set('include_paused', String(params.include_paused));
+  if (params?.sort_by) searchParams.set('sort_by', params.sort_by);
+  if (params?.sort_direction) searchParams.set('sort_direction', params.sort_direction);
+
+  const data = await apiRequest<PaginatedCompetitorsApiResponse>(`/competitors?${searchParams.toString()}`, {
+    token,
+  });
+
+  return {
+    items: data.items.map(mapCompetitorFromApi),
+    total: data.total,
+    page: data.page,
+    per_page: data.per_page,
+  };
+};
+
+/**
+ * API: Pausar concorrentes selecionados.
+ */
+export const pauseCompetitors = (
+  token: string,
+  payload: CompetitorBulkActionPayload,
+): Promise<CompetitorBulkActionResult> =>
+  apiRequest<CompetitorBulkActionResult>('/competitors/bulk/pause', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+/**
+ * API: Retomar concorrentes selecionados.
+ */
+export const resumeCompetitors = (
+  token: string,
+  payload: CompetitorBulkActionPayload,
+): Promise<CompetitorBulkActionResult> =>
+  apiRequest<CompetitorBulkActionResult>('/competitors/bulk/resume', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+/**
+ * API: Remover concorrentes selecionados.
+ */
+export const removeCompetitors = (
+  token: string,
+  payload: CompetitorBulkActionPayload,
+): Promise<CompetitorBulkActionResult> =>
+  apiRequest<CompetitorBulkActionResult>('/competitors/bulk/remove', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 
 /**
  * API: Agendar scraping de concorrente.
