@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useLocation } from 'wouter';
 import { Loader2, AlertCircle, RotateCcw } from 'lucide-react';
@@ -10,6 +10,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/feedback/al
 import MonitoredProductCard from '@/components/MonitoredProductCard';
 import { toast } from 'sonner';
 import type { MonitoredProduct } from '@/lib/api';
+import AddCompetitorModal from '@/components/modals/AddCompetitorModal';
+
 
 /**
  * Página: Produtos Monitorados
@@ -33,6 +35,7 @@ export default function Products() {
     error,
     fetchNextPage,
     refetch,
+    optimisticallyIncrementCompetitorsCount,
   } = useMonitoredProducts();
 
   // Router imperativo via wouter
@@ -40,6 +43,20 @@ export default function Products() {
 
   // Estado local que guarda o id do produto que está sendo atualizado individualmente
   const [refreshingProductId, setRefreshingProductId] = useState<string | null>(null);
+  // Produto associado ao modal de adição de concorrente.
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+
+  // Produto atual derivado da lista global garantindo sincronismo com atualizações otimistas.
+  const selectedProduct = useMemo(
+    () => products.find((item) => item.id === selectedProductId) ?? null,
+    [products, selectedProductId],
+  );
+
+  useEffect(() => {
+    if (selectedProductId && !selectedProduct) {
+      setSelectedProductId(null);
+    }
+  }, [selectedProduct, selectedProductId]);
 
   // Rótulo resumido da faixa exibida (ex: "Exibindo X de Y")
   const rangeLabel = useMemo(() => {
@@ -86,15 +103,28 @@ export default function Products() {
     });
   };
 
-  /** Navega para a rota de cadastro de concorrente já posicionando o hash do formulário. */
+  /** Abre modal card-first para adicionar concorrente ao produto escolhido. */
   const handleAddCompetitor = (productId: string) => {
-    navigate(`/competitors/${productId}#novo-concorrente`);
-  };
+    setSelectedProductId(productId);
 
   /** Navega para a lista completa de concorrentes daquele produto. */
   const handleViewCompetitors = (productId: string) => {
     navigate(`/competitors/${productId}`);
   };
+
+  /** Fecha modal de concorrentes limpando seleção atual. */
+  const handleCloseAddCompetitor = useCallback(() => {
+    setSelectedProductId(null);
+  }, []);
+
+  /** Atualiza contador de concorrentes no cache após agendamento bem-sucedido. */
+  const handleCompetitorScheduled = useCallback(() => {
+    if (!selectedProductId) {
+      return;
+    }
+
+    optimisticallyIncrementCompetitorsCount(selectedProductId);
+  }, [optimisticallyIncrementCompetitorsCount, selectedProductId]);
 
   /**
    * Trigger para carregar a próxima página de resultados.
@@ -209,6 +239,15 @@ export default function Products() {
               />
             </div>
           )}
+        />
+      )}
+
+      {selectedProduct && (
+        <AddCompetitorModal
+          product={selectedProduct}
+          isOpen={Boolean(selectedProduct)}
+          onClose={handleCloseAddCompetitor}
+          onScheduled={handleCompetitorScheduled}
         />
       )}
     </div>

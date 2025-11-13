@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useCallback, useMemo } from 'react';
+import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { MonitoredProduct, PaginatedMonitoredProducts, getMonitoredProducts } from '@/lib/api';
 
@@ -22,6 +22,7 @@ type UseMonitoredProductsResult = {
   error: string | null;
   fetchNextPage: () => Promise<unknown>;
   refetch: () => Promise<void>;
+  optimisticallyIncrementCompetitorsCount: (productId: string) => void;
 };
 
 /**
@@ -33,9 +34,11 @@ type UseMonitoredProductsResult = {
  */
 export const useMonitoredProducts = (): UseMonitoredProductsResult => {
   const { token } = useAuth();
+  const queryClient = useQueryClient();
+  const queryKey = ['monitored-products', token] as const;
 
   const query = useInfiniteQuery<PaginatedMonitoredProducts>({
-    queryKey: ['monitored-products', token] as const,
+    queryKey,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     retry: 1,
@@ -81,6 +84,46 @@ export const useMonitoredProducts = (): UseMonitoredProductsResult => {
     return;
   };
 
+  /**
+   * Atualiza o cache local incrementando o contador de concorrentes do produto.
+   * Mantém imutabilidade das páginas para que a lista virtualizada reflita o novo valor.
+   */
+  const optimisticallyIncrementCompetitorsCount = useCallback(
+    (productId: string) => {
+      if (!token) {
+        return;
+      }
+
+      queryClient.setQueryData<InfiniteData<PaginatedMonitoredProducts>>(queryKey, (data) => {
+        if (!data) {
+          return data;
+        }
+
+        const nextPages = data.pages.map((page) => ({
+          ...page,
+          items: page.items.map((item) => {
+            if (item.id !== productId) {
+              return item;
+            }
+
+            const currentCount = item.competitors_count ?? 0;
+
+            return {
+              ...item,
+              competitors_count: currentCount + 1,
+            };
+          }),
+        }));
+
+        return {
+          ...data,
+          pages: nextPages,
+        };
+      });
+    },
+    [queryClient, queryKey, token],
+  );
+
   return {
     products,
     total,
@@ -92,5 +135,6 @@ export const useMonitoredProducts = (): UseMonitoredProductsResult => {
     error: errorMessage,
     fetchNextPage: () => query.fetchNextPage(),
     refetch,
+    optimisticallyIncrementCompetitorsCount,
   };
 };

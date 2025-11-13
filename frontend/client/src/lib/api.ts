@@ -354,13 +354,26 @@ export interface MonitoredProduct {
 
 /**
  * Estrutura bruta do resumo competitivo retornado pelo backend.
+ * 
+ * Mantém campos novos (contract card-first) e legados para garantir compatibilidade durante a transição do backend.
  */
 export interface ComparisonSummaryApiResponse {
+  monitored_price?: string | number | null;
+  competitors_count?: number | string | null;
+  competitors_with_price_count?: number | string | null;
+  competitors_mean?: string | number | null;
+  competitors_min?: string | number | null;
+  competitors_max?: string | number | null;
+  potential_savings?: string | number | null;
+  comparison_id?: string | null;
+  last_comparison_at?: string | null;
+  comparison_insights?: string | null;
+  position_rank?: string | number | null;
+  
+  /** Campos legados preservados para retrocompatibilidade de deploy. */
   average_competitor_price?: string | number | null;
   min_competitor_price?: string | number | null;
   max_competitor_price?: string | number | null;
-  position_rank?: string | number | null;
-  comparison_insights?: string | null;
 }
 
 /**
@@ -433,25 +446,35 @@ export const mapMonitoredProductFromApi = (
  */
 const mapComparisonSummaryFromApi = (
   summary: ComparisonSummaryApiResponse,
-): ComparisonSummary => ({
-  monitored_price: toNumberOrNull(summary.monitored_price),
-  competitors_count:
-    summary.competitors_count !== undefined && summary.competitors_count !== null
-      ? Number(toNumberOrNull(summary.competitors_count)) || 0
-      : 0,
-  competitors_with_price_count:
-    summary.competitors_with_price_count !== undefined && summary.competitors_with_price_count !== null
-      ? Number(toNumberOrNull(summary.competitors_with_price_count)) || 0
-      : 0,
-  competitors_mean: toNumberOrNull(summary.competitors_mean),
-  competitors_min: toNumberOrNull(summary.competitors_min),
-  competitors_max: toNumberOrNull(summary.competitors_max),
-  position_rank: toNumberOrNull(summary.position_rank),
-  potential_savings: toNumberOrNull(summary.potential_savings),
-  comparison_insights: summary.comparison_insights ?? null,
-  comparison_id: summary.comparison_id ?? null,
-  last_comparison_at: summary.last_comparison_at ?? null,
-});
+): ComparisonSummary => {
+  /**
+   * Campos de preço mantêm fallback para nomenclaturas antigas evitando que cartões
+   * fiquem vazios durante rollout parcial do backend.
+   */
+  const meanSource = summary.competitors_mean ?? summary.average_competitor_price;
+  const minSource = summary.competitors_min ?? summary.min_competitor_price;
+  const maxSource = summary.competitors_max ?? summary.max_competitor_price;
+
+  return {
+    monitored_price: toNumberOrNull(summary.monitored_price),
+    competitors_count:
+      summary.competitors_count !== undefined && summary.competitors_count !== null
+        ? Number(toNumberOrNull(summary.competitors_count)) || 0
+        : 0,
+    competitors_with_price_count:
+      summary.competitors_with_price_count !== undefined && summary.competitors_with_price_count !== null
+        ? Number(toNumberOrNull(summary.competitors_with_price_count)) || 0
+        : 0,
+    competitors_mean: toNumberOrNull(meanSource),
+    competitors_min: toNumberOrNull(minSource),
+    competitors_max: toNumberOrNull(maxSource),
+    position_rank: toNumberOrNull(summary.position_rank),
+    potential_savings: toNumberOrNull(summary.potential_savings),
+    comparison_insights: summary.comparison_insights ?? null,
+    comparison_id: summary.comparison_id ?? null,
+    last_comparison_at: summary.last_comparison_at ?? null,
+  };
+};
 
 /**
  * Interface para concorrente (Competitor).
