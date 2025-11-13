@@ -312,10 +312,13 @@ export interface MonitoredProductApiResponse {
   status: MonitoredStatus;
   last_checked?: string | null;
   competitors_count?: number | string | null;
-  average_competitor_price?: string | number | null;
-  min_competitor_price?: string | number | null;
-  max_competitor_price?: string | number | null;
+  competitors_mean?: string | number | null;
+  competitors_min?: string | number | null;
+  competitors_max?: string | number | null;
   position_rank?: number | string | null;
+  potential_savings?: string | number | null;
+  competitors_with_price_count?: number | string | null;
+  latest_comparison_id?: string | null;
   last_comparison_at?: string | null;
   is_new?: boolean | null;
   comparison_insights?: string | null;
@@ -337,10 +340,13 @@ export interface MonitoredProduct {
   status: MonitoredStatus;
   last_checked: string | null;
   competitors_count: number | null;
-  average_competitor_price: number | null;
-  min_competitor_price: number | null;
-  max_competitor_price: number | null;
+  competitors_mean: number | null;
+  competitors_min: number | null;
+  competitors_max: number | null;
   position_rank: number | null;
+  potential_savings: number | null;
+  competitors_with_price_count: number | null;
+  latest_comparison_id: string | null;
   last_comparison_at: string | null;
   is_new: boolean;
   comparison_insights: string | null;
@@ -361,11 +367,17 @@ export interface ComparisonSummaryApiResponse {
  * Estrutura normalizada do resumo competitivo consumido pelo frontend.
  */
 export interface ComparisonSummary {
-  average_competitor_price: number | null;
-  min_competitor_price: number | null;
-  max_competitor_price: number | null;
+  monitored_price?: string | number | null;
+  competitors_count?: number | string | null;
+  competitors_with_price_count?: number | string | null;
+  competitors_mean?: string | number | null;
+  competitors_min?: string | number | null;
+  competitors_max?: string | number | null;
   position_rank: number | null;
+  potential_savings?: string | number | null;
   comparison_insights: string | null;
+  comparison_id?: string | null;
+  last_comparison_at?: string | null;
 }
 
 /**
@@ -378,7 +390,7 @@ const toNumberOrNull = (value: string | number | null | undefined): number | nul
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
+};
 
 /**
  * Normaliza o payload recebido da API para o formato consumido na UI 
@@ -401,10 +413,16 @@ export const mapMonitoredProductFromApi = (
     product.competitors_count !== undefined && product.competitors_count !== null
       ? toNumberOrNull(product.competitors_count)
       : null,
-  average_competitor_price: toNumberOrNull(product.average_competitor_price),
-  min_competitor_price: toNumberOrNull(product.min_competitor_price),
-  max_competitor_price: toNumberOrNull(product.max_competitor_price),
+  competitors_mean: toNumberOrNull(product.competitors_mean),
+  competitors_min: toNumberOrNull(product.competitors_min),
+  competitors_max: toNumberOrNull(product.competitors_max),
   position_rank: toNumberOrNull(product.position_rank),
+  potential_savings: toNumberOrNull(product.potential_savings),
+  competitors_with_price_count:
+    product.competitors_with_price_count !== undefined && product.competitors_with_price_count !== null
+      ? toNumberOrNull(product.competitors_with_price_count)
+      : null,
+  latest_comparison_id: product.latest_comparison_id ?? null,
   last_comparison_at: product.last_comparison_at ?? null,
   is_new: Boolean(product.is_new),
   comparison_insights: product.comparison_insights ?? null,
@@ -416,11 +434,23 @@ export const mapMonitoredProductFromApi = (
 const mapComparisonSummaryFromApi = (
   summary: ComparisonSummaryApiResponse,
 ): ComparisonSummary => ({
-  average_competitor_price: toNumberOrNull(summary.average_competitor_price),
-  min_competitor_price: toNumberOrNull(summary.min_competitor_price),
-  max_competitor_price: toNumberOrNull(summary.max_competitor_price),
+  monitored_price: toNumberOrNull(summary.monitored_price),
+  competitors_count:
+    summary.competitors_count !== undefined && summary.competitors_count !== null
+      ? Number(toNumberOrNull(summary.competitors_count)) || 0
+      : 0,
+  competitors_with_price_count:
+    summary.competitors_with_price_count !== undefined && summary.competitors_with_price_count !== null
+      ? Number(toNumberOrNull(summary.competitors_with_price_count)) || 0
+      : 0,
+  competitors_mean: toNumberOrNull(summary.competitors_mean),
+  competitors_min: toNumberOrNull(summary.competitors_min),
+  competitors_max: toNumberOrNull(summary.competitors_max),
   position_rank: toNumberOrNull(summary.position_rank),
+  potential_savings: toNumberOrNull(summary.potential_savings),
   comparison_insights: summary.comparison_insights ?? null,
+  comparison_id: summary.comparison_id ?? null,
+  last_comparison_at: summary.last_comparison_at ?? null,
 });
 
 /**
