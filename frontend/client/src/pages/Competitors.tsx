@@ -6,7 +6,7 @@
  * - Integra modal card-first para adicionar novos concorrentes com feedback otimista.
  */
 
-import React, { use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation, useRoute } from 'wouter';
 import { toast } from 'sonner';

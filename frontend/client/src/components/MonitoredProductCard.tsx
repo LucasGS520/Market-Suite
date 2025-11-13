@@ -107,7 +107,7 @@ const formatRelativeTime = (timestamp: string | null): string => {
     return 'Data inválida';
   }
 
-    const now = Date.now();
+  const now = Date.now();
   const diffInSeconds = Math.round((parsed.getTime() - now) / 1000);
   const absoluteSeconds = Math.abs(diffInSeconds);
   const formatter = new Intl.RelativeTimeFormat('pt-BR', { numeric: 'auto' });
