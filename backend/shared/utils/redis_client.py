@@ -1,12 +1,18 @@
-""" Inicialização e acesso compartilhado ao cliente Redis
+""" Inicialização de clientes Redis e utilidades compartilhadas
 
-Reutilizado por `market_alert` e `market_scraper` para gerenciar
-a flag de suspensão de scraping
+Este módulo provê funções reutilizadas nos serviços para recuperar
+clientes isolados por thread, criar chaves com TTL e aplicar limites
+de taxa baseados em Redis. Ele também concentra a lógica do *leaky
+bucket* utilizada pelas rotas HTTP para evitar explosões de requisições.
 """
 
+from __future__ import annotations
+
 import logging
+import math
 import threading
-from typing import Any
+import time
+from typing import Any, Tuple
 import redis
 
 from shared.core.config_base import ConfigBase
@@ -18,6 +24,48 @@ _thread_local = threading.local()
 logger = logging.getLogger(__name__)
 SCRAPING_SUSPENDED_KEY = "scraping:suspended"
 _settings = ConfigBase()
+
+_LEAKY_BUCKET_SCRIPT = """
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local leak_rate = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local ttl = tonumber(ARGV[4])
+
+local state = redis.call('GET', key)
+local tokens = 0.0
+local last = now
+
+if state then
+    local separator = string.find(state, '|')
+    if separator then
+        tokens = tonumber(string.sub(state, 1, separator - 1)) or 0.0
+        last = tonumber(string.sub(state, separator + 1)) or now
+    else
+        tokens = tonumber(state) or 0.0
+    end
+    local elapsed = now - last
+    if elapsed > 0 then
+        local leaked = elapsed * leak_rate
+        tokens = tokens - leaked
+        if tokens < 0 then
+            tokens = 0.0
+        end
+    end
+end
+
+local allowed = 0
+if tokens < capacity then
+    tokens = tokens + 1
+    allowed = 1
+end
+
+redis.call('SET', key, string.format('%.4f|%.4f', tokens, now), 'EX', ttl)
+
+return {allowed, tokens}
+"""
+
+_registered_scripts: dict[int, Any] = {}
 
 def get_redis_client() -> redis.Redis | None:
     """ Retorna um cliente Redis isolado por thread
@@ -84,6 +132,74 @@ def set_key_with_ttl(key: str, value: Any, ttl_seconds: int, *, only_if_absent: 
 
     return bool(result)
 
+def consume_leaky_bucket(
+    key: str,
+    *,
+    capacity: int,
+    leak_rate_per_second: float,
+    ttl_seconds: int | None = None,
+    now: float | None = None,
+) -> Tuple[bool, float | None]:
+    """Consome um *token* do balde vazante controlando limites de requisições.
+
+    A função aplica um algoritmo de *leaky bucket* no Redis. Em cada chamada,
+    calculamos a quantidade de *tokens* que deveriam ter vazado desde o último
+    registro e, se o balde ainda não está cheio, consumimos um novo *token*.
+    Quando o Redis não estiver disponível, consideramos a requisição permitida
+    para manter o serviço funcional.
+
+    Parâmetros
+    ----------
+    key:
+        Chave única que identifica o balde (ex.: ``rate:user:123``).
+    capacity:
+        Quantidade máxima de requisições acumuladas permitidas no intervalo.
+    leak_rate_per_second:
+        Taxa de vazão em tokens por segundo (``capacity / janela``).
+    ttl_seconds:
+        Tempo de vida do registro no Redis. Se omitido, utiliza duas janelas
+        completas como margem de segurança.
+    now:
+        Timestamp atual em segundos. Mantido parametrizável para facilitar
+        testes determinísticos.
+
+    Retorno
+    -------
+    tuple[bool, float | None]
+        ``(permitido, tokens_atualizados)``. O segundo valor pode ser ``None``
+        quando o Redis estiver indisponível.
+    """
+
+    client = get_redis_client()
+    if client is None:
+        logger.warning("leaky_bucket_disabled", reason="redis_unavailable", key=key)
+        return True, None
+
+    if capacity <= 0 or leak_rate_per_second <= 0:
+        logger.warning("leaky_bucket_invalid_parameters", key=key)
+        return True, None
+
+    current_time = now or time.time()
+    ttl = ttl_seconds
+    if ttl is None:
+        window_seconds = max(1.0, capacity / leak_rate_per_second)
+        ttl = max(1, int(math.ceil(window_seconds * 2)))
+
+    try:
+        client_id = id(client)
+        script = _registered_scripts.get(client_id)
+        if script is None:
+            script = client.register_script(_LEAKY_BUCKET_SCRIPT)
+            _registered_scripts[client_id] = script
+
+        allowed, tokens = script(
+            keys=[key],
+            args=[capacity, leak_rate_per_second, current_time, ttl],
+        )
+        return bool(int(allowed)), float(tokens)
+    except Exception as exc:  # pragma: no cover - proteção contra falhas externas
+        logger.warning("leaky_bucket_execution_failed", key=key, error=str(exc))
+        return True, None
 
 def key_exists(key: str) -> bool:
     """ Verifica de forma resiliente se uma chave existe no Redis """

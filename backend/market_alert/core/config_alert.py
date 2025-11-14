@@ -111,8 +111,8 @@ class Settings(ConfigBase):
         os.getenv("MAX_COMPETITORS_PER_MONITORED", "10")
     ) #Limite padrão de concorrentes por produto monitorado
     IDEMPOTENCY_TTL_SECONDS: int = int(
-        os.getenv("IDEMPOTENCY_TTL_SECONDS", str(10 * 60))
-    ) #Tempo padrão para reter chaves de idempotência
+        os.getenv("IDEMPOTENCY_TTL_SECONDS", str(60 * 60))
+    ) #Tempo padrão para reter chaves de idempotência (1h)
     COMPARISON_IDEMPOTENCY_TTL_SECONDS: int = int(
         os.getenv("COMPARISON_IDEMPOTENCY_TTL_SECONDS", str(60 * 60))
     ) #TTL específico para deduplicação de comparações automáticas

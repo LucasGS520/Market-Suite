@@ -13,6 +13,7 @@ import structlog
 import time
 
 from shared.metrics.metrics_price_comparison import PRICE_COMPARISON_DURATION_SECONDS, PRICE_COMPARISONS_TOTAL, PRICE_ALERTS_TOTAL
+from shared.utils.url_validation import canonicalize_product_url
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
@@ -21,6 +22,7 @@ from market_alert.crud.crud_comparison import (
     upsert_price_comparison_summary,
 )
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
+from market_alert.models.models_products import CompetitorProduct
 from market_alert.utils.comparator import compare_prices
 from market_alert.core.config_alert import settings
 
@@ -42,6 +44,7 @@ def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | N
 
         #Recupera concorrentes associados
         competitors = get_competitors_by_monitored_id(db, monitored_id)
+        competitors = _deduplicate_competitors(competitors)
         logger.info("comparison_started", monitored_id=str(monitored_id), competitors=len(competitors))
 
         tol = tolerance if tolerance is not None else Decimal(str(settings.PRICE_TOLERANCE))
@@ -86,6 +89,37 @@ def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | N
             PRICE_ALERTS_TOTAL.inc(len(alerts))
 
     return result, alerts
+
+def _deduplicate_competitors(competitors: List[CompetitorProduct]) -> List[CompetitorProduct]:
+    """Remove duplicidades de concorrentes com base na URL canônica."""
+
+    if not competitors:
+        return []
+
+    deduped: dict[str, CompetitorProduct] = {}
+    for competitor in competitors:
+        raw_url = getattr(competitor, "product_url", "") or ""
+        try:
+            canonical = canonicalize_product_url(raw_url)
+        except ValueError:
+            canonical = raw_url.strip()
+
+        if not canonical:
+            canonical = str(getattr(competitor, "id", ""))
+
+        existing = deduped.get(canonical)
+        if existing is None:
+            deduped[canonical] = competitor
+            continue
+
+        existing_checked = getattr(existing, "last_checked", None)
+        current_checked = getattr(competitor, "last_checked", None)
+        if existing_checked is None or (
+            current_checked is not None and current_checked > existing_checked
+        ):
+            deduped[canonical] = competitor
+
+    return list(deduped.values())
 
 def _to_decimal(value: Any) -> Optional[Decimal]:
     """ Converte valores do JSON armazenado para Decimal quando possível """

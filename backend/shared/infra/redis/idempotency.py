@@ -1,10 +1,9 @@
 """ Utilidades de idempotência apoiadas em Redis
 
-Este módulo centraliza o uso de chaves ``Idempotency-Key`` aceitas pela API.
-Ele mantém um contrato simples: ao registrar uma chave para um namespace
-específico, o primeiro cliente obtém o direito de executar a operação e
-armazenar uma resposta. Chamadas subsequentes com a mesma chave recuperam
-o resultado anterior ou são rejeitadas caso pertençam a outro usuário.
+Este módulo centraliza o uso de chaves ``Idempotency-Key`` aceitas pela API
+HTTP e por tasks Celery. O objetivo é garantir que replays recebam a mesma
+resposta sem reprocessar a operação. O armazenamento utiliza o padrão
+``idemp:{Idempotency-Key}``, conforme política estabelecida nas tarefas.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ class IdempotencyOwnershipError(RuntimeError):
 def _compose_redis_key(namespace: str, key: str) -> str:
     """ Monta a chave interna utilizada no Redis """
     safe_namespace = namespace.strip().replace(" ", "_")
-    return f"idempotency:{safe_namespace}:{key}"
+    return f"idemp:{safe_namespace}:{key}"
 
 def _serialize_record(owner: str | None, response: Any | None, status_code: int | None) -> str:
     """ Serializa a estrutura interna para JSON aceitando valores arbitrários """
@@ -153,4 +152,3 @@ def store_idempotency_response(
         )
     except Exception as exc:  # pragma: no cover - evita que falhas de cache quebrem a rota
         logger.warning("idempotency_store_failed", error=str(exc), namespace=namespace)
-        

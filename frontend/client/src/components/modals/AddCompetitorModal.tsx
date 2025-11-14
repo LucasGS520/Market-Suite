@@ -68,7 +68,7 @@ const buildIdempotencyKey = (productId: string, canonicalUrl: string): string =>
 };
 
 /**
- * Normaliza URLs removendo hash, espaços em branco e garantindo protocolo suportado.
+ * Normaliza URLs removendo hash, querystring e domínios com `www.` para deduplicação.
  */
 const canonicalizeCompetitorUrl = (rawUrl: string): string => {
   const trimmed = rawUrl.trim();
@@ -83,10 +83,19 @@ const canonicalizeCompetitorUrl = (rawUrl: string): string => {
 
   const parsed = new URL(sanitized);
   parsed.hash = '';
+  parsed.search = '';
+  parsed.username = '';
+  parsed.password = '';
 
-  // Remove barras duplicadas no final mantendo raiz simples.
-  const normalizedPath = parsed.pathname.replace(/\/+$/, '');
-  parsed.pathname = normalizedPath ? normalizedPath : '/';
+  // Remove prefixo www. e normaliza porta padrão para alinhar com o backend.
+  parsed.hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+  if ((parsed.protocol === 'https:' && parsed.port === '443') || (parsed.protocol === 'http:' && parsed.port === '80')) {
+    parsed.port = '';
+  }
+
+  const normalizedPath = parsed.pathname.replace(/\/+/, '/');
+  const trimmedPath = normalizedPath !== '/' ? normalizedPath.replace(/\/+$/, '') : normalizedPath;
+  parsed.pathname = trimmedPath || '/';
 
   return parsed.toString();
 };

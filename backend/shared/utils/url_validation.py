@@ -103,6 +103,38 @@ def normalize_product_url(url: str) -> str:
     
     return _ensure_scheme(raw)
 
+def canonicalize_product_url(url: str) -> str:
+    """Produz uma representação canônica estável para URLs de produto."""
+
+    normalized = normalize_product_url(url)
+    parsed = urlparse(normalized)
+
+    host = (parsed.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+
+    port = parsed.port
+    if port in {80, 443}:
+        port = None
+
+    netloc = host
+    if port:
+        netloc = f"{host}:{port}"
+
+    path = re.sub(r"/+", "/", parsed.path or "/")
+    if path != "/":
+        path = path.rstrip("/") or "/"
+
+    canonical = parsed._replace(
+        scheme=(parsed.scheme or "https").lower(),
+        netloc=netloc,
+        path=path or "/",
+        params="",
+        query="",
+        fragment="",
+    )
+    return urlunparse(canonical)
+
 def _matches_domain(host: str, domain: str) -> bool:
     """ Indica se o host informado pertence ao domínio esperado """
     return host == domain or host.endswith(f".{domain}")
@@ -166,7 +198,7 @@ def check_url_compatibility(
 
 def normalize_and_validate_product_url(url: str) -> tuple[str, UrlIssue | None]:
     """ Normaliza e valida URLs de produto retornando possível inconsistência """
-    normalized = normalize_product_url(url)
+    normalized = canonicalize_product_url(url)
     issue = check_url_compatibility(normalized)
     return normalized, issue
 
@@ -177,7 +209,7 @@ def normalize_product_url_for_storage(url: str) -> str:
         return ""
     
     try:
-        return normalize_product_url(raw_value)
+        return canonicalize_product_url(raw_value)
     except ValueError:
         #Mater o valor original evita quebrar dados legados já persistidos
         return raw_value
@@ -186,6 +218,7 @@ __all__ = [
     "UrlIssue",
     "normalize_product_url",
     "normalize_and_validate_product_url",
+    "canonicalize_product_url",
     "normalize_product_url_for_storage",
     "check_url_compatibility",
     "SUPPORTED_DOMAINS",

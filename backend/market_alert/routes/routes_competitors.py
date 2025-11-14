@@ -15,7 +15,7 @@ from backend.shared.infra.redis.idempotency import (
     register_idempotency_key,
     store_idempotency_response,
 )
-from shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import consume_leaky_bucket
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
@@ -109,30 +109,19 @@ def _enforce_competitor_scrape_rate_limit(user_id: UUID) -> None:
         return
 
     max_requests, window_seconds = parsed_limit
-    client = get_redis_client()
+    leak_rate = max_requests / window_seconds
+    bucket_key = f"rate:competitor:{user_id}"
 
-    if client is None:
-        # Sem Redis disponível, o sistema permanece funcional sem bloquear o usuário
-        logger.warning("rate_limit_client_unavailable", user_id=str(user_id))
-        return
+    allowed, _ = consume_leaky_bucket(
+        bucket_key,
+        capacity=max_requests,
+        leak_rate_per_second=leak_rate,
+    )
 
-    key = f"competitor:scrape:{user_id}"
-
-    try:
-        pipeline = client.pipeline(True)
-        pipeline.incr(key)
-        pipeline.expire(key, window_seconds)
-        current_count, _ = pipeline.execute()
-    except Exception as exc:
-        # Erros transitórios de Redis não devem impedir o agendamento
-        logger.warning("rate_limit_pipeline_error", user_id=str(user_id), error=str(exc))
-        return
-
-    if int(current_count) > max_requests:
+    if not allowed:
         logger.warning(
             "competitor_rate_limit_exceeded",
             user_id=str(user_id),
-            current=int(current_count),
             limit=max_requests,
             window=window_seconds,
         )

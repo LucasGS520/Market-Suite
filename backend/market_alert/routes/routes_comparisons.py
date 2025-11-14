@@ -32,10 +32,83 @@ from backend.shared.infra.redis import (
     store_idempotency_response,
 )
 from market_alert.core.config_alert import settings
+from shared.utils.redis_client import consume_leaky_bucket
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
 logger = structlog.get_logger("http_route")
+
+def _parse_rate_limit_config(rate_limit: str) -> tuple[int, int] | None:
+    """Converte configuração textual em ``(capacidade, janela_em_segundos)``."""
+
+    cleaned = (rate_limit or "").strip()
+    if not cleaned or "/" not in cleaned:
+        return None
+
+    amount_part, window_part = cleaned.split("/", 1)
+    try:
+        max_requests = int(amount_part)
+    except ValueError:
+        logger.warning("manual_comparison_invalid_rate_limit", raw=rate_limit)
+        return None
+
+    unit = window_part.strip().lower()
+    unit_mapping = {
+        "s": 1,
+        "sec": 1,
+        "secs": 1,
+        "second": 1,
+        "seconds": 1,
+        "m": 60,
+        "min": 60,
+        "mins": 60,
+        "minute": 60,
+        "minutes": 60,
+        "h": 3600,
+        "hour": 3600,
+        "hours": 3600,
+    }
+
+    if unit.isdigit():
+        window_seconds = int(unit)
+    else:
+        window_seconds = unit_mapping.get(unit)
+
+    if not window_seconds or max_requests <= 0:
+        logger.warning("manual_comparison_rate_limit_invalid_window", raw=rate_limit)
+        return None
+
+    return max_requests, window_seconds
+
+
+def _enforce_manual_comparison_rate_limit(user_id: UUID) -> None:
+    """Aplica o rate limit do tipo *leaky bucket* para execuções manuais."""
+
+    parsed_limit = _parse_rate_limit_config(settings.MANUAL_COMPARISON_RATE_LIMIT)
+    if not parsed_limit:
+        return
+
+    max_requests, window_seconds = parsed_limit
+    leak_rate = max_requests / window_seconds
+    bucket_key = f"rate:comparison_manual:{user_id}"
+
+    allowed, _ = consume_leaky_bucket(
+        bucket_key,
+        capacity=max_requests,
+        leak_rate_per_second=leak_rate,
+    )
+
+    if not allowed:
+        logger.warning(
+            "manual_comparison_rate_limit_exceeded",
+            user_id=str(user_id),
+            limit=max_requests,
+            window=window_seconds,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Limite de comparações manuais atingido. Aguarde alguns instantes.",
+        )
 
 @router.get("/{monitored_id}", response_model=List[PriceComparisonResponse])
 def list_comparisons(request: Request, monitored_id: UUID, limit: int = 10, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -148,6 +221,21 @@ def run_comparison_endpoint(
             content={"message": "Comparação já está em processamento."},
             status_code=status.HTTP_202_ACCEPTED,
         )
+    
+    try:
+        _enforce_manual_comparison_rate_limit(user.id)
+    except HTTPException as exc:
+        error_payload = exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail)}
+        if idempotency_record:
+            store_idempotency_response(
+                namespace="comparison_run",
+                key=idempotency_key,
+                owner=owner_reference,
+                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
+                response=error_payload,
+                status_code=exc.status_code,
+            )
+        raise
 
     result, alerts = run_price_comparison(
         db,

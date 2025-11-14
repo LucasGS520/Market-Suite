@@ -29,11 +29,24 @@ export function sanitizeExternalUrl(rawUrl: string | null | undefined): string |
     return null;
   }
 
+  const trimmed = rawUrl.trim();
+  if (!trimmed || /[\u0000-\u001F\u007F]/.test(trimmed)) {
+    return null;
+  }
+
   try {
-    const parsed = new URL(rawUrl.trim());
+    const parsed = new URL(trimmed);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return null;
     }
+
+    if (!parsed.hostname) {
+      return null;
+    }
+
+    parsed.username = '';
+    parsed.password = '';
+    
     return parsed.toString();
   } catch (error) {
     return null;
