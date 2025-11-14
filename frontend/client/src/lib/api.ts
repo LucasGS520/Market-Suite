@@ -64,6 +64,23 @@ const buildApiUrl = (endpoint: string): string => {
 };
 
 /**
+ * Monta a URL do WebSocket de notificações autenticada com token JWT.
+ */
+export const buildNotificationsWebSocketUrl = (token: string): string => {
+  const base = getApiUrl();
+  const url = new URL(base);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+
+  const normalizedPath = url.pathname.replace(/\/+$/, '');
+  url.pathname = `${normalizedPath}/ws`;
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('token', token);
+
+  return url.toString();
+};
+
+/**
  * Função auxiliar para fazer requisições HTTP com autenticação.
  *
  * - Aceita um token opcional que é colocado no header Authorization.
@@ -848,36 +865,49 @@ export const getComparisonSummary = async (
  * - tolerance: tolerância para considerar preços equivalentes (opcional)
  * - priceChangeThreshold: limiar para considerar variação significativa (opcional)
  */
+/**
+ * Parâmetros opcionais aceitos ao acionar comparação manual.
+ */
+export interface RunComparisonOptions {
+  tolerance?: number;
+  priceChangeThreshold?: number;
+  idempotencyKey?: string;
+}
+
+/**
+ * API: Rodar comparação de preços manualmente com suporte a idempotência.
+ */
 export const runComparison = (
   token: string,
   monitoredId: string,
-  tolerance?: number,
-  priceChangeThreshold?: number,
+  options: RunComparisonOptions = {},
 ) => {
   const payload: Record<string, number> = {};
 
-  if (tolerance !== undefined) {
-    payload.tolerance = tolerance;
+  if (options.tolerance !== undefined) {
+    payload.tolerance = options.tolerance;
   }
 
-  if (priceChangeThreshold !== undefined) {
-    payload.price_change_threshold = priceChangeThreshold;
+  if (options.priceChangeThreshold !== undefined) {
+    payload.price_change_threshold = options.priceChangeThreshold;
   }
 
   const hasCustomParameters = Object.keys(payload).length > 0;
+  const headers: Record<string, string> = {};
+
+  if (options.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey;
+  }
+
+  if (hasCustomParameters) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   return apiRequest<PriceComparison>(`/comparisons/${monitoredId}/run`, {
     token,
     method: 'POST',
-    ...(hasCustomParameters
-      ? {
-          body: JSON.stringify(payload),
-          headers: {
-            // Evitamos envio desnecessário quando não há tolerâncias para preservar contratos antigos.
-            'Content-Type': 'application/json',
-          },
-        }
-      : {}),
+    ...(hasCustomParameters ? { body: JSON.stringify(payload) } : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
 };
 

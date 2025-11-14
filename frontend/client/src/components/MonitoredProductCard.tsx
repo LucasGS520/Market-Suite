@@ -1,14 +1,34 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/data-display/card';
 import { Badge } from '@/components/ui/data-display/badge';
 import { Button } from '@/components/ui/button/button';
-import { AlertCircle, ChevronDown, ChevronUp, Clock, ExternalLink, ImageOff, Loader2, RefreshCw, UserPlus, Users } from 'lucide-react';
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  ExternalLink,
+  ImageOff,
+  Loader2,
+  RefreshCw,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 import { cn, sanitizeExternalUrl } from '@/lib/utils';
-import type { ComparisonSummary, Competitor, MonitoredProduct } from '@/lib/api';
-import { getCompetitors } from '@/lib/api';
+import type {
+  ComparisonSummary,
+  Competitor,
+  MonitoredProduct,
+  PaginatedMonitoredProducts,
+  PriceComparisonAlert,
+} from '@/lib/api';
+import { getCompetitors, getMonitoredProduct } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import useComparisonSummary from '@/hooks/useComparisonSummary';
+import { useNotifications } from '@/hooks/useNotifications';
+import type { NotificationEvent } from '@/contexts/NotificationsContext';
 
 /**
  * Propriedades aceitas pelo cartão de produto monitorado.
@@ -65,6 +85,73 @@ type CompetitorSummary = {
 type CompetitiveDescriptor = {
   label: string;
   tone: 'positive' | 'neutral' | 'negative';
+};
+
+/**
+ * Estrutura utilizada para indicar alertas recebidos em tempo real na UI.
+ */
+type RealtimeAlertBadge = {
+  label: string;
+  message: string | null;
+  comparisonId: string | null;
+  emittedAt: number;
+};
+
+/**
+ * Formata variações percentuais exibindo sinal explícito.
+ */
+const formatPercentChange = (value: number | null | undefined): string | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(1)}%`;
+};
+
+/**
+ * Extrai variação percentual relevante a partir dos alertas retornados na comparação.
+ */
+const deriveBadgeLabelFromAlerts = (alerts: PriceComparisonAlert[] | null | undefined): string | null => {
+  if (!alerts || alerts.length === 0) {
+    return null;
+  }
+
+  for (const alert of alerts) {
+    const candidate =
+      formatPercentChange(alert.pct_change ?? alert.pct_below_monitored ?? null) ??
+      formatPercentChange(alert.delta_x_monitored ?? null);
+    if (candidate) {
+      return `Alerta: ${candidate}`;
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Realiza parsing simples da mensagem textual de alerta para extrair percentual.
+ */
+const deriveBadgeLabelFromMessage = (message: string | null | undefined): string | null => {
+  if (!message) {
+    return null;
+  }
+
+  const percentMatch = message.match(/([-+]?\d+[\.,]\d+)\s*%/);
+  if (percentMatch) {
+    const normalized = percentMatch[1].replace(',', '.');
+    const numeric = Number(normalized);
+    if (Number.isFinite(numeric)) {
+      const formatted = formatPercentChange(numeric);
+      return formatted ? `Alerta: ${formatted}` : null;
+    }
+  }
+
+  return null;
 };
 
 /**
@@ -294,6 +381,11 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
   isRefreshingSelf,
 }) => {
   const { token } = useAuth();
+  const queryClient = useQueryClient();
+  const [realtimeHighlight, setRealtimeHighlight] = useState<'comparison' | 'alert' | null>(null);
+  const [activeAlertBadge, setActiveAlertBadge] = useState<RealtimeAlertBadge | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
+  const pollingTimeoutRef = useRef<number | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [competitors, setCompetitors] = useState<CompetitorSummary[]>([]);
   const [isLoadingCompetitors, setIsLoadingCompetitors] = useState(false);
@@ -309,6 +401,152 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
     loadSummary,
     refetchSummary,
   } = useComparisonSummary(product.id, { initialSummary });
+
+/** Atualiza o cache global com a versão mais recente do produto monitorado. */
+  const syncProductInCache = useCallback(
+    (replacement: MonitoredProduct) => {
+      if (!token) {
+        return;
+      }
+
+      const cacheKey = ['monitored-products', token] as const;
+      queryClient.setQueryData<InfiniteData<PaginatedMonitoredProducts>>(cacheKey, (data) => {
+        if (!data) {
+          return data;
+        }
+
+        const nextPages = data.pages.map((page) => ({
+          ...page,
+          items: page.items.map((item) => (item.id === replacement.id ? replacement : item)),
+        }));
+
+        return {
+          ...data,
+          pages: nextPages,
+        };
+      });
+    },
+    [queryClient, token],
+  );
+
+  /** Busca o produto diretamente na API como fallback em cenários sem WebSocket. */
+  const refreshMonitoredProduct = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+
+    try {
+      const latest = await getMonitoredProduct(token, product.id);
+      syncProductInCache(latest);
+    } catch (error) {
+      console.error('Erro ao atualizar produto monitorado via polling.', error);
+    }
+  }, [product.id, syncProductInCache, token]);
+
+  /** Controla o pulso visual exibido no cartão após eventos em tempo real. */
+  const triggerHighlight = useCallback((variant: 'comparison' | 'alert') => {
+    setRealtimeHighlight(variant);
+
+    if (highlightTimerRef.current) {
+      window.clearTimeout(highlightTimerRef.current);
+    }
+
+    highlightTimerRef.current = window.setTimeout(() => {
+      setRealtimeHighlight(null);
+    }, 4_000);
+  }, []);
+
+  /** Trata eventos recebidos via WebSocket aplicando realces e badges contextuais. */
+  const handleRealtimeEvent = useCallback(
+    (event: NotificationEvent) => {
+      if (event.type === 'comparison.created') {
+        triggerHighlight('comparison');
+        const badgeLabel = deriveBadgeLabelFromAlerts(event.alerts ?? null);
+        if (!badgeLabel && !event.comparison_id) {
+          return;
+        }
+
+        setActiveAlertBadge((previous) => ({
+          label: badgeLabel ?? previous?.label ?? 'Alerta ativo',
+          message: previous?.message ?? null,
+          comparisonId: event.comparison_id ?? previous?.comparisonId ?? null,
+          emittedAt: Date.now(),
+        }));
+        return;
+      }
+
+      if (event.type === 'alert.created') {
+        triggerHighlight('alert');
+        setActiveAlertBadge((previous) => ({
+          label: deriveBadgeLabelFromMessage(event.message) ?? previous?.label ?? 'Alerta ativo',
+          message: event.message ?? previous?.message ?? null,
+          comparisonId: event.comparison_id ?? previous?.comparisonId ?? null,
+          emittedAt: Date.now(),
+        }));
+      }
+    },
+    [triggerHighlight],
+  );
+
+  const { connectionState } = useNotifications({
+    monitoredId: product.id,
+    onEvent: handleRealtimeEvent,
+  });
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        window.clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+      if (pollingTimeoutRef.current) {
+        window.clearTimeout(pollingTimeoutRef.current);
+        pollingTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    setActiveAlertBadge(null);
+    setRealtimeHighlight(null);
+  }, [product.id]);
+
+  /** Inicia polling exponencial quando o WS estiver indisponível e o card estiver aberto. */
+  useEffect(() => {
+    if (!isExpanded || connectionState === 'connected') {
+      if (pollingTimeoutRef.current) {
+        window.clearTimeout(pollingTimeoutRef.current);
+        pollingTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    const schedule = (attempt: number) => {
+      const delay = Math.min(30_000, 5_000 * 2 ** attempt);
+      pollingTimeoutRef.current = window.setTimeout(async () => {
+        if (cancelled) {
+          return;
+        }
+        await refreshMonitoredProduct();
+        if (!cancelled) {
+          schedule(Math.min(attempt + 1, 5));
+        }
+      }, delay);
+    };
+
+    void refreshMonitoredProduct();
+    schedule(0);
+
+    return () => {
+      cancelled = true;
+      if (pollingTimeoutRef.current) {
+        window.clearTimeout(pollingTimeoutRef.current);
+        pollingTimeoutRef.current = null;
+      }
+    };
+  }, [connectionState, isExpanded, refreshMonitoredProduct]);
 
   const effectiveSummary = summaryFromQuery ?? initialSummary;
   const positionInfo = describePosition(effectiveSummary, product.competitors_count);
@@ -354,7 +592,7 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
           return acc;
         }, new Map()).values(),
       );
-      
+
       setCompetitors(summary);
       hasLoadedCompetitorsRef.current = true;
     } catch (error) {
@@ -479,8 +717,14 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
   return (
     <Card
       className={cn(
-        'relative overflow-hidden transition-colors',
+        'relative overflow-hidden transition-colors transition-shadow',
         statusDisplay.cardAccentClass,
+        realtimeHighlight === 'alert'
+          ? 'border-red-300 ring-2 ring-red-400/60 shadow-[0_0_0_1px_rgba(248,113,113,0.35)]'
+          : null,
+        realtimeHighlight === 'comparison'
+          ? 'border-sky-300 ring-2 ring-sky-400/60 shadow-[0_0_0_1px_rgba(56,189,248,0.35)]'
+          : null,
       )}
     >
       {product.is_new && product.status === 'pending' && (
@@ -511,6 +755,24 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
               <CardDescription>
                 Última coleta: {formatRelativeTime(product.last_checked)}
               </CardDescription>
+              {activeAlertBadge && (
+                <div className="flex flex-col gap-1">
+                  <Badge
+                    variant="destructive"
+                    className={cn(
+                      'w-fit text-xs font-semibold uppercase tracking-tight',
+                      realtimeHighlight === 'alert' ? 'animate-pulse' : undefined,
+                    )}
+                  >
+                    {activeAlertBadge.label}
+                  </Badge>
+                  {activeAlertBadge.message && (
+                    <p className="text-xs text-amber-600 dark:text-amber-300">
+                      {activeAlertBadge.message}
+                    </p>
+                  )}
+                </div>
+              )}
               {effectiveSummary?.last_comparison_at && (
                 <p className="text-xs text-muted-foreground">
                   Última comparação: {formatRelativeTime(effectiveSummary.last_comparison_at)}
@@ -519,6 +781,11 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
+            {connectionState !== 'connected' && (
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Modo polling
+              </Badge>
+            )}
             <Badge variant={statusDisplay.badgeVariant}>{statusDisplay.label}</Badge>
             <span className="text-xs text-muted-foreground">
               Concorrentes monitorados: {product.competitors_count ?? 0}

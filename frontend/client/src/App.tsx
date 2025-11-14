@@ -9,6 +9,7 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary"; // Captura erros em árvore de componentes
 import { ThemeProvider } from "./contexts/ThemeContext"; // Contexto de tema (dark/light)
 import { AuthProvider } from "./contexts/AuthContext"; // Contexto de autenticação
+import { NotificationsProvider } from "./contexts/NotificationsContext"; // Consumo reativo de eventos
 import { ProtectedRoute } from "./components/ProtectedRoute"; // Protege rotas que exigem login
 import { DashboardLayout } from "./components/DashboardLayout"; // Layout comum do dashboard
 import Login from "./pages/Login";
@@ -122,10 +123,12 @@ function App() {
     >
       <AuthProvider>
        <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-         <Toaster />
-         <Router />
-        </TooltipProvider>
+        <NotificationsProvider>
+         <TooltipProvider>
+          <Toaster />
+          <Router />
+         </TooltipProvider>
+        </NotificationsProvider>
        </QueryClientProvider>
       </AuthProvider>
     </ThemeProvider>

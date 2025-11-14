@@ -24,6 +24,8 @@ type UseMonitoredProductsResult = {
   refetch: () => Promise<void>;
   optimisticallyIncrementCompetitorsCount: (productId: string) => void;
   refreshProductById: (productId: string) => Promise<MonitoredProduct | null>;
+  /** Alias semântico usado em fluxos reativos para atualizar um item específico. */
+  refetchItem: (productId: string) => Promise<MonitoredProduct | null>;
 };
 
 /**
@@ -187,5 +189,6 @@ export const useMonitoredProducts = (): UseMonitoredProductsResult => {
     refetch,
     optimisticallyIncrementCompetitorsCount,
     refreshProductById,
+    refetchItem: refreshProductById,
   };
 };
