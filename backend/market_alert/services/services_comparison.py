@@ -209,7 +209,9 @@ def _apply_summary_defaults(
     summary = _empty_summary(competitors_count)
     summary.update(payload or {})
 
-    summary["last_comparison_at"] = timestamp
+    #Preserva o timestamp da última comparação quando já registrado no payload
+    if summary.get("last_comparison_at") is None:
+        summary["last_comparison_at"] = timestamp
     summary["computed_at"] = timestamp
     summary["competitors_count"] = competitors_count
 

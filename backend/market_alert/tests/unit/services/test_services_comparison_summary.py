@@ -17,9 +17,14 @@ class _DummyComparison:
 class _DummySummary:
     """ Estrutura simples para simular PriceComparisonSummary """
 
-    def __init__(self, aggregates: dict, comparison_id: uuid.UUID | None = None) -> None:
+    def __init__(
+        self,
+        aggregates: dict,
+        comparison_id: uuid.UUID | None = None,
+        timestamp: datetime | None = None,
+    ) -> None:
         self.aggregates = aggregates
-        self.timestamp = datetime.now(timezone.utc)
+        self.timestamp = timestamp or datetime.now(timezone.utc)
         self.comparison_id = comparison_id or uuid.uuid4()
 
 
@@ -86,4 +91,28 @@ def test_build_comparison_summary_with_stored_snapshot() -> None:
     assert summary["competitors_count"] == 4
     assert summary["competitors_mean"] == "95.00"
     assert summary["competitors_with_price_count"] == 3
+    
+def test_build_comparison_summary_preserves_last_comparison_at() -> None:
+    """ Garante que o resumo mantém o último horário de comparação original """
+
+    last_comparison_snapshot = "2024-01-01T12:00:00+00:00"
+    stored_timestamp = datetime(2024, 1, 2, 12, 0, tzinfo=timezone.utc)
+    stored = _DummySummary(
+        aggregates={
+            "competitors_mean": "95.00",
+            "competitors_with_price_count": 2,
+            "last_comparison_at": last_comparison_snapshot,
+        },
+        timestamp=stored_timestamp,
+    )
+
+    summary = build_comparison_summary(
+        None,
+        competitors_count=3,
+        stored_summary=stored,
+    )
+
+    assert summary["last_comparison_at"] == last_comparison_snapshot
+    assert summary["computed_at"] == stored_timestamp
+    assert summary["competitors_count"] == 3
     
