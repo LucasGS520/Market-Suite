@@ -6,6 +6,7 @@ from market_alert.notifications.channels.base import NotificationChannel
 from market_alert.notifications.channels.email import EmailChannel
 from market_alert.enums.enums_alerts import ChannelType
 from market_alert.enums.enums_alerts import AlertType
+from market_alert.enums.enums_alerts import NotificationStatus
 
 class DummyChannel(NotificationChannel):
     def __init__(self, fail: bool = False):
@@ -25,9 +26,13 @@ def test_alert_manager_dispatches_to_all_channels(monkeypatch):
     user = SimpleNamespace(id="u1")
 
     logs = []
+    def fake_log(db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None,
+                 provider_metadata=None, success=True, error=None, **extra):
+        logs.append((channel, success, alert_rule_id, extra.get("status")))
+
     monkeypatch.setattr(
         "market_alert.notifications.manager.create_notification_log",
-        lambda db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None: logs.append((channel, success, alert_rule_id))
+        fake_log,
     )
 
     manager.send(None, user, "subject", "message", alert_rule_id="rule1")
@@ -37,6 +42,7 @@ def test_alert_manager_dispatches_to_all_channels(monkeypatch):
     assert [log[0] for log in logs] == [ChannelType.WEBHOOK, ChannelType.WEBHOOK]
     assert all(log[1] for log in logs)
     assert [log[2] for log in logs] == ["rule1", "rule1"]
+    assert all(log[3] == NotificationStatus.SENT for log in logs)
 
 def test_alert_manager_uses_asyncio_gather(monkeypatch):
     ch1 = DummyChannel()
@@ -62,10 +68,24 @@ def test_alert_manager_logs_errors(monkeypatch):
     user = SimpleNamespace(id="u1")
 
     recorded = {}
-    def fake_create(db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None):
+    def fake_create(
+        db,
+        user_id,
+        channel,
+        subject,
+        message,
+        alert_rule_id=None,
+        alert_type=None,
+        provider_metadata=None,
+        success=True,
+        error=None,
+        **extra
+    ):
         recorded["success"] = success
         recorded["error"] = error
         recorded["rule"] = alert_rule_id
+        recorded["status"] = extra.get("status")
+
 
     monkeypatch.setattr(
         "market_alert.notifications.manager.create_notification_log",
@@ -77,6 +97,7 @@ def test_alert_manager_logs_errors(monkeypatch):
     assert recorded["success"] is False
     assert "fail" in recorded["error"]
     assert recorded["rule"] == "rule2"
+    assert recorded["status"] == NotificationStatus.FAILED
 
 class DummyLogger:
     def __init__(self):
@@ -173,8 +194,23 @@ def test_dispatch_price_alerts_handles_rule_without_id(monkeypatch):
 
     monkeypatch.setattr(services_mod, "get_user_by_id", lambda *a, **k: user)
     monkeypatch.setattr(services_mod, "get_notification_manager", lambda: NotificationManager([DummyChannel()]))
-    monkeypatch.setattr(manager_mod, "create_notification_log", lambda db, user_id, channel, subject, message,
-                        alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None: logs.append(alert_rule_id))
+    
+    def fake_manager_log(
+        db,
+        user_id,
+        channel,
+        subject,
+        message,
+        alert_rule_id=None,
+        alert_type=None,
+        provider_metadata=None,
+        success=True,
+        error=None,
+        **extra
+    ):
+        logs.append(alert_rule_id)
+
+    monkeypatch.setattr(manager_mod, "create_notification_log", fake_manager_log)
     monkeypatch.setattr(services_mod, "update_last_notified", lambda *a, **k: None)
 
     dispatch_price_alerts(None, mp, [{"name": "A", "price": 5}])
@@ -194,7 +230,18 @@ def test_send_rendered_renders_per_channel(monkeypatch):
     dummy = DummyChannel()
     logs = []
 
-    def fake_log(db, user_id, channel, subject, message, alert_rule_id=None, alert_type=None, provider_metadata=None, success=True, error=None):
+    def fake_log(
+        db,
+        user_id,
+        channel,
+        subject,
+        message,
+        alert_rule_id=None,
+        alert_type=None,
+        provider_metadata=None,
+        success=True, error=None,
+        **extra
+    ):
         logs.append(channel)
 
     monkeypatch.setattr("market_alert.notifications.manager.create_notification_log", fake_log)

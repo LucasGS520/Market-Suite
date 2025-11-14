@@ -7,7 +7,12 @@ from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from market_alert.enums.enums_alerts import AlertType, ChannelType
+from market_alert.enums.enums_alerts import (
+    AlertType,
+    ChannelType,
+    AlertSeverity,
+    NotificationStatus,
+)
 from market_alert.enums.enums_products import ProductStatus
 
 
@@ -106,6 +111,9 @@ class NotificationLogResponse(BaseModel):
     user_id: UUID
     alert_rule_id: Optional[UUID] = None
     alert_type: Optional[AlertType] = None
+    comparison_id: Optional[UUID] = None
+    severity: Optional[AlertSeverity] = None
+    status: NotificationStatus
     channel: ChannelType
     subject: str
     message: str

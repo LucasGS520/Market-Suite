@@ -24,3 +24,20 @@ class ChannelType(str, Enum):
     WHATSAPP = "whatsapp" #Envio via WhatsApp
     WEBHOOK = "webhook" #Disparo para webhook
     SLACK = "slack" #Mensagem no Slack
+
+class AlertSeverity(str, Enum):
+    """ Define níveis padronizados de severidade para alertas """
+
+    LOW = "low" #Eventos informativos ou de baixa urgência
+    MEDIUM = "medium" #Mudanças relevantes que exigem atenção
+    HIGH = "high" #Ocorrências críticas que requerem ação imediata
+
+
+class NotificationStatus(str, Enum):
+    """ Situações possíveis do fluxo de notificação """
+
+    SENT = "sent" #Notificação enviada com sucesso
+    FAILED = "failed" #Envio falhou após tentativa do canal
+    SKIPPED_COOLDOWN = "skipped-cooldown" #Suprimida por janela de cooldown
+    SKIPPED_DUPLICATE = "skipped-duplicate" #Ignorada por payload idêntico recente
+    SKIPPED_TOLERANCE = "skipped-tolerance" #Descartada por variar abaixo da tolerância

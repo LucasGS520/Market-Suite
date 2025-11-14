@@ -7,21 +7,51 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from market_alert.models.models_alerts import NotificationLog
-from market_alert.enums.enums_alerts import ChannelType, AlertType
+from market_alert.enums.enums_alerts import (
+    ChannelType,
+    AlertType,
+    AlertSeverity,
+    NotificationStatus,
+)
 
 
-def create_notification_log(db: Session, user_id: UUID, channel: ChannelType, subject: str, message: str, alert_rule_id: UUID | None = None,
-                            alert_type: AlertType | None = None, provider_metadata: dict | None = None, success: bool = True, error: str | None = None) -> NotificationLog:
+def create_notification_log(
+    db: Session,
+    user_id: UUID,
+    channel: ChannelType,
+    subject: str,
+    message: str,
+    alert_rule_id: UUID | None = None,
+    alert_type: AlertType | None = None,
+    provider_metadata: dict | None = None,
+    success: bool = True,
+    error: str | None = None,
+    *,
+    comparison_id: UUID | None = None,
+    severity: AlertSeverity | None = None,
+    status: NotificationStatus | None = None,
+    sent_at: datetime | None = None,
+) -> NotificationLog:
     """ Cria um registro de "log" de notificação no banco de dados """
+    resolved_status = status
+    if resolved_status is None:
+        resolved_status = NotificationStatus.SENT if success else NotificationStatus.FAILED
+
+    resolved_success = success if status is None else resolved_status == NotificationStatus.SENT
+    timestamp = sent_at or datetime.now(timezone.utc)
     log = NotificationLog(
         user_id=user_id,
         alert_rule_id=alert_rule_id,
         alert_type=alert_type,
+        comparison_id=comparison_id,
+        severity=severity,
+        status=resolved_status,
         channel=channel,
         subject=subject,
         message=message,
         provider_metadata=provider_metadata,
-        success=success,
+        sent_at=timestamp,
+        success=resolved_success,
         error=error
     )
     db.add(log)

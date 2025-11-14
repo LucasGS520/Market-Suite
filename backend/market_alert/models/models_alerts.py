@@ -8,7 +8,12 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 
 from shared.infra.db import Base
-from market_alert.enums.enums_alerts import AlertType, ChannelType
+from market_alert.enums.enums_alerts import (
+    AlertType,
+    ChannelType,
+    AlertSeverity,
+    NotificationStatus,
+)
 from market_alert.enums.enums_products import ProductStatus
 
 
@@ -51,6 +56,13 @@ class NotificationLog(Base):
     alert_rule_id = Column(PG_UUID(as_uuid=True), ForeignKey("alert_rules.id", ondelete="SET NULL"), nullable=True, index=True)
 
     alert_type = Column(PgEnum(AlertType, name="notification_alert_type_enum"), nullable=True)
+    comparison_id = Column(PG_UUID(as_uuid=True), nullable=True, index=True)
+    severity = Column(PgEnum(AlertSeverity, name="notification_severity_enum"), nullable=True)
+    status = Column(
+        PgEnum(NotificationStatus, name="notification_status_enum"),
+        default=NotificationStatus.SENT,
+        nullable=False,
+    )
     channel = Column(PgEnum(ChannelType, name="notification_channel_enum"), nullable=False)
     subject = Column(Text, nullable=False)
     message = Column(Text, nullable=False)

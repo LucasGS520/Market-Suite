@@ -74,6 +74,8 @@ class ConfigBase(BaseSettings):
     ALERT_RATE_LIMIT: str = os.getenv("ALERT_RATE_LIMIT", "60/m") #Limite de alertas
     ALERT_DUPLICATE_WINDOW: int = int(os.getenv("ALERT_DUPLICATE_WINDOW", 600)) #Janela anti-duplicação
     ALERT_RULE_COOLDOWN: int = int(os.getenv("ALERT_RULE_COOLDOWN", "3600")) #Intervalo para regras
+    ALERT_COOLDOWN_SECONDS: int = int(os.getenv("ALERT_COOLDOWN_SECONDS", str(2 * 3600))) #Cooldown global de alertas
+    ALERT_DEDUPE_TTL_SECONDS: int = int(os.getenv("ALERT_DEDUPE_TTL_SECONDS", str(2 * 3600))) #TTL para hash de deduplicação
 
     #Parâmetros para comparação de preços
     PRICE_TOLERANCE: float = float(os.getenv("PRICE_TOLERANCE", "0.01")) #Variação permitida
