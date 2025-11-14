@@ -3,6 +3,8 @@
 from decimal import Decimal
 from uuid import uuid4
 
+from fastapi import HTTPException, status
+
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_users import User
@@ -39,6 +41,11 @@ def test_create_competitor_scrape_autorizado_agenda_task(
     monkeypatch.setattr(
         "market_alert.routes.routes_competitors.collect_competitor_task.delay",
         fake_delay,
+    )
+
+    monkeypatch.setattr(
+        "market_alert.routes.routes_competitors._enforce_competitor_scrape_rate_limit",
+        lambda _user_id: None,
     )
 
     response = client.post(
@@ -108,6 +115,61 @@ def test_create_competitor_scrape_usuario_diferente_recebe_erro(
     assert response.json()["detail"] == "Usuário não possui permissão para acessar este produto monitorado."
     assert called["count"] == 0
     
+def test_create_competitor_scrape_respects_rate_limit(
+    client,
+    db_session,
+    test_user,
+    prepare_test_database,
+    monkeypatch,
+):
+    """Confere que o endpoint devolve 429 quando o limite configurado é excedido"""
+
+    monitored = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Monitor 4K",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/produto-monitorado",
+        status=MonitoredStatus.active,
+    )
+    db_session.add(monitored)
+    db_session.commit()
+
+    called = {"count": 0}
+
+    def fake_delay(*args, **kwargs):
+        """Impede que a task seja agendada quando o rate limit bloqueia a requisição"""
+
+        called["count"] += 1
+
+    def fake_rate_limit(_user_id):
+        """Simula estouro de limite diário para validar retorno HTTP"""
+
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Limite de scraping de concorrentes atingido. Tente novamente em instantes.",
+        )
+
+    monkeypatch.setattr(
+        "market_alert.routes.routes_competitors.collect_competitor_task.delay",
+        fake_delay,
+    )
+    monkeypatch.setattr(
+        "market_alert.routes.routes_competitors._enforce_competitor_scrape_rate_limit",
+        fake_rate_limit,
+    )
+
+    response = client.post(
+        "/competitors/scrape",
+        json={
+            "monitored_product_id": str(monitored.id),
+            "product_url": "https://www.mercadolivre.com.br/MLB-123",
+        },
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "Limite de scraping de concorrentes atingido. Tente novamente em instantes."
+    assert called["count"] == 0
+
 def test_list_competitors_returns_paginated_items(
     client,
     db_session,

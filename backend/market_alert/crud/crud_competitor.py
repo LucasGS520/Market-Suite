@@ -22,7 +22,9 @@ def get_competitor_by_monitored_and_url(
     product_url: str,
 ) -> CompetitorProduct | None:
     """ Recupera concorrente usando URL canônica vinculada ao monitorado """
-    normalized_url = normalize_product_url_for_storage(product_url)
+    normalized_url = normalize_product_url_for_storage(str(product_url))
+    if not normalized_url:
+        return None
     return (
         db.query(CompetitorProduct)
         .filter(
@@ -53,14 +55,17 @@ def create_or_update_competitor_product_scraped(
     etag: str | None = None,
     last_modified: datetime | None = None,
 ) -> CompetitorProduct:
-    """ Atualiza ou cria um produto concorrente a partir dos dados do scraping manual com link direto """
-    normalized_url = normalize_product_url_for_storage(product_data.product_url)
-    
-    #Verifica se já existe um concorrentes com mesmo monitored_product_id e URL canônica
+    """ Atualiza ou cria um produto concorrente a partir dos dados extraídos pelo scraping """
+    normalized_url = normalize_product_url_for_storage(str(product_data.product_url))
+    if not normalized_url:
+        #Mantém fallback para registros antigos que já passaram pela validação externa
+        normalized_url = str(product_data.product_url).strip()
+
+    #Verifica se já existe um concorrente com o mesmo monitorado e URL canônica
     existing = get_competitor_by_monitored_and_url(
         db,
         product_data.monitored_product_id,
-        normalized_url
+        normalized_url,
     )
 
     if existing:

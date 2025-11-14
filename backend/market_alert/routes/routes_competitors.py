@@ -1,6 +1,6 @@
 """ Rotas para gerenciamento de produtos concorrentes monitorados """
 
-from typing import List
+from typing import List, Tuple
 from uuid import UUID
 
 import structlog
@@ -15,6 +15,7 @@ from backend.shared.infra.redis.idempotency import (
     register_idempotency_key,
     store_idempotency_response,
 )
+from shared.utils.redis_client import get_redis_client
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
@@ -53,6 +54,92 @@ ALLOWED_SORT_FIELDS = {"price", "last_checked", "price_change"}
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 100
 
+def _parse_rate_limit_config(rate_limit: str) -> Tuple[int, int] | None:
+    """Converte configuração ``valor/unidade`` em tupla ``(valor, janela_em_segundos)``."""
+
+    cleaned = (rate_limit or "").strip()
+    if not cleaned or "/" not in cleaned:
+        return None
+
+    amount_part, window_part = cleaned.split("/", 1)
+    try:
+        max_requests = int(amount_part)
+    except ValueError:
+        logger.warning("invalid_rate_limit_config", raw=rate_limit)
+        return None
+
+    unit = window_part.strip().lower()
+    unit_mapping = {
+        "s": 1,
+        "sec": 1,
+        "secs": 1,
+        "second": 1,
+        "seconds": 1,
+        "m": 60,
+        "min": 60,
+        "mins": 60,
+        "minute": 60,
+        "minutes": 60,
+        "h": 3600,
+        "hour": 3600,
+        "hours": 3600,
+    }
+
+    if unit.isdigit():
+        window_seconds = int(unit)
+    else:
+        window_seconds = unit_mapping.get(unit)
+
+    if not window_seconds:
+        logger.warning("unsupported_rate_limit_unit", raw=rate_limit)
+        return None
+
+    if max_requests <= 0 or window_seconds <= 0:
+        logger.warning("non_positive_rate_limit", raw=rate_limit)
+        return None
+
+    return max_requests, window_seconds
+
+
+def _enforce_competitor_scrape_rate_limit(user_id: UUID) -> None:
+    """Garante que requisições de scraping respeitam limites configurados por usuário."""
+
+    parsed_limit = _parse_rate_limit_config(settings.COMPETITOR_RATE_LIMIT)
+    if not parsed_limit:
+        return
+
+    max_requests, window_seconds = parsed_limit
+    client = get_redis_client()
+
+    if client is None:
+        # Sem Redis disponível, o sistema permanece funcional sem bloquear o usuário
+        logger.warning("rate_limit_client_unavailable", user_id=str(user_id))
+        return
+
+    key = f"competitor:scrape:{user_id}"
+
+    try:
+        pipeline = client.pipeline(True)
+        pipeline.incr(key)
+        pipeline.expire(key, window_seconds)
+        current_count, _ = pipeline.execute()
+    except Exception as exc:
+        # Erros transitórios de Redis não devem impedir o agendamento
+        logger.warning("rate_limit_pipeline_error", user_id=str(user_id), error=str(exc))
+        return
+
+    if int(current_count) > max_requests:
+        logger.warning(
+            "competitor_rate_limit_exceeded",
+            user_id=str(user_id),
+            current=int(current_count),
+            limit=max_requests,
+            window=window_seconds,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Limite de scraping de concorrentes atingido. Tente novamente em instantes.",
+        )
 
 @router.post("/scrape", status_code=status.HTTP_202_ACCEPTED, response_model=None)
 def create_competitor_scrape(
@@ -150,7 +237,7 @@ def create_competitor_scrape(
     existing = get_competitor_by_monitored_and_url(db, mp.id, normalized_url)
     if existing:
         logger.info(
-            "competitor_existis",
+            "competitor_exists",
             path=request.url.path,
             method=request.method,
             monitored_id=str(mp.id),
@@ -181,6 +268,21 @@ def create_competitor_scrape(
             "method": request.method,
         },
     )
+
+    try:
+        _enforce_competitor_scrape_rate_limit(user.id)
+    except HTTPException as exc:
+        error_payload = exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail)}
+        if idempotency_record:
+            store_idempotency_response(
+                namespace="competitor_scrape",
+                key=idempotency_key,
+                owner=owner_reference,
+                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
+                response=error_payload,
+                status_code=exc.status_code,
+            )
+        raise
 
     #Cria um produto concorrente via Celery
     collect_competitor_task.delay(
@@ -237,6 +339,7 @@ def list_competitors(
             "path": request.url.path,
             "method": request.method,
         },
+        hide_forbidden=False,
     )
 
     normalized_sort = (sort_by or "last_checked").lower()
@@ -310,6 +413,7 @@ def resume_competitors(
             "path": request.url.path,
             "method": request.method,
         },
+        hide_forbidden=False,
     )
 
     competitors = load_competitors_for_action(
@@ -363,6 +467,7 @@ def pause_competitors(
             "path": request.url.path,
             "method": request.method,
         },
+        hide_forbidden=False,
     )
 
     competitors = load_competitors_for_action(
@@ -417,6 +522,7 @@ def remove_competitors(
             "path": request.url.path,
             "method": request.method,
         },
+        hide_forbidden=False,
     )
 
     competitors = load_competitors_for_action(
@@ -457,6 +563,7 @@ def delete_competitors(request: Request, monitored_product_id: UUID, db: Session
             "path": request.url.path,
             "method": request.method,
         },
+        hide_forbidden=False,
     )
 
     deleted = delete_competitors_by_monitored_id(db, monitored_product_id)
