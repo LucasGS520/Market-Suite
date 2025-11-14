@@ -1004,7 +1004,7 @@ const CompetitorsPage: React.FC = () => {
     }}
     isOpen={isAddModalOpen}
     onClose={() => setIsAddModalOpen(false)}
-    onScheduled={() => {
+    onScheduled={(_options) => {
       // Feedback otimista: fecha modal, informa usuário e recarrega dados
       toast.success('Concorrente enviado para coleta. Sincronizando lista...');
       setIsAddModalOpen(false);

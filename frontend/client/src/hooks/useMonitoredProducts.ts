@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { MonitoredProduct, PaginatedMonitoredProducts, getMonitoredProducts } from '@/lib/api';
+import { MonitoredProduct, PaginatedMonitoredProducts, getMonitoredProducts, getMonitoredProduct } from '@/lib/api';
 
 /** 
  * Número padrão de itens buscados por página ao paginar produtos monitorados. 
@@ -23,6 +23,7 @@ type UseMonitoredProductsResult = {
   fetchNextPage: () => Promise<unknown>;
   refetch: () => Promise<void>;
   optimisticallyIncrementCompetitorsCount: (productId: string) => void;
+  refreshProductById: (productId: string) => Promise<MonitoredProduct | null>;
 };
 
 /**
@@ -124,6 +125,55 @@ export const useMonitoredProducts = (): UseMonitoredProductsResult => {
     [queryClient, queryKey, token],
   );
 
+  /**
+   * Recarrega os dados de um monitorado específico atualizando o cache local.
+   * Evita refetch completo da lista quando apenas um item mudou.
+   */
+  const refreshProductById = useCallback(
+    async (productId: string): Promise<MonitoredProduct | null> => {
+      if (!token) {
+        throw new Error('Sessão expirada. Faça login novamente para atualizar o produto monitorado.');
+      }
+
+      const freshProduct = await getMonitoredProduct(token, productId);
+      let wasUpdated = false;
+
+      queryClient.setQueryData<InfiniteData<PaginatedMonitoredProducts>>(queryKey, (data) => {
+        if (!data) {
+          return data;
+        }
+
+        const nextPages = data.pages.map((page) => ({
+          ...page,
+          items: page.items.map((item) => {
+            if (item.id !== productId) {
+              return item;
+            }
+
+            wasUpdated = true;
+            return freshProduct;
+          }),
+        }));
+
+        if (!wasUpdated) {
+          return data;
+        }
+
+        return {
+          ...data,
+          pages: nextPages,
+        };
+      });
+
+      if (!wasUpdated) {
+        return null;
+      }
+
+      return freshProduct;
+    },
+    [queryClient, queryKey, token],
+  );
+
   return {
     products,
     total,
@@ -136,5 +186,6 @@ export const useMonitoredProducts = (): UseMonitoredProductsResult => {
     fetchNextPage: () => query.fetchNextPage(),
     refetch,
     optimisticallyIncrementCompetitorsCount,
+    refreshProductById,
   };
 };

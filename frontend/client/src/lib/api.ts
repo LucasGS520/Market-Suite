@@ -782,19 +782,41 @@ export const removeCompetitors = (
 /**
  * API: Agendar scraping de concorrente.
  * POST /competitors/scrape
+ * 
+ * - Aceita cabeçalho Idempotency-Key para evitar duplicações em cliques repetidos.
+ * - Quando nenhuma chave for informada, geramos uma automaticamente.
  */
 export const scrapeCompetitor = (
   token: string,
   data: {
     monitored_product_id: string;
     product_url: string;
-  }
-) =>
-  apiRequest<{ message: string }>('/competitors/scrape', {
+  },
+  options: {
+    idempotencyKey?: string;
+  } = {},
+) => {
+  const resolvedIdempotencyKey = (() => {
+    if (options.idempotencyKey) {
+      return options.idempotencyKey;
+    }
+
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  })();
+
+  return apiRequest<{ message: string }>('/competitors/scrape', {
     token,
     method: 'POST',
     body: JSON.stringify(data),
+    headers: {
+      'Idempotency-Key': resolvedIdempotencyKey,
+    },
   });
+};
 
 /**
  * API: Listar logs de notificações do usuário.

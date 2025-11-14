@@ -36,6 +36,7 @@ export default function Products() {
     fetchNextPage,
     refetch,
     optimisticallyIncrementCompetitorsCount,
+    refreshProductById
   } = useMonitoredProducts();
 
   // Router imperativo via wouter
@@ -71,7 +72,7 @@ export default function Products() {
   const isRefreshingList = refreshingProductId !== null;
 
   /**
-   * Atualiza um produto específico (na prática executa refetch da lista).
+   * Atualiza um produto específico recarregando seus dados individualmente.
    * Protege contra múltiplos refreshes concorrentes.
    */
   const handleRefreshProduct = async (productId: string) => {
@@ -82,8 +83,11 @@ export default function Products() {
     setRefreshingProductId(productId);
 
     try {
-      await refetch();
-      toast.success('Lista de produtos atualizada.');
+      const refreshed = await refreshProductById(productId);
+      if (!refreshed) {
+        await refetch();
+      }
+      toast.success('Produto atualizado com sucesso.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao atualizar produto';
       toast.error(message);
@@ -119,13 +123,29 @@ export default function Products() {
   }, []);
 
   /** Atualiza contador de concorrentes no cache após agendamento bem-sucedido. */
-  const handleCompetitorScheduled = useCallback(() => {
-    if (!selectedProductId) {
-      return;
-    }
+  const handleCompetitorScheduled = useCallback(
+    (options: { keepOpen: boolean; product: MonitoredProduct }) => {
+      const productId = options.product.id;
 
-    optimisticallyIncrementCompetitorsCount(selectedProductId);
-  }, [optimisticallyIncrementCompetitorsCount, selectedProductId]);
+    optimisticallyIncrementCompetitorsCount(productId);
+
+      refreshProductById(productId)
+        .then((refreshed) => {
+          if (!refreshed) {
+            return refetch();
+          }
+          return undefined;
+        })
+        .catch((error) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Erro ao atualizar produto após adicionar concorrente.';
+          toast.error(message);
+        });
+    },
+    [optimisticallyIncrementCompetitorsCount, refreshProductById, refetch],
+  );
 
   /**
    * Trigger para carregar a próxima página de resultados.

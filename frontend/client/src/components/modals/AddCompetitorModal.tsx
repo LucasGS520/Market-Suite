@@ -41,8 +41,31 @@ export interface AddCompetitorModalProps {
   product: MonitoredProduct;
   isOpen: boolean;
   onClose: () => void;
-  onScheduled?: (options: { keepOpen: boolean }) => void;
+  onScheduled?: (options: { keepOpen: boolean; product: MonitoredProduct }) => void;
 }
+
+/**
+ * Constrói chave de idempotência derivada do produto e do concorrente.
+ * Mantém apenas caracteres seguros para cabeçalhos HTTP.
+ */
+const buildIdempotencyKey = (productId: string, canonicalUrl: string): string => {
+  const normalized = `${productId}:${canonicalUrl}`.toLowerCase();
+  const encoded = encodeURIComponent(normalized)
+    .replace(/%/g, '-')
+    .replace(/[!~*'().]/g, '-')
+    .replace(/-+/g, '-');
+  const trimmed = `competitor-${encoded}`.slice(0, 200);
+
+  if (trimmed.length > 0) {
+    return trimmed;
+  }
+
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
 
 /**
  * Normaliza URLs removendo hash, espaços em branco e garantindo protocolo suportado.
@@ -179,14 +202,20 @@ const AddCompetitorModal: React.FC<AddCompetitorModalProps> = ({ product, isOpen
       setFormError(null);
 
       try {
-        await scrapeCompetitor(token, {
-          monitored_product_id: product.id,
-          product_url: canonicalUrl,
-        });
+        await scrapeCompetitor(
+          token,
+          {
+            monitored_product_id: product.id,
+            product_url: canonicalUrl,
+          },
+          {
+            idempotencyKey: buildIdempotencyKey(product.id, canonicalUrl),
+          },
+        );
 
         setRecentCanonicalUrls((previous) => [...previous, canonicalUrl]);
         toast.success('Concorrente enviado para coleta.');
-        onScheduled?.({ keepOpen });
+        onScheduled?.({ keepOpen, product });
 
         if (keepOpen) {
           setUrlValue('');
