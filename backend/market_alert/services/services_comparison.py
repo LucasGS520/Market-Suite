@@ -18,7 +18,7 @@ from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_comparison import (
     create_price_comparison,
-    create_price_comparison_summary,
+    upsert_price_comparison_summary,
 )
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.utils.comparator import compare_prices
@@ -59,7 +59,7 @@ def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | N
             comparison_id=comparison.id,
             competitors_count=len(competitors),
         )
-        create_price_comparison_summary(
+        upsert_price_comparison_summary(
             db,
             monitored.id,
             comparison.id,

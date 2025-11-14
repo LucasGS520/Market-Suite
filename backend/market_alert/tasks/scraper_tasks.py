@@ -186,6 +186,8 @@ def collect_product_task(
         _observe_metrics(start, "collect_product_task", status)
         SCRAPER_IN_FLIGHT.dec()
         return
+    
+    product_id: str | None = monitored_id
 
     try:
         normalized_url = normalize_product_url(url)
@@ -217,7 +219,6 @@ def collect_product_task(
         return
 
     #Execução do scraping delegada ao serviço especializado
-    product_id = monitored_id
     with SessionLocal() as db:
         try:
             user_uuid = UUID(user_id)

@@ -2,6 +2,7 @@
 
 import structlog
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
@@ -25,6 +26,12 @@ from market_alert.services.services_comparison import (
     run_price_comparison,
     build_comparison_summary,
 )
+from backend.shared.infra.redis import (
+    IdempotencyOwnershipError,
+    register_idempotency_key,
+    store_idempotency_response,
+)
+from market_alert.core.config_alert import settings
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
@@ -102,14 +109,7 @@ def run_comparison_endpoint(
     ``Idempotency-Key`` permite que o cliente evite disparos duplicados. O retorno mantém
     o mesmo formato de comparação persistida, com agregados a alertas utilizados pelo frontend.
     """
-    logger.info(
-        "route_called", 
-        path=request.url.path, 
-        method=request.method, 
-        user_id=str(user.id), 
-        monitored_id=str(monitored_id),
-        idempotency_key=idempotency_key,
-    )
+    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_id), idempotency_key=idempotency_key)
 
     mp = get_monitored_product_by_id(db, monitored_id)
     if not mp or mp.user_id != user.id:
@@ -121,6 +121,34 @@ def run_comparison_endpoint(
         payload.price_change_threshold if payload is not None else None
     )
 
+    owner_reference = str(user.id)
+
+    try:
+        idempotency_record = register_idempotency_key(
+            namespace="comparison_run",
+            key=idempotency_key,
+            owner=owner_reference,
+            ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
+        )
+    except IdempotencyOwnershipError as exc:
+        logger.warning("idempotency_conflict", path=request.url.path, method=request.method, key=idempotency_key)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Chave de idempotência já utilizada por outro usuário",
+        ) from exc
+    
+    if idempotency_record and not idempotency_record.is_new:
+        logger.info("idempotency_replayed", path=request.url.path, method=request.method, key=idempotency_key)
+        if idempotency_record.response is not None:
+            return JSONResponse(
+                content=idempotency_record.response,
+                status_code=idempotency_record.status_code or status.HTTP_200_OK,
+            )
+        return JSONResponse(
+            content={"message": "Comparação já está em processamento."},
+            status_code=status.HTTP_202_ACCEPTED,
+        )
+
     result, alerts = run_price_comparison(
         db,
         monitored_id,
@@ -128,4 +156,14 @@ def run_comparison_endpoint(
         price_change_threshold=price_change_threshold,
     )
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", alerts=len(alerts))
+
+    if idempotency_record:
+        store_idempotency_response(
+            namespace="comparison_run",
+            key=idempotency_key,
+            owner=owner_reference,
+            ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
+            response=result,
+            status_code=status.HTTP_200_OK,
+        )
     return result

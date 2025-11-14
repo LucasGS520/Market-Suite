@@ -1,5 +1,6 @@
 """ Operações de persistência para resultados de comparação de preços """
 
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from uuid import UUID
 
@@ -32,6 +33,36 @@ def create_price_comparison_summary(
         comparison_id=comparison_id,
         aggregates=aggregates,
     )
+    db.add(summary)
+    db.commit()
+    db.refresh(summary)
+    return summary
+
+def upsert_price_comparison_summary(
+    db: Session,
+    monitored_product_id: UUID,
+    comparison_id: UUID,
+    aggregates: Dict[str, object],
+) -> PriceComparisonSummary:
+    """ Cria ou atualiza o resumo agregado associado a uma comparação """
+
+    summary = (
+        db.query(PriceComparisonSummary)
+        .filter(PriceComparisonSummary.comparison_id == comparison_id)
+        .first()
+    )
+
+    if summary is None:
+        return create_price_comparison_summary(
+            db,
+            monitored_product_id,
+            comparison_id,
+            aggregates,
+        )
+
+    summary.aggregates = aggregates
+    summary.timestamp = datetime.now(timezone.utc)
+    summary.monitored_product_id = monitored_product_id
     db.add(summary)
     db.commit()
     db.refresh(summary)
