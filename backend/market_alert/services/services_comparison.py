@@ -59,12 +59,17 @@ def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | N
             comparison_id=comparison.id,
             competitors_count=len(competitors),
         )
+        encoded_summary = jsonable_encoder(summary_payload)
         upsert_price_comparison_summary(
             db,
             monitored.id,
             comparison.id,
-            jsonable_encoder(summary_payload),
+            encoded_summary,
         )
+        encoded_result["summary"] = encoded_summary
+        encoded_result["comparison_id"] = str(comparison.id)
+        encoded_result["monitored_id"] = str(monitored.id)
+        encoded_result["user_id"] = str(monitored.user_id)
         result = encoded_result
         logger.info("comparison_finished", monitored_id=str(monitored_id), alerts=len(alerts))
 

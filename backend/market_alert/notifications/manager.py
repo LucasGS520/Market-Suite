@@ -40,6 +40,7 @@ from market_alert.enums.enums_alerts import (
 from market_alert.core.config_alert import settings
 from shared import metrics
 from shared.utils.redis_client import set_key_with_ttl
+from shared.infra.redis_pubsub import publish_message
 
 
 logger = structlog.get_logger("alerts")
@@ -171,7 +172,7 @@ class NotificationManager:
             metrics.NOTIFICATION_SEND_DURATION_SECONDS.labels(channel=channel_type.value).observe(duration)
             metrics.NOTIFICATIONS_SENT_TOTAL.labels(channel=channel_type.value, success=str(success)).inc()
 
-        create_notification_log(
+        log = create_notification_log(
             db,
             user_id=user.id,
             channel=channel_type,
@@ -185,6 +186,15 @@ class NotificationManager:
             comparison_id=comparison_id,
             severity=severity,
             status=NotificationStatus.SENT if success else NotificationStatus.FAILED,
+        )
+        _publish_notification_event(
+            log,
+            channel_type=channel_type,
+            user_id=str(user.id),
+            alert_type=alert_type,
+            severity=severity,
+            comparison_id=comparison_id,
+            success=success,
         )
 
     async def send_async(
@@ -458,3 +468,47 @@ def get_notification_manager() -> NotificationManager:
     if settings.SLACK_WEBHOOK_URL:
         channels.append(SlackChannel())
     return NotificationManager(channels)
+
+def _publish_notification_event(
+    log,
+    *,
+    channel_type: ChannelType,
+    user_id: str,
+    alert_type: AlertType | None,
+    severity: AlertSeverity | None,
+    comparison_id: UUID | None,
+    success: bool,
+) -> None:
+    """Envia para o Redis o evento de alerta criado para consumo em tempo real."""
+
+    notification_id = getattr(log, "id", None)
+    sent_at = getattr(log, "sent_at", None)
+    status = getattr(log, "status", None)
+
+    event_payload = {
+        "type": "alert.created",
+        "notification_id": str(notification_id) if notification_id else None,
+        "user_id": user_id,
+        "alert_rule_id": str(getattr(log, "alert_rule_id", None)) if getattr(log, "alert_rule_id", None) else None,
+        "comparison_id": str(comparison_id or getattr(log, "comparison_id", None))
+        if (comparison_id or getattr(log, "comparison_id", None))
+        else None,
+        "channel": channel_type.value,
+        "status": status.value if status else None,
+        "success": bool(success),
+        "created_at": sent_at.isoformat() if sent_at else None,
+        "subject": getattr(log, "subject", None),
+        "message": getattr(log, "message", None),
+        "severity": (severity.value if severity else None)
+        or (getattr(log, "severity", None).value if getattr(log, "severity", None) else None),
+        "alert_type": (alert_type.value if alert_type else None)
+        or (getattr(log, "alert_type", None).value if getattr(log, "alert_type", None) else None),
+        "channels": [f"user:{user_id}"],
+    }
+
+    if not publish_message("notifications", event_payload):
+        logger.warning(
+            "notification_event_publish_failed",
+            notification_id=str(notification_id) if notification_id else None,
+        )
+        

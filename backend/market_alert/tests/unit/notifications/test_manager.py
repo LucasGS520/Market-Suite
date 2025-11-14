@@ -34,6 +34,7 @@ def test_alert_manager_dispatches_to_all_channels(monkeypatch):
         "market_alert.notifications.manager.create_notification_log",
         fake_log,
     )
+    monkeypatch.setattr("market_alert.notifications.manager.publish_message", lambda *a, **k: True)
 
     manager.send(None, user, "subject", "message", alert_rule_id="rule1")
 
@@ -57,6 +58,7 @@ def test_alert_manager_uses_asyncio_gather(monkeypatch):
     called = {}
     monkeypatch.setattr("market_alert.notifications.manager.asyncio.gather", fake_gather)
     monkeypatch.setattr("market_alert.notifications.manager.create_notification_log", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.notifications.manager.publish_message", lambda *a, **k: True)
 
     manager.send(None, user, "s", "m")
 
@@ -91,6 +93,7 @@ def test_alert_manager_logs_errors(monkeypatch):
         "market_alert.notifications.manager.create_notification_log",
         fake_create
     )
+    monkeypatch.setattr("market_alert.notifications.manager.publish_message", lambda *a, **k: True)
 
     manager.send(None, user, "subject", "message", alert_rule_id="rule2")
 
@@ -126,6 +129,7 @@ def test_get_notification_manager_logs_missing_settings(monkeypatch):
     counter = DummyCounter()
     monkeypatch.setattr(manager_mod.metrics, "NOTIFICATIONS_SKIPPED_TOTAL", counter)
 
+    monkeypatch.setattr("market_alert.notifications.manager.publish_message", lambda *a, **k: True)
     monkeypatch.setattr(settings, "SMTP_HOST", None)
     monkeypatch.setattr(settings, "TWILIO_ACCOUNT_SID", None)
     monkeypatch.setattr(settings, "TWILIO_AUTH_TOKEN", None)
@@ -156,6 +160,7 @@ def test_get_notification_manager_no_logs_when_configured(monkeypatch):
     monkeypatch.setattr(settings, "TWILIO_WHATSAPP_FROM", "+2")
     monkeypatch.setattr(settings, "FCM_SERVER_KEY", "key")
     monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "http://hook")
+    monkeypatch.setattr("market_alert.notifications.manager.publish_message", lambda *a, **k: True)
 
     class DummyClient:
         def __init__(self, *a, **k):
@@ -193,6 +198,7 @@ def test_dispatch_price_alerts_handles_rule_without_id(monkeypatch):
     from market_alert.services import services_notifications as services_mod
 
     monkeypatch.setattr(services_mod, "get_user_by_id", lambda *a, **k: user)
+    monkeypatch.setattr("market_alert.notifications.manager.publish_message", lambda *a, **k: True)
     monkeypatch.setattr(services_mod, "get_notification_manager", lambda: NotificationManager([DummyChannel()]))
     
     def fake_manager_log(
