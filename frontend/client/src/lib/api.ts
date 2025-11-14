@@ -852,15 +852,32 @@ export const runComparison = (
   token: string,
   monitoredId: string,
   tolerance?: number,
-  priceChangeThreshold?: number
+  priceChangeThreshold?: number,
 ) => {
-  const params = new URLSearchParams();
-  if (tolerance !== undefined) params.append('tolerance', tolerance.toString());
-  if (priceChangeThreshold !== undefined) params.append('price_change_threshold', priceChangeThreshold.toString());
+  const payload: Record<string, number> = {};
 
-  return apiRequest<PriceComparison>(`/comparisons/${monitoredId}/run?${params}`, {
+  if (tolerance !== undefined) {
+    payload.tolerance = tolerance;
+  }
+
+  if (priceChangeThreshold !== undefined) {
+    payload.price_change_threshold = priceChangeThreshold;
+  }
+
+  const hasCustomParameters = Object.keys(payload).length > 0;
+
+  return apiRequest<PriceComparison>(`/comparisons/${monitoredId}/run`, {
     token,
     method: 'POST',
+    ...(hasCustomParameters
+      ? {
+          body: JSON.stringify(payload),
+          headers: {
+            // Evitamos envio desnecessário quando não há tolerâncias para preservar contratos antigos.
+            'Content-Type': 'application/json',
+          },
+        }
+      : {}),
   });
 };
 
