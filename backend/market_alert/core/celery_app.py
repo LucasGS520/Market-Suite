@@ -150,19 +150,26 @@ celery_app.conf.update(
     task_time_limit=60,
 
     #Concorrência global (podendo ser sobrescrito via CLI)
-    worker_concurrency=int(os.getenv("CELERY_WORKER_CONCURRENCY", "8")),
+    worker_concurrency=int(os.getenv("CELERY_WORKER_CONCURRENCY", "12")),
+
+    #Prefetch reduzido mantém fila de comparação reagindo rapidamente mesmo em alta carga
+    worker_prefetch_multiplier=int(os.getenv("CELERY_WORKER_PREFETCH", "1")),
+    task_queue_max_priority=10,
 )
 
 #Define exchanges e filas dedicadas
 #Separa scraping e monitoramento
 scraping_exchange = Exchange("scraping", type="direct")
 monitor_exchange = Exchange("monitor", type="direct")
+compare_exchange = Exchange("compare", type="direct")
 
 celery_app.conf.task_queues = (
     #Fila para tarefas de scraping
     Queue("scraping", scraping_exchange, routing_key="scraping"),
     #Fila para tarefas de monitoramento
     Queue("monitor", monitor_exchange, routing_key="monitor"),
+    #Fila de comparação dedicada com suporte a prioridade máx
+    Queue("compare", compare_exchange, routing_key="compare", queue_arguments={"x-max-priority": 10}),
 )
 
 #Roteamento de tarefas para filas específicas
@@ -182,7 +189,11 @@ celery_app.conf.task_routes = {
     },
     "market_alert.tasks.monitor_tasks.recheck_competitor_products": {
         "queue": "monitor", "routing_key": "monitor"
-    }
+    },
+    #Comparações recebem prioridade alta e fila dedicada
+    "market_alert.tasks.compare_prices_tasks.compare_prices_task": {
+        "queue": "compare", "routing_key": "compare", "priority": 9,
+    },
 }
 
 #Agendamentos periódicos (Celery Beat)

@@ -42,9 +42,15 @@ redis_client = get_redis_client()
     name="compare_prices_task",
     rate_limit=settings.COMPARE_RATE_LIMIT,
     queue="compare",
+    soft_time_limit=20,
+    time_limit=40,
+    acks_late=True,
+    reject_on_worker_lost=True,
+    priority=9,
 )
 def compare_prices_task(self, monitored_id: str, idempotency_key: str | None = None) -> None:
     """ Carrega um produto monitorado e executa a comparação de preços """
+    #A confirmação tardia garante reentrega caso o worker seja finalizado antes de concluir o processamento
     task_logger = logger.bind(task_id=self.request.id, monitored_id=mask_identifier(monitored_id))
     start = datetime.now(timezone.utc)
     status = "success"
