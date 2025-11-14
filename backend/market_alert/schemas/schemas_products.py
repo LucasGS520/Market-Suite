@@ -36,6 +36,7 @@ class MonitoredProductResponse(BaseModel):
     competitors_with_price_count: Optional[int] = None
     latest_comparison_id: Optional[UUID] = None
     last_comparison_at: Optional[datetime] = None
+    summary_computed_at: Optional[datetime] = None
     is_new: Optional[bool] = None
     comparison_insights: Optional[str] = None
 

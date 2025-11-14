@@ -1,17 +1,17 @@
 """ Rotas para consulta de comparações de preços """
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
-from decimal import Decimal
 
 from shared.infra.db import get_db
 from market_alert.models import User
 from market_alert.schemas.schemas_comparisons import (
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
+    PriceComparisonRunRequest,
 )
 from market_alert.core.security import get_current_user
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
@@ -88,25 +88,44 @@ def get_comparison(request: Request, comparison_id: UUID, db: Session = Depends(
     return comparison
 
 @router.post("/{monitored_id}/run", response_model=dict)
-def run_comparison_endpoint(request: Request, monitored_id: UUID, tolerance: float | None = Query(None), price_change_threshold: float | None = Query(None), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """ Execute uma nova comparação de preços para o produto monitorado 
-    
-    O payload contém preços agregados (média, menor, maior), discrepâncias por concorrente
-    e alertas de disponibilidade/variação para que o frontend reproduza o comportamento esperado
-    observado na API legada.
+def run_comparison_endpoint(
+    request: Request,
+    monitored_id: UUID,
+    payload: PriceComparisonRunRequest | None = Body(default=None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """ Executa nova comparação de preços com suporte a tolerâncias personalizdas e idempotência
+
+    O payload opcional aceita ``tolerance`` e ``price_change_threshold`` enquanto o header
+    ``Idempotency-Key`` permite que o cliente evite disparos duplicados. O retorno mantém
+    o mesmo formato de comparação persistida, com agregados a alertas utilizados pelo frontend.
     """
-    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_id))
+    logger.info(
+        "route_called", 
+        path=request.url.path, 
+        method=request.method, 
+        user_id=str(user.id), 
+        monitored_id=str(monitored_id),
+        idempotency_key=idempotency_key,
+    )
 
     mp = get_monitored_product_by_id(db, monitored_id)
     if not mp or mp.user_id != user.id:
         logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", monitored_id=str(monitored_id))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto monitorado não encontrado.")
 
+    tolerance = payload.tolerance if payload is not None else None
+    price_change_threshold = (
+        payload.price_change_threshold if payload is not None else None
+    )
+
     result, alerts = run_price_comparison(
         db,
         monitored_id,
-        tolerance=Decimal(str(tolerance)) if tolerance is not None else None,
-        price_change_threshold=Decimal(str(price_change_threshold)) if price_change_threshold is not None else None
+        tolerance=tolerance,
+        price_change_threshold=price_change_threshold,
     )
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", alerts=len(alerts))
     return result

@@ -99,6 +99,7 @@ def _empty_summary(competitors_count: int) -> Dict[str, Any]:
     return {
         "comparison_id": None,
         "last_comparison_at": None,
+        "computed_at": None,
         "monitored_price": None,
         "competitors_count": competitors_count,
         "competitors_with_price_count": 0,
@@ -122,6 +123,7 @@ def _compute_summary_from_payload(
     """Calcula agregados a partir do payload cru armazenado na comparação """
     summary = _empty_summary(competitors_count)
     summary["last_comparison_at"] = timestamp
+    summary["computed_at"] = timestamp
     if comparison_id is not None:
         summary["comparison_id"] = str(comparison_id)
 
@@ -208,6 +210,7 @@ def _apply_summary_defaults(
     summary.update(payload or {})
 
     summary["last_comparison_at"] = timestamp
+    summary["computed_at"] = timestamp
     summary["competitors_count"] = competitors_count
 
     if summary.get("discrepancies") is None:

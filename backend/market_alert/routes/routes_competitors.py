@@ -4,7 +4,7 @@ from typing import List
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
@@ -50,8 +50,26 @@ MAX_PER_PAGE = 100
 
 @router.post("/scrape", status_code=status.HTTP_202_ACCEPTED, response_model=None)
 def create_competitor_scrape(request: Request, product_data: CompetitorProductCreateScraping, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """ Endpoint para monitorar e comparar um produto concorrente por meio de um link direto (scraping) """
-    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(product_data.monitored_product_id))
+    def create_competitor_scrape(
+    request: Request,
+    product_data: CompetitorProductCreateScraping,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    """ Endpoint para monitorar e comparar um produto concorrente por meio de um link direto (scraping)
+
+    O header ``Idempotency-Key`` é aceito para que clientes previnam agendamentos duplicados
+    em fluxos de scraping.
+    """
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        monitored_id=str(product_data.monitored_product_id),
+        idempotency_key=idempotency_key,
+    )
 
     try:
         normalized_url, issue = normalize_and_validate_product_url(str(product_data.product_url))

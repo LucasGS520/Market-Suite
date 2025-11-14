@@ -2,6 +2,7 @@
 
 from uuid import UUID
 from datetime import datetime
+from decimal import Decimal
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,11 +21,23 @@ class PriceComparisonResponse(BaseModel):
     timestamp: datetime
     data: Dict[str, Any]
 
+class PriceComparisonRunRequest(BaseModel):
+    """ Payload opcional utilizado para executar comparação com tolerâncias customizadas """
+    tolerance: Decimal | None = Field(
+        default=None,
+        description="Tolerância absoluta aplicada na comparação de preços.",
+    )
+    price_change_threshold: Decimal | None = Field(
+        default=None,
+        description="Variação mínima em percentual utilizada para disparar alertas.",
+    )
+
 class PriceComparisonSummaryResponse(BaseModel):
     """ Resumo consolidado da última comparação executada para um produto monitorado """
     monitored_product_id: UUID
     comparison_id: Optional[UUID] = None
     last_comparison_at: Optional[datetime] = None
+    computed_at: Optional[datetime] = None
     monitored_price: Optional[str] = None
     competitors_count: int = 0
     competitors_with_price_count: int = 0
