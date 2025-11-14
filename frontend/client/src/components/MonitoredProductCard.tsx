@@ -253,8 +253,17 @@ const describePotentialAdjustment = (summary: ComparisonSummary | null | undefin
 /**
  * Seleciona concorrentes de destaque (menor e maior preço) entre os carregados.
  */
-const buildCompetitorHighlights = (competitors: CompetitorSummary[]): CompetitorSummary[] => {
-  const withPrice = competitors.filter((competitor) => competitor.currentPrice !== null);
+export const buildCompetitorHighlights = (competitors: CompetitorSummary[]): CompetitorSummary[] => {
+  const uniqueCompetitors = Array.from(
+    competitors.reduce<Map<string, CompetitorSummary>>((acc, competitor) => {
+      if (!acc.has(competitor.id)) {
+        acc.set(competitor.id, competitor);
+      }
+      return acc;
+    }, new Map()).values(),
+  );
+
+  const withPrice = uniqueCompetitors.filter((competitor) => competitor.currentPrice !== null);
 
   if (withPrice.length === 0) {
     return [];
@@ -324,13 +333,28 @@ export const MonitoredProductCard: React.FC<MonitoredProductCardProps> = ({
     setCompetitorsError(null);
 
     try {
-      const response = await getCompetitors(token, product.id, {
+      const sharedParams = {
         per_page: COMPETITOR_HIGHLIGHT_COUNT,
-        sort_by: 'price',
-        sort_direction: 'asc',
+        sort_by: 'price' as const,
         include_paused: false,
-      });
-      const summary = response.items.map(mapCompetitorToSummary);
+      };
+
+      const [ascending, descending] = await Promise.all([
+        getCompetitors(token, product.id, { ...sharedParams, sort_direction: 'asc' }),
+        getCompetitors(token, product.id, { ...sharedParams, sort_direction: 'desc' }),
+      ]);
+
+      const combined = [...ascending.items, ...descending.items];
+      // Combina resultados de ordenações opostas para garantir captura de extremos de preço.
+      const summary = Array.from(
+        combined.reduce<Map<string, CompetitorSummary>>((acc, competitor) => {
+          if (!acc.has(competitor.id)) {
+            acc.set(competitor.id, mapCompetitorToSummary(competitor));
+          }
+          return acc;
+        }, new Map()).values(),
+      );
+      
       setCompetitors(summary);
       hasLoadedCompetitorsRef.current = true;
     } catch (error) {
