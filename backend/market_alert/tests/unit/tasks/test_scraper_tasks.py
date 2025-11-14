@@ -1,6 +1,7 @@
 """ Testes unitários das tasks de scraping sem dependências externas """
 
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 import pytest
 
@@ -45,6 +46,8 @@ def test_collect_product_task_send_request_and_persists(monkeypatch):
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.redis_client.set", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks._dispatch_comparison_task", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.get_monitored_product_by_user_and_url", lambda *a, **k: None)
 
     collect_product_task.run("http://produto", VALID_UUID, "Produto")
 
@@ -63,6 +66,8 @@ def test_collect_product_task_accepts_missing_name(monkeypatch):
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_monitored_product", fake_service)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.redis_client.set", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks._dispatch_comparison_task", lambda *a, **k: None)
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks.get_monitored_product_by_user_and_url", lambda *a, **k: None)
 
     collect_product_task.run("http://produto", VALID_UUID, None)
 
@@ -77,17 +82,27 @@ def test_collect_competitor_task_send_request_and_persist(monkeypatch):
         chamado["user_id"] = str(user_id)
         chamado["monitored_id"] = str(payload.monitored_product_id)
         return {"status": "success", "competitor_id": "abc"}
+    
+    dispatched: dict[str, object] = {}
+
+    def fake_dispatch(monitored_id, **kwargs):
+        dispatched["monitored_id"] = str(monitored_id)
+        dispatched["kwargs"] = kwargs
 
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_competitor_product", fake_service)
     monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.compare_prices_task.delay", lambda pid: chamado.setdefault("compare", pid))
-
+    monkeypatch.setattr(
+        "market_alert.tasks.scraper_tasks.get_monitored_product_by_id",
+        lambda db, pid: SimpleNamespace(user_id=VALID_UUID, last_checked=datetime.now(timezone.utc)),
+    )
+    monkeypatch.setattr("market_alert.tasks.scraper_tasks._dispatch_comparison_task", fake_dispatch)
     collect_competitor_task.run(VALID_UUID, "http://concorrente")
 
     assert chamado["url"] == "http://concorrente"
     assert chamado["monitored_id"] == VALID_UUID
-    assert chamado["compare"] == VALID_UUID
+    assert dispatched["monitored_id"] == VALID_UUID
+    assert dispatched["kwargs"]["price_changed"] is True
+    assert dispatched["kwargs"]["availability_changed"] is False
 
 def test_result_helpers_accept_result_and_mapping():
     """Garante compatibilidade com ``ScrapeResult`` e dicionários legados."""

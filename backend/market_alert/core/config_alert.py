@@ -113,7 +113,9 @@ class Settings(ConfigBase):
     IDEMPOTENCY_TTL_SECONDS: int = int(
         os.getenv("IDEMPOTENCY_TTL_SECONDS", str(10 * 60))
     ) #Tempo padrão para reter chaves de idempotência
-
+    COMPARISON_IDEMPOTENCY_TTL_SECONDS: int = int(
+        os.getenv("COMPARISON_IDEMPOTENCY_TTL_SECONDS", str(60 * 60))
+    ) #TTL específico para deduplicação de comparações automáticas
 
 #Instância única de settings para a aplicação
 settings = Settings()

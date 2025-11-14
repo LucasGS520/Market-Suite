@@ -171,11 +171,12 @@ def test_collect_product_task_processa_sucesso(monkeypatch):
 
     captured = {}
 
+    def fake_dispatch(monitored_id, **kwargs):
+        captured["id"] = str(monitored_id)
+        captured["kwargs"] = kwargs
+
     _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
-    monkeypatch.setattr(
-        "market_alert.tasks.scraper_tasks.compare_prices_task",
-        SimpleNamespace(delay=lambda value: captured.setdefault("id", value)),
-    )
+    _patch_task_attr(monkeypatch, "_dispatch_comparison_task", fake_dispatch)
 
     assert collect_product_task.run(
         "https://mercadolivre.com.br/abc",
@@ -184,6 +185,7 @@ def test_collect_product_task_processa_sucesso(monkeypatch):
         VALID_UUID,
     ) is None
     assert captured["id"] == VALID_UUID
+    assert captured["kwargs"]["price_changed"] is True
 
 def test_collect_product_task_availability_change(monkeypatch):
     """ Alterações de disponibilidade deve disparar comparação mesmo sem preço """
@@ -197,11 +199,12 @@ def test_collect_product_task_availability_change(monkeypatch):
 
     captured = {}
 
+    def fake_dispatch(monitored_id, **kwargs):
+        captured["id"] = str(monitored_id)
+        captured["kwargs"] = kwargs
+
     _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
-    monkeypatch.setattr(
-        "market_alert.tasks.scraper_tasks.compare_prices_task",
-        SimpleNamespace(delay=lambda value: captured.setdefault("id", value)),
-    )
+    _patch_task_attr(monkeypatch, "_dispatch_comparison_task", fake_dispatch)
 
     assert collect_product_task.run(
         "https://mercadolivre.com.br/abc",
@@ -210,6 +213,7 @@ def test_collect_product_task_availability_change(monkeypatch):
         VALID_UUID,
     ) is None
     assert captured["id"] == VALID_UUID
+    assert captured["kwargs"]["availability_changed"] is True
 
 def test_collect_product_task_no_result_dispara_retry(monkeypatch):
     """Cenário ``no_result`` deve solicitar reexecução posterior."""
@@ -297,12 +301,16 @@ def test_collect_competitor_task_not_modified(monkeypatch):
     def fake_service(*a, **k):
         return ScrapeResult(status="not_modified", product_id=VALID_UUID, price_changed=False)
 
-    def fake_compare(arg):
+    def fake_dispatch(*args, **kwargs):
         captured["called"] = True
 
     _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
-    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.compare_prices_task", SimpleNamespace(delay=fake_compare))
+    _patch_task_attr(
+        monkeypatch,
+        "get_monitored_product_by_id",
+        lambda db, pid: SimpleNamespace(user_id=VALID_UUID, last_checked=None),
+    )
+    _patch_task_attr(monkeypatch, "_dispatch_comparison_task", fake_dispatch)
 
     assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None
     assert "called" not in captured
@@ -320,15 +328,21 @@ def test_collect_competitor_task_availability_change(monkeypatch):
             availability_changed=True,
         )
 
-    def fake_compare(arg):
-        captured["called_with"] = arg
+    def fake_dispatch(monitored_id, **kwargs):
+        captured["called_with"] = str(monitored_id)
+        captured["kwargs"] = kwargs
 
     _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
-    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.compare_prices_task", SimpleNamespace(delay=fake_compare))
+    _patch_task_attr(
+        monkeypatch,
+        "get_monitored_product_by_id",
+        lambda db, pid: SimpleNamespace(user_id=VALID_UUID, last_checked=None),
+    )
+    _patch_task_attr(monkeypatch, "_dispatch_comparison_task", fake_dispatch)
 
     assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None
     assert captured["called_with"] == VALID_UUID
+    assert captured["kwargs"]["availability_changed"] is True
 
 def test_collect_competitor_task_no_result_dispara_retry(monkeypatch):
     """Resposta ``no_result`` deve reagendar nova tentativa."""

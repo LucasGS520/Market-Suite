@@ -9,7 +9,7 @@ as tasks mantêm métricas e tratamento de erros.
 
 from uuid import UUID
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import structlog
 from sqlalchemy.orm import Session
@@ -40,6 +40,123 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 
 logger = structlog.get_logger("scraper_tasks")
 redis_client = get_redis_client()
+
+def _normalized_timestamp(value: datetime | None) -> datetime:
+    """ Normaliza timestamp para UTC e remove microssegundos para chaves estáveis """
+    base = value or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    return base.astimezone(timezone.utc).replace(microsecond=0)
+
+
+def _extract_comparison_reference(
+    db: Session | None,
+    monitored_id: str | UUID | None,
+) -> datetime | None:
+    """ Recupera referência temporal usada para montar a chave de idempotência """
+    if db is None or monitored_id is None or not hasattr(db, "query"):
+        return None
+
+    try:
+        monitored_uuid = monitored_id if isinstance(monitored_id, UUID) else UUID(str(monitored_id))
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        monitored = get_monitored_product_by_id(db, monitored_uuid)
+    except Exception:
+        return None
+
+    if monitored is None:
+        return None
+
+    reference = getattr(monitored, "last_checked", None)
+    if isinstance(reference, datetime):
+        return _normalized_timestamp(reference)
+
+    fallback = getattr(monitored, "updated_at", None)
+    if isinstance(fallback, datetime):
+        return _normalized_timestamp(fallback)
+
+    return None
+
+
+def _changes_to_flags(price_changed: bool, availability_changed: bool) -> tuple[str, ...]:
+    """ Converte alterações em uma tupla ordenada para compor a chave """
+    flags: list[str] = []
+    if price_changed:
+        flags.append("price")
+    if availability_changed:
+        flags.append("availability")
+    return tuple(sorted(flags))
+
+
+def _build_comparison_idempotency_key(
+    monitored_id: str,
+    *,
+    reference: datetime | None,
+    flags: Sequence[str],
+    source: str,
+) -> str:
+    """ Monta chave que identifica a comparação evitando reprocessamentos """
+    normalized_time = _normalized_timestamp(reference)
+    descriptor = "+".join(flags) if flags else "no-change"
+    safe_source = source.replace(" ", "_")
+    return f"compare:auto:{safe_source}:{descriptor}:{monitored_id}:{normalized_time.isoformat()}"
+
+
+def _dispatch_comparison_task(
+    monitored_id: str | None,
+    *,
+    db: Session | None,
+    price_changed: bool,
+    availability_changed: bool,
+    source: str,
+    task_logger,
+) -> None:
+    """ Agenda comparação com prioridade alta e garante fallback para ``delay`` """
+    if not monitored_id:
+        task_logger.info(
+            "price_comparison_task_skipped",
+            reason="missing_monitored_id",
+            source=source,
+        )
+        return
+
+    reference = _extract_comparison_reference(db, monitored_id)
+    flags = _changes_to_flags(price_changed, availability_changed)
+    idempotency_key = _build_comparison_idempotency_key(
+        str(monitored_id),
+        reference=reference,
+        flags=flags,
+        source=source,
+    )
+
+    headers = {"Idempotency-Key": idempotency_key}
+
+    try:
+        compare_prices_task.apply_async(
+            args=(str(monitored_id),),
+            kwargs={"idempotency_key": idempotency_key},
+            queue="compare",
+            priority=0,
+            headers=headers,
+        )
+        task_logger.info(
+            "price_comparison_task_dispatched",
+            reason="change_detected",
+            availability_changed=availability_changed,
+            price_changed=price_changed,
+            idempotency_key=idempotency_key,
+            source=source,
+        )
+    except Exception as exc:
+        task_logger.warning(
+            "price_comparison_apply_async_failed",
+            error=str(exc),
+            source=source,
+        )
+        compare_prices_task.delay(str(monitored_id), idempotency_key=idempotency_key)
 
 def _mark_failed_product(
     product_reference: str | UUID | None,
@@ -289,12 +406,14 @@ def collect_product_task(
             if redis_client is not None:
                 redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
 
-            if product_id and (price_changed or availability_changed):
-                compare_prices_task.delay(str(product_id))
-                task_logger.info(
-                    "price_comparison_task_dispatched",
-                    reason="product_change",
-                    availability_changed=availability_changed,
+            if price_changed or availability_changed:
+                _dispatch_comparison_task(
+                    product_id,
+                    db=db,
+                    price_changed=bool(price_changed),
+                    availability_changed=bool(availability_changed),
+                    source="monitored_scrape",
+                    task_logger=task_logger,
                 )
 
         except ScraperClientError as req_err:
@@ -446,10 +565,13 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
                 raise self.retry(countdown=delay)
             
             if price_changed or availability_changed:
-                compare_prices_task.delay(str(monitored_product_id))
-                task_logger.info(
-                    "price_comparison_task_dispatched",
-                    availability_changed=availability_changed,
+                _dispatch_comparison_task(
+                    monitored_product_id,
+                    db=db,
+                    price_changed=bool(price_changed),
+                    availability_changed=bool(availability_changed),
+                    source="competitor_scrape",
+                    task_logger=task_logger,
                 )
 
         except ScraperClientError as req_err:
