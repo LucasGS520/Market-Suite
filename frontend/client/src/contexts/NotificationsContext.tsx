@@ -135,6 +135,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const reconnectAttemptRef = useRef(0);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const isManuallyClosedRef = useRef(false);
+  const scheduleReconnectRef = useRef<((lastClose?: CloseEvent) => void) | null>(null);
 
   const listenersRef = useRef<ListenerRegistry>({
     general: new Set(),
@@ -484,7 +485,51 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   /**
-   * Agenda nova tentativa de conexão utilizando backoff exponencial.
+   * Abre uma conexão WebSocket utilizando um token já validado, preservando handlers
+   * e configurando reconexão automática em caso de falha.
+   */
+  const openWebSocket = useCallback(
+    (freshToken: string) => {
+      try {
+        setConnectionState('connecting');
+        const url = buildNotificationsWebSocketUrl(freshToken);
+        const socket = new WebSocket(url);
+        websocketRef.current = socket;
+        isManuallyClosedRef.current = false;
+
+        socket.onopen = () => {
+          reconnectAttemptRef.current = 0;
+          setConnectionState('connected');
+          syncChannelSubscriptions();
+        };
+
+        socket.onmessage = (event) => {
+          handleMessage(event).catch((error) => {
+            console.error('Erro ao processar mensagem do WebSocket.', error);
+          });
+        };
+
+        socket.onerror = () => {
+          setConnectionState('error');
+        };
+
+        socket.onclose = (event) => {
+          websocketRef.current = null;
+          setConnectionState('idle');
+          scheduleReconnectRef.current?.(event);
+        };
+      } catch (error) {
+        console.error('Falha ao conectar ao WebSocket de notificações.', error);
+        scheduleReconnectRef.current?.();
+      }
+    },
+    [handleMessage, syncChannelSubscriptions],
+  );
+
+  /**
+   * Agenda nova tentativa de conexão utilizando backoff exponencial e sempre solicitando
+   * um token atualizado imediatamente antes do handshake para evitar reuso de credenciais
+   * expiradas em callbacks antigos.
    */
   const scheduleReconnect = useCallback(
     (lastClose?: CloseEvent) => {
@@ -492,12 +537,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
         return;
       }
 
-      if (lastClose && [4401, 4403].includes(lastClose.code)) {
-        window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
-        return;
-      }
-
-      const nextAttempt = reconnectAttemptRef.current + 1;
+      const isAuthCloseCode = lastClose && [4401, 4403].includes(lastClose.code);
+      const nextAttempt = isAuthCloseCode ? 0 : reconnectAttemptRef.current + 1;
       reconnectAttemptRef.current = nextAttempt;
       const delay = computeBackoffDelay(nextAttempt);
 
@@ -506,12 +547,18 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       reconnectTimeoutRef.current = window.setTimeout(() => {
-        connect();
+        attemptConnectionWithFreshToken().catch((error) => {
+          console.error('Falha ao reabrir WebSocket de notificações após desconexão.', error);
+        });
       }, delay);
       setConnectionState('error');
     },
-    [token],
+    [attemptConnectionWithFreshToken, token],
   );
+
+  useEffect(() => {
+    scheduleReconnectRef.current = scheduleReconnect;
+  }, [scheduleReconnect]);
 
   /**
    * Fecha a conexão atual limpando timers associados.
@@ -534,9 +581,10 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   /**
-   * Estabelece conexão WebSocket autenticada com o backend.
+   * Estabelece conexão WebSocket solicitando token atualizado no momento do handshake
+   * para mitigar uso de tokens expirados armazenados em closures antigas ou abas distintas.
    */
-  const connect = useCallback(async () => {
+  const attemptConnectionWithFreshToken = useCallback(async () => {
     if (websocketRef.current) {
       return;
     }
@@ -544,42 +592,12 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     const freshToken = await getFreshAccessToken();
 
     if (!freshToken) {
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
       return;
     }
 
-    try {
-      setConnectionState('connecting');
-      const url = buildNotificationsWebSocketUrl(freshToken);
-      const socket = new WebSocket(url);
-      websocketRef.current = socket;
-      isManuallyClosedRef.current = false;
-
-      socket.onopen = () => {
-        reconnectAttemptRef.current = 0;
-        setConnectionState('connected');
-        syncChannelSubscriptions();
-      };
-
-      socket.onmessage = (event) => {
-        handleMessage(event).catch((error) => {
-          console.error('Erro ao processar mensagem do WebSocket.', error);
-        });
-      };
-
-      socket.onerror = () => {
-        setConnectionState('error');
-      };
-
-      socket.onclose = (event) => {
-        websocketRef.current = null;
-        setConnectionState('idle');
-        scheduleReconnect(event);
-      };
-    } catch (error) {
-      console.error('Falha ao conectar ao WebSocket de notificações.', error);
-      scheduleReconnect();
-    }
-  }, [getFreshAccessToken, handleMessage, scheduleReconnect, syncChannelSubscriptions]);
+    openWebSocket(freshToken);
+  }, [getFreshAccessToken, openWebSocket]);
 
   /**
    * Observa mudanças de autenticação para iniciar ou encerrar a conexão.
@@ -592,13 +610,13 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       return;
     }
 
-    connect();
+    attemptConnectionWithFreshToken();
 
     return () => {
       isManuallyClosedRef.current = true;
       cleanupConnection();
     };
-  }, [cleanupConnection, connect, token, user]);
+  }, [attemptConnectionWithFreshToken, cleanupConnection, token, user]);
 
   /**
    * Garante que listeners sejam limpos quando o componente desmontar.
