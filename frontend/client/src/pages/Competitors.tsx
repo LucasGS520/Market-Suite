@@ -697,5 +697,7 @@ const CompetitorsPage: React.FC = () => {
     }}
   />
 </div>
+  );
+};
 
 export default CompetitorsPage;
