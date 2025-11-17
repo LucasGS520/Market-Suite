@@ -216,6 +216,9 @@ def _extract_token(websocket: WebSocket) -> Optional[str]:
 
     token = websocket.query_params.get("token")
     if token:
+        token = token.strip()
+        if token.lower().startswith("bearer "):
+            return token.split(" ", 1)[1]
         return token
 
     header = websocket.headers.get("Authorization")
@@ -236,16 +239,19 @@ def _get_user_from_token(token: str) -> Optional[User]:
 
     user_id = payload.get("sub")
     if not user_id:
+        logger.warning("notifications_ws_token_missing_sub")
         return None
 
     try:
         user_uuid = UUID(str(user_id))
     except (ValueError, TypeError):
+        logger.warning("notifications_ws_token_invalid_sub", sub=str(user_id))
         return None
 
     with SessionLocal() as db:
         user = db.get(User, user_uuid)
         if not user or not user.is_active:
+            logger.warning("notifications_ws_user_not_found", user_id=str(user_uuid))
             return None
         return user
 
@@ -299,11 +305,13 @@ async def notifications_stream(websocket: WebSocket) -> None:
 
     token = _extract_token(websocket)
     if not token:
+        logger.warning("notifications_ws_missing_token")
         await websocket.close(code=WEBSOCKET_CLOSE_UNAUTHORIZED)
         return
 
     user = _get_user_from_token(token)
     if user is None:
+        logger.warning("notifications_ws_forbidden", reason="invalid_token_or_user")
         await websocket.close(code=WEBSOCKET_CLOSE_FORBIDDEN)
         return
 

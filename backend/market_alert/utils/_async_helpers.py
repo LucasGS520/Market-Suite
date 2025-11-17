@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
@@ -10,39 +11,34 @@ from typing import Any, TypeVar
 T = TypeVar("T")
 
 def _run_sync(coro: Coroutine[Any, Any, T]) -> T:
-    """ Executa corrotina garantindo gerenciamento seguro do loop de evento """
+    """ Executa uma corrotina sem interferir no loop de evento global """
     try:
-        loop = asyncio.get_event_loop()
+        running_loop = asyncio.get_running_loop()
     except RuntimeError:
-        new_loop = asyncio.new_event_loop()
+        #Caminho normal em tarefas Celery
+        #Cria um loop próprio e garante que ele seja encerrado ao final sem impactar loops compartilhados
+        return asyncio.run(coro)
+    
+    result: dict[str, T | BaseException] = {}
+
+    def _worker() -> None:
+        """ Cria um loop dedicado em ``threado`` isolada para evitar conflitos """
         try:
-            asyncio.set_event_loop(new_loop)
-            return new_loop.run_until_complete(coro)
-        finally:
-            new_loop.close()
-            asyncio.set_event_loop(None)
+            result["value"] = asyncio.run(coro)
+        except BaseException as exc:
+            result["error"] = exc
 
-    if loop.is_closed():
-        asyncio.set_event_loop(None)
-        new_loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(new_loop)
-            return new_loop.run_until_complete(coro)
-        finally:
-            new_loop.close()
-            asyncio.set_event_loop(None)
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    thread.join()
 
-    if loop.is_running():
-        new_loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(new_loop)
-            return new_loop.run_until_complete(coro)
-        finally:
-            new_loop.close()
-            asyncio.set_event_loop(None)
+    if "error" in result:
+        raise result["error"]
+    
+    if "value" not in result:
+        raise RuntimeError("Execução assíncrona não retornou resultado")
 
-    return loop.run_until_complete(coro)
-
+    return result["value"]
 
 __all__ = [
     "_run_sync",
