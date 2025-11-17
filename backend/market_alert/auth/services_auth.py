@@ -16,7 +16,13 @@ from market_alert.core.tokens import generate_verification_token, generate_reset
 from market_alert.notifications.manager import get_notification_manager
 from market_alert.crud.crud_notification_logs import has_recent_duplicate_notification
 from market_alert.core.config_alert import settings
-from market_alert.schemas.schemas_auth import TokenResponse, ResetPasswordRequest, ResetPasswordConfirmRequest, ChangePasswordRequest, ChangeEmailRequest, EmailTokenRequest
+from market_alert.schemas.schemas_auth import (
+    ResetPasswordRequest,
+    ResetPasswordConfirmRequest,
+    ChangePasswordRequest,
+    ChangeEmailRequest,
+    EmailTokenRequest,
+)
 from market_alert.schemas.schemas_auth import TokenPairResponse, RefreshRequest
 from market_alert.models.models_users import User
 
@@ -30,7 +36,7 @@ def authenticate_user(db: Session, email: str, password: str) -> User | None:
         return user
     return None
 
-def login_user(request: Request, db: Session, username: str, password: str) -> TokenResponse:
+def login_user(request: Request, db: Session, username: str, password: str) -> TokenPairResponse:
     """ Organiza o fluxo de login: Bloqueio por IP, Autenticação, Registro de falhas ou sucesso, Geração de JWT """
     ip = request.client.host
     email = username
@@ -59,7 +65,11 @@ def login_user(request: Request, db: Session, username: str, password: str) -> T
     logger.info("login_success", user_id=str(user.id), ip=ip)
 
     token = create_access_token({"sub": str(user.id), "jti": str(uuid4())})
-    return TokenResponse(access_token=token, token_type="bearer")
+    raw_refresh, refresh = create_refresh_token(
+        db, str(user.id), request.client.host, request.headers.get("user-agent", "")
+    )
+    logger.info("refresh_token_issued_on_login", refresh_id=str(refresh.id), user_id=str(user.id))
+    return TokenPairResponse(access_token=token, refresh_token=raw_refresh, token_type="bearer")
 
 def send_verification_email_service(db: Session, current_user: User) -> None:
     """ Gera e envia um token de verificação de email """

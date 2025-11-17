@@ -126,7 +126,7 @@ const toNumberOrNull = (value: unknown): number | null => {
  * Provider responsável por manter a conexão WebSocket e distribuir eventos.
  */
 export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { token, user } = useAuth();
+  const { token, user, getFreshAccessToken } = useAuth();
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
 
@@ -279,18 +279,19 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
    */
   const refetchMonitoredFromApi = useCallback(
     async (monitoredId: string): Promise<void> => {
-      if (!token) {
+      const freshToken = await getFreshAccessToken();
+      if (!freshToken) {
         return;
       }
 
       try {
-        const fresh = await getMonitoredProduct(token, monitoredId);
+        const fresh = await getMonitoredProduct(freshToken, monitoredId);
         patchCachedMonitoredProduct(monitoredId, fresh);
       } catch (error) {
         console.error('Falha ao atualizar produto monitorado após evento em tempo real.', error);
       }
     },
-    [patchCachedMonitoredProduct, token],
+    [getFreshAccessToken, patchCachedMonitoredProduct],
   );
 
   /**
@@ -535,14 +536,20 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   /**
    * Estabelece conexão WebSocket autenticada com o backend.
    */
-  const connect = useCallback(() => {
-    if (!token || websocketRef.current) {
+  const connect = useCallback(async () => {
+    if (websocketRef.current) {
+      return;
+    }
+
+    const freshToken = await getFreshAccessToken();
+
+    if (!freshToken) {
       return;
     }
 
     try {
       setConnectionState('connecting');
-      const url = buildNotificationsWebSocketUrl(token);
+      const url = buildNotificationsWebSocketUrl(freshToken);
       const socket = new WebSocket(url);
       websocketRef.current = socket;
       isManuallyClosedRef.current = false;
@@ -572,7 +579,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error('Falha ao conectar ao WebSocket de notificações.', error);
       scheduleReconnect();
     }
-  }, [handleMessage, scheduleReconnect, syncChannelSubscriptions, token]);
+  }, [getFreshAccessToken, handleMessage, scheduleReconnect, syncChannelSubscriptions]);
 
   /**
    * Observa mudanças de autenticação para iniciar ou encerrar a conexão.

@@ -16,6 +16,8 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 from shared.infra.db import SessionLocal, get_db
 from shared.infra.redis_pubsub import RedisChannelSubscriber
+from shared.metrics.metrics_notifications import NOTIFICATIONS_WS_REJECTED_TOTAL
+
 from market_alert.core.jwt import verify_access_token
 from market_alert.core.security import get_current_user
 from market_alert.crud.crud_notification_logs import get_notification_logs
@@ -228,32 +230,32 @@ def _extract_token(websocket: WebSocket) -> Optional[str]:
     return None
 
 
-def _get_user_from_token(token: str) -> Optional[User]:
+def _get_user_from_token(token: str) -> tuple[Optional[User], Optional[str]]:
     """Valida o JWT informado e retorna o usuário associado quando ativo."""
 
     try:
         payload = verify_access_token(token)
     except HTTPException as exc:
         logger.warning("notifications_ws_token_invalid", error=str(exc.detail))
-        return None
+        return None, "invalid_token"
 
     user_id = payload.get("sub")
     if not user_id:
         logger.warning("notifications_ws_token_missing_sub")
-        return None
+        return None, "missing_sub"
 
     try:
         user_uuid = UUID(str(user_id))
     except (ValueError, TypeError):
         logger.warning("notifications_ws_token_invalid_sub", sub=str(user_id))
-        return None
+        return None, "invalid_sub"
 
     with SessionLocal() as db:
         user = db.get(User, user_uuid)
         if not user or not user.is_active:
             logger.warning("notifications_ws_user_not_found", user_id=str(user_uuid))
-            return None
-        return user
+            return None, "user_inactive_or_missing"
+        return user, None
 
 
 async def _handle_client_message(
@@ -306,12 +308,15 @@ async def notifications_stream(websocket: WebSocket) -> None:
     token = _extract_token(websocket)
     if not token:
         logger.warning("notifications_ws_missing_token")
+        NOTIFICATIONS_WS_REJECTED_TOTAL.labels(reason="missing_token").inc()
         await websocket.close(code=WEBSOCKET_CLOSE_UNAUTHORIZED)
         return
 
-    user = _get_user_from_token(token)
+    user, rejection_reason = _get_user_from_token(token)
     if user is None:
-        logger.warning("notifications_ws_forbidden", reason="invalid_token_or_user")
+        reason = rejection_reason or "invalid_token_or_user"
+        logger.warning("notifications_ws_forbidden", reason=reason)
+        NOTIFICATIONS_WS_REJECTED_TOTAL.labels(reason=reason).inc()
         await websocket.close(code=WEBSOCKET_CLOSE_FORBIDDEN)
         return
 

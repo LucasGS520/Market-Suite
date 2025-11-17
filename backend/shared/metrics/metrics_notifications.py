@@ -1,4 +1,4 @@
-""" Métricas sobre envio e supressão de notificações """
+""" Métricas sobre envio, supressão e conexão do canal de notificações """
 
 from prometheus_client import Counter, Histogram
 
@@ -14,6 +14,12 @@ NOTIFICATIONS_SKIPPED_TOTAL = Counter(
     ["reason"],
 )
 
+NOTIFICATIONS_WS_REJECTED_TOTAL = Counter(
+    "notifications_ws_rejected_total",
+    "Total de conexões WebSocket de notificações rejeitadas",
+    ["reason"],
+)
+
 NOTIFICATION_SEND_DURATION_SECONDS = Histogram(
     "notification_send_duration_seconds",
     "Tempo de envio de notificações (segundos)",
@@ -24,5 +30,6 @@ NOTIFICATION_SEND_DURATION_SECONDS = Histogram(
 __all__ = [
     "NOTIFICATIONS_SENT_TOTAL",
     "NOTIFICATIONS_SKIPPED_TOTAL",
+    "NOTIFICATIONS_WS_REJECTED_TOTAL",
     "NOTIFICATION_SEND_DURATION_SECONDS",
 ]

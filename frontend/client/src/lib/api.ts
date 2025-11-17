@@ -10,6 +10,15 @@
  */
 const DEFAULT_API_URL = 'http://localhost:8000/';
 
+/** Chave de armazenamento para o access token persistido. */
+export const ACCESS_TOKEN_STORAGE_KEY = 'auth_token';
+
+/** Chave de armazenamento para o refresh token persistido. */
+export const REFRESH_TOKEN_STORAGE_KEY = 'auth_refresh_token';
+
+/** Evento disparado globalmente quando um novo par de tokens é obtido. */
+export const TOKENS_REFRESHED_EVENT = 'auth-tokens-refreshed';
+
 /** Nome do evento emitido globalmente quando a sessão expira (401) */
 export const SESSION_EXPIRED_EVENT = 'session-expired';
 
@@ -80,6 +89,116 @@ export const buildNotificationsWebSocketUrl = (token: string): string => {
   return url.toString();
 };
 
+/** Lê o access token persistido (quando disponível no ambiente de navegador). */
+export const getStoredAccessToken = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+};
+
+/** Lê o refresh token persistido (quando disponível no ambiente de navegador). */
+export const getStoredRefreshToken = (): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+};
+
+/** Persiste o par de tokens no localStorage garantindo limpeza segura quando faltante. */
+export const persistTokens = (accessToken: string, refreshToken?: string | null): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
+
+  if (refreshToken) {
+    localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
+  } else {
+    localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  }
+};
+
+/** Remove tokens persistidos liberando cache local para novas sessões. */
+export const clearStoredTokens = (): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+};
+
+/**
+ * Decodifica o payload de um JWT retornando objeto plano.
+ *
+ * Usado apenas para verificar validade local do token e evitar reconexões com credenciais expiradas.
+ */
+export const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
+  try {
+    const [, payload] = token.split('.');
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(normalized);
+    return JSON.parse(decoded);
+  } catch (error) {
+    console.warn('Não foi possível decodificar o token JWT.', error);
+    return null;
+  }
+};
+
+/**
+ * Verifica se o token já expirou ou expira em breve.
+ */
+export const isTokenExpired = (token: string, leewaySeconds = 60): boolean => {
+  const payload = decodeJwtPayload(token);
+  const exp = typeof payload?.exp === 'number' ? payload.exp : null;
+
+  if (!exp) {
+    return false;
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  return nowSeconds >= exp - leewaySeconds;
+};
+
+/** Estrutura de resposta contendo par de tokens de autenticação. */
+export interface TokenPairResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+}
+
+/** Atualiza caches locais e notifica listeners globais sobre novos tokens. */
+const persistAndBroadcastTokens = (tokenPair: TokenPairResponse): void => {
+  persistTokens(tokenPair.access_token, tokenPair.refresh_token);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(TOKENS_REFRESHED_EVENT, { detail: tokenPair }));
+  }
+};
+
+/** Solicita novos tokens utilizando refresh token bruto. */
+const requestTokenRefresh = async (refreshToken: string): Promise<TokenPairResponse> => {
+  const response = await fetch(buildApiUrl('/auth/refresh'), {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Falha ao renovar token');
+  }
+
+  return response.json();
+};
+
 /**
  * Função auxiliar para fazer requisições HTTP com autenticação.
  *
@@ -88,12 +207,29 @@ export const buildNotificationsWebSocketUrl = (token: string): string => {
  * - Converte o body para JSON quando necessário (caller já envia JSON.stringify).
  * - Lança erro com mensagem padrão quando a resposta não for ok.
  */
+export interface ApiRequestOptions extends RequestInit {
+  token?: string;
+  timeoutMs?: number;
+  retryOnAuthFailure?: boolean;
+  allowAuthRefresh?: boolean;
+}
+
 export const apiRequest = async <T = any>(
   endpoint: string,
-  options: RequestInit & { token?: string; timeoutMs?: number } = {},
+  options: ApiRequestOptions = {},
 ): Promise<T> => {
-  const { token, headers: requestHeaders, timeoutMs, signal: callerSignal, ...fetchOptions } = options;
+  const {
+    token,
+    headers: requestHeaders,
+    timeoutMs,
+    signal: callerSignal,
+    retryOnAuthFailure = true,
+    allowAuthRefresh = true,
+    ...fetchOptions
+  } = options;
   const url = buildApiUrl(endpoint);
+  const effectiveToken = token ?? getStoredAccessToken();
+  let dispatchedSessionExpiration = false;
 
   const headers = new Headers(requestHeaders as HeadersInit | undefined);
 
@@ -113,9 +249,9 @@ export const apiRequest = async <T = any>(
     headers.set('Content-Type', 'application/json');
   }
 
-  if (token) {
+  if (effectiveToken) {
     // Utilizamos set para garantir que o header Authorization seja persistido no objeto Headers
-    headers.set('Authorization', `Bearer ${token}`);
+    headers.set('Authorization', `Bearer ${effectiveToken}`);
   }
 
   const controller = new AbortController();
@@ -132,6 +268,27 @@ export const apiRequest = async <T = any>(
   const timeoutId = setTimeout(() => {
     controller.abort();
   }, timeout);
+
+  const performAuthRefresh = async (): Promise<TokenPairResponse | null> => {
+    const refreshToken = getStoredRefreshToken();
+    if (!refreshToken || !allowAuthRefresh) {
+      return null;
+    }
+
+    try {
+      const refreshed = await requestTokenRefresh(refreshToken);
+      persistAndBroadcastTokens(refreshed);
+      return refreshed;
+    } catch (error) {
+      clearStoredTokens();
+      if (typeof window !== 'undefined') {
+        dispatchedSessionExpiration = true;
+        window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+      }
+      console.error('Falha ao renovar sessão de forma silenciosa.', error);
+      return null;
+    }
+  };
 
   let response: Response;
 
@@ -242,7 +399,21 @@ export const apiRequest = async <T = any>(
       }
     }
 
-    if (token && response.status === 401 && typeof window !== 'undefined') {
+    const isAuthFailure = response.status === 401 || response.status === 403;
+
+    if (isAuthFailure && retryOnAuthFailure && effectiveToken) {
+      const refreshed = await performAuthRefresh();
+      if (refreshed) {
+        return apiRequest<T>(endpoint, {
+          ...options,
+          token: refreshed.access_token,
+          retryOnAuthFailure: false,
+          allowAuthRefresh,
+        });
+      }
+    }
+
+    if (effectiveToken && response.status === 401 && typeof window !== 'undefined' && !dispatchedSessionExpiration) {
       window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
     }
 
@@ -258,36 +429,41 @@ export const apiRequest = async <T = any>(
 };
 
 /**
- * Estrutura da resposta de autenticação que contém o token JWT.
- */
-interface AuthResponse {
-  access_token: string;
-  token_type: string;
-}
-
-/**
  * Realiza login no backend enviando credenciais em formato form-urlencoded.
  * 
  * A função utiliza apiRequest para reaproveitar o tratamento de erros centralizado,
  * garantindo que mensagens vindas do backend (como detail) sejam preservadas.
  */
-export const login = async (email: string, password: string): Promise<string> => {
+export const login = async (email: string, password: string): Promise<TokenPairResponse> => {
   // Utilizamos URLSearchParams para garantir a codificação correta dos campos de fomulário
   const body = new URLSearchParams({
     username: email,
     password: password,
   });
 
-  const response = await apiRequest<AuthResponse>('/auth/', {
+  const response = await apiRequest<TokenPairResponse>('/auth/', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     // toString assegura que o corpo seja enviado como string, respeitando o content-type configurado
     body: body.toString(),
+    retryOnAuthFailure: false,
+    allowAuthRefresh: false,
   });
 
-  return response.access_token;
+  persistAndBroadcastTokens(response);
+
+  return response;
+};
+
+/**
+ * Realiza refresh explícito (útil em fluxos de reconexão ou interceptores).
+ */
+export const refreshTokens = async (refreshToken: string): Promise<TokenPairResponse> => {
+  const refreshed = await requestTokenRefresh(refreshToken);
+  persistAndBroadcastTokens(refreshed);
+  return refreshed;
 };
 
 /**
