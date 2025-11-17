@@ -18,7 +18,7 @@ services:
         condition: service_completed_successfully
       migrations:
         condition: service_completed_successfully
-      api:
+      market_alert:
         condition: service_started
       market_scraper:
         condition: service_started
@@ -107,6 +107,7 @@ services:
       # Monta o pacote `shared` inteiro para que imports como `import shared` funcionem
       - ./backend/shared:/market_alert/shared:ro
       - ./backend/shared/infra:/market_alert/infra
+      - ./backend:/backend:ro   
     working_dir: /market_alert
     command:
       - alembic
@@ -122,7 +123,7 @@ services:
 
 
   #API principal do MarketAlert
-  api:
+  market_alert:
     build:
       context: ./backend/market_alert
       dockerfile: Dockerfile
@@ -151,8 +152,8 @@ services:
       - ./backend/market_alert:/market_alert
       - audit-logs:/market_alert/logs/audit
       - ./backend/shared/infra:/market_alert/infra
-      # Monta o pacote `shared` para permitir imports como `import shared.infra`
       - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro   
     networks:
       - monitoring-net
 
@@ -184,6 +185,7 @@ services:
       - audit-logs:/market_alert/logs/audit
       - ./backend/shared/infra:/market_alert/infra
       - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro   
     networks:
       - monitoring-net
 
@@ -224,6 +226,7 @@ services:
       - audit-logs:/market_alert/logs/audit
       - ./backend/shared/infra:/market_alert/infra
       - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro   
     networks:
       - monitoring-net
 
@@ -239,6 +242,7 @@ services:
       - ENV_FILE=.env.market_scraper
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - PYTHONPATH=/app:/
     command:
       - uvicorn
       - "market_scraper.main:app"
@@ -257,8 +261,9 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_scraper:/app/market_scraper
+      - ./backend/shared:/app/shared:ro
       - ./backend/shared/infra:/market_scraper/infra
-      - ./backend/shared:/app/shared
+      - ./backend:/backend:ro
     networks:
       - monitoring-net
 
@@ -284,7 +289,7 @@ services:
       - frontend-node-modules:/app/node_modules
       - frontend-pnpm-store:/root/.local/share/pnpm/store
     depends_on:
-      api:
+      market_alert:
         condition: service_started
     networks:
       - monitoring-net
@@ -390,7 +395,7 @@ services:
   locust:
     image: locustio/locust
     depends_on:
-      - api
+      - market_alert
     volumes:
       - ./backend/market_alert:/market_alert
       - ./backend/shared/infra:/market_alert/infra
@@ -400,7 +405,7 @@ services:
       - "-f"
       - "tests/load/locustfile.py"
       - "--host"
-      - "http://api:8000"
+      - "http://market_alert:8000"
     ports:
       - "8089:8089"
     networks:
