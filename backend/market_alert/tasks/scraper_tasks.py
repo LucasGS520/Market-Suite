@@ -9,7 +9,7 @@ as tasks mantêm métricas e tratamento de erros.
 
 from uuid import UUID
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 import structlog
 from sqlalchemy.orm import Session
@@ -80,31 +80,6 @@ def _extract_comparison_reference(
 
     return None
 
-
-def _changes_to_flags(price_changed: bool, availability_changed: bool) -> tuple[str, ...]:
-    """ Converte alterações em uma tupla ordenada para compor a chave """
-    flags: list[str] = []
-    if price_changed:
-        flags.append("price")
-    if availability_changed:
-        flags.append("availability")
-    return tuple(sorted(flags))
-
-
-def _build_comparison_idempotency_key(
-    monitored_id: str,
-    *,
-    reference: datetime | None,
-    flags: Sequence[str],
-    source: str,
-) -> str:
-    """ Monta chave que identifica a comparação evitando reprocessamentos """
-    normalized_time = _normalized_timestamp(reference)
-    descriptor = "+".join(flags) if flags else "no-change"
-    safe_source = source.replace(" ", "_")
-    return f"compare:auto:{safe_source}:{descriptor}:{monitored_id}:{normalized_time.isoformat()}"
-
-
 def _dispatch_comparison_task(
     monitored_id: str | None,
     *,
@@ -123,31 +98,17 @@ def _dispatch_comparison_task(
         )
         return
 
-    reference = _extract_comparison_reference(db, monitored_id)
-    flags = _changes_to_flags(price_changed, availability_changed)
-    idempotency_key = _build_comparison_idempotency_key(
-        str(monitored_id),
-        reference=reference,
-        flags=flags,
-        source=source,
-    )
-
-    headers = {"Idempotency-Key": idempotency_key}
-
     try:
         compare_prices_task.apply_async(
             args=(str(monitored_id),),
-            kwargs={"idempotency_key": idempotency_key},
             queue="compare",
             priority=0,
-            headers=headers,
         )
         task_logger.info(
             "price_comparison_task_dispatched",
             reason="change_detected",
             availability_changed=availability_changed,
             price_changed=price_changed,
-            idempotency_key=idempotency_key,
             source=source,
         )
     except Exception as exc:
@@ -156,7 +117,7 @@ def _dispatch_comparison_task(
             error=str(exc),
             source=source,
         )
-        compare_prices_task.delay(str(monitored_id), idempotency_key=idempotency_key)
+        compare_prices_task.delay(str(monitored_id))
 
 def _mark_failed_product(
     product_reference: str | UUID | None,

@@ -1,7 +1,8 @@
 """ Serviço de comparação e persistência de preços
 
-Carrega o produto monitorado e os seus concorrentes, executa a lógica
-de comparação e persiste o resultado obtido
+O fluxo mantém apenas as etapas essenciais: carregamento de produtos,
+execução da comparação e armazenamento do último resumo para consumo do
+frontend.
 """
 
 from uuid import UUID
@@ -13,7 +14,6 @@ import structlog
 import time
 
 from shared.metrics.metrics_price_comparison import PRICE_COMPARISON_DURATION_SECONDS, PRICE_COMPARISONS_TOTAL, PRICE_ALERTS_TOTAL
-from shared.utils.url_validation import canonicalize_product_url
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
@@ -29,8 +29,8 @@ from market_alert.core.config_alert import settings
 
 logger = structlog.get_logger("comparison_service")
 
-def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | None = None, price_change_threshold: Decimal | None = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """ Executa a comparação de preços de um produto monitorado, retornando o resultado da comparação e a lista de alertas gerados """
+def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | None = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """ Executa a comparação de preços de um produto monitorado e retorna o resultado calculado """
     start = time.time()
     status = "success"
     result: Dict[str, Any] | None = None
@@ -48,10 +48,9 @@ def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | N
         logger.info("comparison_started", monitored_id=str(monitored_id), competitors=len(competitors))
 
         tol = tolerance if tolerance is not None else Decimal(str(settings.PRICE_TOLERANCE))
-        pct = price_change_threshold if price_change_threshold is not None else Decimal(str(settings.PRICE_CHANGE_THRESHOLD))
 
         #Processa comparação e persiste resultado
-        raw_result = compare_prices(monitored, competitors, tol, pct)
+        raw_result = compare_prices(monitored, competitors, tol)
         encoded_result = jsonable_encoder(raw_result)
         alerts = encoded_result.get("alerts", [])
 
@@ -91,25 +90,21 @@ def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | N
     return result, alerts
 
 def _deduplicate_competitors(competitors: List[CompetitorProduct]) -> List[CompetitorProduct]:
-    """Remove duplicidades de concorrentes com base na URL canônica."""
+    """Remove duplicidades simples mantendo o concorrente mais recente por ID """
 
     if not competitors:
         return []
 
     deduped: dict[str, CompetitorProduct] = {}
     for competitor in competitors:
-        raw_url = getattr(competitor, "product_url", "") or ""
-        try:
-            canonical = canonicalize_product_url(raw_url)
-        except ValueError:
-            canonical = raw_url.strip()
+        reference = str(getattr(competitor, "id", ""))
+        if not reference:
+            deduped[str(len(deduped))] = competitor
+            continue
 
-        if not canonical:
-            canonical = str(getattr(competitor, "id", ""))
-
-        existing = deduped.get(canonical)
+        existing = deduped.get(reference)
         if existing is None:
-            deduped[canonical] = competitor
+            deduped[reference] = competitor
             continue
 
         existing_checked = getattr(existing, "last_checked", None)
@@ -117,7 +112,7 @@ def _deduplicate_competitors(competitors: List[CompetitorProduct]) -> List[Compe
         if existing_checked is None or (
             current_checked is not None and current_checked > existing_checked
         ):
-            deduped[canonical] = competitor
+            deduped[reference] = competitor
 
     return list(deduped.values())
 

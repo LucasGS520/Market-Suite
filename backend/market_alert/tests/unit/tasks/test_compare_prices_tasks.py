@@ -65,21 +65,15 @@ def test_compare_prices_task_continues_without_redis(monkeypatch):
     assert dummy_logger.warning_called
     assert dummy_logger.last_event == "compare_prices_redis_unavailable"
     
-def test_compare_prices_task_skips_when_idempotent(monkeypatch):
-    """Repete execução com mesma chave e garante que nada é reprocessado"""
-
-    class DummyRecord:
-        is_new = False
-        owner = VALID_UUID
-        response = None
-        status_code = None
+def test_compare_prices_task_always_runs(monkeypatch):
+    """Executa a comparação mesmo quando chaves duplicadas não são controladas."""
 
     run_called = False
 
     def fake_run(*args, **kwargs):
         nonlocal run_called
         run_called = True
-        return {}, []
+        return {"lowest_competitor": {}, "highest_competitor": {}}, []
 
     monkeypatch.setattr(compare_prices_tasks, "logger", DummyLogger(), raising=False)
     monkeypatch.setattr(compare_prices_tasks, "SessionLocal", lambda: DummySession(), raising=False)
@@ -88,22 +82,15 @@ def test_compare_prices_task_skips_when_idempotent(monkeypatch):
     monkeypatch.setattr(compare_prices_tasks, "run_price_comparison", fake_run, raising=False)
     monkeypatch.setattr(
         compare_prices_tasks,
-        "register_idempotency_key",
-        lambda **kwargs: DummyRecord(),
-        raising=False,
-    )
-    monkeypatch.setattr(compare_prices_tasks, "store_idempotency_response", lambda **kwargs: None, raising=False)
-    monkeypatch.setattr(
-        compare_prices_tasks,
         "send_notification_task",
         SimpleNamespace(delay=lambda *args, **kwargs: None),
         raising=False,
     )
     monkeypatch.setattr(compare_prices_tasks, "publish_message", lambda *a, **k: True, raising=False)
 
-    compare_prices_tasks.compare_prices_task.run(VALID_UUID, idempotency_key="dup")
+    compare_prices_tasks.compare_prices_task.run(VALID_UUID)
 
-    assert run_called is False
+    assert run_called is True
 
 def test_compare_prices_task_publishes_realtime_event(monkeypatch):
     """Garante que o evento seja publicado quando o payload contém identificadores."""

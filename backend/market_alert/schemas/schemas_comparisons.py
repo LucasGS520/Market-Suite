@@ -27,10 +27,6 @@ class PriceComparisonRunRequest(BaseModel):
         default=None,
         description="Tolerância absoluta aplicada na comparação de preços.",
     )
-    price_change_threshold: Decimal | None = Field(
-        default=None,
-        description="Variação mínima em percentual utilizada para disparar alertas.",
-    )
 
 class PriceComparisonSummaryResponse(BaseModel):
     """ Resumo consolidado da última comparação executada para um produto monitorado """

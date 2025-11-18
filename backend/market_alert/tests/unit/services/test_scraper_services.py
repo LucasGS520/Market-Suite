@@ -57,7 +57,7 @@ def _build_parser_payload(**metadata) -> ParserResponse:
     )
 
 
-def _patch_monitored(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Mock, Mock, AsyncMock]:
+def _patch_monitored(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Mock, AsyncMock]:
     """Prepara dependências dos serviços de monitorados"""
 
     fetch_result = ScraperFetchResult(
@@ -216,7 +216,7 @@ async def test_scrape_monitored_async_propagates_last_modified(
 ) -> None:
     """Confere que o ``last_modified`` parseado é repassado para o CRUD"""
 
-    _, crud_mock, _, _ = _patch_monitored(monkeypatch)
+    _, crud_mock, _ = _patch_monitored(monkeypatch)
 
     await monitored.scrape_monitored_product_async(
         db=Mock(spec=Session),

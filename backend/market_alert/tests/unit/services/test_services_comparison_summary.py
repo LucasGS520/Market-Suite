@@ -52,7 +52,7 @@ def test_build_comparison_summary_with_metrics() -> None:
                 {"price": "80.00"},
                 {"price": "120.00"},
             ],
-            "alerts": [{"type": "price_event"}],
+            "alerts": [{"type": "price_below_monitored"}],
         }
     )
 
@@ -65,7 +65,7 @@ def test_build_comparison_summary_with_metrics() -> None:
     assert summary["potential_savings"] == "20.00"
     assert summary["competitors_with_price_count"] == 2
     assert summary["comparison_insights"] == "Preço monitorado acima da média dos concorrentes."
-    assert summary["alerts"] == [{"type": "price_event"}]
+    assert summary["alerts"] == [{"type": "price_below_monitored"}]
     
 def test_build_comparison_summary_with_stored_snapshot() -> None:
     """ Usa resumo persistido quando disponível """

@@ -16,7 +16,7 @@ def alert_matches_rule(alert: dict, rule) -> bool:
             return False
 
     if rule.rule_type == AlertType.PRICE_TARGET:
-        if alert.get("type") not in (None, "price_event"):
+        if alert.get("type") not in (None, "price_event", "price_below_monitored"):
             return False
         price = alert.get("price")
         if price is None:

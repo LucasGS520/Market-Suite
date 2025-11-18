@@ -11,7 +11,6 @@ import structlog
 from uuid import UUID
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Mapping
 
 from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client
@@ -26,11 +25,6 @@ from market_alert.core.celery_app import celery_app
 from market_alert.services.services_comparison import run_price_comparison
 from market_alert.tasks.alert_tasks import send_notification_task
 from market_alert.core.config_alert import settings
-from backend.shared.infra.redis import (
-    IdempotencyOwnershipError,
-    register_idempotency_key,
-    store_idempotency_response,
-)
 
 
 logger = structlog.get_logger("compare_prices")
@@ -49,47 +43,15 @@ redis_client = get_redis_client()
     reject_on_worker_lost=True,
     priority=9,
 )
-def compare_prices_task(self, monitored_id: str, idempotency_key: str | None = None) -> None:
-    """ Carrega um produto monitorado e executa a comparação de preços """
-    #A confirmação tardia garante reentrega caso o worker seja finalizado antes de concluir o processamento
-    task_logger = logger.bind(task_id=self.request.id, monitored_id=mask_identifier(monitored_id))
+def compare_prices_task(self, monitored_id: str) -> None:
+    """Carrega um produto monitorado e executa a comparação com fluxo enxuto."""
+    task_logger = logger.bind(
+        task_id=self.request.id, monitored_id=mask_identifier(monitored_id)
+    )
     start = datetime.now(timezone.utc)
     status = "success"
 
     task_logger.info("compare_prices_started")
-
-    request_headers = getattr(self.request, "headers", {})
-    header_key: str | None = None
-    if isinstance(request_headers, Mapping):
-        #Padroniza leitura do header independente de capitalização
-        header_key = request_headers.get("Idempotency-Key") or request_headers.get("idempotency-key")
-
-    effective_key = idempotency_key or header_key
-    idempotency_record = None
-
-    if effective_key:
-        try:
-            idempotency_record = register_idempotency_key(
-                namespace="comparison_task",
-                key=effective_key,
-                owner=str(monitored_id),
-                ttl_seconds=settings.COMPARISON_IDEMPOTENCY_TTL_SECONDS,
-            )
-        except IdempotencyOwnershipError as exc:
-            #A rejeição protege contra reprocessamentos concorrentes de outro contexto
-            task_logger.warning(
-                "compare_prices_idempotency_conflict",
-                idempotency_key=effective_key,
-                error=str(exc),
-            )
-            return
-        
-        if idempotency_record is not None and not idempotency_record.is_new:
-            task_logger.info(
-                "compare_prices_idempotent_skip",
-                idempotency_key=effective_key,
-            )
-            return
 
     with SessionLocal() as db:
         try:
@@ -98,7 +60,6 @@ def compare_prices_task(self, monitored_id: str, idempotency_key: str | None = N
                 db,
                 UUID(monitored_id),
                 tolerance=Decimal(str(settings.PRICE_TOLERANCE)),
-                price_change_threshold=Decimal(str(settings.PRICE_CHANGE_THRESHOLD))
             )
 
             # Log do resultado resumido para fácil consulta
@@ -106,7 +67,7 @@ def compare_prices_task(self, monitored_id: str, idempotency_key: str | None = N
                 "compare_prices_completed",
                 lowest=result["lowest_competitor"],
                 highest=result["highest_competitor"],
-                alerts_count=len(alerts)
+                alerts_count=len(alerts),
             )
 
             _dispatch_realtime_event(
@@ -117,16 +78,6 @@ def compare_prices_task(self, monitored_id: str, idempotency_key: str | None = N
 
             if alerts:
                 send_notification_task.delay(monitored_id, alerts)
-
-            if idempotency_record is not None and effective_key:
-                store_idempotency_response(
-                    namespace="comparison_task",
-                    key=effective_key,
-                    owner=str(monitored_id),
-                    ttl_seconds=settings.COMPARISON_IDEMPOTENCY_TTL_SECONDS,
-                    response=result,
-                    status_code=200,
-                )
 
             #Garante que a persistência no Redis só ocorre quando o cliente estiver disponível
             client = redis_client or get_redis_client()

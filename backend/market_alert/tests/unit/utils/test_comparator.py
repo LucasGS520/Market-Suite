@@ -1,7 +1,7 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
-from market_alert.utils.comparator import compare_prices, calculate_discrepancies, detect_price_changes, detect_listing_status
+from market_alert.utils.comparator import compare_prices, calculate_discrepancies
 from market_alert.enums.enums_products import ProductStatus
 
 def test_compare_prices_no_competitors():
@@ -28,10 +28,12 @@ def test_compare_prices_with_competitors():
     assert result["highest_competitor"]["delta_x_monitored"] == Decimal("2.00")
     assert len(result["discrepancies"]) == 2
     assert "delta_x_monitored" in result["discrepancies"][0]
-    price_events = [a for a in result["alerts"] if a.get("type") == "price_event"]
-    assert len(price_events) == 2
-    assert price_events[0]["competitor_id"] in {"c1", "c2"}
-    assert any(a.get("pct_below_monitored") == Decimal("20.00") for a in price_events)
+    price_alerts = [
+        a for a in result["alerts"] if a.get("type") == "price_below_monitored"
+    ]
+    assert len(price_alerts) == 1
+    assert price_alerts[0]["competitor_id"] == "c1"
+    assert price_alerts[0]["pct_below_monitored"] == Decimal("20.00")
 
 def test_competitor_without_price_ignored():
     monitored = SimpleNamespace(id="m1", current_price=Decimal("10.00"))
@@ -46,7 +48,7 @@ def test_competitor_without_price_ignored():
     assert len(result["discrepancies"]) == 1
     assert "delta_x_monitored" in result["discrepancies"][0]
     assert result["discrepancies"][0]["competitor_id"] == "c2"
-    assert any(a.get("type") == "price_event" for a in result["alerts"])
+    assert result["alerts"] == []
 
 def test_all_competitors_without_price_returns_empty():
     monitored = SimpleNamespace(id="m1", current_price=Decimal("10.00"))
@@ -62,14 +64,14 @@ def test_all_competitors_without_price_returns_empty():
     assert result["alerts"] == []
 
 def test_price_change_detection():
-    monitored = SimpleNamespace(id="m1", current_price=Decimal("10.00"))
-    c1 = SimpleNamespace(id="c1", name_competitor="A", current_price=Decimal("8.00"), old_price=Decimal("9.00"), status=ProductStatus.available)
+    monitored = SimpleNamespace(id="m1", current_price=Decimal("10.00"), status=ProductStatus.available)
+    c1 = SimpleNamespace(id="c1", name_competitor="A", current_price=Decimal("8.00"), status=ProductStatus.unavailable)
 
-    result = compare_prices(monitored, [c1], price_change_threshold=Decimal("0.5"))
+    result = compare_prices(monitored, [c1])
 
-    assert any(a.get("type") == "price_decrease" for a in result["alerts"])
-    assert any(a.get("pct_change") == Decimal("-11.11") for a in result["alerts"])
-    assert any(a.get("type") == "price_event" for a in result["alerts"])
+    listing_alerts = [a for a in result["alerts"] if a.get("type") == "listing_status"]
+    assert listing_alerts and listing_alerts[0]["status"] == "unavailable"
+    assert any(a.get("type") == "price_below_monitored" for a in result["alerts"])
 
 def test_listing_status_alert():
     monitored = SimpleNamespace(id="m1", current_price=Decimal("10.00"), status=ProductStatus.available)
@@ -85,17 +87,4 @@ def test_calculate_discrepancies_helper():
     assert info["competitor_id"] == "c1"
     assert info["delta_x_min_competitor"] == Decimal("0.00")
     assert info["delta_x_monitored"] == Decimal("-2.00")
-    assert info["change_from_old"] == Decimal("-1.00")
-    assert info["pct_change_from_old"] == Decimal("-11.11")
     assert info["pct_below_monitored"] == Decimal("20.00")
-
-def test_detect_price_changes_helper():
-    competitor = SimpleNamespace(id="c1", name_competitor="A", current_price=Decimal("8.00"), old_price=Decimal("9.00"))
-    alert = detect_price_changes(competitor, Decimal("0.01"), Decimal("0.5"))
-    assert alert and alert["type"] == "price_decrease"
-    assert alert["pct_change"] == Decimal("-11.11")
-
-def test_detect_status_helper():
-    competitor = SimpleNamespace(id="c1", name_competitor="A", current_price=Decimal("8.00"), status=ProductStatus.removed)
-    alert = detect_listing_status(competitor)
-    assert alert and alert["status"] == "removed"
