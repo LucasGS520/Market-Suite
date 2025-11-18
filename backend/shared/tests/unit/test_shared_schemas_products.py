@@ -8,17 +8,28 @@ from pydantic import ValidationError
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
 
 def test_monitored_scraped_info_defaults():
-    data = MonitoredScrapedInfo(current_price=Decimal("10.5"))
+    data = MonitoredScrapedInfo(
+        name="Produto monitorado",
+        product_url="https://example.com/produto",
+        current_price=Decimal("10.5"),
+    )
     assert data.thumbnail is None
     assert data.free_shipping is False
+    assert data.source == "monitored"
+    assert data.collected_at is not None
 
 def test_competitor_scraped_info_defaults():
-    data = CompetitorScrapedInfo(name="Produto", current_price=Decimal("9.99"))
+    data = CompetitorScrapedInfo(
+        name="Produto",
+        product_url="https://example.com/produto",
+        current_price=Decimal("9.99"),
+    )
     assert data.old_price is None
     assert data.thumbnail is None
     assert data.free_shipping is False
     assert data.seller is None
     assert data.seller_rating is None
+    assert data.source == "competitor"
 
 def test_monitored_product_required_fields():
     with pytest.raises(ValidationError) as exc:

@@ -85,10 +85,13 @@ async def _handle_response(
     sanitized_currency = normalize_currency_code(metadata.get("currency"))
 
     scraped_info = MonitoredScrapedInfo(
+        name=sanitized_name or sanitize_text(monitored_payload.name_identification) or request_url,
+        product_url=request_url,
         current_price=ensure_price(payload, request_url),
         thumbnail=sanitized_thumbnail,
         free_shipping=bool(metadata.get("free_shipping", False)),
         currency=sanitized_currency,
+        collected_at=last_checked,
     )
 
     product = create_or_update_monitored_product_scraped(

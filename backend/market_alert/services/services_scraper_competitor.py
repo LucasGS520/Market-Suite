@@ -105,6 +105,7 @@ async def scrape_competitor_product_async(
 
     scraped_info = CompetitorScrapedInfo(
         name=ensure_name(payload_model, normalized_url),
+        product_url=normalized_url,
         current_price=ensure_price(payload_model, normalized_url),
         old_price=to_decimal(metadata.get("old_price")),
         thumbnail=sanitized_thumbnail,
@@ -112,6 +113,7 @@ async def scrape_competitor_product_async(
         seller=sanitized_seller,
         seller_rating=to_float(metadata.get("seller_rating")),
         currency=sanitized_currency,
+        collected_at=now,
     )
 
     competitor = create_or_update_competitor_product_scraped(

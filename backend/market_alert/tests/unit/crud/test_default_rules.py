@@ -66,7 +66,7 @@ def test_default_rule_on_user_creation(monkeypatch):
     rule = called.get("rule")
     assert rule is not None
     assert rule.user_id == user.id
-    assert rule.rule_type == AlertType.PRICE_TARGET
+    assert rule.rule_type == AlertType.PRICE_CHANGE
     assert rule.enabled is True
 
 def test_default_rule_on_product_creation(monkeypatch):
@@ -80,7 +80,13 @@ def test_default_rule_on_product_creation(monkeypatch):
         name_identification="Prod",
         product_url="http://example.com",
     )
-    info = MonitoredScrapedInfo(current_price=Decimal("1.10"), thumbnail=None, free_shipping=False)
+    info = MonitoredScrapedInfo(
+        name="Produto teste",
+        product_url="https://example.com/produto",
+        current_price=Decimal("1.10"),
+        thumbnail=None,
+        free_shipping=False,
+    )
 
     product = crud_monitored.create_or_update_monitored_product_scraped(
         db, uuid.uuid4(), payload, info, datetime.now(timezone.utc)
@@ -88,5 +94,5 @@ def test_default_rule_on_product_creation(monkeypatch):
 
     rule = called.get("rule")
     assert rule is not None
-    assert rule.rule_type == AlertType.PRICE_TARGET
+    assert rule.rule_type == AlertType.PRICE_CHANGE
     assert rule.enabled is True
