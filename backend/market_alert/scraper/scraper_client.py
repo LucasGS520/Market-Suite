@@ -27,6 +27,18 @@ from market_alert.utils.rate_limiter import RateLimiter
 
 logger = structlog.get_logger(__name__)
 
+ALLOWED_SCRAPER_FIELDS = {
+    "currency",
+    "availability",
+    "thumbnail",
+    "free_shipping",
+    "seller",
+    "seller_rating",
+    "old_price",
+    "etag",
+    "last_modified",
+}
+
 class ScraperClientError(Exception):
     """ Representa falhas de comunicação ou regras de proteção do cliente """
     def __init__(
@@ -80,6 +92,18 @@ def _build_async_client(
 
 _CLIENT_POOL: dict[str, tuple[httpx.AsyncClient, int]] = {}
 _POOL_LOCK = Lock()
+
+def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
+    """Reduz o payload retornado pelo scraper apenas ao que é essencial.
+
+    O scraper pode enviar campos auxiliares diversos no atributo ``payload``.
+    Para manter previsibilidade e evitar ruído no frontend, filtramos os
+    metadados aceitando somente chaves permitidas, priorizando preço,
+    disponibilidade e moeda.
+    """
+    extras = dict(response.payload or {})
+    filtered_payload = {k: v for k, v in extras.items() if k in ALLOWED_SCRAPER_FIELDS}
+    return response.model_copy(update={"payload": filtered_payload or None})
 
 def _acquire_http_client(
     base_url: str,
@@ -238,6 +262,7 @@ class ScraperClient:
             if status_code == 200:
                 try:
                     parsed_payload = ParserResponse.model_validate(response.json())
+                    parsed_payload = _sanitize_parser_response(parsed_payload)
                 except ValidationError as exc:
                     circuit_breaker.record_failure(host)
                     raise ScraperClientError(
@@ -249,6 +274,7 @@ class ScraperClient:
                     status_code=status_code,
                     payload=parsed_payload,
                     headers=response.headers,
+                    error_code="not_modified",
                 )
 
             if status_code == 304:

@@ -83,6 +83,7 @@ async def _handle_response(
 
     sanitized_thumbnail = sanitize_media_url(metadata.get("thumbnail"))
     sanitized_currency = normalize_currency_code(metadata.get("currency"))
+    availability = metadata.get("availability")
 
     scraped_info = MonitoredScrapedInfo(
         name=sanitized_name or sanitize_text(monitored_payload.name_identification) or request_url,
@@ -92,6 +93,7 @@ async def _handle_response(
         free_shipping=bool(metadata.get("free_shipping", False)),
         currency=sanitized_currency,
         collected_at=last_checked,
+        availability=bool(availability) if availability is not None else None,
     )
 
     product = create_or_update_monitored_product_scraped(

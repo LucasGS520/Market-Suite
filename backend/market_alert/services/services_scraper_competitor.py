@@ -102,6 +102,7 @@ async def scrape_competitor_product_async(
     sanitized_thumbnail = sanitize_media_url(metadata.get("thumbnail"))
     sanitized_currency = normalize_currency_code(metadata.get("currency"))
     sanitized_seller = sanitize_text(metadata.get("seller"))
+    availability = metadata.get("availability")
 
     scraped_info = CompetitorScrapedInfo(
         name=ensure_name(payload_model, normalized_url),
@@ -114,6 +115,7 @@ async def scrape_competitor_product_async(
         seller_rating=to_float(metadata.get("seller_rating")),
         currency=sanitized_currency,
         collected_at=now,
+        availability=bool(availability) if availability is not None else None,
     )
 
     competitor = create_or_update_competitor_product_scraped(
