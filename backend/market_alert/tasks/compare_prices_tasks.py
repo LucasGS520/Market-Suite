@@ -2,9 +2,8 @@
 
 Esta task roda de forma assíncrona via Celery. Ela carrega do banco de dados
 um produto monitorado e todos os seus concorrentes, executa a comparação de
-preços e registra métricas para acompanhamento. O ``rate_limit`` definido no
-decorador limita quantas comparações cada worker pode iniciar por minuto e é
-independente da lógica que agenda novas verificações.
+preços e registra métricas para acompanhamento. O fluxo foi simplificado para
+usar a fila padrão do Celery e evitar coordenação distribuída adicional.
 """
 
 import structlog
@@ -13,7 +12,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from shared.infra.db import SessionLocal
-from shared.utils.redis_client import get_redis_client
 from shared.utils.logging_utils import mask_identifier
 from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
 from shared.metrics.metrics_price_comparison import (
@@ -28,20 +26,15 @@ from market_alert.core.config_alert import settings
 
 
 logger = structlog.get_logger("compare_prices")
-redis_client = get_redis_client()
 
 @celery_app.task(
     bind=True,
     max_retries=3,
     default_retry_delay=10,
     name="compare_prices_task",
-    rate_limit=settings.COMPARE_RATE_LIMIT,
-    queue="compare",
     soft_time_limit=20,
     time_limit=40,
     acks_late=True,
-    reject_on_worker_lost=True,
-    priority=9,
 )
 def compare_prices_task(self, monitored_id: str) -> None:
     """Carrega um produto monitorado e executa a comparação com fluxo enxuto."""
@@ -49,8 +42,6 @@ def compare_prices_task(self, monitored_id: str) -> None:
         task_id=self.request.id, monitored_id=mask_identifier(monitored_id)
     )
     start = datetime.now(timezone.utc)
-    status = "success"
-
     task_logger.info("compare_prices_started")
 
     with SessionLocal() as db:
@@ -79,19 +70,7 @@ def compare_prices_task(self, monitored_id: str) -> None:
             if alerts:
                 send_notification_task.delay(monitored_id, alerts)
 
-            #Garante que a persistência no Redis só ocorre quando o cliente estiver disponível
-            client = redis_client or get_redis_client()
-            if client is not None:
-                client.set(
-                    f"compare:last_success:{monitored_id}",
-                    datetime.now(timezone.utc).isoformat(),
-                    ex=settings.COMPARISON_LAST_SUCCESS_TTL,
-                )
-            else:
-                task_logger.warning("compare_prices_redis_unavailable")
-
         except Exception as exc:
-            status = "failure"
             task_logger.error("compare_prices_failed", error=str(exc))
             raise self.retry(exc=exc)
 

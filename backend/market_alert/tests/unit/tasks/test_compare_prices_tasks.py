@@ -31,7 +31,7 @@ class DummyLogger:
         """ Ignora mensagens informativas durante o teste """
 
     def warning(self, event, **kwargs):
-        """ Registra o último aviso emitido pela task """
+        """ Registra o último aviso emitido pela task quando houver """
         self.warning_called = True
         self.last_event = event
 
@@ -39,7 +39,7 @@ class DummyLogger:
         """ Ignora mensagens de erro, pois não são esperadas """
 
 def test_compare_prices_task_continues_without_redis(monkeypatch):
-    """ Garante que a task siga o fluxo mesmo quando o Redis estiver ausente """
+    """ Garante que a task siga o fluxo mesmo sem integrações auxiliares """
     def fake_run_price_comparison(*args, **kwargs):
         return {"lowest_competitor": {}, "highest_competitor": {}}, []
 
@@ -54,16 +54,11 @@ def test_compare_prices_task_continues_without_redis(monkeypatch):
         SimpleNamespace(delay=lambda *args, **kwargs: None),
         raising=False,
     )
-    monkeypatch.setattr(compare_prices_tasks, "redis_client", None, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "get_redis_client", lambda: None, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "register_idempotency_key", lambda **kwargs: None, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "store_idempotency_response", lambda **kwargs: None, raising=False)
     monkeypatch.setattr(compare_prices_tasks, "publish_message", lambda *args, **kwargs: True, raising=False)
 
     compare_prices_tasks.compare_prices_task.run(VALID_UUID)
 
-    assert dummy_logger.warning_called
-    assert dummy_logger.last_event == "compare_prices_redis_unavailable"
+    assert dummy_logger.warning_called is False
     
 def test_compare_prices_task_always_runs(monkeypatch):
     """Executa a comparação mesmo quando chaves duplicadas não são controladas."""
@@ -77,8 +72,6 @@ def test_compare_prices_task_always_runs(monkeypatch):
 
     monkeypatch.setattr(compare_prices_tasks, "logger", DummyLogger(), raising=False)
     monkeypatch.setattr(compare_prices_tasks, "SessionLocal", lambda: DummySession(), raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "redis_client", None, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "get_redis_client", lambda: None, raising=False)
     monkeypatch.setattr(compare_prices_tasks, "run_price_comparison", fake_run, raising=False)
     monkeypatch.setattr(
         compare_prices_tasks,
@@ -117,10 +110,6 @@ def test_compare_prices_task_publishes_realtime_event(monkeypatch):
 
     monkeypatch.setattr(compare_prices_tasks, "SessionLocal", lambda: DummySession(), raising=False)
     monkeypatch.setattr(compare_prices_tasks, "run_price_comparison", fake_run_price_comparison, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "redis_client", None, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "get_redis_client", lambda: None, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "register_idempotency_key", lambda **kwargs: None, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "store_idempotency_response", lambda **kwargs: None, raising=False)
     monkeypatch.setattr(compare_prices_tasks, "publish_message", fake_publish, raising=False)
     monkeypatch.setattr(
         compare_prices_tasks,
