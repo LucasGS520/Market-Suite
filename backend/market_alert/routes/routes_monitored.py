@@ -9,7 +9,6 @@ from uuid import UUID
 from shared.infra.db import get_db
 from shared.utils.url_validation import normalize_and_validate_product_url
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
-from market_alert.core.config_alert import settings
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
@@ -23,14 +22,9 @@ from market_alert.crud.crud_monitored import (
     create_pending_monitored_product,
     get_monitored_product_by_user_and_url,
 )
-from market_alert.crud.crud_comparison import (
-    get_latest_comparisons_for_products,
-    get_latest_summaries_for_products,
-)
 from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
-from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.services.services_comparison import build_comparison_summary
+from market_alert.services.services_products import build_monitored_response
 
 
 router = APIRouter(prefix="/monitored", tags=["Monitoramento"])
@@ -137,71 +131,34 @@ def list_monitored_products(
         per_page=per_page,
     )
 
-    product_ids = [product.id for product, _ in products_with_count]
-
-    if not product_ids:
-        logger.info(
-            "route_completed",
-            path=request.url.path,
-            method=request.method,
-            status="success",
-            count=0,
-            total=total,
-            page=page,
-            per_page=per_page,
-        )
-        return PaginatedMonitoredProductsResponse(
-            items=[],
-            total=total,
-            page=page,
-            per_page=per_page,
-        )
-    
-    latest_comparisons = get_latest_comparisons_for_products(db, product_ids)
-    latest_summaries = get_latest_summaries_for_products(db, product_ids)
-
     response_payload: list[MonitoredProductResponse] = []
-    for product, competitors_count in products_with_count:
-        comparison = latest_comparisons.get(product.id)
-        summary = build_comparison_summary(
-            comparison,
-            competitors_count=competitors_count,
-            stored_summary=latest_summaries.get(product.id),
-        )
-        is_new = product.status == MonitoredStatus.pending or summary["last_comparison_at"] is None
+    for product, _ in products_with_count:
+            try:
+                response_payload.append(build_monitored_response(product))
+            except HTTPException as exc:
+                #Ignora registros sem preço para manter o contrato enxuto
+                logger.warning(
+                    "monitored_without_price",
+                    product_id=str(product.id),
+                    status=product.status.value,
+                    detail=str(exc.detail),
+                )
+                continue
 
-        #Propaga campos agregados para o contrato exposto ao frontend
-        response_payload.append(
-            MonitoredProductResponse.model_validate(product).model_copy(
-                update={
-                    "competitors_count": competitors_count,
-                    "competitors_mean": summary["competitors_mean"],
-                    "competitors_min": summary["competitors_min"],
-                    "competitors_max": summary["competitors_max"],
-                    "position_rank": summary["position_rank"],
-                    "potential_savings": summary["potential_savings"],
-                    "competitors_with_price_count": summary["competitors_with_price_count"],
-                    "latest_comparison_id": summary["comparison_id"],
-                    "last_comparison_at": summary["last_comparison_at"],
-                    "is_new": is_new,
-                    "comparison_insights": summary["comparison_insights"],
-                }
-            )
-        )
-
+    visible_total = len(response_payload)
     logger.info(
         "route_completed",
         path=request.url.path,
         method=request.method,
         status="success",
-        count=len(response_payload),
-        total=total,
+        count=visible_total,
+        total=visible_total,
         page=page,
         per_page=per_page,
     )
     return PaginatedMonitoredProductsResponse(
         items=response_payload,
-        total=total,
+        total=visible_total,
         page=page,
         per_page=per_page,
     )
@@ -214,31 +171,8 @@ def get_product(request: Request, product_id: UUID, db: Session = Depends(get_db
     if not product or product.user_id != user.id:
         logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", product_id=str(product_id))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado.")
-    latest_comparison = get_latest_comparisons_for_products(db, [product.id]).get(product.id)
-    latest_summary = get_latest_summaries_for_products(db, [product.id]).get(product.id)
-    competitors_count = len(getattr(product, "competitors", []) or [])
-    summary = build_comparison_summary(
-        latest_comparison,
-        competitors_count=competitors_count,
-        stored_summary=latest_summary,
-    )
-    is_new = product.status == MonitoredStatus.pending or summary["last_comparison_at"] is None
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
-    return MonitoredProductResponse.model_validate(product).model_copy(
-        update={
-            "competitors_count": competitors_count,
-            "competitors_mean": summary["competitors_mean"],
-            "competitors_min": summary["competitors_min"],
-            "competitors_max": summary["competitors_max"],
-            "position_rank": summary["position_rank"],
-            "potential_savings": summary["potential_savings"],
-            "competitors_with_price_count": summary["competitors_with_price_count"],
-            "latest_comparison_id": summary["comparison_id"],
-            "last_comparison_at": summary["last_comparison_at"],
-            "is_new": is_new,
-            "comparison_insights": summary["comparison_insights"],
-        }
-    )
+    return build_monitored_response(product)
 
 @router.delete("/{product_id}", response_model=MonitoredProductResponse)
 def delete_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -248,6 +182,7 @@ def delete_product(request: Request, product_id: UUID, db: Session = Depends(get
     if not product or product.user_id != user.id:
         logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", product_id=str(product_id))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado.")
-    deleted = delete_monitored_product(db, product_id)
+    response_payload = build_monitored_response(product)
+    _ = delete_monitored_product(db, product_id)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
-    return deleted
+    return response_payload

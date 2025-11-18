@@ -11,62 +11,10 @@ from sqlalchemy.orm import Session
 
 from market_alert.models import User
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
-from market_alert.schemas.schemas_products import CompetitorListItemResponse
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 
 
 logger = structlog.get_logger(__name__)
-
-
-def format_decimal_field(value) -> str | None:
-    """ Formata valores decimais para string preservando `None` """
-    if value is None:
-        return None
-    return str(value)
-
-
-def calculate_price_change(competitor: CompetitorProduct) -> tuple[str | None, str | None]:
-    """ Calcula variação absoluta e percentual entre preços atual e anterior """
-    current = competitor.current_price
-    previous = competitor.old_price
-
-    if current is None or previous is None:
-        return None, None
-
-    absolute_change = current - previous
-    try:
-        percentage_change = (absolute_change / previous) * 100 if previous else None
-    except ZeroDivisionError:
-        #Evita quebra quando o preço anterior está zerado
-        percentage_change = None
-
-    absolute_str = format_decimal_field(absolute_change)
-    percentage_str = None
-
-    if percentage_change is not None:
-        percentage_str = f"{percentage_change:.4f}"
-
-    return absolute_str, percentage_str
-
-
-def map_competitor_to_response(competitor: CompetitorProduct) -> CompetitorListItemResponse:
-    """ Normaliza modelo ORM para o contrato de listagem de concorrentes """
-    absolute_change, percentage_change = calculate_price_change(competitor)
-
-    return CompetitorListItemResponse(
-        id=competitor.id,
-        monitored_product_id=competitor.monitored_product_id,
-        name=competitor.name_competitor,
-        product_url=competitor.product_url,
-        current_price=format_decimal_field(competitor.current_price),
-        previous_price=format_decimal_field(competitor.old_price),
-        price_change=absolute_change,
-        price_change_percentage=percentage_change,
-        status=competitor.status,
-        last_checked=competitor.last_checked,
-        is_paused=competitor.is_paused,
-    )
-
 
 def ensure_user_can_access_monitored(
     *,

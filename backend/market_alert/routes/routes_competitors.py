@@ -21,9 +21,9 @@ from market_alert.schemas.schemas_products import (
 from market_alert.services.services_competitors import (
     ensure_user_can_access_monitored,
     load_competitors_for_action,
-    map_competitor_to_response,
     validate_competitor_limit,
 )
+from market_alert.services.services_products import build_competitor_response
 from market_alert.enums.enums_products import ProductStatus
 from market_alert.crud.crud_competitor import (
     bulk_delete_competitors,
@@ -270,7 +270,21 @@ def list_competitors(
         sort_direction=normalized_direction,
     )
 
-    items = [map_competitor_to_response(item) for item in competitors]
+    items: list[CompetitorProductResponse] = []
+    for competitor in competitors:
+        try:
+            items.append(build_competitor_response(competitor))
+        except HTTPException as exc:
+            #Ignora concorrentes sem preço para manter previsibilidade
+            logger.warning(
+                "competitor_without_price",
+                competitor_id=str(competitor.id),
+                monitored_id=str(monitored_product_id),
+                status=competitor.status.value,
+                detail=str(exc.detail),
+            )
+            continue
+    visible_total = len(items)
     logger.info(
         "route_completed",
         path=request.url.path,
@@ -278,13 +292,13 @@ def list_competitors(
         status="success",
         monitored_id=str(monitored_product_id),
         page=page,
-        count=len(items),
-        total=total,
+        count=visible_total,
+        total=visible_total,
     )
 
     return PaginatedCompetitorResponse(
         items=items,
-        total=total,
+        total=visible_total,
         page=page,
         per_page=per_page,
     )
