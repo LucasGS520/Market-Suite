@@ -14,11 +14,6 @@ PRICE_COMPARISON_DURATION_SECONDS = Histogram(
     buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0],
 )
 
-PRICE_ALERTS_TOTAL = Counter(
-    "price_alerts_total",
-    "Total de alertas de preço gerados",
-)
-
 PRICE_COMPARISON_TASK_LATENCY_SECONDS = Histogram(
     "price_comparison_task_latency_seconds",
     "Tempo total da task Celery de comparação de preços",
@@ -28,6 +23,5 @@ PRICE_COMPARISON_TASK_LATENCY_SECONDS = Histogram(
 __all__ = [
     "PRICE_COMPARISONS_TOTAL",
     "PRICE_COMPARISON_DURATION_SECONDS",
-    "PRICE_ALERTS_TOTAL",
     "PRICE_COMPARISON_TASK_LATENCY_SECONDS",
 ]

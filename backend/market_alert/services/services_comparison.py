@@ -13,7 +13,10 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import structlog
 import time
 
-from shared.metrics.metrics_price_comparison import PRICE_COMPARISON_DURATION_SECONDS, PRICE_COMPARISONS_TOTAL, PRICE_ALERTS_TOTAL
+from shared.metrics.metrics_price_comparison import (
+    PRICE_COMPARISON_DURATION_SECONDS,
+    PRICE_COMPARISONS_TOTAL,
+)
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
@@ -29,8 +32,16 @@ from market_alert.core.config_alert import settings
 
 logger = structlog.get_logger("comparison_service")
 
-def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | None = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """ Executa a comparação de preços de um produto monitorado e retorna o resultado calculado """
+def run_price_comparison(
+    db: Session,
+    monitored_id: UUID,
+    tolerance: Decimal | None = None,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Executa a comparação de preços retornando apenas o resumo essencial.
+
+    O fluxo evita cálculos derivados quando já trabalhamos com resumos pré-existentes
+    e persiste o payload completo somente quando configurado para depuração.
+    """
     start = time.time()
     status = "success"
     result: Dict[str, Any] | None = None
@@ -54,8 +65,21 @@ def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | N
         encoded_result = jsonable_encoder(raw_result)
         alerts = encoded_result.get("alerts", [])
 
-        comparison = create_price_comparison(db, monitored.id, encoded_result)
-        summary_payload = _compute_summary_from_payload(
+        persist_raw_result = settings.COMPARISON_STORE_RAW_RESULT
+        stored_payload = (
+            encoded_result
+            if persist_raw_result
+            else {
+                "monitored_price": encoded_result.get("monitored_price"),
+                "alerts": alerts,
+                "discrepancies": encoded_result.get("discrepancies", []),
+                "lowest_competitor": encoded_result.get("lowest_competitor"),
+                "highest_competitor": encoded_result.get("highest_competitor"),
+            }
+        )
+
+        comparison = create_price_comparison(db, monitored.id, stored_payload)
+        summary_payload = _build_summary_from_result(
             encoded_result,
             timestamp=comparison.timestamp,
             comparison_id=comparison.id,
@@ -84,8 +108,6 @@ def run_price_comparison(db: Session, monitored_id: UUID, tolerance: Decimal | N
         #Registra métricas de duração e status
         PRICE_COMPARISON_DURATION_SECONDS.observe(duration)
         PRICE_COMPARISONS_TOTAL.labels(status=status).inc()
-        if result is not None:
-            PRICE_ALERTS_TOTAL.inc(len(alerts))
 
     return result, alerts
 
@@ -146,6 +168,52 @@ def _empty_summary(competitors_count: int) -> Dict[str, Any]:
         "discrepancies": [],
         "alerts": [],
     }
+
+def _build_summary_from_result(
+    payload: Dict[str, Any],
+    *,
+    timestamp: Any,
+    comparison_id: UUID | None,
+    competitors_count: int,
+) -> Dict[str, Any]:
+    """ Monta um resumo enxuto com base no resultado bruto do comparador.
+
+    A função evita cálculos derivados complexos e prioriza apenas os campos
+    necessários para dashboards e notificações rápidas.
+    """
+    summary = _empty_summary(competitors_count)
+    summary["last_comparison_at"] = timestamp
+    summary["computed_at"] = timestamp
+    summary["competitors_count"] = competitors_count
+
+    if comparison_id is not None:
+        summary["comparison_id"] = str(comparison_id)
+
+    if isinstance(payload, dict):
+        raw_alerts = payload.get("alerts")
+        summary["alerts"] = raw_alerts if isinstance(raw_alerts, list) else []
+
+        discrepancies = payload.get("discrepancies")
+        if isinstance(discrepancies, list):
+            summary["discrepancies"] = discrepancies
+            summary["competitors_with_price_count"] = sum(
+                1
+                for item in discrepancies
+                if isinstance(item, dict) and item.get("price") is not None
+            )
+
+    monitored_price = _to_decimal(payload.get("monitored_price"))
+    lowest_price = _to_decimal((payload.get("lowest_competitor") or {}).get("price"))
+    highest_price = _to_decimal((payload.get("highest_competitor") or {}).get("price"))
+
+    if monitored_price is not None:
+        summary["monitored_price"] = str(monitored_price)
+    if lowest_price is not None:
+        summary["competitors_min"] = str(lowest_price)
+    if highest_price is not None:
+        summary["competitors_max"] = str(highest_price)
+
+    return summary
 
 def _compute_summary_from_payload(
     payload: Dict[str, Any],
@@ -284,6 +352,18 @@ def build_comparison_summary(
         return _empty_summary(competitors_count)
 
     payload = comparison.data or {}
+
+    if isinstance(payload, dict):
+        embedded_summary = payload.get("summary")
+        if isinstance(embedded_summary, dict):
+            #Quando a comparação já armazena um resumo, evitamos cálculos adicionais
+            return _apply_summary_defaults(
+                embedded_summary,
+                timestamp=comparison.timestamp,
+                comparison_id=comparison.id,
+                competitors_count=competitors_count,
+            )
+
     return _compute_summary_from_payload(
         payload,
         timestamp=comparison.timestamp,
