@@ -49,6 +49,8 @@ market_alert/
 - **`shared/`**: reutiliza abstrações de configuração, métricas (`shared/metrics/metrics_api.py`), segurança e utilidades comuns.
 - **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs e tracing.
 
+> O canal WebSocket de notificações permanece desativado temporariamente; utilize `/notifications/logs` e polling no frontend para acompanhar alertas.
+
 ## Celery
 - **Arquivo principal:** `core/celery_app.py`.
 - **Filas padrão:** `celery`, `scraping`, `monitor` (configuráveis via `.env.market_alert`).

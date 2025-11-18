@@ -74,6 +74,8 @@ const buildApiUrl = (endpoint: string): string => {
 
 /**
  * Monta a URL do WebSocket de notificações autenticada com token JWT.
+ * 
+ * Mantido por compatibilidade enquanto o streaming em tempo real está desativado no backend.
  */
 export const buildNotificationsWebSocketUrl = (token: string): string => {
   const base = getApiUrl();
