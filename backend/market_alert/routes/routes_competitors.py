@@ -24,7 +24,6 @@ from market_alert.services.services_competitors import (
     validate_competitor_limit,
 )
 from market_alert.services.services_products import build_competitor_response
-from market_alert.enums.enums_products import ProductStatus
 from market_alert.crud.crud_competitor import (
     bulk_delete_competitors,
     bulk_update_paused_status,
@@ -44,7 +43,6 @@ from shared.utils.url_validation import normalize_and_validate_product_url
 router = APIRouter(prefix="/competitors", tags=["Concorrentes"])
 logger = structlog.get_logger("http_route")
 
-ALLOWED_SORT_FIELDS = {"price", "last_checked", "price_change"}
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 100
 
@@ -214,15 +212,20 @@ def list_competitors(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     monitored_product_id: UUID = Query(..., alias="monitored_id"),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(DEFAULT_PER_PAGE, ge=1, le=MAX_PER_PAGE),
-    search: str | None = Query(None, max_length=120),
-    status: ProductStatus | None = Query(None),
-    include_paused: bool = Query(True),
-    sort_by: str = Query("last_checked"),
-    sort_direction: str = Query("desc"),
+    page: int = Query(
+        1,
+        ge=1,
+        description="Página atual da listagem de concorrentes (base 1)",
+    ),
+    per_page: int = Query(
+        DEFAULT_PER_PAGE,
+        ge=1,
+        le=MAX_PER_PAGE,
+        description="Quantidade de concorrentes retornados por página",
+    ),
+    
 ):
-    """ Lista concorrentes com filtros, ordenação e paginação """
+    """ Lista concorrentes com os campos mínimos e paginação previsível """
     logger.info(
         "route_called",
         path=request.url.path,
@@ -244,30 +247,12 @@ def list_competitors(
         hide_forbidden=False,
     )
 
-    normalized_sort = (sort_by or "last_checked").lower()
-    if normalized_sort not in ALLOWED_SORT_FIELDS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Campo de ordenação inválido.",
-        )
-
-    normalized_direction = (sort_direction or "desc").lower()
-    if normalized_direction not in {"asc", "desc"}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Direção de ordenação inválida.",
-        )
-
+    #Mantemos apenas pafinação essencial para simplificar consumo pelo frontend
     total, competitors = paginate_competitors(
         db,
         monitored_product_id,
         page=page,
         per_page=per_page,
-        search=search,
-        status=status,
-        include_paused=include_paused,
-        sort_by=normalized_sort,
-        sort_direction=normalized_direction,
     )
 
     items: list[CompetitorProductResponse] = []
@@ -293,7 +278,7 @@ def list_competitors(
         monitored_id=str(monitored_product_id),
         page=page,
         count=visible_total,
-        total=visible_total,
+        total=total,
     )
 
     return PaginatedCompetitorResponse(

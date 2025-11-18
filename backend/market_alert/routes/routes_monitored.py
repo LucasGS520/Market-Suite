@@ -75,10 +75,9 @@ def create_scrape_product(
             db.commit()
             db.refresh(existing)
 
-        conflict_payload = {"message": "Este produto já está sendo monitorado."}
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            content=conflict_payload,
+            detail="Este produto já está sendo monitorado.",
         )
 
     pending = create_pending_monitored_product(
@@ -133,17 +132,17 @@ def list_monitored_products(
 
     response_payload: list[MonitoredProductResponse] = []
     for product, _ in products_with_count:
-            try:
-                response_payload.append(build_monitored_response(product))
-            except HTTPException as exc:
-                #Ignora registros sem preço para manter o contrato enxuto
-                logger.warning(
-                    "monitored_without_price",
-                    product_id=str(product.id),
-                    status=product.status.value,
-                    detail=str(exc.detail),
-                )
-                continue
+        try:
+            response_payload.append(build_monitored_response(product))
+        except HTTPException as exc:
+            #Ignora registros sem preço para manter o contrato enxuto
+            logger.warning(
+                "monitored_without_price",
+                product_id=str(product.id),
+                status=product.status.value,
+                detail=str(exc.detail),
+            )
+            continue
 
     visible_total = len(response_payload)
     logger.info(

@@ -5,7 +5,7 @@ from uuid import UUID
 from datetime import datetime
 from typing import Iterable, List, Sequence
 
-from sqlalchemy import asc, desc, func
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
@@ -184,14 +184,9 @@ def paginate_competitors(
     *,
     page: int,
     per_page: int,
-    search: str | None = None,
-    status: ProductStatus | None = None,
-    include_paused: bool = True,
-    sort_by: str = "last_checked",
-    sort_direction: str = "desc",
+    include_paused: bool = False,
 ) -> tuple[int, List[CompetitorProduct]]:
-    """ Retorna lista paginada de concorrentes considerando filtros e ordenação """
-
+    """ Retorna concorrentes paginados usando apenas filtros essenciais. """
     query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
     )
@@ -199,33 +194,11 @@ def paginate_competitors(
     if not include_paused:
         query = query.filter(CompetitorProduct.is_paused.is_(False))
 
-    if search:
-        like_pattern = f"%{search.strip()}%"
-        query = query.filter(CompetitorProduct.name_competitor.ilike(like_pattern))
-
-    if status:
-        query = query.filter(CompetitorProduct.status == status)
-
     total = int(query.count())
-
-    sort_key = sort_by or "last_checked"
-    price_change_expr = CompetitorProduct.current_price - func.coalesce(
-        CompetitorProduct.old_price,
-        CompetitorProduct.current_price,
-    )
-    order_mapping = {
-        "price": CompetitorProduct.current_price,
-        "last_checked": CompetitorProduct.last_checked,
-        "price_change": price_change_expr,
-    }
-
-    order_column = order_mapping.get(sort_key, CompetitorProduct.last_checked)
-    direction = sort_direction.lower() if sort_direction else "desc"
-    order_clause = desc(order_column) if direction == "desc" else asc(order_column)
 
     offset_value = max(page - 1, 0) * per_page
     items = (
-        query.order_by(order_clause, CompetitorProduct.id)
+        query.order_by(desc(CompetitorProduct.last_checked), CompetitorProduct.id)
         .offset(offset_value)
         .limit(per_page)
         .all()

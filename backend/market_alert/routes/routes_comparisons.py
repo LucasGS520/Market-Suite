@@ -1,7 +1,7 @@
 """ Rotas para consulta de comparações de preços """
 
 import structlog
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
@@ -31,8 +31,19 @@ router = APIRouter(prefix="/comparisons", tags=["Comparações"])
 logger = structlog.get_logger("http_route")
 
 @router.get("/{monitored_id}", response_model=List[PriceComparisonResponse])
-def list_comparisons(request: Request, monitored_id: UUID, limit: int = 10, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """ Lista as comparações recentes de um produto monitorado. """
+def list_comparisons(
+    request: Request,
+    monitored_id: UUID,
+    limit: int = Query(
+        10,
+        ge=1,
+        le=100,
+        description="Quantidade máxima de registros retornados",
+    ),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """ Lista as comparações recentes de um produto monitorado com limite controlado """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_id))
 
     mp = get_monitored_product_by_id(db, monitored_id)
