@@ -25,6 +25,7 @@ from market_alert.services._scraper_common import (
     compute_force_refresh,
     ensure_price,
     execute_scraper_fetch,
+    normalize_currency_code,
     resolve_conditional_headers,
 )
 
@@ -81,7 +82,7 @@ async def _handle_response(
     sanitized_name = sanitize_text(payload.name)
 
     sanitized_thumbnail = sanitize_media_url(metadata.get("thumbnail"))
-    sanitized_currency = sanitize_text(metadata.get("currency"))
+    sanitized_currency = normalize_currency_code(metadata.get("currency"))
 
     scraped_info = MonitoredScrapedInfo(
         current_price=ensure_price(payload, request_url),

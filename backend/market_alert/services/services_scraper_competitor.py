@@ -12,6 +12,7 @@ from backend.shared.schemas.shared_schemas_products import CompetitorProductCrea
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
+from shared.utils.url_validation import canonicalize_product_url
 from market_alert.crud.crud_competitor import (
     create_or_update_competitor_product_scraped,
     get_competitor_by_monitored_and_url,
@@ -23,6 +24,7 @@ from market_alert.services._scraper_common import (
     execute_scraper_fetch,
     ensure_name,
     ensure_price,
+    normalize_currency_code,
     resolve_conditional_headers,
     to_decimal,
     to_float,
@@ -47,7 +49,10 @@ async def scrape_competitor_product_async(
     payload: CompetitorProductCreateScraping,
 ) -> ScrapeResult:
     """ Executa scraping de concorrentes retornando ``ScraperResult`` estruturado """
-    normalized_url = str(url)
+    try:
+        normalized_url = canonicalize_product_url(str(url))
+    except ValueError:
+        normalized_url = str(url)
     existing = _get_existing(db, payload)
     etag, last_modified = resolve_conditional_headers(existing)
 
@@ -95,7 +100,7 @@ async def scrape_competitor_product_async(
     metadata = extract_scraper_metadata(payload_model, response.headers)
 
     sanitized_thumbnail = sanitize_media_url(metadata.get("thumbnail"))
-    sanitized_currency = sanitize_text(metadata.get("currency"))
+    sanitized_currency = normalize_currency_code(metadata.get("currency"))
     sanitized_seller = sanitize_text(metadata.get("seller"))
 
     scraped_info = CompetitorScrapedInfo(

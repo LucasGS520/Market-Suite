@@ -1,71 +1,34 @@
-""" Validações compartilhadas de URLs dos marketplaces suportados
+""" Utilidades simples para normalização e validação básica de URLs
 
-O módulo concentra regras de sanitização e verificação utilizadas pelos
-serviços ``market_alert`` e ``market_scraper``. O objetivo é garantir que
-ambos aceitem apenas URLs legítimas de marketplaces suportados, evitando
-duplicação de regras de negócio e reduzindo riscos de SSRF.
+O foco do módulo é oferecer normalização previsível para deduplicação e
+validação mínima (esquema e host), sem heurísticas específicas de
+marketplace. Isso reduz casos-borda complexos e mantém o fluxo
+determinístico para os serviços ``market_alert`` e ``market_scraper``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from ipaddress import ip_address
-from typing import Callable, Dict
-from urllib.parse import ParseResult, urlparse, urlunparse
+from typing import Callable
+from urllib.parse import urlparse, urlunparse
 import re
 
 
 @dataclass(frozen=True)
 class UrlIssue:
-    """ Representa inconsistências de URL compartilhadas entre serviços """
+    """ Representa inconsistências simples identificadas durante a validação """
     code: str
     message: str
 
-SUPPORTED_DOMAINS = {
-    "mercadolivre.com.br",
-    "mercadolivre.com",
-    "amazon.com.br",
-    "amazon.com",
-    "magazineluiza.com.br",
-    "magazineluiza.com",
-}
-
-_ML_PRODUCT_RE = re.compile(r"/MLB[-_]?[0-9]+", re.IGNORECASE)
-_AMAZON_PATH_RE = re.compile(r"/(dp|gp/product)/", re.IGNORECASE)
-_MAGALU_PATH_RE = re.compile(r"/p/", re.IGNORECASE)
-
 _ALLOWED_SCHEMES = {"http", "https"}
 
-_PRODUCT_CHECKS: Dict[str, Callable[[ParseResult], bool]] = {
-    "mercadolivre.com.br": lambda parsed: bool(_ML_PRODUCT_RE.search(parsed.path)),
-    "mercadolivre.com": lambda parsed: bool(_ML_PRODUCT_RE.search(parsed.path)),
-    "amazon.com.br": lambda parsed: bool(_AMAZON_PATH_RE.search(parsed.path)),
-    "amazon.com": lambda parsed: bool(_AMAZON_PATH_RE.search(parsed.path)),
-    "magazineluiza.com.br": lambda parsed: bool(_MAGALU_PATH_RE.search(parsed.path)),
-    "magazineluiza.com": lambda parsed: bool(_MAGALU_PATH_RE.search(parsed.path)),
-}
-
-
 def _validate_hostname(host: str | None) -> None:
-    """ Garante que o hostname não contém labels inválidas ou punycode corrompido """
-    if not host:
+    """ Confere apenas a existência de host e caracteres básicos """
+    if not host or not host.strip():
         raise ValueError("URL inválida ou malformada")
-    
-    for label in host.split("."):
-        cleaned = label.strip()
-        if not cleaned:
-            raise ValueError("Hostname inválido ou incompleto")
-        if cleaned.startswith("-") or cleaned.endswith("-"):
-            raise ValueError("Hostname inválido ou punycode malformado")
-        if len(cleaned) > 63:
-            raise ValueError("Hostname excede o limite permitido")
-        try:
-            cleaned.encode("idna")
-        except UnicodeError as exc:
-            raise ValueError("Hostname inválido ou punycode malformado") from exc
 
 def _ensure_scheme(url: str) -> str:
-    """ Normaliza esquema HTTP/HTTPS mantendo consistência """
+    """ Garante esquema HTTP/HTTPS e remove fragmentos supérfluos """
     parsed_raw = urlparse(url)
     scheme = (parsed_raw.scheme or "https").lower()
 
@@ -135,40 +98,12 @@ def canonicalize_product_url(url: str) -> str:
     )
     return urlunparse(canonical)
 
-def _matches_domain(host: str, domain: str) -> bool:
-    """ Indica se o host informado pertence ao domínio esperado """
-    return host == domain or host.endswith(f".{domain}")
-
-def _is_supported_marketplace(host: str) -> bool:
-    """ Confere se o host faz parte dos marketplaces suportados """
-    return any(_matches_domain(host, domain) for domain in SUPPORTED_DOMAINS)
-
-def _is_product_page(url: str) -> bool:
-    """ Verifica se a URL possui padrões de página de produto """
-    parsed = urlparse(url)
-    host = parsed.hostname or ""
-    for domain, check in _PRODUCT_CHECKS.items():
-        if _matches_domain(host, domain):
-            return check(parsed)
-    return False
-
-def _default_public_endpoint_check(host: str) -> UrlIssue | None:
-    """ Bloqueia literais de IP privados sem depender de DNS """
-    try:
-        ip_obj = ip_address(host)
-    except ValueError:
-        return None
-    
-    if not ip_obj.is_global:
-        return UrlIssue(code="blocked_host", message="Endereços privados não são permitidos")
-    return None
-
 def check_url_compatibility(
     url: str,
     *,
     ensure_public_endpoint: Callable[[str], UrlIssue | None] | None = None,
 ) -> UrlIssue | None:
-    """ Aplica validações de domínio e formato compartilhado """
+    """ Validações mínimas para garantir formato seguro e previsível """
     parsed = urlparse(url)
     host = parsed.hostname or ""
 
@@ -183,27 +118,21 @@ def check_url_compatibility(
     except ValueError:
         return UrlIssue(code="invalid_url", message="URL inválida ou malformada")
 
-    if not _is_supported_marketplace(host):
-        return UrlIssue(code="unsupported_marketplace", message="Marketplace ainda não suportado")
-    
-    checker = ensure_public_endpoint or _default_public_endpoint_check
-    issue = checker(host)
-    if issue:
-        return issue
-    
-    if not _is_product_page(url):
-        return UrlIssue(code="not_a_product", message="A URL informada não corresponde a um produto")
+    if ensure_public_endpoint:
+        issue = ensure_public_endpoint(host)
+        if issue:
+            return issue
     
     return None
 
 def normalize_and_validate_product_url(url: str) -> tuple[str, UrlIssue | None]:
-    """ Normaliza e valida URLs de produto retornando possível inconsistência """
+    """ Normaliza URLs de produto com validação mínima de formato """
     normalized = canonicalize_product_url(url)
     issue = check_url_compatibility(normalized)
     return normalized, issue
 
 def normalize_product_url_for_storage(url: str) -> str:
-    """ Normaliza URLs para armazenamento tolerando entradas já sanitizadas """
+    """ Normaliza URLs para armazenamento sem heurísticas adicionais """
     raw_value = str(url or "").strip()
     if not raw_value:
         return ""
@@ -211,8 +140,7 @@ def normalize_product_url_for_storage(url: str) -> str:
     try:
         return canonicalize_product_url(raw_value)
     except ValueError:
-        #Mater o valor original evita quebrar dados legados já persistidos
-        return raw_value
+        return ""
 
 __all__ = [
     "UrlIssue",
@@ -221,6 +149,5 @@ __all__ = [
     "canonicalize_product_url",
     "normalize_product_url_for_storage",
     "check_url_compatibility",
-    "SUPPORTED_DOMAINS",
 ]
     

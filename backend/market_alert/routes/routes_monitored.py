@@ -1,7 +1,7 @@
 """ Rotas para produtos monitorados pelo usuário """
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from uuid import UUID
@@ -9,11 +9,6 @@ from uuid import UUID
 from shared.infra.db import get_db
 from shared.utils.url_validation import normalize_and_validate_product_url
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
-from backend.shared.infra.redis import (
-    IdempotencyOwnershipError,
-    register_idempotency_key,
-    store_idempotency_response,
-)
 from market_alert.core.config_alert import settings
 
 from market_alert.models import User
@@ -47,7 +42,6 @@ def create_scrape_product(
     product_data: MonitoredProductCreateScraping,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """ Agenda coleta assíncrona de produto monitorado validando URL e duplicidade """
     logger.info(
@@ -56,66 +50,16 @@ def create_scrape_product(
         method=request.method,
         user_id=str(user.id),
         monitoring_type="scraping",
-        idempotency_key=idempotency_key,
     )
-
-    owner_reference = str(user.id)
-    idempotency_record = None
-
-    try:
-        idempotency_record = register_idempotency_key(
-            namespace="monitored_scrape",
-            key=idempotency_key,
-            owner=owner_reference,
-            ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-        )
-    except IdempotencyOwnershipError as exc:
-        logger.warning("idempotency_conflict", path=request.url.path, method=request.method, key=idempotency_key)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Chave de idempotência já utilizada por outro usuário",
-        ) from exc
-
-    if idempotency_record and not idempotency_record.is_new:
-        logger.info("idempotency_replayed", path=request.url.path, method=request.method, key=idempotency_key)
-        if idempotency_record.response is not None:
-            return JSONResponse(
-                content=idempotency_record.response,
-                status_code=idempotency_record.status_code or status.HTTP_202_ACCEPTED,
-            )
-        return JSONResponse(
-            content={"message": "Requisição já processada anteriormente."},
-            status_code=status.HTTP_202_ACCEPTED,
-        )
 
     try:
         normalized_url, issue = normalize_and_validate_product_url(str(product_data.product_url))
     except ValueError as exc:
         logger.warning("invalid_product_url", url=str(product_data.product_url), error=str(exc))
-        error_payload = {"detail": str(exc)}
-        if idempotency_record:
-            store_idempotency_response(
-                namespace="monitored_scrape",
-                key=idempotency_key,
-                owner=owner_reference,
-                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-                response=error_payload,
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     if issue:
         logger.warning("invalid_product_url", url=normalized_url, code=issue.code)
-        error_payload = {"detail": issue.message}
-        if idempotency_record:
-            store_idempotency_response(
-                namespace="monitored_scrape",
-                key=idempotency_key,
-                owner=owner_reference,
-                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-                response=error_payload,
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
 
     existing = get_monitored_product_by_user_and_url(db, user.id, normalized_url)
@@ -138,16 +82,6 @@ def create_scrape_product(
             db.refresh(existing)
 
         conflict_payload = {"message": "Este produto já está sendo monitorado."}
-        if idempotency_record:
-            store_idempotency_response(
-                namespace="monitored_scrape",
-                key=idempotency_key,
-                owner=owner_reference,
-                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-                response=conflict_payload,
-                status_code=status.HTTP_409_CONFLICT,
-            )
-
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
             content=conflict_payload,
@@ -169,16 +103,6 @@ def create_scrape_product(
 
     logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled", monitored_id=str(pending.id))
     response_payload = {"message": "Scraping agendado. O produto será salvo em breve."}
-
-    if idempotency_record:
-        store_idempotency_response(
-            namespace="monitored_scrape",
-            key=idempotency_key,
-            owner=owner_reference,
-            ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-            response=response_payload,
-            status_code=status.HTTP_202_ACCEPTED,
-        )
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content=response_payload,

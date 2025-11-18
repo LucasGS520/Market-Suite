@@ -4,17 +4,11 @@ from typing import List, Tuple
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
-from backend.shared.infra.redis.idempotency import (
-    IdempotencyOwnershipError,
-    register_idempotency_key,
-    store_idempotency_response,
-)
 from shared.utils.redis_client import consume_leaky_bucket
 
 from market_alert.models import User
@@ -136,79 +130,26 @@ def create_competitor_scrape(
     product_data: CompetitorProductCreateScraping,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    """ Endpoint para monitorar e comparar um produto concorrente por meio de um link direto (scraping)
-
-    O header ``Idempotency-Key`` é aceito para que clientes previnam agendamentos duplicados
-    em fluxos de scraping.
-    """
+    """ Endpoint para monitorar e comparar um produto concorrente por meio de scraping """
     logger.info(
         "route_called",
         path=request.url.path,
         method=request.method,
         user_id=str(user.id),
         monitored_id=str(product_data.monitored_product_id),
-        idempotency_key=idempotency_key,
     )
-
-    owner_reference = str(user.id)
-    idempotency_record = None
-
-    try:
-        idempotency_record = register_idempotency_key(
-            namespace="competitor_scrape",
-            key=idempotency_key,
-            owner=owner_reference,
-            ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-        )
-    except IdempotencyOwnershipError as exc:
-        logger.warning("idempotency_conflict", path=request.url.path, method=request.method, key=idempotency_key)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Chave de idempotência já utilizada por outro usuário",
-        ) from exc
-    
-    if idempotency_record and not idempotency_record.is_new:
-        logger.info("idempotency_replayed", path=request.url.path, method=request.method, key=idempotency_key)
-        if idempotency_record.response is not None:
-            return JSONResponse(
-                content=idempotency_record.response,
-                status_code=idempotency_record.status_code or status.HTTP_202_ACCEPTED,
-            )
-        return JSONResponse(
-            content={"message": "Requisição de scraping já está em processamento."},
-            status_code=status.HTTP_202_ACCEPTED,
-        )
 
     try:
         normalized_url, issue = normalize_and_validate_product_url(str(product_data.product_url))
     except ValueError as exc:
         logger.warning("invalid_competitor_url", url=str(product_data.product_url), error=str(exc))
         error_payload = {"detail": str(exc)}
-        if idempotency_record:
-            store_idempotency_response(
-                namespace="competitor_scrape",
-                key=idempotency_key,
-                owner=owner_reference,
-                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-                response=error_payload,
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_payload["detail"])
 
     if issue:
         logger.warning("invalid_competitor_url", url=normalized_url, code=issue.code)
         error_payload = {"detail": issue.message}
-        if idempotency_record:
-            store_idempotency_response(
-                namespace="competitor_scrape",
-                key=idempotency_key,
-                owner=owner_reference,
-                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-                response=error_payload,
-                status_code=status.HTTP_400_BAD_REQUEST,
-            )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
 
     mp = ensure_user_can_access_monitored(
@@ -233,15 +174,6 @@ def create_competitor_scrape(
             competitor_id=str(existing.id),
         )
         conflict_payload = {"detail": "Concorrente já cadastrado para este produto monitorado."}
-        if idempotency_record:
-            store_idempotency_response(
-                namespace="competitor_scrape",
-                key=idempotency_key,
-                owner=owner_reference,
-                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-                response=conflict_payload,
-                status_code=status.HTTP_409_CONFLICT,
-            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=conflict_payload["detail"],
@@ -262,15 +194,6 @@ def create_competitor_scrape(
         _enforce_competitor_scrape_rate_limit(user.id)
     except HTTPException as exc:
         error_payload = exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail)}
-        if idempotency_record:
-            store_idempotency_response(
-                namespace="competitor_scrape",
-                key=idempotency_key,
-                owner=owner_reference,
-                ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-                response=error_payload,
-                status_code=exc.status_code,
-            )
         raise
 
     #Cria um produto concorrente via Celery
@@ -281,16 +204,6 @@ def create_competitor_scrape(
 
     logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled")
     response_payload = {"message": "Scraping de concorrente agendado com sucesso."}
-
-    if idempotency_record:
-        store_idempotency_response(
-            namespace="competitor_scrape",
-            key=idempotency_key,
-            owner=owner_reference,
-            ttl_seconds=settings.IDEMPOTENCY_TTL_SECONDS,
-            response=response_payload,
-            status_code=status.HTTP_202_ACCEPTED,
-        )
 
     return response_payload
 

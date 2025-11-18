@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 from uuid import UUID
 
@@ -60,13 +60,19 @@ def compute_force_refresh(
     return (now - last_checked).total_seconds() >= ttl_seconds
 
 def ensure_price(payload: ParserResponse, url: str) -> Decimal:
-    """ Garante que o payload contenha preço válido antes de persistir """
+    """ Garante que o payload contenha preço válido como ``Decimal`` """
     if payload.current_price is None:
         raise ScraperClientError(
             f"Payload do scraper sem preço para a URL {url}",
             status_code=500,
         )
-    return payload.current_price
+    try:
+        return Decimal(str(payload.current_price))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ScraperClientError(
+            f"Preço inválido retornado pelo scraper para a URL {url}",
+            status_code=500,
+        ) from exc
 
 def ensure_name(payload: ParserResponse, url: str) -> str:
     """ Normaliza e valida o nome retornado pelo scraper """
@@ -82,6 +88,22 @@ def ensure_name(payload: ParserResponse, url: str) -> str:
             status_code=500,
         )
     return sanitized
+
+def normalize_currency_code(value: str | None) -> str | None:
+    """ Sanitiza e valida código de moeda aceitando apenas letras e até 5 caracteres """
+    if value is None:
+        return None
+    
+    sanitized = sanitize_text(value)
+    if not sanitized:
+        return None
+    
+    cleaned = "".join(ch for ch in sanitized if ch.isalnum())
+    if not cleaned:
+        return None
+    
+    normalized = cleaned.upper()[:5]
+    return normalized
 
 def to_decimal(value: Any) -> Decimal | None:
     """ Converte valores genéricos para ``Decimal`` com tolerância """
