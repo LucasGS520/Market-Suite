@@ -69,8 +69,7 @@ def create_user(db: Session, user_data: UserCreate) -> UserResponse:
             db,
             AlertRuleCreate(
                 user_id=new_user.id,
-                rule_type=AlertType.PRICE_TARGET,
-                threshold_percent=5.0,
+                rule_type=AlertType.PRICE_CHANGE,
                 enabled=True
             )
         )

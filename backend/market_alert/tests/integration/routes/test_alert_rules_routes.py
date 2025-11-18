@@ -22,8 +22,7 @@ def test_cannot_delete_other_users_rule(client, db_session, test_user, prepare_t
 
     rule = AlertRule(
         user_id=other_user.id,
-        rule_type=AlertType.PRICE_TARGET,
-        threshold_value=100.0,
+        rule_type=AlertType.PRICE_CHANGE,
         enabled=True
     )
     db_session.add(rule)
@@ -39,8 +38,7 @@ def test_cannot_delete_other_users_rule(client, db_session, test_user, prepare_t
 def test_delete_own_rule(client, db_session, test_user, prepare_test_database):
     rule = AlertRule(
         user_id=test_user.id,
-        rule_type=AlertType.PRICE_TARGET,
-        threshold_value=50.0,
+        rule_type=AlertType.PRICE_CHANGE,
         enabled=True
     )
     db_session.add(rule)
@@ -67,22 +65,20 @@ def test_cannot_update_other_users_rule(client, db_session, test_user, prepare_t
 
     rule = AlertRule(
         user_id=other.id,
-        rule_type=AlertType.PRICE_TARGET,
-        threshold_value=10.0,
+        rule_type=AlertType.PRICE_CHANGE,
         enabled=True
     )
     db_session.add(rule)
     db_session.commit()
     db_session.refresh(rule)
 
-    resp = client.put(f"/alert_rules/{rule.id}", json={"threshold_value": 20})
+    resp = client.put(f"/alert_rules/{rule.id}", json={"enabled": False})
     assert resp.status_code == 404
 
 def test_update_own_rule(client, db_session, test_user, prepare_test_database):
     rule = AlertRule(
         user_id=test_user.id,
-        rule_type=AlertType.PRICE_TARGET,
-        threshold_value=5.0,
+        rule_type=AlertType.PRICE_CHANGE,
         enabled=True
     )
     db_session.add(rule)
@@ -91,21 +87,20 @@ def test_update_own_rule(client, db_session, test_user, prepare_test_database):
 
     resp = client.put(
         f"/alert_rules/{rule.id}",
-        json={"threshold_value": 8.0, "enabled": False}
+        json={"rule_type": AlertType.LISTING_PAUSED.value, "enabled": False}
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["threshold_value"] == "8.00"
+    assert data["rule_type"] == AlertType.LISTING_PAUSED.value
     assert data["enabled"] is False
 
 def test_rule_creation_simplified(client, db_session, test_user, prepare_test_database):
     user_id = str(test_user.id)
-    resp = client.post("/alert_rules/", json={"threshold_value": 12})
+    resp = client.post("/alert_rules/", json={})
     assert resp.status_code == 201
     data = resp.json()
     assert data["user_id"] == user_id
-    assert data["rule_type"] == AlertType.PRICE_TARGET.value
-    assert data["threshold_value"] == "12.00"
+    assert data["rule_type"] == AlertType.PRICE_CHANGE.value
 
 def test_rule_creation_validates_product(client, db_session, test_user, prepare_test_database):
     other_unique = uuid.uuid4().hex[:8]
@@ -130,5 +125,5 @@ def test_rule_creation_validates_product(client, db_session, test_user, prepare_
     db_session.commit()
     db_session.refresh(mp)
 
-    resp = client.post("/alert_rules/", json={"monitored_product_id": str(mp.id), "threshold_value": 1})
+    resp = client.post("/alert_rules/", json={"monitored_product_id": str(mp.id)})
     assert resp.status_code == 400

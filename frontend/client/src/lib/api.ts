@@ -977,9 +977,6 @@ export const removeCompetitors = (
 /**
  * API: Agendar scraping de concorrente.
  * POST /competitors/scrape
- * 
- * - Aceita cabeçalho Idempotency-Key para evitar duplicações em cliques repetidos.
- * - Quando nenhuma chave for informada, geramos uma automaticamente.
  */
 export const scrapeCompetitor = (
   token: string,
@@ -987,31 +984,12 @@ export const scrapeCompetitor = (
     monitored_product_id: string;
     product_url: string;
   },
-  options: {
-    idempotencyKey?: string;
-  } = {},
-) => {
-  const resolvedIdempotencyKey = (() => {
-    if (options.idempotencyKey) {
-      return options.idempotencyKey;
-    }
-
-    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-      return crypto.randomUUID();
-    }
-
-    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  })();
-
-  return apiRequest<{ message: string }>('/competitors/scrape', {
+) =>
+  apiRequest<{ message: string }>('/competitors/scrape', {
     token,
     method: 'POST',
     body: JSON.stringify(data),
-    headers: {
-      'Idempotency-Key': resolvedIdempotencyKey,
-    },
   });
-};
 
 /**
  * API: Listar logs de notificações do usuário.
@@ -1038,18 +1016,15 @@ export const getComparisonSummary = async (
 
 /**
  * API: Rodar comparação de preços manualmente.
- * POST /comparisons/{monitoredId}/run?tolerance=...&price_change_threshold=...
+ * POST /comparisons/{monitoredId}/run?tolerance=...
  *
  * - tolerance: tolerância para considerar preços equivalentes (opcional)
- * - priceChangeThreshold: limiar para considerar variação significativa (opcional)
  */
 /**
  * Parâmetros opcionais aceitos ao acionar comparação manual.
  */
 export interface RunComparisonOptions {
   tolerance?: number;
-  priceChangeThreshold?: number;
-  idempotencyKey?: string;
 }
 
 /**
@@ -1066,26 +1041,12 @@ export const runComparison = (
     payload.tolerance = options.tolerance;
   }
 
-  if (options.priceChangeThreshold !== undefined) {
-    payload.price_change_threshold = options.priceChangeThreshold;
-  }
-
   const hasCustomParameters = Object.keys(payload).length > 0;
-  const headers: Record<string, string> = {};
-
-  if (options.idempotencyKey) {
-    headers['Idempotency-Key'] = options.idempotencyKey;
-  }
-
-  if (hasCustomParameters) {
-    headers['Content-Type'] = 'application/json';
-  }
 
   return apiRequest<PriceComparison>(`/comparisons/${monitoredId}/run`, {
     token,
     method: 'POST',
     ...(hasCustomParameters ? { body: JSON.stringify(payload) } : {}),
-    ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
 };
 

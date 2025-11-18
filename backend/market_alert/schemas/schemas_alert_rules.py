@@ -1,11 +1,10 @@
 """ Esquemas de regras de alerta e registro de notificações """
 
-from decimal import Decimal
-from typing import Optional, Any
+from typing import Optional, ClassVar
 
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from market_alert.enums.enums_alerts import (
     AlertType,
@@ -17,55 +16,52 @@ from market_alert.enums.enums_products import ProductStatus
 
 
 class AlertRuleCreate(BaseModel):
-    """ Esquema de criação para regras de alerta """
+    """ Esquema de criação para regras de alerta enxutas
+
+    O contrato aceita apenas os tipos necessários para o fluxo
+    simplificado: mudança de preço e variações de disponibilidade.
+    Limiares numéricos foram removidos para reduzir heurísticas
+    dinâmicas e tornar o comportamento previsível.
+    """
+    allowed_rule_types: ClassVar[set[AlertType]] = {
+        AlertType.PRICE_CHANGE,
+        AlertType.PRICE_TARGET,
+        AlertType.LISTING_PAUSED,
+        AlertType.LISTING_REMOVED,
+        AlertType.SCRAPING_ERROR,
+    }
+
     user_id: UUID
     monitored_product_id: Optional[UUID] = None
     rule_type: AlertType
-    threshold_value: Optional[Decimal] = Field(None, gt=0)
-    threshold_percent: Optional[float] = Field(None, gt=0, le=100)
     product_status: Optional[ProductStatus] = None
     enabled: bool = True
-
-    @field_validator("threshold_percent")
-    @classmethod
-    def validate_percent(cls, value):
-        """ Verifica se o percentual está entre o e 100 """
-        if value is not None and not (0 < value <= 100):
-            raise ValueError("threshold_percent é necessário estar entre 0 e 100")
-        return value
     
     @model_validator(mode="after")
-    def validate_threshold_requirements(cls, values: "AlertRuleCreate") -> "AlertRuleCreate":
-        """ Garante que regras de preço possuam algum limiar configurado """
-        if values.rule_type == AlertType.PRICE_TARGET and not any(
-            [values.threshold_value, values.threshold_percent]
-        ):
+    def validate_rule_type(cls, values: "AlertRuleCreate") -> "AlertRuleCreate":
+        """Permite apenas tipos de alerta essenciais
+
+        Mantemos ``PRICE_TARGET`` como apelido para ``PRICE_CHANGE``
+        por retrocompatibilidade, porém sem aceitar thresholds.
+        """
+        if values.rule_type not in cls.allowed_rule_types:
             raise ValueError(
-                "Regras de preço precisam informar threshold_value ou threshold_percent"
+                "Tipo de alerta não suportado nesta versão simplificada"
             )
         return values
 
 class QuickAlertRuleCreate(BaseModel):
     """ Esquema simplificado para criação rápida de regra """
     monitored_product_id: Optional[UUID] = None
-    rule_type: AlertType = AlertType.PRICE_TARGET
-    threshold_value: Optional[Decimal] = Field(None, gt=0)
-    threshold_percent: Optional[float] = Field(None, gt=0, le=100)
-
-    @field_validator("threshold_percent")
-    @classmethod
-    def validate_percent(cls, value):
-        """ Verifica se o percentual está entre 0 e 100 """
-        if value is not None and not (0 < value <= 100):
-            raise ValueError("threshold_percent é necessário estar entre 0 e 100")
-        return value
+    rule_type: AlertType = AlertType.PRICE_CHANGE
+    product_status: Optional[ProductStatus] = None
     
     @model_validator(mode="after")
-    def validate_threshold_requirements(cls, values: "QuickAlertRuleCreate") -> "QuickAlertRuleCreate":
-        """ Evita criação rápida sem um limiar definido """
-        if not any([values.threshold_value, values.threshold_percent]):
+    def validate_rule_type(cls, values: "QuickAlertRuleCreate") -> "QuickAlertRuleCreate":
+        """Garante que apenas regras suportadas sejam criadas rapidamente"""
+        if values.rule_type not in AlertRuleCreate.allowed_rule_types:
             raise ValueError(
-                "Informe threshold_value ou threshold_percent na criação rápida"
+                "Tipo de alerta não suportado para criação rápida"
             )
         return values
 
@@ -74,18 +70,8 @@ class AlertRuleUpdate(BaseModel):
     user_id: Optional[UUID] = None
     monitored_product_id: Optional[UUID] = None
     rule_type: Optional[AlertType] = None
-    threshold_value: Optional[Decimal] = Field(None, gt=0)
-    threshold_percent: Optional[float] = Field(None, gt=0, le=100)
     product_status: Optional[ProductStatus] = None
     enabled: Optional[bool] = None
-
-    @field_validator("threshold_percent")
-    @classmethod
-    def validate_percent(cls, value):
-        """ Verifica se o percentual está entre 0 e 100 """
-        if value is not None and not (0 < value <= 100):
-            raise ValueError("threshold_percent é necessário estar entre 0 e 100")
-        return value
 
 class AlertRuleResponse(BaseModel):
     """ Esquema de resposta para regras de alerta """
@@ -95,8 +81,6 @@ class AlertRuleResponse(BaseModel):
     user_id: UUID
     monitored_product_id: Optional[UUID] = None
     rule_type: AlertType
-    threshold_value: Optional[Decimal] = None
-    threshold_percent: Optional[float] = None
     product_status: Optional[ProductStatus] = None
     enabled: bool = True
     last_notified_at: Optional[datetime] = None

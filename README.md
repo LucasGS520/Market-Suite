@@ -47,14 +47,14 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 3. **Coleta de dados**: tasks que demandam scraping invocam o `ScraperClient` (`backend/market_alert/services/scraper_client.py`), enviando `POST /scraper/parse` ao `market_scraper`.
 4. **Pipeline de scraping**: o `market_scraper` executa validação de URL, checagem de `robots.txt`, caching LRU com TTL e pipeline sequencial (`FetchHTML` → `DomainSpecificParser` → `JsonLdParser` → `HtmlMetadataParser` → `GenericFallbackParser`). Resultados são devolvidos como `ParserResponse`.
 5. **Persistência e regras de negócio**: workers Celery consolidam dados no PostgreSQL (`backend/market_alert/repositories`), recalculam comparações, aplicam regras de alerta e armazenam histórico de coletas.
-6. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. Regras de retry/idempotência evitam duplicidades e mantêm consistência de estado.
+6. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 
 #### Princípios do backend
 - **Exposição de APIs**: o FastAPI em `market_alert` oferece rotas públicas, autenticação JWT e endpoints para monitoramentos, concorrentes e comparações.
 - **Contrato único**: esquemas em `backend/shared/schemas/schemas_scraper.py` padronizam comunicação API ↔ scraper.
 - **Separação de responsabilidades**: apenas o `market_scraper` processa HTML, enquanto o `market_alert` persiste dados e aplica lógica de negócios.
 - **Processamento assíncrono**: workers Celery e Beat ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização, métricas e observabilidade.
-- **Idempotência**: tasks Celery evitam reprocessamentos (cache de respostas, validação de timestamps e status `304 Not Modified`).
+- **Simplicidade operacional**: priorizamos contratos previsíveis, removendo idempotência distribuída nos disparos manuais e regras de alerta baseadas em thresholds dinâmicos.
 - **Extensibilidade controlada**: novos marketplaces exigem evoluções no `market_scraper` e nos contratos compartilhados antes de tocar regras de alerta.
 - **Biblioteca compartilhada**: `backend/shared` concentra schemas Pydantic, utilidades, métricas, observabilidade e integrações externas consumidas pelos demais serviços.
 

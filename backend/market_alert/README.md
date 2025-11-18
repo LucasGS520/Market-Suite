@@ -12,6 +12,7 @@ API FastAPI responsável por autenticação, gestão e monitoramento, comparaç�
 - **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
 - **Registrar métricas e logs estruturados** para Prometheus e Loki.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
+- **Simplificar alertas** priorizando apenas mudanças de preço e disponibilidade, sem thresholds dinâmicos ou idempotência distribuída.
 
 ## Estrutura do Diretório
 ```text

@@ -19,7 +19,7 @@ logger = structlog.get_logger("http_route")
 
 @router.post("/", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)
 def create_rule(request: Request, payload: QuickAlertRuleCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """ Cria uma regra de alerta para o usuário autenticado de forma simplificada """
+    """ Cria uma regra de alerta simplificada para o usuário autenticado """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id))
 
     if payload.monitored_product_id:
@@ -32,8 +32,6 @@ def create_rule(request: Request, payload: QuickAlertRuleCreate, db: Session = D
         user_id=user.id,
         monitored_product_id=payload.monitored_product_id,
         rule_type=payload.rule_type,
-        threshold_value=payload.threshold_value,
-        threshold_percent=payload.threshold_percent,
         enabled=True
     )
     rule = create_alert_rule(db, rule_in)

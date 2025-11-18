@@ -45,29 +45,6 @@ export interface AddCompetitorModalProps {
 }
 
 /**
- * Constrói chave de idempotência derivada do produto e do concorrente.
- * Mantém apenas caracteres seguros para cabeçalhos HTTP.
- */
-const buildIdempotencyKey = (productId: string, canonicalUrl: string): string => {
-  const normalized = `${productId}:${canonicalUrl}`.toLowerCase();
-  const encoded = encodeURIComponent(normalized)
-    .replace(/%/g, '-')
-    .replace(/[!~*'().]/g, '-')
-    .replace(/-+/g, '-');
-  const trimmed = `competitor-${encoded}`.slice(0, 200);
-
-  if (trimmed.length > 0) {
-    return trimmed;
-  }
-
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-};
-
-/**
  * Normaliza URLs removendo hash, querystring e domínios com `www.` para deduplicação.
  */
 const canonicalizeCompetitorUrl = (rawUrl: string): string => {
@@ -216,9 +193,6 @@ const AddCompetitorModal: React.FC<AddCompetitorModalProps> = ({ product, isOpen
           {
             monitored_product_id: product.id,
             product_url: canonicalUrl,
-          },
-          {
-            idempotencyKey: buildIdempotencyKey(product.id, canonicalUrl),
           },
         );
 

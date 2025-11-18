@@ -233,8 +233,7 @@ def create_or_update_monitored_product_scraped(
             AlertRuleCreate(
                 user_id=user_id,
                 monitored_product_id=new.id,
-                rule_type=AlertType.PRICE_TARGET,
-                threshold_percent=5.0,
+                rule_type=AlertType.PRICE_CHANGE,
                 enabled=True
             )
         )

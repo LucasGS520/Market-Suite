@@ -2,14 +2,13 @@ from types import SimpleNamespace
 from datetime import datetime
 
 from market_alert.crud import crud_alert_rules as crud_alerts
+from market_alert.enums.enums_alerts import AlertType
 from market_alert.enums.enums_products import ProductStatus
 
 
 def test_update_alert_rule_success(monkeypatch):
     rule = SimpleNamespace(
         id="r1",
-        threshold_value=5,
-        threshold_percent=None,
         product_status=None,
         enabled=True
     )
@@ -25,16 +24,14 @@ def test_update_alert_rule_success(monkeypatch):
     monkeypatch.setattr(crud_alerts, "get_alert_rule", lambda d, rid: rule)
 
     update = {
-        "threshold_value": 10,
-        "threshold_percent": 1.5,
-        "product_status": ProductStatus.available
+        "product_status": ProductStatus.available,
+        "rule_type": AlertType.LISTING_PAUSED,
     }
 
     result = crud_alerts.update_alert_rule(db, "r1", update)
 
     assert result is rule
-    assert rule.threshold_value == 10
-    assert rule.threshold_percent == 1.5
+    assert rule.rule_type == AlertType.LISTING_PAUSED
     assert rule.product_status == ProductStatus.available
     assert db_called.get("commit") is True
     assert db_called.get("refresh") is rule
@@ -50,7 +47,7 @@ def test_update_alert_rule_missing(monkeypatch):
     db = DummyDB()
     monkeypatch.setattr(crud_alerts, "get_alert_rule", lambda d, rid: None)
 
-    result = crud_alerts.update_alert_rule(db, "r1", {"threshold_value": 10})
+    result = crud_alerts.update_alert_rule(db, "r1", {"enabled": False})
 
     assert result is None
     assert not db_called
