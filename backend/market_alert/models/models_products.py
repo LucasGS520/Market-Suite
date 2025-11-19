@@ -40,6 +40,9 @@ class MonitoredProduct(Base):
     currency = Column(String(8), nullable=True)
     thumbnail = Column(Text, nullable=True)
 
+    #Flag indicando destaque manual exibido no dashboard
+    is_featured = Column(Boolean, nullable=False, default=False, server_default="false")
+
     #Cache condicional
     etag = Column(String, nullable=True)
     last_modified = Column(DateTime(timezone=True), nullable=True)

@@ -19,18 +19,15 @@ class ProductResponse(BaseModel):
     currency: Optional[str] = Field(None, description="Moeda do preço informado")
     collected_at: datetime = Field(..., description="Momento da última coleta bem-sucedida")
     source: Literal["monitored", "competitor"]
-    availability: bool | None = Field(
-        None, description="Disponibilidade reportada pelo fluxo de coleta"
-    )
-    last_status: str | None = Field(
-        None, description="Status mais recente conhecido do fluxo de coleta"
-    )
+    availability: bool | None = Field(None, description="Disponibilidade reportada pelo fluxo de coleta")
+    last_status: str | None = Field(None, description="Status mais recente conhecido do fluxo de coleta")
 
 
 # ----- PRODUTO MONITORADO -----
 class MonitoredProductResponse(ProductResponse):
     """ Contrato simplificado de um produto monitorado """
     source: Literal["monitored"] = "monitored"
+    is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
 
 class PaginatedMonitoredProductsResponse(BaseModel):
     """ Envelope de paginação para produtos monitorados """
@@ -46,9 +43,7 @@ class CompetitorProductResponse(ProductResponse):
         ..., description="Vínculo obrigatório com o produto monitorado"
     )
     source: Literal["competitor"] = "competitor"
-    is_paused: bool = Field(
-        False, description="Indica se o monitoramento do concorrente está pausado"
-    )
+    is_paused: bool = Field(False, description="Indica se o monitoramento do concorrente está pausado")
 
 class PaginatedCompetitorResponse(BaseModel):
     """Envelope padronizado para retornar concorrentes paginados."""

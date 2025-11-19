@@ -17,6 +17,7 @@ from market_alert.schemas.schemas_products import (
 )
 from market_alert.crud.crud_monitored import (
     get_all_monitored_products,
+    get_featured_monitored_products,
     get_monitored_product_by_id,
     delete_monitored_product,
     create_pending_monitored_product,
@@ -29,6 +30,9 @@ from market_alert.services.services_products import build_monitored_response
 
 router = APIRouter(prefix="/monitored", tags=["Monitoramento"])
 logger = structlog.get_logger("http_route")
+
+#Limite de itens destacados exibidos simultaneamente no dashboard
+MAX_FEATURED_ITEMS = 3
 
 @router.post("/scrape", status_code=status.HTTP_202_ACCEPTED, response_model=None)
 def create_scrape_product(
@@ -161,6 +165,49 @@ def list_monitored_products(
         page=page,
         per_page=per_page,
     )
+
+@router.get("/featured", response_model=list[MonitoredProductResponse])
+def list_featured_products(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """ Retorna no máximo três itens destacados para o dashboard """
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        limit=MAX_FEATURED_ITEMS,
+    )
+    featured_items = get_featured_monitored_products(
+        db,
+        user.id,
+        limit=MAX_FEATURED_ITEMS,
+    )
+
+    response_payload: list[MonitoredProductResponse] = []
+    for product in featured_items:
+        try:
+            response_payload.append(build_monitored_response(product))
+        except HTTPException as exc:
+            #Manter o contrato consistente mesmo que algum destaque esteja sem preço
+            logger.warning(
+                "featured_without_price",
+                product_id=str(product.id),
+                status=product.status.value,
+                detail=str(exc.detail),
+            )
+            continue
+
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        count=len(response_payload),
+    )
+    return response_payload
 
 @router.get("/{product_id}", response_model=MonitoredProductResponse)
 def get_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

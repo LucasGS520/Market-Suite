@@ -287,6 +287,53 @@ def get_all_monitored_products(
     items = [(product, competitors_map.get(product.id, 0)) for product in products]
     return items, total
 
+def get_featured_monitored_products(
+    db: Session,
+    user_id: UUID,
+    *,
+    limit: int = 3,
+) -> list[MonitoredProduct]:
+    """ Seleciona produtos em destaque respeitando limite máximo configurado """
+    normalized_limit = max(0, limit)
+    if normalized_limit == 0:
+        return []
+    
+    base_query = (
+        db.query(MonitoredProduct)
+        .filter(
+            MonitoredProduct.user_id == user_id,
+            MonitoredProduct.current_price.isnot(None),
+        )
+    )
+
+    #Prioriza itens marcados manualmente como destaque
+    manual_featured = (
+        base_query.filter(MonitoredProduct.is_featured.is_(True))
+        .order_by(MonitoredProduct.updated_at.desc())
+        .limit(normalized_limit)
+        .all()
+    )
+    if len(manual_featured) >= normalized_limit:
+        return manual_featured[:normalized_limit]
+    
+    remaining_limit = normalized_limit - len(manual_featured)
+    excluded_ids = [product.id for product in manual_featured]
+    fallback_query = base_query.filter(MonitoredProduct.status == MonitoredStatus.active)
+    if excluded_ids:
+        fallback_query = fallback_query.filter(~MonitoredProduct.id.in_(excluded_ids))
+
+    #Complementa com itens mais recentes caso falte destaque manual
+    fallback_featured = (
+        fallback_query
+        .order_by(
+            MonitoredProduct.last_checked.desc(),
+            MonitoredProduct.created_at.desc(),
+        )
+        .limit(remaining_limit)
+        .all()
+    )
+    return manual_featured + fallback_featured
+
 def get_products_by_type(db: Session, monitoring_type: MonitoringType) -> List[MonitoredProduct]:
     """ Lista todos os produtos monitorados conforme o tipo """
     return (

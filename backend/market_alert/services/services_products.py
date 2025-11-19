@@ -50,6 +50,7 @@ def build_monitored_response(monitored: MonitoredProduct) -> MonitoredProductRes
         source="monitored",
         availability=availability,
         last_status=monitored.status.value,
+        is_featured=monitored.is_featured,
     )
 
 
