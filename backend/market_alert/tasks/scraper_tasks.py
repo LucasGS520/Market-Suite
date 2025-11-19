@@ -41,6 +41,9 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 logger = structlog.get_logger("scraper_tasks")
 redis_client = get_redis_client()
 
+#TTL de idempotência para evitar reprocessamento repetido do mesmo produto
+IDEMPOTENCY_TTL_SECONDS = getattr(settings, "SCRAPER_IDEMPOTENCY_TTL_SECONDS", 3600)
+
 def _normalized_timestamp(value: datetime | None) -> datetime:
     """ Normaliza timestamp para UTC e remove microssegundos para chaves estáveis """
     base = value or datetime.now(timezone.utc)
@@ -48,6 +51,28 @@ def _normalized_timestamp(value: datetime | None) -> datetime:
         base = base.replace(tzinfo=timezone.utc)
     return base.astimezone(timezone.utc).replace(microsecond=0)
 
+def _build_idempotency_key(
+    monitored_id: str | UUID | None,
+    *,
+    reference: datetime | None,
+) -> str | None:
+    """ Monta chave de deduplicação baseada no monitorado e referência temporal """
+    if monitored_id is None:
+        return None
+    
+    reference_value = _normalized_timestamp(reference) if reference else None
+    suffix = reference_value.isoformat() if reference_value else "none"
+    return f"scraper:idempotent:{monitored_id}:{suffix}"
+
+def _acquire_idempotency_slot(key: str | None, *, task_logger) -> bool:
+    """ Registra execução em Redis evitando execuções duplicadas do mesmo payload """
+    if key is None or redis_client is None:
+        return True
+    
+    acquired = bool(redis_client.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS))
+    if not acquired:
+        task_logger.info("idempotency_skip", key=key)
+    return acquired
 
 def _extract_comparison_reference(
     db: Session | None,
@@ -327,6 +352,13 @@ def collect_product_task(
             )
             product_id = str(existing.id)
         
+        reference = _extract_comparison_reference(db, product_id or monitored_id)
+        idempotency_key = _build_idempotency_key(product_id or monitored_id, reference=reference)
+        if not _acquire_idempotency_slot(idempotency_key, task_logger=task_logger):
+            _observe_metrics(start, "collect_product_task", status)
+            SCRAPER_IN_FLIGHT.dec()
+            return
+
         try:
             result: ScrapeResult = scrape_monitored_product(
                 db=db,
@@ -489,6 +521,13 @@ def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
             else:
                 task_logger.info("competitor_lookup_skipped", reason="session_without_query")
             user_id = monitored.user_id if monitored is not None else UUID(int=0)
+
+            reference = _extract_comparison_reference(db, monitored_product_id)
+            idem_key = _build_idempotency_key(monitored_product_id, reference=reference)
+            if not _acquire_idempotency_slot(idem_key, task_logger=task_logger):
+                _observe_metrics(start, "collect_competitor_task", status)
+                SCRAPER_IN_FLIGHT.dec()
+                return
 
             result: ScrapeResult = scrape_competitor_product(
                 db=db,
