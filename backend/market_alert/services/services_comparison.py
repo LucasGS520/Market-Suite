@@ -28,9 +28,16 @@ from market_alert.models.models_comparisons import PriceComparison, PriceCompari
 from market_alert.models.models_products import CompetitorProduct
 from market_alert.utils.comparator import compare_prices
 from market_alert.core.config_alert import settings
+from market_alert.enums.enums_comparisons import CompetitivenessStatus
 
 
 logger = structlog.get_logger("comparison_service")
+
+#Limites percentuais para classificar a competitividade frente ao menor preço.
+#Diferença >= 10% sinaliza urgência; entre 3% e 10% requer atenção; abaixo disso é competitivo.
+COMPETITIVENESS_NON_COMPETITIVE_THRESHOLD = Decimal("0.01")
+COMPETITIVENESS_ATTENTION_THRESHOLD = Decimal("0.03")
+COMPETITIVENESS_URGENT_THRESHOLD = Decimal("0.10")
 
 def run_price_comparison(
     db: Session,
@@ -163,11 +170,33 @@ def _empty_summary(competitors_count: int) -> Dict[str, Any]:
         "competitors_min": None,
         "competitors_max": None,
         "position_rank": None,
-        "potential_savings": None,
+        "potential_adjustment": None,
+        "competitiveness_status": None,
         "comparison_insights": None,
         "discrepancies": [],
         "alerts": [],
     }
+
+def _calculate_competitiveness_status(
+    monitored_price: Optional[Decimal],
+    reference_price: Optional[Decimal],
+) -> Optional[str]:
+    """ Define o status competitivo comparando o preço monitorado com o menor preço conhecido """
+    if (
+        monitored_price is None or reference_price is None or reference_price <= Decimal("0")
+    ):
+        return None
+    
+    price_delta = (monitored_price - reference_price) / reference_price
+
+    if price_delta <= 0:
+        return CompetitivenessStatus.COMPETITIVE.value
+    elif price_delta >= COMPETITIVENESS_URGENT_THRESHOLD:
+        return CompetitivenessStatus.URGENT.value
+    elif price_delta >= COMPETITIVENESS_ATTENTION_THRESHOLD:
+        return CompetitivenessStatus.ATTENTION.value
+    elif price_delta >= COMPETITIVENESS_NON_COMPETITIVE_THRESHOLD:
+        return CompetitivenessStatus.NON_COMPETITIVE.value
 
 def _build_summary_from_result(
     payload: Dict[str, Any],
@@ -212,6 +241,10 @@ def _build_summary_from_result(
         summary["competitors_min"] = str(lowest_price)
     if highest_price is not None:
         summary["competitors_max"] = str(highest_price)
+
+    status = _calculate_competitiveness_status(monitored_price, lowest_price)
+    if status is not None:
+        summary["competitiveness_status"] = status
 
     return summary
 
@@ -278,7 +311,7 @@ def _compute_summary_from_payload(
         and lowest_price is not None
         and monitored_price > lowest_price
     ):
-        summary["potential_savings"] = str(
+        summary["potential_adjustment"] = str(
             (monitored_price - lowest_price).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
@@ -297,6 +330,11 @@ def _compute_summary_from_payload(
             summary["comparison_insights"] = "Produto monitorado é o mais caro entre os concorrentes."
         else:
             summary["comparison_insights"] = "Preço monitorado alinhado com a concorrência."
+
+    status_reference = lowest_price or average_price
+    status = _calculate_competitiveness_status(monitored_price, status_reference)
+    if status is not None:
+        summary["competitiveness_status"] = status
 
     return summary
 

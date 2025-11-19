@@ -37,6 +37,7 @@ def test_build_comparison_summary_without_data() -> None:
     assert summary["discrepancies"] == []
     assert summary["competitors_count"] == 0
     assert summary["competitors_with_price_count"] == 0
+    assert summary["competitiveness_status"] is None
 
 
 def test_build_comparison_summary_with_metrics() -> None:
@@ -66,6 +67,7 @@ def test_build_comparison_summary_with_metrics() -> None:
     assert summary["competitors_with_price_count"] == 2
     assert summary["comparison_insights"] == "Preço monitorado acima da média dos concorrentes."
     assert summary["alerts"] == [{"type": "price_below_monitored"}]
+    assert summary["competitiveness_status"] == "urgente"
     
 def test_build_comparison_summary_with_stored_snapshot() -> None:
     """ Usa resumo persistido quando disponível """
@@ -115,4 +117,35 @@ def test_build_comparison_summary_preserves_last_comparison_at() -> None:
     assert summary["last_comparison_at"] == last_comparison_snapshot
     assert summary["computed_at"] == stored_timestamp
     assert summary["competitors_count"] == 3
+    
+def test_competitiveness_status_attention_threshold() -> None:
+    """Classifica como atenção quando a diferença fica entre 3% e 10%"""
+
+    comparison = _DummyComparison(
+        data={
+            "monitored_price": "103.00",
+            "lowest_competitor": {"price": "100.00"},
+            "discrepancies": [{"price": "100.00"}],
+        }
+    )
+
+    summary = build_comparison_summary(comparison, competitors_count=1)
+
+    assert summary["competitiveness_status"] == "atencao"
+
+
+def test_competitiveness_status_competitive_when_cheaper() -> None:
+    """Mantém status competitivo quando o preço monitorado é igual ou menor"""
+
+    comparison = _DummyComparison(
+        data={
+            "monitored_price": "95.00",
+            "lowest_competitor": {"price": "100.00"},
+            "discrepancies": [{"price": "100.00"}],
+        }
+    )
+
+    summary = build_comparison_summary(comparison, competitors_count=1)
+
+    assert summary["competitiveness_status"] == "competitivo"
     
