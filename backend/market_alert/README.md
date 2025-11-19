@@ -12,7 +12,8 @@ API FastAPI responsável por autenticação, gestão e monitoramento, comparaç�
 - **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
 - **Registrar métricas e logs estruturados** para Prometheus e Loki.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
-- **Simplificar alertas** priorizando apenas mudanças de preço e disponibilidade, sem thresholds dinâmicos ou idempotência distribuída.
+- **Regras Comparação** deve ser realizado automaticamente, sem haver possibilidade de ser realizada manualmente, ou forçar comparação, seguir um padrão para quando houver comparações entre os produtos.
+- **Simplificar alertas** priorizando apenas mudanças de preço e disponibilidade, sem thresholds dinâmicos ou idempotência distribuída (regra de alerta padronizada pelo sistema, sem possibilidade de criação de regras, alterações, etc).
 
 ## Estrutura do Diretório
 ```text
