@@ -28,7 +28,7 @@ class MonitoredProduct(Base):
     user_id = Column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
 
     #Informações basicas do produto
-    name_identification = Column("name", String, nullable=False)
+    name_identification = Column("name", String, nullable=False, index=True) #Indice simplifica buscas por nome
     monitoring_type = Column(PgEnum(MonitoringType, name="monitoring_type_enum"), nullable=False)
 
     #Para produtos via API (search_query) e scraping (product_url)

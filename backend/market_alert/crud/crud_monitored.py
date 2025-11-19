@@ -6,16 +6,18 @@ from uuid import UUID
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url_for_storage
 
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
+from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
+from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.enums.enums_alerts import AlertType
 from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
 from market_alert.crud import crud_alert_rules
@@ -239,6 +241,33 @@ def create_or_update_monitored_product_scraped(
         )
     return new
 
+def _join_latest_summary(query, db: Session):
+    """ Acopla o último resumo disponível para permitir filtros de competitividade """
+    latest_summary_subquery = (
+        db.query(
+            PriceComparisonSummary.monitored_product_id.label("monitored_product_id"),
+            func.max(PriceComparisonSummary.timestamp).label("max_timestamp"),
+        )
+        .group_by(PriceComparisonSummary.monitored_product_id)
+        .subquery()
+    )
+    summary_alias = aliased(PriceComparisonSummary)
+    joined_query = (
+        query.join(
+            latest_summary_subquery,
+            latest_summary_subquery.c.monitored_product_id == MonitoredProduct.id,
+        )
+        .join(
+            summary_alias,
+            (
+                summary_alias.monitored_product_id
+                == latest_summary_subquery.c.monitored_product_id
+            )
+            & (summary_alias.timestamp == latest_summary_subquery.c.max_timestamp),
+        )
+    )
+    return joined_query, summary_alias
+
 def get_all_monitored_products(
     db: Session,
     user_id: UUID,
@@ -246,14 +275,44 @@ def get_all_monitored_products(
     *,
     page: int = 1,
     per_page: int = 50,
+    query: str | None = None,
+    status: CompetitivenessStatus | None = None,
 ) -> tuple[list[tuple[MonitoredProduct, int]], int]:
-    """ Retorna produtos monitorados com contagem de concorrentes e suporte a paginação """
+    """ Lista produtos monitorados com filtros avançados e contagem de concorrentes """
     normalized_page = max(page, 1)
     normalized_per_page = max(per_page, 1)
 
-    base_query = db.query(MonitoredProduct).filter(MonitoredProduct.user_id == user_id)
+    base_query = db.query(MonitoredProduct).filter(
+        MonitoredProduct.user_id == user_id,
+        MonitoredProduct.current_price.isnot(None),
+    )
     if monitoring_type:
         base_query = base_query.filter(MonitoredProduct.monitoring_type == monitoring_type)
+
+    if query and query.strip():
+        like_pattern = f"%{query.strip()}%"
+        base_query = base_query.filter(
+            or_(
+                MonitoredProduct.name_identification.ilike(like_pattern),
+                MonitoredProduct.search_query.ilike(like_pattern),
+            )
+        )
+
+    if status is not None:
+        base_query, summary_alias = _join_latest_summary(base_query, db)
+        dialect_name = getattr(getattr(db, "bind", None), "dialect", None)
+        dialect_key = getattr(dialect_name, "name", "") if dialect_name else ""
+        if dialect_key == "sqlite":
+            status_field = func.json_extract(
+                summary_alias.aggregates,
+                "$.competitiveness_status",
+            )
+        else:
+            status_field = func.json_extract_path_text(
+                summary_alias.aggregates,
+                "competitiveness_status",
+            )
+        base_query = base_query.filter(status_field == status.value)
 
     total = base_query.count()
     if total == 0:

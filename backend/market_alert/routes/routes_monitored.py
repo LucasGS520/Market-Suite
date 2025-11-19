@@ -11,6 +11,7 @@ from shared.utils.url_validation import normalize_and_validate_product_url
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
 
 from market_alert.models import User
+from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.schemas.schemas_products import (
     MonitoredProductResponse,
     PaginatedMonitoredProductsResponse,
@@ -117,8 +118,18 @@ def list_monitored_products(
         le=200,
         description="Quantidade de itens por página (máximo 200)",
     ),
+    query: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Busca por nome configurado ou termo do produto",
+    ),
+    status: CompetitivenessStatus | None = Query(
+        default=None,
+        description="Filtra pelo status de competitividade mais recente",
+    ),
 ):
-    """ Endpoint para listar produtos monitorados com suporte a paginação """
+    """ Lista produtos monitorados aplicando filtros textuais e de competitividade  """
     logger.info(
         "route_called",
         path=request.url.path,
@@ -126,12 +137,16 @@ def list_monitored_products(
         user_id=str(user.id),
         page=page,
         per_page=per_page,
+        query=query,
+        competitiveness=status.value if status else None,
     )
     products_with_count, total = get_all_monitored_products(
         db,
         user.id,
         page=page,
         per_page=per_page,
+        query=query,
+        status=status,
     )
 
     response_payload: list[MonitoredProductResponse] = []
@@ -148,20 +163,19 @@ def list_monitored_products(
             )
             continue
 
-    visible_total = len(response_payload)
     logger.info(
         "route_completed",
         path=request.url.path,
         method=request.method,
         status="success",
-        count=visible_total,
-        total=visible_total,
+        count=len(response_payload),
+        total=total,
         page=page,
         per_page=per_page,
     )
     return PaginatedMonitoredProductsResponse(
         items=response_payload,
-        total=visible_total,
+        total=total,
         page=page,
         per_page=per_page,
     )

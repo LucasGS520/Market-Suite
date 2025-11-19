@@ -3,7 +3,9 @@
 from decimal import Decimal
 
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
+from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
+from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.tasks import scraper_tasks
 
 
@@ -51,10 +53,120 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
     assert response.status_code == 200
 
     payload = response.json()
-    counts = {item["id"]: item["competitors_count"] for item in payload}
+    assert payload["total"] == 2
+    assert payload["page"] == 1
+    assert payload["per_page"] == 50
 
-    assert counts[str(monitored.id)] == 2
-    assert counts[str(outro_monitorado.id)] == 0
+    ids = {item["id"] for item in payload["items"]}
+    assert str(monitored.id) in ids
+    assert str(outro_monitorado.id) in ids
+
+    assert len(payload["items"]) == 2
+
+def test_list_monitored_products_aplica_paginacao(client, db_session, test_user, prepare_test_database):
+    """Verifica que o endpoint respeita os parâmetros de página e itens por página"""
+    for sufixo in range(3):
+        produto = MonitoredProduct(
+            user_id=test_user.id,
+            name_identification=f"Produto {sufixo}",
+            monitoring_type=MonitoringType.scraping,
+            product_url=f"https://example.com/produto-{sufixo}",
+            current_price=Decimal("100.00") + sufixo,
+            status=MonitoredStatus.active,
+        )
+        db_session.add(produto)
+    db_session.commit()
+
+    response = client.get("/monitored/?page=2&per_page=1")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["total"] == 3
+    assert payload["page"] == 2
+    assert payload["per_page"] == 1
+    assert len(payload["items"]) == 1
+
+def test_list_monitored_products_filtra_por_query(client, db_session, test_user, prepare_test_database):
+    """Garante que a busca textual considere o nome configurado"""
+    alvo = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Console Gamer", 
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/console", 
+        current_price=Decimal("5000.00"),
+        status=MonitoredStatus.active,
+    )
+    outro = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Notebook", 
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/notebook", 
+        current_price=Decimal("4500.00"),
+        status=MonitoredStatus.active,
+    )
+    db_session.add_all([alvo, outro])
+    db_session.commit()
+
+    response = client.get("/monitored/?query=console")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["total"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["id"] == str(alvo.id)
+
+def test_list_monitored_products_filtra_por_status_competitivo(client, db_session, test_user, prepare_test_database):
+    """Confere que o filtro de status usa o resumo mais recente de comparação"""
+    produto_urgente = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Produto Urgente",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/urgente",
+        current_price=Decimal("100.00"),
+        status=MonitoredStatus.active,
+    )
+    produto_estavel = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Produto Estavel",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/estavel",
+        current_price=Decimal("200.00"),
+        status=MonitoredStatus.active,
+    )
+    db_session.add_all([produto_urgente, produto_estavel])
+    db_session.flush()
+
+    comparacao_urgente = PriceComparison(
+        monitored_product_id=produto_urgente.id,
+        data={},
+    )
+    comparacao_estavel = PriceComparison(
+        monitored_product_id=produto_estavel.id,
+        data={},
+    )
+    db_session.add_all([comparacao_urgente, comparacao_estavel])
+    db_session.flush()
+
+    resumo_urgente = PriceComparisonSummary(
+        monitored_product_id=produto_urgente.id,
+        comparison_id=comparacao_urgente.id,
+        aggregates={"competitiveness_status": CompetitivenessStatus.URGENT.value},
+    )
+    resumo_estavel = PriceComparisonSummary(
+        monitored_product_id=produto_estavel.id,
+        comparison_id=comparacao_estavel.id,
+        aggregates={"competitiveness_status": CompetitivenessStatus.COMPETITIVE.value},
+    )
+    db_session.add_all([resumo_urgente, resumo_estavel])
+    db_session.commit()
+
+    response = client.get("/monitored/?status=urgente")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["total"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["id"] == str(produto_urgente.id)
     
 def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_session, test_user, prepare_test_database):
     """Certifica que o POST cria registro pendente e agenda task"""
@@ -153,7 +265,7 @@ def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_sessi
     )
 
     assert response.status_code == 409
-    message = response.json()["message"]
+    message = response.json()["detail"]
     assert "já está sendo monitorado" in message.lower()
 
     reloaded = (
