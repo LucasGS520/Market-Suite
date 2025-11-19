@@ -75,6 +75,7 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 3. Execute testes pertinentes e registre resultados.
 4. Valide se novas portas/variáveis foram documentadas.
 5. Revise o `README.md` e demais READMEs específicos para garantir consistência.
+6. Confirme que contratos críticos consumidos pelo frontend permanecem coerentes.
 
 ## Manutenção contínua - AGENTS.md Atualizado
 - Revisar este documento a cada sprint ou nova versão, e sempre que for realizado novas tarefas e mudanças no projeto.

@@ -37,9 +37,12 @@ market_alert/
 | `POST` | `/auth/refresh` | Renova token de acesso ativo. |
 | `POST` | `/monitored` | Cria produto monitorado associado ao usuário autenticado. |
 | `POST` | `/monitored/scrape` | Agenda coleta imediata e persiste última cotação. |
+| `GET` | `/monitored` | Lista monitorados paginados com filtros `page`, `per_page`, `query` (nome/URL) e `status`. |
+| `GET` | `/monitored/featured` | Retorna até 3 monitorados em destaque ordenados pelo critério configurado. |
 | `POST` | `/competitors` | Registra URL concorrente vinculada a um monitorado. |
 | `POST` | `/competitors/scrape` | Agenda scraping de concorrente específico. |
 | `POST` | `/comparisons/{monitored_id}/run` | Executa comparação síncrona utilizando dados mais recentes. |
+| `GET` | `/comparisons/{monitored_id}/summary` | Consolida preços, campos monetários numéricos (Decimais serializados). |
 | `GET` | `/notifications` | Lista histórico e status de notificações geradas. |
 | `GET` | `/metrics` | Exibe métricas Prometheus da API. |
 | `Celery` | `tasks.monitor_tasks.collect_product_task` | Consome fila `scraping` para coletar dados do monitorado. |
@@ -49,6 +52,7 @@ market_alert/
 - **`market_scraper`**: consumido por `scraper/scraper_client.ScraperClient`, que envia `ParserRequest` valida `ParserResponse` do pacote e trata `304 Not Modified` retornando `None` quando nada mudou.
 - **`shared/`**: reutiliza abstrações de configuração, métricas (`shared/metrics/metrics_api.py`), segurança e utilidades comuns.
 - **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs e tracing.
+- **Codificação numérica unificada**: responses que carregam valores monetários ou estatísticos são serializadas como numéricos usando encoder JSON compartilhado, evitando strings em campos como `current_price`, `target_price`, `delta` e agregados do dashboard.
 
 > O canal WebSocket de notificações permanece desativado temporariamente; utilize `/notifications/logs` e polling no frontend para acompanhar alertas.
 
