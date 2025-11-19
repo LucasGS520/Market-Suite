@@ -26,7 +26,7 @@ export default function Dashboard() {
     total_monitored: 0, // total de produtos monitorados
     active_alerts: 0,   // quantidade de alertas ativos
     ok_prices: 0,       // quantos preços estão OK/competitivos
-    potential_savings: 0, // soma da economia potencial em reais
+    potential_adjustment: 0, // soma da economia potencial em reais
   });
 
   // Estado local para controlar carregamento (pode ser usado para skeletons/spinners)
@@ -92,7 +92,7 @@ export default function Dashboard() {
         <StatsCard
           title="Economia Potencial"
           // Formata o valor em moeda BRL (string simples aqui, processamento pode ser movido para util)
-          value={`R$ ${stats.potential_savings.toFixed(2)}`}
+          value={`R$ ${stats.potential_adjustment.toFixed(2)}`}
           subtitle="Se ajustar preços"
           icon={DollarSign}
           variant="warning"

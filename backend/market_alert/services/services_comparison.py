@@ -273,7 +273,7 @@ def _compute_summary_from_payload(
     monitored_price = _to_decimal(payload.get("monitored_price"))
 
     if monitored_price is not None:
-        summary["monitored_price"] = str(monitored_price)
+        summary["monitored_price"] = monitored_price
 
     competitor_prices: list[Decimal] = []
     for item in summary["discrepancies"]:
@@ -300,22 +300,20 @@ def _compute_summary_from_payload(
     if highest_price is None and competitor_prices:
         highest_price = max(competitor_prices)
     if average_price is not None:
-        summary["competitors_mean"] = str(average_price)
+        summary["competitors_mean"] = average_price
     if lowest_price is not None:
-        summary["competitors_min"] = str(lowest_price)
+        summary["competitors_min"] = lowest_price
     if highest_price is not None:
-        summary["competitors_max"] = str(highest_price)
+        summary["competitors_max"] = highest_price
 
     if (
         monitored_price is not None
         and lowest_price is not None
         and monitored_price > lowest_price
     ):
-        summary["potential_adjustment"] = str(
-            (monitored_price - lowest_price).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-        )
+        summary["potential_adjustment"] = (
+            monitored_price - lowest_price
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     if monitored_price is not None and competitor_prices:
         #Rank considera quantos concorrentes possuem preço inferior ao monitorado
@@ -367,6 +365,33 @@ def _apply_summary_defaults(
         summary["competitors_with_price_count"] = int(summary["competitors_with_price_count"])
     except (TypeError, ValueError, KeyError):
         summary["competitors_with_price_count"] = 0
+
+    summary = _coerce_decimal_fields(summary)
+
+    if summary.get("competitiveness_status") is None:
+        monitored_price = summary.get("monitored_price")
+        status_reference = summary.get("competitors_min") or summary.get("competitors_mean")
+        status = _calculate_competitiveness_status(monitored_price, status_reference)
+        if status is not None:
+            summary["competitiveness_status"] = status
+
+    return summary
+
+
+def _coerce_decimal_fields(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """Normaliza campos monetários para Decimal para evitar strings na resposta"""
+
+    monetary_keys = [
+        "monitored_price",
+        "competitors_mean",
+        "competitors_min",
+        "competitors_max",
+        "potential_adjustment",
+    ]
+
+    for key in monetary_keys:
+        if key in summary:
+            summary[key] = _to_decimal(summary.get(key))
 
     return summary
 

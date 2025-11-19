@@ -122,7 +122,7 @@ O frontend utiliza os seguintes endpoints do backend:
     "total_monitored": 3,
     "active_alerts": 1,
     "ok_prices": 2,
-    "potential_savings": 45.20
+    "potential_adjustment": 45.20
   }
   ```
 

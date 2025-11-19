@@ -679,7 +679,7 @@ const CompetitorsPage: React.FC = () => {
       competitors_min: null,
       competitors_max: null,
       position_rank: null,
-      potential_savings: null,
+      potential_adjustment: null,
       competitors_with_price_count: null,
       latest_comparison_id: null,
       last_comparison_at: null,

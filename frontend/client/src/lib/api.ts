@@ -511,7 +511,7 @@ export interface MonitoredProductApiResponse {
   competitors_min?: string | number | null;
   competitors_max?: string | number | null;
   position_rank?: number | string | null;
-  potential_savings?: string | number | null;
+  potential_adjustment?: string | number | null;
   competitors_with_price_count?: number | string | null;
   latest_comparison_id?: string | null;
   last_comparison_at?: string | null;
@@ -539,7 +539,7 @@ export interface MonitoredProduct {
   competitors_min: number | null;
   competitors_max: number | null;
   position_rank: number | null;
-  potential_savings: number | null;
+  potential_adjustment: number | null;
   competitors_with_price_count: number | null;
   latest_comparison_id: string | null;
   last_comparison_at: string | null;
@@ -559,7 +559,7 @@ export interface ComparisonSummaryApiResponse {
   competitors_mean?: string | number | null;
   competitors_min?: string | number | null;
   competitors_max?: string | number | null;
-  potential_savings?: string | number | null;
+  potential_adjustment?: string | number | null;
   comparison_id?: string | null;
   last_comparison_at?: string | null;
   comparison_insights?: string | null;
@@ -582,7 +582,7 @@ export interface ComparisonSummary {
   competitors_min?: string | number | null;
   competitors_max?: string | number | null;
   position_rank: number | null;
-  potential_savings?: string | number | null;
+  potential_adjustment?: string | number | null;
   comparison_insights: string | null;
   comparison_id?: string | null;
   last_comparison_at?: string | null;
@@ -625,7 +625,7 @@ export const mapMonitoredProductFromApi = (
   competitors_min: toNumberOrNull(product.competitors_min),
   competitors_max: toNumberOrNull(product.competitors_max),
   position_rank: toNumberOrNull(product.position_rank),
-  potential_savings: toNumberOrNull(product.potential_savings),
+  potential_adjustment: toNumberOrNull(product.potential_adjustment),
   competitors_with_price_count:
     product.competitors_with_price_count !== undefined && product.competitors_with_price_count !== null
       ? toNumberOrNull(product.competitors_with_price_count)
@@ -664,7 +664,7 @@ const mapComparisonSummaryFromApi = (
     competitors_min: toNumberOrNull(minSource),
     competitors_max: toNumberOrNull(maxSource),
     position_rank: toNumberOrNull(summary.position_rank),
-    potential_savings: toNumberOrNull(summary.potential_savings),
+    potential_adjustment: toNumberOrNull(summary.potential_adjustment),
     comparison_insights: summary.comparison_insights ?? null,
     comparison_id: summary.comparison_id ?? null,
     last_comparison_at: summary.last_comparison_at ?? null,
@@ -1060,5 +1060,5 @@ export const getDashboardStats = (token: string) =>
     total_monitored: number;
     active_alerts: number;
     ok_prices: number;
-    potential_savings: number;
+    potential_adjustment: number;
   }>('/dashboard/stats', { token });

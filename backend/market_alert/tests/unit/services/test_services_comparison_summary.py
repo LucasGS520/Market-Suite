@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import uuid
+from decimal import Decimal
 
 from market_alert.services.services_comparison import build_comparison_summary
 
@@ -59,11 +60,11 @@ def test_build_comparison_summary_with_metrics() -> None:
 
     summary = build_comparison_summary(comparison, competitors_count=2)
 
-    assert summary["competitors_mean"] == "90.00"
-    assert summary["competitors_min"] == "80.00"
-    assert summary["competitors_max"] == "120.00"
+    assert summary["competitors_mean"] == Decimal("90.00")
+    assert summary["competitors_min"] == Decimal("80.00")
+    assert summary["competitors_max"] == Decimal("120.00")
     assert summary["position_rank"] == 2
-    assert summary["potential_savings"] == "20.00"
+    assert summary["potential_adjustment"] == Decimal("20.00")
     assert summary["competitors_with_price_count"] == 2
     assert summary["comparison_insights"] == "Preço monitorado acima da média dos concorrentes."
     assert summary["alerts"] == [{"type": "price_below_monitored"}]
@@ -77,7 +78,7 @@ def test_build_comparison_summary_with_stored_snapshot() -> None:
             "competitors_mean": "95.00",
             "competitors_min": "90.00",
             "competitors_max": "110.00",
-            "potential_savings": None,
+            "potential_adjustment": None,
             "competitors_with_price_count": 3,
             "alerts": [],
             "discrepancies": [],
@@ -91,7 +92,7 @@ def test_build_comparison_summary_with_stored_snapshot() -> None:
     )
 
     assert summary["competitors_count"] == 4
-    assert summary["competitors_mean"] == "95.00"
+    assert summary["competitors_mean"] == Decimal("95.00")
     assert summary["competitors_with_price_count"] == 3
     
 def test_build_comparison_summary_preserves_last_comparison_at() -> None:
@@ -148,4 +149,3 @@ def test_competitiveness_status_competitive_when_cheaper() -> None:
     summary = build_comparison_summary(comparison, competitors_count=1)
 
     assert summary["competitiveness_status"] == "competitivo"
-    

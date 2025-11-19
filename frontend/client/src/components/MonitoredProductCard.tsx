@@ -241,7 +241,7 @@ const buildInitialSummaryFromProduct = (product: MonitoredProduct): ComparisonSu
     product.competitors_min,
     product.competitors_max,
     product.position_rank,
-    product.potential_savings,
+    product.potential_adjustment,
     product.competitors_with_price_count,
     product.latest_comparison_id,
     product.last_comparison_at,
@@ -259,7 +259,7 @@ const buildInitialSummaryFromProduct = (product: MonitoredProduct): ComparisonSu
     competitors_min: product.competitors_min,
     competitors_max: product.competitors_max,
     position_rank: product.position_rank,
-    potential_savings: product.potential_savings,
+    potential_adjustment: product.potential_adjustment,
     comparison_insights: product.comparison_insights ?? null,
     comparison_id: product.latest_comparison_id,
     last_comparison_at: product.last_comparison_at ?? null,
@@ -320,11 +320,11 @@ const describePotentialAdjustment = (summary: ComparisonSummary | null | undefin
     };
   }
 
-  const potentialSavings = summary.potential_savings ?? 0;
+  const potentialSavings = summary.potential_adjustment ?? 0;
   const absoluteSavings = Math.abs(potentialSavings);
   const formatted = formatCurrency(absoluteSavings);
 
-  if (summary.potential_savings === null || summary.potential_savings <= 0) {
+  if (summary.potential_adjustment === null || summary.potential_adjustment <= 0) {
     return {
       adjustmentLabel: 'Nenhum ajuste necessário',
       competitiveness: { label: 'Competitivo', tone: 'positive' },
