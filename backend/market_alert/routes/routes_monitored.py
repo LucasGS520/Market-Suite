@@ -186,7 +186,13 @@ def list_featured_products(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ Retorna no máximo três itens destacados para o dashboard """
+    """ Retorna destaques priorizando variação, alertas ativos e recente adição 
+    
+    A seleção prioriza: 
+    (1) maior variação de preço em 24h, 
+    (2) maior número de regras de alerta ativas
+    (3) ordem de criação mais recente, garantindo empate consistente sem depender apenas do destaque manual.
+    """
     logger.info(
         "route_called",
         path=request.url.path,
