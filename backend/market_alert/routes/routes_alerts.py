@@ -20,7 +20,7 @@ from market_alert.services.services_alert_rules import (
 from market_alert.core.security import get_current_user
 
 
-router = APIRouter(prefix="/alert_rules", tags=["Regras de Alertas"])
+router = APIRouter(prefix="/alerts", tags=["Alertas"])
 logger = structlog.get_logger("http_route")
 
 @router.post("/", response_model=AlertRuleResponse, status_code=status.HTTP_201_CREATED)

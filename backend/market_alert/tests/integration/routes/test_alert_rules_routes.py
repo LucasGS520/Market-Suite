@@ -29,7 +29,7 @@ def test_cannot_delete_other_users_rule(client, db_session, test_user, prepare_t
     db_session.commit()
     db_session.refresh(rule)
 
-    response = client.delete(f"/alert_rules/{rule.id}")
+    response = client.delete(f"/alerts/{rule.id}")
     assert response.status_code == 404
 
     remaining = get_alert_rule(db_session, rule.id)
@@ -45,7 +45,7 @@ def test_delete_own_rule(client, db_session, test_user, prepare_test_database):
     db_session.commit()
     db_session.refresh(rule)
 
-    response = client.delete(f"/alert_rules/{rule.id}")
+    response = client.delete(f"/alerts/{rule.id}")
     assert response.status_code == 200
 
     remaining = get_alert_rule(db_session, rule.id)
@@ -72,7 +72,7 @@ def test_cannot_update_other_users_rule(client, db_session, test_user, prepare_t
     db_session.commit()
     db_session.refresh(rule)
 
-    resp = client.put(f"/alert_rules/{rule.id}", json={"enabled": False})
+    resp = client.put(f"/alerts/{rule.id}", json={"enabled": False})
     assert resp.status_code == 404
 
 def test_update_own_rule(client, db_session, test_user, prepare_test_database):
@@ -86,7 +86,7 @@ def test_update_own_rule(client, db_session, test_user, prepare_test_database):
     db_session.refresh(rule)
 
     resp = client.put(
-        f"/alert_rules/{rule.id}",
+        f"/alerts/{rule.id}",
         json={"rule_type": AlertType.LISTING_PAUSED.value, "enabled": False}
     )
     assert resp.status_code == 200
@@ -96,7 +96,7 @@ def test_update_own_rule(client, db_session, test_user, prepare_test_database):
 
 def test_rule_creation_simplified(client, db_session, test_user, prepare_test_database):
     user_id = str(test_user.id)
-    resp = client.post("/alert_rules/", json={})
+    resp = client.post("/alerts/", json={})
     assert resp.status_code == 201
     data = resp.json()
     assert data["user_id"] == user_id
@@ -125,5 +125,5 @@ def test_rule_creation_validates_product(client, db_session, test_user, prepare_
     db_session.commit()
     db_session.refresh(mp)
 
-    resp = client.post("/alert_rules/", json={"monitored_product_id": str(mp.id)})
+    resp = client.post("/alerts/", json={"monitored_product_id": str(mp.id)})
     assert resp.status_code == 400
