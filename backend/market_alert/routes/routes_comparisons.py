@@ -3,7 +3,6 @@
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
-from typing import List
 from uuid import UUID
 
 from shared.infra.db import get_db
@@ -16,10 +15,10 @@ from market_alert.schemas.schemas_comparisons import (
 from market_alert.core.security import get_current_user
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_comparison import (
-    get_latest_comparisons,
     get_comparison_by_id,
     get_latest_comparisons_for_products,
     get_latest_summary,
+    paginate_comparisons,
 )
 from market_alert.services.services_comparison import (
     run_price_comparison,
@@ -30,30 +29,58 @@ from market_alert.services.services_comparison import (
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
 logger = structlog.get_logger("http_route")
 
-@router.get("/{monitored_id}", response_model=List[PriceComparisonResponse])
+@router.get("/{monitored_id}", response_model=PaginatedPriceComparisonsResponse)
 def list_comparisons(
     request: Request,
     monitored_id: UUID,
-    limit: int = Query(
-        10,
+    page: int = Query(
+        1,
+        ge=1,
+        description="Página atual do histórico de comparações (base 1)",
+    ),
+    per_page: int = Query(
+        20,
         ge=1,
         le=100,
-        description="Quantidade máxima de registros retornados",
+        description="Quantidade de registros retornados por página",
     ),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ Lista as comparações recentes de um produto monitorado com limite controlado """
-    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_id))
+    """ Lista histórico de comparações aplicando envelope de paginação estável """
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        monitored_id=str(monitored_id),
+        page=page,
+        per_page=per_page,
+    )
 
     mp = get_monitored_product_by_id(db, monitored_id)
     if not mp or mp.user_id != user.id:
         logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", monitored_id=str(monitored_id))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto monitorado não encontrado.")
 
-    comparisons = get_latest_comparisons(db, monitored_id, limit)
-    logger.info("route_completed", path=request.url.path, method=request.method, status="success", count=len(comparisons))
-    return comparisons
+    total, comparisons = paginate_comparisons(
+        db,
+        monitored_product_id=monitored_id,
+        page=page,
+        per_page=per_page,
+    )
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        count=len(comparisons),
+        total=total,
+    )
+    return PaginatedPriceComparisonResponse(
+        items=comparisons,
+        meta={"total": total, "page": page, "per_page": per_page},
+    )
 
 @router.get("/{monitored_id}/summary", response_model=PriceComparisonSummaryResponse)
 def get_comparison_summary(request: Request, monitored_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):

@@ -1,4 +1,10 @@
-""" Esquema Pydantic utilizados pela API de comparações de Preços """
+""" Esquema Pydantic utilizados pela API de comparações de Preços 
+
+Inclui contratos para criação, visualização detalhada, resumo e paginação
+do histórico de comparações. Os números são mantidos como ``Decimal``
+para preservar presisão financeira, cabendo à camada de serialização
+documentar qualquer conversão adicional.
+"""
 
 from uuid import UUID
 from datetime import datetime
@@ -32,7 +38,7 @@ class PriceComparisonRunRequest(BaseModel):
 
 class PriceComparisonSummaryResponse(BaseModel):
     """ Resumo consolidado da última comparação executada para um produto monitorado """
-    model_config = ConfigDict(json_encoders={Decimal: lambda value: float(value)})
+    model_config = ConfigDict()
     monitored_product_id: UUID
     comparison_id: Optional[UUID] = None
     last_comparison_at: Optional[datetime] = None
@@ -70,3 +76,20 @@ class PriceComparisonSummaryResponse(BaseModel):
     )
     discrepancies: List[Dict[str, Any]] = Field(default_factory=list)
     alerts: List[Dict[str, Any]] = Field(default_factory=list)
+
+class PaginationMeta(BaseModel):
+    """ Informações básicas de paginação utilizadas em respostas listadas """
+
+    total: int = Field(..., description="Total de registros encontrados para o filtro")
+    page: int = Field(..., ge=1, description="Página atual (base 1)")
+    per_page: int = Field(..., ge=1, description="Quantidade de itens por página")
+
+
+class PaginatedPriceComparisonResponse(BaseModel):
+    """ Envelope paginado para histórico de comparações de preço """
+
+    items: List[PriceComparisonResponse] = Field(
+        default_factory=list,
+        description="Lista ordenada de comparações para o produto monitorado",
+    )
+    meta: PaginationMeta

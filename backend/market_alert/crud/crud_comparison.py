@@ -1,7 +1,7 @@
 """ Operações de persistência para resultados de comparação de preços """
 
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from uuid import UUID
 
 from sqlalchemy import func
@@ -77,6 +77,26 @@ def get_latest_comparisons(db: Session, monitored_product_id: UUID, limit: int =
         .limit(limit)
         .all()
     )
+
+def paginate_comparisons(
+    db: Session,
+    monitored_product_id: UUID,
+    *,
+    page: int,
+    per_page: int,
+) -> Tuple[int, List[PriceComparison]]:
+    """ Recupera comparações de forma paginada para um produto monitorado """
+    base_query = db.query(PriceComparison).filter(
+        PriceComparison.monitored_product_id == monitored_product_id
+    )
+    total = base_query.count()
+    comparisons = (
+        base_query.order_by(PriceComparison.timestamp.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+    return total, comparisons
 
 def get_comparison_by_id(db: Session, comparison_id: UUID) -> Optional[PriceComparison]:
     """ Obtém um registro de comparação específico pelo ID """
