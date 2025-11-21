@@ -36,24 +36,28 @@ market_alert/
 |--------|--------------|-----------|
 | `POST` | `/auth` | Autenticação via formulário e emissão de JWT. |
 | `POST` | `/auth/refresh` | Renova token de acesso ativo. |
-| `POST` | `/monitored` | Cria produto monitorado associado ao usuário autenticado. |
-| `POST` | `/monitored/scrape` | Agenda coleta imediata e persiste última cotação. |
-| `GET` | `/monitored` | Lista monitorados paginados com filtros `page`, `per_page`, `query` (nome/URL) e `status`. |
-| `GET` | `/monitored/featured` | Retorna até 3 monitorados em destaque ordenados pelo critério configurado. |
-| `POST` | `/competitors` | Registra URL concorrente vinculada a um monitorado. |
-| `POST` | `/competitors/scrape` | Agenda scraping de concorrente específico. |
+| `GET` | `/monitored` | Lista monitorados paginados usando envelope `{ items, meta }` com filtros `page`, `per_page`, `query` e `status`. |
+| `GET` | `/monitored/{id}` | Retorna detalhes do monitorado com `owner_id`, `thumbnail`, `current_price` (`Decimal` serializado) e `last_scraped_at`. |
+| `GET` | `/monitored/featured` | Retorna até 3 monitorados em destaque respeitando `is_featured` e ordenação configurada. |
+| `POST` | `/monitored/scrape` | Valida duplicidade por usuário + URL, cria recurso mínimo (`id`, `url`, `created_at`) e agenda coleta na fila `scraping`. |
+| `POST` | `/monitored` | Cria produto monitorado associado ao usuário autenticado (fluxo alternativo ao scrape imediato). |
+| `GET` | `/comparisons/{monitored_id}` | Lista comparações paginadas (`items` + `meta`) para o monitorado informado. |
+| `GET` | `/comparisons/{monitored_id}/summary` | Consolida métricas de comparação; `Decimal` enviado como número apenas no resumo (encoder existente). |
+| `GET` | `/competitors` | Lista concorrentes vinculados a um monitorado com paginação e campos `thumbnail`/`last_scraped_at`. |
+| `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo e agenda coleta na fila `scraping`. |
 | `POST` | `/comparisons/{monitored_id}/run` | Executa comparação síncrona utilizando dados mais recentes. |
-| `GET` | `/comparisons/{monitored_id}/summary` | Consolida preços, campos monetários numéricos (Decimais serializados). |
 | `GET` | `/notifications` | Lista histórico e status de notificações geradas. |
 | `GET` | `/metrics` | Exibe métricas Prometheus da API. |
-| `Celery` | `tasks.monitor_tasks.collect_product_task` | Consome fila `scraping` para coletar dados do monitorado. |
+| `Celery` | `tasks.monitor_tasks.collect_product_task` | Consome fila `scraping` para coletar dados do monitorado (payload mínimo e idempotente). |
+| `Celery` | `tasks.monitor_tasks.collect_competitor_task` | Coleta concorrentes vinculados, recalcula comparações e grava `PriceHistory`. |
+| `Celery` | `tasks.compare_prices_tasks.compare_prices_task` | Recalcula comparação e `competitiveness_status` após coletas. |
 | `Celery` | `tasks.alert_tasks.dispatch_price_alert_task` | Enfileira alertas quando regras de preço são acionadas. |
 
 ### Integração com os Serviços
 - **`market_scraper`**: consumido por `scraper/scraper_client.ScraperClient`, que envia `ParserRequest` valida `ParserResponse` do pacote e trata `304 Not Modified` retornando `None` quando nada mudou.
 - **`shared/`**: reutiliza abstrações de configuração, métricas (`shared/metrics/metrics_api.py`), segurança e utilidades comuns.
 - **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs e tracing.
-- **Codificação numérica unificada**: responses que carregam valores monetários ou estatísticos são serializadas como numéricos usando encoder JSON compartilhado, evitando strings em campos como `current_price`, `target_price`, `delta` e agregados do dashboard.
+- **Codificação numérica**: valores monetários são serializados como string (`Decimal` → `"1099.90"`) em quase todos os contratos, exceto no resumo de comparação que mantém encoder numérico para compatibilidade.
 
 > O canal WebSocket de notificações permanece desativado temporariamente; utilize `/notifications/logs` e polling no frontend para acompanhar alertas.
 
@@ -80,6 +84,12 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 | Notificações | `NOTIFICATION_FROM_EMAIL`, `NOTIFICATION_WEBHOOK_URL`, `NOTIFICATION_COOLDOWN_SECONDS`, `NOTIFICATION_CHANNELS` |
 | Observabilidade | `SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `METRICS_PORT`, `LOG_LEVEL` |
 
+### Padrões de contratos
+- **Paginação**: todas as rotas de listagem utilizam envelope `{ items: [], meta: { total, page, per_page } }` com paginação base 1.
+- **Campos monetários**: valores `Decimal` são serializados como string (`"1099.90"`) por padrão. O resumo de comparação mantém encoder que envia números (`1099.9`) e deve ser tratado pelo frontend.
+- **Criar via scraping**: endpoints `/monitored/scrape` e `/competitors/scrape` retornam 202 com representação mínima do recurso (`id`, `url`, `created_at`) e enfileiram coleta na fila `scraping`.
+- **Destaques**: `/monitored/featured` devolve até 3 monitorados com `is_featured=true`, ordenados pelo critério definido em `routes_monitored`.
+
 ## Principais Componentes do Serviço
 - `main.py` – instancia a aplicação FastAPI, middlewares, limiter e rotas.
 - `core/config_alert.py` – carrega variáveis de ambiente e aplica defaults.
@@ -89,6 +99,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 - `tasks/monitor_tasks.py` – concentra tasks de coleta de monitorados e concorrentes.
 - `tasks/alert_tasks.py` – envia notificações e aplica cooldowns.
 - `tasks/metrics_tasks.py` – publica métricas periódicas da fila e recursos.
+- `tasks/compare_prices_tasks.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.
 
 Exemplo mínimo de `.env.market_alert`:
 ```env
@@ -115,7 +126,7 @@ SERVICE_NAME=market-alert
 - **Observabilidade:**
   - Métricas expostas em `/metrics`
   - Logs estruturados via `structlog`
-  - Métricas Celery disponíveis em `beat_with_metrics.py` na porta configurada.
+   - Métricas Celery disponíveis em `beat_with_metrics.py` na porta configurada, incluindo contadores de scraping e latência (`market_alert_monitoring_tasks_total`, `market_alert_scrape_latency_seconds`).
   - Tracing opcional via OTEL (`OTEL_EXPORTER_OTLP_ENDPOINT`)
 
 ## Execução Local
