@@ -8,6 +8,7 @@ from uuid import UUID
 from shared.infra.db import get_db
 from market_alert.models import User
 from market_alert.schemas.schemas_comparisons import (
+    PaginatedPriceComparisonResponse,
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
     PriceComparisonRunRequest,
@@ -29,7 +30,7 @@ from market_alert.services.services_comparison import (
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
 logger = structlog.get_logger("http_route")
 
-@router.get("/{monitored_id}", response_model=PaginatedPriceComparisonsResponse)
+@router.get("/{monitored_id}", response_model=PaginatedPriceComparisonResponse)
 def list_comparisons(
     request: Request,
     monitored_id: UUID,

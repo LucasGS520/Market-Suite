@@ -44,6 +44,51 @@ redis_client = get_redis_client()
 #TTL de idempotência para evitar reprocessamento repetido do mesmo produto
 IDEMPOTENCY_TTL_SECONDS = getattr(settings, "SCRAPER_IDEMPOTENCY_TTL_SECONDS", 3600)
 
+def _merge_payload(
+    payload: Mapping[str, Any] | None,
+    legacy_kwargs: Mapping[str, Any],
+) -> dict[str, Any]:
+    """ Normaliza o payload aceitando contratos novos e legados """
+    merged: dict[str, Any] = {}
+    merged.update(payload or {})
+
+    #Mapeia aliases herdados para manter compatibilidade com chamadas existentes
+    alias_mapping = {
+        "url": ["url"],
+        "owner_id": ["owner_id", "user_id"],
+        "monitored_id": ["monitored_id"],
+        "competitor_id": ["competitor_id"],
+        "request_id": ["request_id"],
+        "name": ["name", "name_identification"],
+    }
+
+    for target_key, aliases in alias_mapping.items():
+        if merged.get(target_key) is not None:
+            continue
+        for alias in aliases:
+            if legacy_kwargs.get(alias) is not None:
+                merged[target_key] = legacy_kwargs.get(alias)
+                break
+
+    return merged
+
+def _request_id_key(request_id: str | None) -> str | None:
+    """ Constrói chave de idempotência baseada no ``request_id`` informativo """
+    if not request_id:
+        return None
+    return f"scraper:request:{request_id}"
+
+def _acquire_request_guard(request_id: str | None, *, task_logger) -> bool:
+    """ Bloqueia reprocessamento quando mesmo ``request_id`` ja foi processado """
+    key = _request_id_key(request_id)
+    if key is None or redis_client is None:
+        return True
+    
+    acquired = bool(redis_client.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS))
+    if not acquired:
+        task_logger.info("request_idempotency_skip", request_id=request_id)
+    return acquired
+
 def _normalized_timestamp(value: datetime | None) -> datetime:
     """ Normaliza timestamp para UTC e remove microssegundos para chaves estáveis """
     base = value or datetime.now(timezone.utc)
@@ -269,23 +314,68 @@ def _compute_retry_delay(base: float, attempt: int, limit: int) -> int:
 )
 def collect_product_task(
     self,
-    url: str,
-    user_id: str,
-    name_identification: str | None,
+    payload: Mapping[str, Any] | str | None = None,
+    user_id: str | None = None,
+    name_identification: str | None = None,
     monitored_id: str | None = None,
+    **legacy_kwargs,
 ) -> None:
     """ Coleta dados de um produto monitorado e os salva no banco """
+    payload_source: Mapping[str, Any] | None
+    if isinstance(payload, Mapping):
+        payload_source = payload
+    else:
+        payload_source = {
+            "url": payload,
+            "owner_id": user_id,
+            "name": name_identification,
+            "monitored_id": monitored_id,
+        }
+
+    merged_payload = _merge_payload(
+        payload_source,
+        {
+            "user_id": user_id,
+            "name_identification": name_identification,
+            "monitored_id": monitored_id,
+            **legacy_kwargs,
+        },
+    )
+    url = merged_payload.get("url")
+    user_id = merged_payload.get("owner_id")
+    name_identification = merged_payload.get("name")
+    monitored_id = merged_payload.get("monitored_id")
+    request_id = merged_payload.get("request_id")
+
     SCRAPER_IN_FLIGHT.inc()
-    task_logger = logger.bind(task_id=self.request.id, url=url, user_id=user_id)
+    task_logger = logger.bind(
+        task_id=self.request.id,
+        url=url,
+        user_id=user_id,
+        monitored_id=monitored_id,
+        request_id=request_id,
+    )
 
     start = datetime.now(timezone.utc)
     status = "success"
     task_logger.info("collect_product_started")
 
+    if not url or not user_id:
+        status = "failure"
+        task_logger.error("missing_payload_fields")
+        _observe_metrics(start, "collect_product_task", status)
+        SCRAPER_IN_FLIGHT.dec()
+        return
+
     #Verifica se há suspensão global para interromper o fluxo imediatamente
     if is_scraping_suspended():
         status = "failure"
         task_logger.warning("suspended_via_flag", detail="scraping suspended flag is set")
+        _observe_metrics(start, "collect_product_task", status)
+        SCRAPER_IN_FLIGHT.dec()
+        return
+    
+    if not _acquire_request_guard(str(request_id) if request_id else None, task_logger=task_logger):
         _observe_metrics(start, "collect_product_task", status)
         SCRAPER_IN_FLIGHT.dec()
         return
@@ -471,14 +561,55 @@ def collect_product_task(
     acks_late=True,
     reject_on_worker_lost=True,
 )
-def collect_competitor_task(self, monitored_product_id: str, url: str) -> None:
-    """ Coleta dados de um produto concorrente e compara os preços. """
+def collect_competitor_task(
+    self,
+    payload: Mapping[str, Any] | str | None = None,
+    url: str | None = None,
+    **legacy_kwargs,
+) -> None:
+    """ Coleta dados de um produto concorrente e compara os preços.
+
+    Payload mínimo esperado: {monitored_id, competitor_id?, url, owner_id?,
+    request_id?}. O contrato antigo (monitored_product_id, url) é suportado
+    para transição suave.
+    """
+    payload_source: Mapping[str, Any] | None
+    if isinstance(payload, Mapping):
+        payload_source = payload
+    else:
+        payload_source = {"monitored_id": payload, "url": url}
+
+    merged_payload = _merge_payload(
+        payload_source,
+        {"url": url, **legacy_kwargs},
+    )
+    request_id = merged_payload.get("request_id")
+    monitored_product_id = merged_payload.get("monitored_id") or merged_payload.get("monitored_product_id")
+    url = merged_payload.get("url") or url
+
     SCRAPER_IN_FLIGHT.inc()
-    task_logger = logger.bind(task_id=self.request.id, monitored_product_id=monitored_product_id, url=url)
+    task_logger = logger.bind(
+        task_id=self.request.id,
+        monitored_product_id=monitored_product_id,
+        url=url,
+        request_id=request_id,
+    )
 
     start = datetime.now(timezone.utc)
     status = "success"
     task_logger.info("collect_competitor_started")
+
+    if not url or not monitored_product_id:
+        status = "failure"
+        task_logger.error("missing_payload_fields")
+        _observe_metrics(start, "collect_competitor_task", status)
+        SCRAPER_IN_FLIGHT.dec()
+        return
+
+    if not _acquire_request_guard(str(request_id) if request_id else None, task_logger=task_logger):
+        _observe_metrics(start, "collect_competitor_task", status)
+        SCRAPER_IN_FLIGHT.dec()
+        return
 
     #Checa flag de suspensão global antes de gastar recursos
     if is_scraping_suspended():

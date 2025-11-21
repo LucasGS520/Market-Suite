@@ -17,6 +17,18 @@ def create_for_monitored(
     checked_at: datetime,
 ) -> PriceHistory:
     """ Registra histórico para produto monitorado mantendo carimbo de coleta """
+    existing = (
+        db.query(PriceHistory)
+        .filter(
+            PriceHistory.monitored_product_id == monitored_product_id,
+            PriceHistory.price == price,
+            PriceHistory.checked_at == checked_at,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    
     entry = PriceHistory(
         monitored_product_id=monitored_product_id,
         price=price,
@@ -36,6 +48,18 @@ def create_for_competitor(
     checked_at: datetime,
 ) -> PriceHistory:
     """ Registra histórico para concorrente permitindo restrear variações """
+    existing = (
+        db.query(PriceHistory)
+        .filter(
+            PriceHistory.competitor_product_id == competitor_product_id,
+            PriceHistory.price == price,
+            PriceHistory.checked_at == checked_at,
+        )
+        .first()
+    )
+    if existing:
+        return existing
+    
     entry = PriceHistory(
         competitor_product_id=competitor_product_id,
         price=price,
