@@ -7,9 +7,13 @@ from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
 from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpdate
-from market_alert.crud import crud_user as crud
 from market_alert.models.models_users import User
 from market_alert.core.security import get_current_user
+from market_alert.services.services_users import (
+    change_user_status,
+    create_user,
+    update_user as service_update_user,
+)
 
 
 router = APIRouter(prefix="/users", tags=["Usuários"]) #Cria um agrupador/organizador de rotas
@@ -20,7 +24,7 @@ logger = structlog.get_logger("http_route")
 def add_user(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
     """ Endpoint para criar um usuário"""
     logger.info("route_called", path=request.url.path, method=request.method, email=user_data.email)
-    user = crud.create_user(db, user_data)
+    user = create_user(db, user_data)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(user.id))
     return user
 
@@ -28,7 +32,7 @@ def add_user(request: Request, user_data: UserCreate, db: Session = Depends(get_
 def change_status(request: Request, user_id: UUID, active: bool, db: Session = Depends(get_db)):
     """ Endpoint para ativar e desativar um usuário """
     logger.info("route_called", path=request.url.path, method=request.method, target_user=str(user_id), active=active)
-    user = crud.toggle_user_active(db, user_id, active)
+    user = change_user_status(db, user_id, active)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(user.id))
     return user
 
@@ -36,7 +40,7 @@ def change_status(request: Request, user_id: UUID, active: bool, db: Session = D
 def update_user(request: Request, user_id: UUID, updates: UserUpdate, db: Session = Depends(get_db)):
     """ Endpoint para atualizar usuário """
     logger.info("route_called", path=request.url.path, method=request.method, target_user=str(user_id))
-    user = crud.update_user(db, user_id, updates)
+    user = service_update_user(db, user_id, updates)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(user.id))
     return user
 
