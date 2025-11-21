@@ -80,6 +80,7 @@ def create_or_update_competitor_product_scraped(
         existing.etag = etag or existing.etag
         existing.last_modified = last_modified or existing.last_modified
         existing.last_checked = last_checked
+        existing.last_scraped_at = last_checked
         existing.status = ProductStatus.available
         existing.product_url = normalized_url
         db.commit()
@@ -110,6 +111,7 @@ def create_or_update_competitor_product_scraped(
         thumbnail=scraped_info.thumbnail,
         status=ProductStatus.available,
         last_checked=last_checked,
+        last_scraped_at=last_checked,
         currency=currency or scraped_info.currency,
         etag=etag,
         last_modified=last_modified,

@@ -79,7 +79,7 @@ def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_ur
         db.query(MonitoredProduct)
         .filter(
             MonitoredProduct.user_id == user_id,
-            MonitoredProduct.product_url == normalized_url,
+            MonitoredProduct.normalized_url == normalized_url,
         )
         .first()
     )
@@ -116,6 +116,7 @@ def create_pending_monitored_product(
         monitoring_type=MonitoringType.scraping,
         search_query=None,
         product_url=normalized_url,
+        normalized_url=normalized_url,
         current_price=None,
         thumbnail=None,
         free_shipping=False,
@@ -182,7 +183,9 @@ def create_or_update_monitored_product_scraped(
         existing.etag = etag or existing.etag
         existing.last_modified = last_modified or existing.last_modified
         existing.last_checked = last_checked
+        existing.last_scraped_at = last_checked
         existing.status = MonitoredStatus.active
+        existing.normalized_url = normalized_url
         db.commit()
         db.refresh(existing)
 
@@ -204,12 +207,14 @@ def create_or_update_monitored_product_scraped(
         name_identification=resolved_name,
         search_query=None,
         product_url=normalized_url,
+        normalized_url=normalized_url,
         current_price=scraped_info.current_price,
         thumbnail=scraped_info.thumbnail,
         free_shipping=scraped_info.free_shipping,
         monitoring_type=MonitoringType.scraping,
         status=MonitoredStatus.active,
         last_checked=last_checked,
+        last_scraped_at=last_checked,
         currency=currency or scraped_info.currency,
         etag=etag,
         last_modified=last_modified,
@@ -496,6 +501,7 @@ def mark_monitored_product_failed(
     
     product.status = MonitoredStatus.failed
     product.last_checked = touched_at or datetime.now(timezone.utc)
+    product.last_scraped_at = product.last_checked
     db.commit()
     db.refresh(product)
     return product

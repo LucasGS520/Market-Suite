@@ -59,6 +59,7 @@ async def _handle_response(
             )
             if product:
                 product.last_checked = last_checked
+                product.last_scraped_at = last_checked
                 product.status = MonitoredStatus.active
                 db.commit()
         return ScrapeResult(status="not_modified", product_id=str(existing_id) if existing_id else None, http_status=304)

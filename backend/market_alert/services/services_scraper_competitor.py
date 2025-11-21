@@ -75,6 +75,7 @@ async def scrape_competitor_product_async(
     if status_code == 304:
         if existing:
             existing.last_checked = now
+            existing.last_scraped_at = now
             db.commit()
         return ScrapeResult(
             status="not_modified",

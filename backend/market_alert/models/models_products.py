@@ -19,8 +19,8 @@ class MonitoredProduct(Base):
     __tablename__ = "monitored_products" #Define o nome da tabela como monitored_products
 
     __table_args__ = (
-        #A restrição considera a URL exatamente como informado, sem canonicalização
-        UniqueConstraint("user_id", "product_url", name="uq_user_product_url"),
+        #Garante unicidade considerando URL canônica normalizada
+        UniqueConstraint("user_id", "normalized_url", name="uq_user_normalized_url"),
     )
 
     #ID unico com UUIDv4
@@ -34,6 +34,7 @@ class MonitoredProduct(Base):
     #Para produtos via API (search_query) e scraping (product_url)
     search_query = Column(String, nullable=True, index=True)
     product_url = Column(Text, nullable=False)
+    normalized_url = Column(Text, nullable=False, index=True)
 
     current_price = Column(Numeric(10,2), nullable=True)
     free_shipping = Column(Boolean, default=False)
@@ -46,10 +47,12 @@ class MonitoredProduct(Base):
     #Cache condicional
     etag = Column(String, nullable=True)
     last_modified = Column(DateTime(timezone=True), nullable=True)
+    last_scrape_signature = Column(String, nullable=True)
 
     #Controle de status
     status = Column(PgEnum(MonitoredStatus, name="monitored_status_enum"), nullable=False, default=MonitoredStatus.active)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -77,7 +80,12 @@ class MonitoredProduct(Base):
     @property
     def collected_at(self) -> datetime:
         """ Seleciona o timestamp mais recente conhecido para a coleta """
-        return self.last_checked or self.updated_at or self.created_at
+        return (
+            self.last_scraped_at
+            or self.last_checked
+            or self.updated_at
+            or self.created_at
+        )
 
 # ---------- PRODUTO CONCORRENTE ----------
 class CompetitorProduct(Base):
@@ -114,6 +122,7 @@ class CompetitorProduct(Base):
     status = Column(PgEnum(ProductStatus, name="product_status_enum"), nullable=False, default=ProductStatus.available)
     is_paused = Column(Boolean, nullable=False, default=False)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -139,4 +148,9 @@ class CompetitorProduct(Base):
     @property
     def collected_at(self) -> datetime:
         """ Seleciona o timestamp mais recente conhecido para a coleta """
-        return self.last_checked or self.updated_at or self.created_at
+        return (
+            self.last_scraped_at
+            or self.last_checked
+            or self.updated_at
+            or self.created_at
+        )
