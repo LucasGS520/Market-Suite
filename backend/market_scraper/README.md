@@ -22,8 +22,7 @@ market_scraper/
 ├── parsers/              #Parsers específicos por domínio e fallback genérico
 ├── utils/                #Utilidades (HTTP, cache, DNS, robots, validação de URL)
 ├── schemas/              #Modelos de erro locais
-├── tests/                #Suite de testes do serviço
-└── archive/              #Implementações legadas mantidas para referência
+└── tests/                #Suite de testes do serviço
 ```
 
 ## Endpoints e Fluxos Relevantes
@@ -120,8 +119,7 @@ pytest market_scraper -q
 A suíte cobre pipeline, parsers específicos, validação de URLs, cache, DNS, robots e integrações HTTP simuladas. Utilize `pytest market_scraper/tests/<módulo> -k <termo>` para focar cenários.
 
 ## Recursos Legados
-- `archive/domain_policy.py` e `archive/domain_policy.yaml` preservam a abordagem antiga baseada em políticas externas. Só reintroduza mediante requisito formal e atualize este README + `AGENTS.md`.
-- Outros componentes arquivados devem permanecer inativos até nova decisão do time.
+- Implementações antigas baseadas em `domain_policy` foram removidas do código ativo. Caso surja a necessidade de reavaliar políticas externas por domínio, consulte o histórico do repositório antes de reinstalar qualquer dependência.
 
 ## Troubleshooting rápido
 - **`unsupported_by_robots` frequente**: revise logs de `utils/robots.py` e confirme permissões do domínio. Ajuste configurações apenas após validação legal.
