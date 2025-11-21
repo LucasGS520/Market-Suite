@@ -9,6 +9,7 @@ from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, P
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_users import User
 from market_alert.core.password import hash_password
+from market_alert.routes import routes_competitors
 
 
 def test_create_competitor_scrape_autorizado_agenda_task(
@@ -296,7 +297,7 @@ def test_list_competitors_returns_paginated_items(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["meta"] == {"total": 3, "page": 1, "per_page": 2}
+    assert payload["meta"] == {"total": 2, "page": 1, "per_page": 2}
     assert len(payload["items"]) == 2
 
     first_item = payload["items"][0]
@@ -314,6 +315,67 @@ def test_list_competitors_returns_paginated_items(
         "is_paused",
     }
     assert first_item["monitored_product_id"] == str(monitored.id)
+
+def test_list_competitors_meta_respects_filtered_items(
+    client,
+    db_session,
+    test_user,
+    prepare_test_database,
+    monkeypatch,
+):
+    """Valida que o meta reflete a quantidade entregue após ignorar itens sem preço"""
+
+    monitored = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Mouse Gamer",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/mouse",
+        normalized_url="https://example.com/mouse",
+        status=MonitoredStatus.active,
+    )
+    db_session.add(monitored)
+    db_session.flush()
+
+    competitors = [
+        CompetitorProduct(
+            monitored_product_id=monitored.id,
+            name_competitor="Loja com preço",
+            product_url="https://example.com/concorrente-1",
+            current_price=Decimal(150),
+            old_price=Decimal(160),
+            status=ProductStatus.available,
+        ),
+        CompetitorProduct(
+            monitored_product_id=monitored.id,
+            name_competitor="Loja sem preço",
+            product_url="https://example.com/concorrente-2",
+            current_price=Decimal(0),
+            old_price=None,
+            status=ProductStatus.available,
+        ),
+    ]
+    db_session.add_all(competitors)
+    db_session.commit()
+
+    original_builder = routes_competitors.build_competitor_response
+
+    def fake_builder(competitor, *, source="competitor"):
+        """Simula falha de preço ausente para um concorrente específico"""
+
+        if competitor.name_competitor == "Loja sem preço":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="sem preço")
+        return original_builder(competitor, source=source)
+
+    monkeypatch.setattr(routes_competitors, "build_competitor_response", fake_builder)
+
+    response = client.get(
+        f"/competitors?monitored_id={monitored.id}&per_page=5&page=1&include_paused=true",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"] == {"total": 1, "page": 1, "per_page": 1}
+    assert len(payload["items"]) == 1
 
 def test_bulk_pause_competitors_marks_entries_as_paused(
     client,

@@ -245,7 +245,9 @@ def list_competitors(
                 detail=str(exc.detail),
             )
             continue
+    #Alinha os metadados de paginação aos itens efetivamente retornados após ignorar preços ausentes   
     visible_total = len(items)
+    visible_per_page = visible_total
     logger.info(
         "route_completed",
         path=request.url.path,
@@ -257,10 +259,14 @@ def list_competitors(
         total=total,
     )
 
-    #Mantemos o total real retornado pela consulta paginada para consistência da API
+    #Retornamos paginação coerente com a quantidade realmente exibida ao consumidor
     return PaginatedCompetitorResponse(
         items=items,
-        meta=PaginationMeta(total=total, page=page, per_page=per_page)
+        meta=PaginationMeta(
+            total=visible_total,
+            page=page,
+            per_page=visible_per_page,
+        )
     )
 
 @router.post("/bulk/resume", response_model=BulkCompetitorActionResult)
