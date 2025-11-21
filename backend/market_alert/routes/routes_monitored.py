@@ -1,7 +1,7 @@
 """ Rotas para produtos monitorados pelo usuário """
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -14,21 +14,15 @@ from market_alert.schemas.schemas_products import (
     MonitoredProductResponse,
     PaginatedMonitoredProductsResponse,
     MonitoredScrapeCreationResponse,
-    PaginationMeta,
-)
-from market_alert.crud.crud_monitored import (
-    get_all_monitored_products,
-    get_featured_monitored_products,
-    get_monitored_product_by_id,
-    delete_monitored_product,
-)
-from market_alert.crud.crud_comparison import (
-    get_latest_summaries_for_products,
-    get_latest_summary,
 )
 from market_alert.core.security import get_current_user
-from market_alert.services.services_products import build_monitored_response
-from market_alert.services.services_monitored import schedule_monitored_scrape
+from market_alert.services.services_monitored import (
+    delete_monitored_product_entry,
+    get_monitored_product,
+    list_featured_monitored_products,
+    list_monitored_products as list_monitored_products_service,
+    schedule_monitored_scrape,
+)
 
 
 router = APIRouter(prefix="/monitored", tags=["Monitoramento"])
@@ -90,50 +84,26 @@ def list_monitored_products(
         query=query,
         competitiveness=status.value if status else None,
     )
-    products_with_count, total = get_all_monitored_products(
-        db,
-        user.id,
+    response_payload = list_monitored_products_service(
+        db=db,
+        user_id=user.id,
         page=page,
         per_page=per_page,
         query=query,
         status=status,
     )
 
-    product_ids = [product.id for product, _ in products_with_count]
-    summaries_map = get_latest_summaries_for_products(db, product_ids)
-
-    response_payload: list[MonitoredProductResponse] = []
-    for product, _ in products_with_count:
-        try:
-            response_payload.append(
-                build_monitored_response(
-                    product, summary=summaries_map.get(product.id)
-                )
-            )
-        except HTTPException as exc:
-            #Ignora registros sem preço para manter o contrato enxuto
-            logger.warning(
-                "monitored_without_price",
-                product_id=str(product.id),
-                status=product.status.value,
-                detail=str(exc.detail),
-            )
-            continue
-
     logger.info(
         "route_completed",
         path=request.url.path,
         method=request.method,
         status="success",
-        count=len(response_payload),
-        total=total,
+        count=len(response_payload.items),
+        total=response_payload.meta.total,
         page=page,
         per_page=per_page,
     )
-    return PaginatedMonitoredProductsResponse(
-        items=response_payload,
-        meta=PaginationMeta(total=total, page=page, per_page=per_page),
-    )
+    return response_payload
 
 @router.get("/featured", response_model=list[MonitoredProductResponse])
 def list_featured_products(
@@ -155,33 +125,11 @@ def list_featured_products(
         user_id=str(user.id),
         limit=MAX_FEATURED_ITEMS,
     )
-    featured_items = get_featured_monitored_products(
-        db,
-        user.id,
+    response_payload = list_featured_monitored_products(
+        db=db,
+        user_id=user.id,
         limit=MAX_FEATURED_ITEMS,
     )
-
-    summary_map = get_latest_summaries_for_products(
-        db, [product.id for product in featured_items]
-    )
-
-    response_payload: list[MonitoredProductResponse] = []
-    for product in featured_items:
-        try:
-            response_payload.append(
-                build_monitored_response(
-                    product, summary=summary_map.get(product.id)
-                )
-            )
-        except HTTPException as exc:
-            #Manter o contrato consistente mesmo que algum destaque esteja sem preço
-            logger.warning(
-                "featured_without_price",
-                product_id=str(product.id),
-                status=product.status.value,
-                detail=str(exc.detail),
-            )
-            continue
 
     logger.info(
         "route_completed",
@@ -196,24 +144,18 @@ def list_featured_products(
 def get_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Endpoint para listar produtos monitorados pelo ID """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), product_id=str(product_id))
-    product = get_monitored_product_by_id(db, product_id)
-    if not product or product.user_id != user.id:
-        logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", product_id=str(product_id))
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado.")
+    response_payload = get_monitored_product(
+        db=db, product_id=product_id, user_id=user.id
+    )
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
-    summary = get_latest_summary(db, product_id)
-    return build_monitored_response(product, summary=summary)
+    return response_payload
 
 @router.delete("/{product_id}", response_model=MonitoredProductResponse)
 def delete_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Endpoint para deletar um produto monitorado """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), product_id=str(product_id))
-    product = get_monitored_product_by_id(db, product_id)
-    if not product or product.user_id != user.id:
-        logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", product_id=str(product_id))
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado.")
-    summary = get_latest_summary(db, product_id)
-    response_payload = build_monitored_response(product, summary=summary)
-    _ = delete_monitored_product(db, product_id)
+    response_payload = delete_monitored_product_entry(
+        db=db, product_id=product_id, user_id=user.id
+    )
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
     return response_payload
