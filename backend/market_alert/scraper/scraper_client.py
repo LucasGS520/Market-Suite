@@ -274,7 +274,6 @@ class ScraperClient:
                     status_code=status_code,
                     payload=parsed_payload,
                     headers=response.headers,
-                    error_code="not_modified",
                 )
 
             if status_code == 304:

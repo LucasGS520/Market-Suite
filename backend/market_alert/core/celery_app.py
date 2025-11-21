@@ -6,10 +6,8 @@ import logging
 
 import structlog
 from structlog.typing import BindableLogger, EventDict
-from kombu import Exchange, Queue
 from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
-from celery.schedules import crontab
 from prometheus_client import start_http_server
 from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL
 
@@ -19,6 +17,12 @@ except Exception:
     CeleryInstrumentor = None
 
 from market_alert.core.config_alert import settings
+from market_alert.core.celery_schedule import (
+    BEAT_SCHEDULE,
+    TASK_MODULES,
+    TASK_QUEUES,
+    TASK_ROUTES,
+)
 
 
 SERVICE_LABEL = "market_alert_worker"
@@ -93,13 +97,7 @@ celery_app = Celery(
     "market_alert",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=[
-        "market_alert.tasks.scraper_tasks",
-        "market_alert.tasks.monitor_tasks",
-        "market_alert.tasks.metrics_tasks",
-        "market_alert.tasks.compare_prices_tasks",
-        "market_alert.tasks.alert_tasks"
-    ]
+    include=TASK_MODULES,
 )
 
 if CeleryInstrumentor:
@@ -157,76 +155,11 @@ celery_app.conf.update(
     task_queue_max_priority=10,
 )
 
-#Define exchanges e filas dedicadas
-#Separa scraping e monitoramento. 
-#Comparações utilizam a fila padrão para simplificar roteamento e evitar prioridades customizadas.
-scraping_exchange = Exchange("scraping", type="direct")
-monitor_exchange = Exchange("monitor", type="direct")
+#Define exchanges e filas dedicadas, Separa scraping e monitoramento. 
+celery_app.conf.task_queues = TASK_QUEUES
 
-celery_app.conf.task_queues = (
-    #Fila para tarefas de scraping
-    Queue("scraping", scraping_exchange, routing_key="scraping"),
-    #Fila para tarefas de monitoramento
-    Queue("monitor", monitor_exchange, routing_key="monitor"),
-)
+#Roteamento de tarefas para filas específicas e mantém cada tipo de tarefa em sua fila
+celery_app.conf.task_routes = TASK_ROUTES
 
-#Roteamento de tarefas para filas específicas
-#Mantém cada tipo de tarefa em sua fila
-celery_app.conf.task_routes = {
-    #Todas as scraping tasks vão para fila "scraping"
-    "market_alert.tasks.scraper_tasks.collect_product_task": {
-        "queue": "scraping", "routing_key": "scraping"
-    },
-    "market_alert.tasks.scraper_tasks.collect_competitor_task": {
-        "queue": "scraping", "routing_key": "scraping"
-    },
-
-    #Monitor tasks vão para fila "monitor"
-    "market_alert.tasks.monitor_tasks.recheck_monitored_products": {
-        "queue": "monitor", "routing_key": "monitor"
-    },
-    "market_alert.tasks.monitor_tasks.recheck_competitor_products": {
-        "queue": "monitor", "routing_key": "monitor"
-    },
-}
-
-#Agendamentos periódicos (Celery Beat)
-#Define intervalos de execução de tasks
-celery_app.conf.beat_schedule = {
-    #Coleta métricas de celery: a cada 1 minuto
-    "collect-celery-metrics-every-1min": {
-        "task": "market_alert.tasks.metrics_tasks.collect_celery_metrics",
-        "schedule": crontab(minute="*/1"),
-        "options": {"queue": "monitor", "routing_key": "monitor"}
-    },
-    #Coleta métricas de auditoria: a cada 1 minuto
-    "collect-audit-metrics-every-1min": {
-        "task": "market_alert.tasks.metrics_tasks.collect_audit_metrics",
-        "schedule": crontab(minute="*/1"),
-        "options": {"queue": "monitor", "routing_key": "monitor"}
-    },
-    #Coleta métricas de banco: a cada 1 minuto
-    "collect-db-metrics-every-1min":{
-        "task": "market_alert.tasks.metrics_tasks.collect_db_metrics",
-        "schedule": crontab(minute="*/1"),
-        "options": {"queue": "monitor", "routing_key": "monitor"}
-    },
-    #Rechecagem de todos os produtos scraping: a cada 5 minutos
-    "recheck-scraping-every-5min": {
-        "task": "market_alert.tasks.monitor_tasks.recheck_monitored_products",
-        "schedule": crontab(minute="*/5"),
-        "options": {"queue": "monitor", "routing_key": "monitor"}
-    },
-    #Rechecagem de todos os produtos concorrentes scraping: a cada 8 minutos
-    "recheck-all-competitors-every-8min": {
-        "task": "market_alert.tasks.monitor_tasks.recheck_competitor_products",
-        "schedule": crontab(minute="*/8"),
-        "options": {"queue": "monitor", "routing_key": "monitor"}
-    },
-    #Limpeza diária do cache de scraping
-    "cleanup-cache-daily": {
-        "task": "market_alert.tasks.metrics_tasks.cleanup_cache",
-        "schedule": crontab(hour=3, minute=0),
-        "options": {"queue": "monitor", "routing_key": "monitor"}
-    },
-}
+#Agendamentos periódicos (Celery Beat), define intervalos de execução de tasks
+celery_app.conf.beat_schedule = BEAT_SCHEDULE
