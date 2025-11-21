@@ -1,5 +1,6 @@
 """ Testes das rotas de produtos monitorados """
 
+from datetime import datetime
 from decimal import Decimal
 
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
@@ -7,6 +8,7 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.tasks import scraper_tasks
+from shared.utils.url_validation import normalize_product_url_for_storage
 
 
 def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session, test_user, prepare_test_database):
@@ -187,7 +189,8 @@ def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_se
     )
 
     assert response.status_code == 202
-    assert "Scraping agendado" in response.json()["message"]
+    payload = response.json()
+    assert "Scraping agendado" in payload["message"]
 
     created = (
         db_session.query(MonitoredProduct)
@@ -201,6 +204,9 @@ def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_se
     assert created.status == MonitoredStatus.pending
     assert created.last_checked is None
     assert created.product_url == "https://produto.mercadolivre.com.br/MLB-0001"
+    assert payload["id"] == str(created.id)
+    assert payload["url"] == created.normalized_url
+    assert datetime.fromisoformat(payload["created_at"]) == created.created_at
     assert captured["monitored_id"] == str(created.id)
     assert captured["name_identification"] == "Console PS5"
 
@@ -238,12 +244,16 @@ def test_create_scrape_product_sem_nome_aplica_fallback(monkeypatch, client, db_
 
 def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_session, test_user, prepare_test_database):
     """Confere que duplicidade devolve mensagem informativa e reusa registro"""
+    normalized_url = normalize_product_url_for_storage(
+        "https://produto.mercadolivre.com.br/MLB-0001"
+    )
 
     existing = MonitoredProduct(
         user_id=test_user.id,
         name_identification="Console PS5",
         monitoring_type=MonitoringType.scraping,
-        product_url="https://produto.mercadolivre.com.br/MLB-0001",
+        product_url=normalized_url,
+        normalized_url=normalized_url,
         status=MonitoredStatus.active,
     )
     db_session.add(existing)

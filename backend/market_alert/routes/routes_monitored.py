@@ -2,7 +2,6 @@
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -15,6 +14,7 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.schemas.schemas_products import (
     MonitoredProductResponse,
     PaginatedMonitoredProductsResponse,
+    MonitoredScrapeCreationResponse,
 )
 from market_alert.crud.crud_monitored import (
     get_all_monitored_products,
@@ -35,7 +35,11 @@ logger = structlog.get_logger("http_route")
 #Limite de itens destacados exibidos simultaneamente no dashboard
 MAX_FEATURED_ITEMS = 3
 
-@router.post("/scrape", status_code=status.HTTP_202_ACCEPTED, response_model=None)
+@router.post(
+    "/scrape",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=MonitoredScrapeCreationResponse,
+)
 def create_scrape_product(
     request: Request,
     product_data: MonitoredProductCreateScraping,
@@ -100,11 +104,13 @@ def create_scrape_product(
     )
 
     logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled", monitored_id=str(pending.id))
-    response_payload = {"message": "Scraping agendado. O produto será salvo em breve."}
-    return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED,
-        content=response_payload,
+    response_payload = MonitoredScrapeCreationResponse(
+        id=pending.id,
+        url=pending.normalized_url,
+        created_at=pending.created_at,
+        message="Scraping agendado. O produto será salvo em breve.",
     )
+    return response_payload
 
 @router.get("/", response_model=PaginatedMonitoredProductsResponse)
 def list_monitored_products(

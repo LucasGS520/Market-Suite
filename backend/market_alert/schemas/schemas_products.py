@@ -22,6 +22,15 @@ class ProductResponse(BaseModel):
     availability: bool | None = Field(None, description="Disponibilidade reportada pelo fluxo de coleta")
     last_status: str | None = Field(None, description="Status mais recente conhecido do fluxo de coleta")
 
+# ----- RETORNOS DE CADASTRO -----
+class MonitoredScrapeCreationResponse(BaseModel):
+    """ Retorno mínimo ao agendar scraping de produto monitorado """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(..., description="Identificador do produto monitorado")
+    url: HttpUrl = Field(..., description="URL normalizada usada no monitoramento")
+    created_at: datetime = Field(..., description="Momento de criação do registro")
+    message: str = Field(..., description="Resumo amigável do agendamento")
 
 # ----- PRODUTO MONITORADO -----
 class MonitoredProductResponse(ProductResponse):
