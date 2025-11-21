@@ -43,12 +43,12 @@ def test_create_competitor_scrape_autorizado_agenda_task(
         captured["kwargs"] = kwargs
 
     monkeypatch.setattr(
-        "market_alert.routes.routes_competitors.collect_competitor_task.delay",
+        "market_alert.services.services_competitors.collect_competitor_task.delay",
         fake_delay,
     )
 
     monkeypatch.setattr(
-        "market_alert.routes.routes_competitors._enforce_competitor_scrape_rate_limit",
+        "market_alert.services.services_competitors.enforce_competitor_scrape_rate_limit",
         lambda _user_id: None,
     )
 
@@ -116,7 +116,7 @@ def test_create_competitor_scrape_usuario_diferente_recebe_erro(
         called["count"] += 1
 
     monkeypatch.setattr(
-        "market_alert.routes.routes_competitors.collect_competitor_task.delay",
+        "market_alert.services.services_competitors.collect_competitor_task.delay",
         fake_delay,
     )
 
@@ -162,11 +162,11 @@ def test_create_competitor_scrape_duplicate_returns_conflict(
         called["count"] += 1
 
     monkeypatch.setattr(
-        "market_alert.routes.routes_competitors.collect_competitor_task.delay",
+        "market_alert.services.services_competitors.collect_competitor_task.delay",
         fake_delay,
     )
     monkeypatch.setattr(
-        "market_alert.routes.routes_competitors._enforce_competitor_scrape_rate_limit",
+        "market_alert.services.services_competitors.enforce_competitor_scrape_rate_limit",
         lambda _user_id: None,
     )
 
@@ -238,11 +238,11 @@ def test_create_competitor_scrape_respects_rate_limit(
         )
 
     monkeypatch.setattr(
-        "market_alert.routes.routes_competitors.collect_competitor_task.delay",
+        "market_alert.services.services_competitors.collect_competitor_task.delay",
         fake_delay,
     )
     monkeypatch.setattr(
-        "market_alert.routes.routes_competitors._enforce_competitor_scrape_rate_limit",
+        "market_alert.services.services_competitors.enforce_competitor_scrape_rate_limit",
         fake_rate_limit,
     )
 

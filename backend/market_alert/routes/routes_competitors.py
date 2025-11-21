@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from shared.infra.db import get_db
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
 
-from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
     BulkCompetitorActionRequest,
@@ -21,6 +20,7 @@ from market_alert.schemas.schemas_products import (
     PaginatedCompetitorResponse,
 )
 from market_alert.services.services_competitors import (
+    create_competitor_scrape_request,
     ensure_user_can_access_monitored,
     load_competitors_for_action,
     validate_competitor_limit,
@@ -30,17 +30,11 @@ from market_alert.crud.crud_competitor import (
     bulk_delete_competitors,
     bulk_update_paused_status,
     count_competitors_by_monitored,
-    create_pending_competitor_product,
     delete_competitors_by_monitored_id,
-    get_competitor_by_monitored_and_url,
     get_competitors_by_monitored_id,
     paginate_competitors,
 )
-from market_alert.tasks.scraper_tasks import collect_competitor_task
 from market_alert.core.security import get_current_user
-from market_alert.core.config_alert import settings
-
-from shared.utils.url_validation import normalize_and_validate_product_url
 
 
 router = APIRouter(prefix="/competitors", tags=["Concorrentes"])
@@ -48,34 +42,6 @@ logger = structlog.get_logger("http_route")
 
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 100
-
-def _enforce_competitor_scrape_rate_limit(user_id: UUID) -> None:
-    """Garante que requisições de scraping respeitam limites configurados por usuário."""
-
-    parsed_limit = parse_rate_limit_config(settings.COMPETITOR_RATE_LIMIT)
-    if not parsed_limit:
-        return
-
-    max_requests, window_seconds = parsed_limit
-    leak_rate = max_requests / window_seconds
-    bucket_key = f"rate:competitor:{user_id}"
-
-    allowed = allow_with_leaky_bucket(
-        bucket_key,
-        rate_limit=parsed_limit,
-    )
-
-    if not allowed:
-        logger.warning(
-            "competitor_rate_limit_exceeded",
-            user_id=str(user_id),
-            limit=max_requests,
-            window=window_seconds,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Limite de scraping de concorrentes atingido. Tente novamente em instantes.",
-        )
 
 @router.post(
     "/scrape",
@@ -89,97 +55,15 @@ def create_competitor_scrape(
     user: User = Depends(get_current_user),
 ):
     """ Cria concorrente pendente e agenda scraping para completar informações """
-    logger.info(
-        "route_called",
-        path=request.url.path,
-        method=request.method,
-        user_id=str(user.id),
-        monitored_id=str(product_data.monitored_product_id),
-    )
-
-    try:
-        normalized_url, issue = normalize_and_validate_product_url(str(product_data.product_url))
-    except ValueError as exc:
-        logger.warning("invalid_competitor_url", url=str(product_data.product_url), error=str(exc))
-        error_payload = {"detail": str(exc)}
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_payload["detail"])
-
-    if issue:
-        logger.warning("invalid_competitor_url", url=normalized_url, code=issue.code)
-        error_payload = {"detail": issue.message}
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
-
-    mp = ensure_user_can_access_monitored(
+    return create_competitor_scrape_request(
         db=db,
-        product_id=product_data.monitored_product_id,
         user=user,
-        context={
-            "path": request.url.path,
-            "method": request.method,
-        },
-        hide_forbidden=False,
-    )
-
-    #Checa duplicidade com base na URL canônica
-    existing = get_competitor_by_monitored_and_url(db, mp.id, normalized_url)
-    if existing:
-        logger.info(
-            "competitor_exists",
-            path=request.url.path,
-            method=request.method,
-            monitored_id=str(mp.id),
-            competitor_id=str(existing.id),
-        )
-        conflict_payload = {"detail": "Concorrente já cadastrado para este produto monitorado."}
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=conflict_payload["detail"],
-        )
-    
-    validate_competitor_limit(
-        db=db,
-        monitored_product_id=mp.id,
-        limit=settings.MAX_COMPETITORS_PER_MONITORED,
-        count_competitors_callback=count_competitors_by_monitored,
-        context={
+        product_data=product_data,
+        request_context={
             "path": request.url.path,
             "method": request.method,
         },
     )
-
-    try:
-        _enforce_competitor_scrape_rate_limit(user.id)
-    except HTTPException as exc:
-        error_payload = exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail)}
-        raise
-
-    pending = create_pending_competitor_product(
-        db=db,
-        monitored_product_id=mp.id,
-        product_url=normalized_url,
-    )
-
-    #Cria um produto concorrente via Celery
-    collect_competitor_task.delay(
-        monitored_product_id=str(product_data.monitored_product_id),
-        url=normalized_url,
-    )
-
-    logger.info(
-        "route_completed",
-        path=request.url.path,
-        method=request.method,
-        status="scheduled",
-        competitor_id=str(pending.id),
-    )
-    response_payload = CompetitorScrapeCreationResponse(
-        id=pending.id,
-        url=pending.product_url,
-        created_at=pending.created_at,
-        message="Scraping de concorrente agendado com sucesso.",
-    )
-
-    return response_payload
 
 @router.get("/", response_model=PaginatedCompetitorResponse)
 def list_competitors(
