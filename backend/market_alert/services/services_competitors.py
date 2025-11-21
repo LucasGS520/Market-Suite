@@ -17,8 +17,19 @@ from market_alert.crud.crud_competitor import (
     count_competitors_by_monitored,
     create_pending_competitor_product,
     get_competitor_by_monitored_and_url,
+    bulk_update_paused_status,
+    paginate_competitors,
+    bulk_delete_competitors,
+    delete_competitors_by_monitored_id,
 )
 from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
+from market_alert.schemas.schemas_products import (
+    BulkCompetitorActionRequest,
+    BulkCompetitorActionResult,
+    PaginationMeta,
+    PaginatedCompetitorResponse,
+)
+from market_alert.services.services_products import build_competitor_response
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.core.config_alert import settings
 
@@ -225,3 +236,172 @@ def create_competitor_scrape_request(
         created_at=pending.created_at,
         message="Scraping de concorrente agendado com sucesso.",
     )
+
+def list_competitors_with_pagination(
+    *,
+    db: Session,
+    user: User,
+    monitored_product_id: UUID,
+    page: int,
+    per_page: int,
+    context: dict[str, str] | None = None,
+) -> PaginatedCompetitorResponse:
+    """ Coordena validação de acesso e paginação simplificada de concorrentes """
+    ensure_user_can_access_monitored(
+        db=db,
+        product_id=monitored_product_id,
+        user=user,
+        context=context,
+        hide_forbidden=False,
+    )
+
+    _total, competitors = paginate_competitors(
+        db,
+        monitored_product_id,
+        page=page,
+        per_page=per_page,
+    )
+
+    items: list = []
+    for competitor in competitors:
+        try:
+            items.append(build_competitor_response(competitor))
+        except HTTPException as exc:
+            # Ignora concorrentes incompletos preservando previsibilidade da listagem
+            logger.warning(
+                "competitor_without_price",
+                competitor_id=str(competitor.id),
+                monitored_id=str(monitored_product_id),
+                status=competitor.status.value,
+                detail=str(exc.detail),
+                **(context or {}),
+            )
+            continue
+
+    return PaginatedCompetitorResponse(
+        items=items,
+        meta=PaginationMeta(
+            total=len(items),
+            page=page,
+            per_page=len(items),
+        ),
+    )
+
+
+def _apply_bulk_paused_status(
+    *,
+    db: Session,
+    payload: BulkCompetitorActionRequest,
+    user: User,
+    paused: bool,
+    context: dict[str, str] | None = None,
+) -> BulkCompetitorActionResult:
+    """ Executa atualização em massa de pausa/retomada com validações centralizadas """
+    ensure_user_can_access_monitored(
+        db=db,
+        product_id=payload.monitored_product_id,
+        user=user,
+        context=context,
+        hide_forbidden=False,
+    )
+
+    competitors = load_competitors_for_action(
+        db=db,
+        monitored_product_id=payload.monitored_product_id,
+        competitor_ids=payload.competitor_ids,
+    )
+
+    updated = bulk_update_paused_status(db, competitors, paused=paused)
+    processed_ids = [item.id for item in updated]
+    skipped = [cid for cid in payload.competitor_ids if cid not in processed_ids]
+    
+    return BulkCompetitorActionResult(
+        processed_ids=processed_ids,
+        skipped_ids=skipped,
+        total_processed=len(processed_ids),
+    )
+
+
+def resume_competitors_bulk(
+    *,
+    db: Session,
+    payload: BulkCompetitorActionRequest,
+    user: User,
+    context: dict[str, str] | None = None,
+) -> BulkCompetitorActionResult:
+    """ Retoma monitoramento de concorrentes garantindo consistência dos registros """
+    return _apply_bulk_paused_status(
+        db=db,
+        payload=payload,
+        user=user,
+        paused=False,
+        context=context,
+    )
+
+
+def pause_competitors_bulk(
+    *,
+    db: Session,
+    payload: BulkCompetitorActionRequest,
+    user: User,
+    context: dict[str, str] | None = None,
+) -> BulkCompetitorActionResult:
+    """ Pausa monitoramento de concorrentes mantendo resposta uniforme """
+    return _apply_bulk_paused_status(
+        db=db,
+        payload=payload,
+        user=user,
+        paused=True,
+        context=context,
+    )
+
+
+def remove_competitors_bulk(
+    *,
+    db: Session,
+    payload: BulkCompetitorActionRequest,
+    user: User,
+    context: dict[str, str] | None = None,
+) -> BulkCompetitorActionResult:
+    """ Remove concorrentes selecionados após validar vínculo com o usuário """
+    ensure_user_can_access_monitored(
+        db=db,
+        product_id=payload.monitored_product_id,
+        user=user,
+        context=context,
+        hide_forbidden=False,
+    )
+
+    competitors = load_competitors_for_action(
+        db=db,
+        monitored_product_id=payload.monitored_product_id,
+        competitor_ids=payload.competitor_ids,
+    )
+    removed = bulk_delete_competitors(db, competitors)
+    processed_ids = [item.id for item in competitors]
+    skipped = [cid for cid in payload.competitor_ids if cid not in processed_ids]
+    
+    return BulkCompetitorActionResult(
+        processed_ids=processed_ids,
+        skipped_ids=skipped,
+        total_processed=removed,
+    )
+
+
+def clear_competitors_from_monitored(
+    *,
+    db: Session,
+    monitored_product_id: UUID,
+    user: User,
+    context: dict[str, str] | None = None,
+) -> list[CompetitorProduct]:
+    """ Apaga todos os concorrentes vinculados ao monitorado do usuário """
+    ensure_user_can_access_monitored(
+        db=db,
+        product_id=monitored_product_id,
+        user=user,
+        context=context,
+        hide_forbidden=False,
+    )
+    
+    return delete_competitors_by_monitored_id(db, monitored_product_id)

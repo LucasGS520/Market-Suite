@@ -14,10 +14,10 @@ from sqlalchemy.orm import Session
 from shared.infra.db import get_db
 
 from market_alert.core.security import get_current_user
-from market_alert.crud.crud_notification_logs import get_notification_logs
 from market_alert.enums.enums_alerts import ChannelType
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_alert_rules import NotificationLogResponse
+from market_alert.services.services_notifications import list_notification_logs_for_user
 
 
 router = APIRouter(prefix="/notifications", tags=["Notificações"])
@@ -56,9 +56,9 @@ def list_notification_logs(
         offset=offset,
     )
 
-    logs = get_notification_logs(
-        db,
-        user.id,
+    logs = list_notification_logs_for_user(
+        db=db,
+        user_id=user.id,
         limit=limit,
         offset=offset,
         start=start,

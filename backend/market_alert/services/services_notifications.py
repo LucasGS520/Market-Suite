@@ -8,6 +8,7 @@ no projeto
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID
 from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
@@ -15,10 +16,13 @@ from sqlalchemy.orm import Session
 from market_alert.notifications.manager import get_notification_manager, NotificationManager
 from market_alert.crud.crud_user import get_user_by_id
 from market_alert.crud.crud_alert_rules import get_alert_rules_or_default, update_last_notified
-from market_alert.crud.crud_notification_logs import has_recent_duplicate_notification
+from market_alert.crud.crud_notification_logs import (
+    get_notification_logs,
+    has_recent_duplicate_notification,
+)
 from market_alert.notifications.matching import alert_matches_rule
 from market_alert.notifications.templates import render_price_alert, render_price_change_alert, render_listing_alert, render_error_alert
-from market_alert.enums.enums_alerts import AlertType
+from market_alert.enums.enums_alerts import AlertType, ChannelType
 from market_alert.core.config_alert import settings
 from shared import metrics
 
@@ -138,3 +142,31 @@ def dispatch_price_alerts(db: Session | None, monitored_product, alerts: list, m
                     update_last_notified(db, alert.get("rule_id"), now)
         else:
             metrics.ALERT_RULES_SUPPRESSED_TOTAL.labels(reason="duplicate").inc()
+
+def list_notification_logs_for_user(
+    *,
+    db: Session,
+    user_id: UUID,
+    limit: int = 20,
+    offset: int = 0,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    channel: ChannelType | None = None,
+    success: bool | None = None,
+    alert_rule_id: UUID | None = None,
+    cursor: datetime | None = None,
+):
+    """Recupera logs filtrados de notificações para um usuário autenticado."""
+
+    return get_notification_logs(
+        db,
+        user_id,
+        limit=limit,
+        offset=offset,
+        start=start,
+        end=end,
+        channel=channel,
+        success=success,
+        alert_rule_id=alert_rule_id,
+        cursor=cursor,
+    )
