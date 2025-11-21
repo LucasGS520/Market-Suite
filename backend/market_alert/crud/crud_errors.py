@@ -13,22 +13,3 @@ def create_scraping_error(db: Session, product_id: UUID, url: str, message: str,
     db.commit()
     db.refresh(err)
     return err
-
-def get_recent_scraping_errors(db: Session, limit: int = 50):
-    """ Retorna os erros mais recentes ordenados por data """
-    return (
-        db.query(ScrapingError)
-        .order_by(ScrapingError.timestamp.desc())
-        .limit(limit)
-        .all()
-    )
-
-def get_scraping_errors_for_product(db: Session, product_id: UUID, limit: int = 50):
-    """ Retorna erros de scraping para um produto específico """
-    return (
-        db.query(ScrapingError)
-        .filter(ScrapingError.product_id == product_id)
-        .order_by(ScrapingError.timestamp.desc())
-        .limit(limit)
-        .all()
-    )

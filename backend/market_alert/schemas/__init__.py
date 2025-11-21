@@ -18,7 +18,6 @@ from .schemas_products import (
     PaginationMeta,
 )
 from .schemas_users import UserCreate, UserLogin, UserUpdate, UserResponse
-from .schemas_errors import ScrapingErrorResponse
 from .schemas_auth import TokenResponse, TokenPairResponse, RefreshRequest, EmailTokenRequest, ResetPasswordRequest, ResetPasswordConfirmRequest, ChangePasswordRequest, ChangeEmailRequest
 from .schemas_comparisons import PriceComparisonCreate, PriceComparisonResponse
 from .schemas_alert_rules import AlertRuleCreate, AlertRuleUpdate, AlertRuleResponse, NotificationLogResponse, QuickAlertRuleCreate
@@ -38,7 +37,6 @@ __all__ = [
     "UserLogin",
     "UserUpdate",
     "UserResponse",
-    "ScrapingErrorResponse",
     "TokenResponse",
     "TokenPairResponse",
     "RefreshRequest",

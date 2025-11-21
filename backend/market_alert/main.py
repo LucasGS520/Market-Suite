@@ -39,7 +39,6 @@ from market_alert.models.models_alerts import AlertRule
 from market_alert.routes.routes_users import router as users_router
 from market_alert.routes.routes_monitored import router as monitored_router
 from market_alert.routes.routes_competitors import router as competitor_router
-from market_alert.routes.routes_monitoring_errors import router as monitoring_errors_router
 from market_alert.routes.routes_notifications import router as notifications_router
 from market_alert.routes.routes_dashboard import router as dashboard_router
 from market_alert.routes.routes_comparisons import router as comparisons_router
@@ -218,7 +217,6 @@ def create_app() -> FastAPI:
     app.include_router(competitor_router)
     app.include_router(comparisons_router)
     app.include_router(alerts_router)
-    app.include_router(monitoring_errors_router)
     app.include_router(notifications_router)
     app.include_router(dashboard_router)
 

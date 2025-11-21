@@ -58,7 +58,7 @@ Este documento consolida as rotas públicas, contratos Pydantic, operações CRU
 - `crud_alert_rules.py`: criação, leitura, atualização e remoção de regras de alerta; consumido por `routes_alerts` e tasks de notificação.
 - `crud_user.py` e `crud_refresh_token.py`: criação/atualização de usuários, gestão de tokens; consumidos por rotas de autenticação e administração.
 - `crud_notification_logs.py`: registro e listagem de logs de notificações; usado por `routes_notifications` e tasks de alerta.
-- `crud_errors.py`: persistência e consulta de erros de scraping; usado por `routes_monitoring_errors` para diagnósticos.
+- `crud_errors.py`: persistência e consulta de erros de scraping; utilizado internamento por tarefas para registrat falhas de coleta
 
 ## Tarefas Celery e agendamentos
 
