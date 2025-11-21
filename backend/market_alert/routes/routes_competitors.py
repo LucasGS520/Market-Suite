@@ -1,6 +1,6 @@
 """ Rotas para gerenciamento de produtos concorrentes monitorados """
 
-from typing import List, Tuple
+from typing import List
 from uuid import UUID
 
 import structlog
@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
-from shared.utils.redis_client import consume_leaky_bucket
 
+from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
     BulkCompetitorActionRequest,
@@ -49,57 +49,10 @@ logger = structlog.get_logger("http_route")
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 100
 
-def _parse_rate_limit_config(rate_limit: str) -> Tuple[int, int] | None:
-    """Converte configuração ``valor/unidade`` em tupla ``(valor, janela_em_segundos)``."""
-
-    cleaned = (rate_limit or "").strip()
-    if not cleaned or "/" not in cleaned:
-        return None
-
-    amount_part, window_part = cleaned.split("/", 1)
-    try:
-        max_requests = int(amount_part)
-    except ValueError:
-        logger.warning("invalid_rate_limit_config", raw=rate_limit)
-        return None
-
-    unit = window_part.strip().lower()
-    unit_mapping = {
-        "s": 1,
-        "sec": 1,
-        "secs": 1,
-        "second": 1,
-        "seconds": 1,
-        "m": 60,
-        "min": 60,
-        "mins": 60,
-        "minute": 60,
-        "minutes": 60,
-        "h": 3600,
-        "hour": 3600,
-        "hours": 3600,
-    }
-
-    if unit.isdigit():
-        window_seconds = int(unit)
-    else:
-        window_seconds = unit_mapping.get(unit)
-
-    if not window_seconds:
-        logger.warning("unsupported_rate_limit_unit", raw=rate_limit)
-        return None
-
-    if max_requests <= 0 or window_seconds <= 0:
-        logger.warning("non_positive_rate_limit", raw=rate_limit)
-        return None
-
-    return max_requests, window_seconds
-
-
 def _enforce_competitor_scrape_rate_limit(user_id: UUID) -> None:
     """Garante que requisições de scraping respeitam limites configurados por usuário."""
 
-    parsed_limit = _parse_rate_limit_config(settings.COMPETITOR_RATE_LIMIT)
+    parsed_limit = parse_rate_limit_config(settings.COMPETITOR_RATE_LIMIT)
     if not parsed_limit:
         return
 
@@ -107,10 +60,9 @@ def _enforce_competitor_scrape_rate_limit(user_id: UUID) -> None:
     leak_rate = max_requests / window_seconds
     bucket_key = f"rate:competitor:{user_id}"
 
-    allowed, _ = consume_leaky_bucket(
+    allowed = allow_with_leaky_bucket(
         bucket_key,
-        capacity=max_requests,
-        leak_rate_per_second=leak_rate,
+        rate_limit=parsed_limit,
     )
 
     if not allowed:

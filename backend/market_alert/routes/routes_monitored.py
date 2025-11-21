@@ -9,6 +9,7 @@ from shared.infra.db import get_db
 from shared.utils.url_validation import normalize_and_validate_product_url
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
 
+from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import User
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.schemas.schemas_products import (
@@ -31,6 +32,7 @@ from market_alert.crud.crud_comparison import (
 )
 from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
+from market_alert.core.config_alert import settings
 from market_alert.services.services_products import build_monitored_response
 
 
@@ -93,6 +95,27 @@ def create_scrape_product(
             status_code=status.HTTP_409_CONFLICT,
             detail="Este produto já está sendo monitorado.",
         )
+    
+    parsed_limit = parse_rate_limit_config(settings.SCRAPER_RATE_LIMIT)
+    if parsed_limit:
+        max_requests, window_seconds = parsed_limit
+        bucket_key = f"rate:scrape:{user.id}"
+        allowed = allow_with_leaky_bucket(
+            bucket_key,
+            rate_limit=parsed_limit,
+        )
+
+        if not allowed:
+            logger.warning(
+                "scrape_rate_limit_exceeded",
+                user_id=str(user.id),
+                limit=max_requests,
+                window=window_seconds,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Limite de scraping atingido. Tente novamente em instantes.",
+            )
 
     pending = create_pending_monitored_product(
         db=db,
