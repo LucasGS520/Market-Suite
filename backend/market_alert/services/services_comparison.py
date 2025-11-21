@@ -7,6 +7,7 @@ frontend.
 
 from uuid import UUID
 from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from typing import Tuple, List, Dict, Any, Optional
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -22,13 +23,24 @@ from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_comparison import (
     create_price_comparison,
+    get_comparison_by_id,
+    get_latest_comparisons_for_products,
+    get_latest_summary,
+    paginate_comparisons,
     upsert_price_comparison_summary,
 )
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct
+from market_alert.models import User
+from market_alert.schemas.schemas_comparisons import (
+    PaginatedPriceComparisonResponse,
+    PriceComparisonResponse,
+    PriceComparisonSummaryResponse,
+)
 from market_alert.utils.comparator import compare_prices
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
+from market_alert.services.services_competitors import ensure_user_can_access_monitored
 
 
 logger = structlog.get_logger("comparison_service")
@@ -38,6 +50,58 @@ logger = structlog.get_logger("comparison_service")
 COMPETITIVENESS_NON_COMPETITIVE_THRESHOLD = Decimal("0.01")
 COMPETITIVENESS_ATTENTION_THRESHOLD = Decimal("0.03")
 COMPETITIVENESS_URGENT_THRESHOLD = Decimal("0.10")
+
+def ensure_user_can_view_monitored(
+    *, db: Session, monitored_id: UUID, user: User
+):
+    """ Valida se o monitorado pertence ao usuário autenticado """
+    return ensure_user_can_access_monitored(
+        db=db,
+        product_id=monitored_id,
+        user=user,
+        context={"monitored_id": str(monitored_id)},
+    )
+
+def get_paginated_comparisons_for_user(
+    *,
+    db: Session,
+    monitored_id: UUID,
+    user: User,
+    page: int,
+    per_page: int,
+) -> PaginatedPriceComparisonResponse:
+    """ Monta envelope paginado de comparações garantindo propriedade do monitorado """
+    ensure_user_can_view_monitored(db=db, monitored_id=monitored_id, user=user)
+    total, comparisons = paginate_comparisons(
+        db, monitored_product_id=monitored_id, page=page, per_page=per_page
+    )
+
+    #Preenche o schema de resposta já com a estrutura de paginação esperada pelo frontend
+    return PaginatedPriceComparisonResponse(
+        items=comparisons,
+        meta={"total": total, "page": page, "per_page": per_page},
+    )
+
+def get_comparison_detail_for_user(
+    *,
+    db: Session,
+    comparison_id: UUID,
+    user: User,
+) -> PriceComparisonResponse:
+    """Retorna detalhes de comparação apenas quando pertence ao usuário."""
+    comparison = get_comparison_by_id(db, comparison_id)
+    if comparison is None:
+        #Oculta a existência do recurso quando inexistente
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comparação não encontrada.",
+        )
+
+    ensure_user_can_view_monitored(
+        db=db, monitored_id=comparison.monitored_product_id, user=user
+    )
+
+    return comparison
 
 def run_price_comparison(
     db: Session,
