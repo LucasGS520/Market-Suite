@@ -6,10 +6,8 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from shared.infra.db import get_db
-from shared.utils.url_validation import normalize_and_validate_product_url
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
 
-from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import User
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.schemas.schemas_products import (
@@ -23,17 +21,14 @@ from market_alert.crud.crud_monitored import (
     get_featured_monitored_products,
     get_monitored_product_by_id,
     delete_monitored_product,
-    create_pending_monitored_product,
-    get_monitored_product_by_user_and_url,
 )
 from market_alert.crud.crud_comparison import (
     get_latest_summaries_for_products,
     get_latest_summary,
 )
-from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
-from market_alert.core.config_alert import settings
 from market_alert.services.services_products import build_monitored_response
+from market_alert.services.services_monitored import schedule_monitored_scrape
 
 
 router = APIRouter(prefix="/monitored", tags=["Monitoramento"])
@@ -53,92 +48,13 @@ def create_scrape_product(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ Agenda coleta assíncrona de produto monitorado validando URL e duplicidade """
-    logger.info(
-        "route_called",
-        path=request.url.path,
-        method=request.method,
-        user_id=str(user.id),
-        monitoring_type="scraping",
-    )
-
-    try:
-        normalized_url, issue = normalize_and_validate_product_url(str(product_data.product_url))
-    except ValueError as exc:
-        logger.warning("invalid_product_url", url=str(product_data.product_url), error=str(exc))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-    if issue:
-        logger.warning("invalid_product_url", url=normalized_url, code=issue.code)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=issue.message)
-
-    existing = get_monitored_product_by_user_and_url(db, user.id, normalized_url)
-
-    if existing:
-        logger.info(
-            "scrape_skipped_existing",
-            path=request.url.path,
-            method=request.method,
-            status="already_monitored",
-            monitored_id=str(existing.id),
-        )
-        if (
-            product_data.name_identification
-            and existing.name_identification != product_data.name_identification
-        ):
-            #Atualiza a identificação quando o usuário ajusta o nome manualmente
-            existing.name_identification = product_data.name_identification
-            db.commit()
-            db.refresh(existing)
-
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Este produto já está sendo monitorado.",
-        )
-    
-    parsed_limit = parse_rate_limit_config(settings.SCRAPER_RATE_LIMIT)
-    if parsed_limit:
-        max_requests, window_seconds = parsed_limit
-        bucket_key = f"rate:scrape:{user.id}"
-        allowed = allow_with_leaky_bucket(
-            bucket_key,
-            rate_limit=parsed_limit,
-        )
-
-        if not allowed:
-            logger.warning(
-                "scrape_rate_limit_exceeded",
-                user_id=str(user.id),
-                limit=max_requests,
-                window=window_seconds,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Limite de scraping atingido. Tente novamente em instantes.",
-            )
-
-    pending = create_pending_monitored_product(
+    """ Delegação enxuta paara agendar scraping de monitorado """
+    return schedule_monitored_scrape(
         db=db,
-        user_id=user.id,
-        name_identification=product_data.name_identification,
-        product_url=normalized_url,
+        user=user,
+        product_data=product_data,
+        request=request,
     )
-    
-    collect_product_task.delay(
-        url=normalized_url,
-        user_id=str(user.id),
-        name_identification=pending.name_identification,
-        monitored_id=str(pending.id),
-    )
-
-    logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled", monitored_id=str(pending.id))
-    response_payload = MonitoredScrapeCreationResponse(
-        id=pending.id,
-        url=pending.normalized_url,
-        created_at=pending.created_at,
-        message="Scraping agendado. O produto será salvo em breve.",
-    )
-    return response_payload
 
 @router.get("/", response_model=PaginatedMonitoredProductsResponse)
 def list_monitored_products(
