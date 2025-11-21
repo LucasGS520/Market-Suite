@@ -29,13 +29,6 @@ class PriceComparisonResponse(BaseModel):
     timestamp: datetime
     data: Dict[str, Any]
 
-class PriceComparisonRunRequest(BaseModel):
-    """ Payload opcional utilizado para executar comparação com tolerâncias customizadas """
-    tolerance: Decimal | None = Field(
-        default=None,
-        description="Tolerância absoluta aplicada na comparação de preços.",
-    )
-
 class PriceComparisonSummaryResponse(BaseModel):
     """ Resumo consolidado da última comparação executada para um produto monitorado """
     model_config = ConfigDict()

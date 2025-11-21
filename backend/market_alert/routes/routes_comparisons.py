@@ -1,7 +1,7 @@
 """ Rotas para consulta de comparações de preços """
 
 import structlog
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -11,7 +11,6 @@ from market_alert.schemas.schemas_comparisons import (
     PaginatedPriceComparisonResponse,
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
-    PriceComparisonRunRequest,
 )
 from market_alert.core.security import get_current_user
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
@@ -21,10 +20,7 @@ from market_alert.crud.crud_comparison import (
     get_latest_summary,
     paginate_comparisons,
 )
-from market_alert.services.services_comparison import (
-    run_price_comparison,
-    build_comparison_summary,
-)
+from market_alert.services.services_comparison import build_comparison_summary
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
@@ -125,55 +121,3 @@ def get_comparison(request: Request, comparison_id: UUID, db: Session = Depends(
 
     logger.info("route_completed", path=request.url.path, method=request.method, reason="success", comparison_id=str(comparison_id))
     return comparison
-
-@router.post("/{monitored_id}/run", response_model=dict)
-def run_comparison_endpoint(
-    request: Request,
-    monitored_id: UUID,
-    payload: PriceComparisonRunRequest | None = Body(default=None),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """ Executa nova comparação de preços com fluxo reduzido e simplificado.
-
-    Removemos camadas de idempotência e rate limit distribuído para
-    privilegiar simplicidade operacional. O payload aceita apenas a
-    tolerância opcional utilizada pelo motor de comparação.
-    """
-    logger.info(
-        "route_called",
-        path=request.url.path,
-        method=request.method,
-        user_id=str(user.id),
-        monitored_id=str(monitored_id),
-    )
-
-    mp = get_monitored_product_by_id(db, monitored_id)
-    if not mp or mp.user_id != user.id:
-        logger.warning(
-            "route_error",
-            path=request.url.path,
-            method=request.method,
-            reason="not_found",
-            monitored_id=str(monitored_id),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Produto monitorado não encontrado.",
-        )
-    
-    tolerance = payload.tolerance if payload is not None else None
-
-    result, alerts = run_price_comparison(
-        db,
-        monitored_id,
-        tolerance=tolerance,
-    )
-    logger.info(
-        "route_completed",
-        path=request.url.path,
-        method=request.method,
-        status="success",
-        alerts=len(alerts),
-    )
-    return result
