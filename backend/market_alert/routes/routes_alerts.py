@@ -1,16 +1,22 @@
 """ Rotas para gerenciamento de regras de alertas """
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
 
 from shared.infra.db import get_db
 from market_alert.models import User
-from market_alert.schemas.schemas_alert_rules import AlertRuleCreate, QuickAlertRuleCreate, AlertRuleUpdate, AlertRuleResponse
-from market_alert.crud.crud_alert_rules import create_alert_rule, get_alert_rule, get_user_alert_rules, toggle_alert_rule, update_alert_rule, delete_alert_rule
-from market_alert.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.schemas.schemas_alert_rules import QuickAlertRuleCreate, AlertRuleUpdate, AlertRuleResponse
+from market_alert.services.services_alert_rules import (
+    create_quick_alert_rule,
+    delete_user_alert_rule,
+    get_user_alert_rule,
+    list_user_alert_rules,
+    toggle_user_alert_rule,
+    update_user_alert_rule,
+)
 from market_alert.core.security import get_current_user
 
 
@@ -21,20 +27,7 @@ logger = structlog.get_logger("http_route")
 def create_rule(request: Request, payload: QuickAlertRuleCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Cria uma regra de alerta simplificada para o usuário autenticado """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id))
-
-    if payload.monitored_product_id:
-        mp = get_monitored_product_by_id(db, payload.monitored_product_id)
-        if not mp or mp.user_id != user.id:
-            logger.warning("route_error", path=request.url.path, method=request.method, reason="invalid_product", product_id=str(payload.monitored_product_id))
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Produto monitorado inválido")
-
-    rule_in = AlertRuleCreate(
-        user_id=user.id,
-        monitored_product_id=payload.monitored_product_id,
-        rule_type=payload.rule_type,
-        enabled=True
-    )
-    rule = create_alert_rule(db, rule_in)
+    rule = create_quick_alert_rule(db, user.id, payload)
     logger.info("route_completed", path=request.url.path, method=request.method, status="created", rule_id=str(rule.id))
     return rule
 
@@ -42,8 +35,7 @@ def create_rule(request: Request, payload: QuickAlertRuleCreate, db: Session = D
 def list_rules(request: Request, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Lista todas as regras de alerta do usuário """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id))
-
-    rules = get_user_alert_rules(db, user.id)
+    rules = list_user_alert_rules(db, user)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", count=len(rules))
     return rules
 
@@ -51,12 +43,7 @@ def list_rules(request: Request, db: Session = Depends(get_db), user: User = Dep
 def get_rule(request: Request, rule_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Obtém uma regra de alerta específica """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), rule_id=str(rule_id))
-
-    rule = get_alert_rule(db, rule_id)
-    if not rule or rule.user_id != user.id:
-        logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", rule_id=str(rule_id))
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regra de alerta não encontrada")
-
+    rule = get_user_alert_rule(db, user, rule_id)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", rule_id=str(rule.id))
     return rule
 
@@ -64,13 +51,7 @@ def get_rule(request: Request, rule_id: UUID, db: Session = Depends(get_db), use
 def toggle_rule_endpoint(request: Request, rule_id: UUID, enabled: bool, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Ativa ou desativa uma regra de alerta """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), rule_id=str(rule_id), enabled=enabled)
-
-    rule = get_alert_rule(db, rule_id)
-    if not rule or rule.user_id != user.id:
-        logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", rule_id=str(rule_id))
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regra não encontrada")
-
-    updated = toggle_alert_rule(db, rule_id, enabled)
+    updated = toggle_user_alert_rule(db, user, rule_id, enabled)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", rule_id=str(rule_id))
     return updated
 
@@ -78,23 +59,7 @@ def toggle_rule_endpoint(request: Request, rule_id: UUID, enabled: bool, db: Ses
 def update_rule_endpoint(request: Request, rule_id: UUID, updates: AlertRuleUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Atualiza uma regra de alerta existente """
     logger.info("route_called", path=request.url.path, method=request.method, rule_id=str(rule_id))
-
-    rule = get_alert_rule(db, rule_id)
-    if not rule or rule.user_id != user.id:
-        logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", rule_id=str(rule_id))
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regra não encontrada")
-
-    if updates.user_id and updates.user_id != user.id:
-        logger.warning("route_error", path=request.url.path, method=request.method, reason="invalid_user", rule_user=str(updates.user_id))
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Usuário inválido para a regra")
-
-    if updates.monitored_product_id:
-        mp = get_monitored_product_by_id(db, updates.monitored_product_id)
-        if not mp or mp.user_id != user.id:
-            logger.warning("route_error", path=request.url.path, method=request.method, reason="invalid_product", product_id=str(updates.monitored_product_id))
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Produto monitorado inválido")
-
-    updated_rule = update_alert_rule(db, rule_id, updates)
+    updated_rule = update_user_alert_rule(db, user, rule_id, updates)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", rule_id=str(rule_id))
     return updated_rule
 
@@ -102,12 +67,6 @@ def update_rule_endpoint(request: Request, rule_id: UUID, updates: AlertRuleUpda
 def delete_rule_endpoint(request: Request, rule_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Exclui uma regra de alerta """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), rule_id=str(rule_id))
-
-    rule = get_alert_rule(db, rule_id)
-    if not rule or rule.user_id != user.id:
-        logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", rule_id=str(rule_id))
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Regra não encontrada")
-
-    deleted = delete_alert_rule(db, rule_id)
+    deleted = delete_user_alert_rule(db, user, rule_id)
     logger.info("route_completed", path=request.url.path, method=request.method, status="deleted", rule_id=str(rule_id))
     return deleted
