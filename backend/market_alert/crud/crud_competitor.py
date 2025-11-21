@@ -3,12 +3,16 @@ from __future__ import annotations
 
 from uuid import UUID
 from datetime import datetime
+from decimal import Decimal
 from typing import Iterable, List, Sequence
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy import desc, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
+from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url_for_storage
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
@@ -33,6 +37,68 @@ def get_competitor_by_monitored_and_url(
         )
         .first()
     )
+
+def _derive_competitor_name_from_url(product_url: str) -> str:
+    """Gera um nome provisório a partir da URL para preencher o cadastro pendente."""
+
+    parsed = urlparse(product_url)
+    caminho = unquote(parsed.path or "").strip("/")
+    ultimo_segmento = caminho.split("/")[-1] if caminho else ""
+    candidato = ultimo_segmento or parsed.netloc or str(product_url)
+    normalizado = candidato.replace("-", " ").replace("_", " ").strip()
+    sanitizado = sanitize_text(normalizado)
+
+    if sanitizado:
+        return sanitizado
+
+    host = sanitize_text(parsed.netloc)
+    if host:
+        return host
+
+    #Mantém um fallback amigável evitando valores vazios no banco
+    return "Concorrente pendente"
+
+def create_pending_competitor_product(
+    db: Session,
+    monitored_product_id: UUID,
+    product_url: str,
+) -> CompetitorProduct:
+    """Cria um concorrente pendente garantindo unicidade por monitorado e URL."""
+
+    normalized_url = normalize_product_url_for_storage(str(product_url)) or str(product_url).strip()
+    existing = get_competitor_by_monitored_and_url(db, monitored_product_id, normalized_url)
+
+    if existing:
+        return existing
+
+    pending = CompetitorProduct(
+        monitored_product_id=monitored_product_id,
+        name_competitor=(normalized_url),
+        product_url=normalized_url,
+        current_price=Decimal("0.00"),
+        old_price=None,
+        free_shipping=False,
+        seller=None,
+        seller_rating=None,
+        currency=None,
+        thumbnail=None,
+        status=ProductStatus.unavailable,
+        last_checked=None,
+        last_scraped_at=None,
+    )
+    db.add(pending)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing_retry = get_competitor_by_monitored_and_url(db, monitored_product_id, normalized_url)
+        if existing_retry:
+            return existing_retry
+        raise
+
+    db.refresh(pending)
+    return pending
 
 def count_competitors_by_monitored(db: Session, monitored_product_id: UUID, *, include_paused: bool = False) -> int:
     """ Conta quantos concorrentes estão associados ao monitorado informado """

@@ -16,6 +16,7 @@ from market_alert.schemas.schemas_products import (
     BulkCompetitorActionRequest,
     BulkCompetitorActionResult,
     CompetitorProductResponse,
+    CompetitorScrapeCreationResponse,
     PaginatedCompetitorResponse,
 )
 from market_alert.services.services_competitors import (
@@ -28,6 +29,7 @@ from market_alert.crud.crud_competitor import (
     bulk_delete_competitors,
     bulk_update_paused_status,
     count_competitors_by_monitored,
+    create_pending_competitor_product,
     delete_competitors_by_monitored_id,
     get_competitor_by_monitored_and_url,
     get_competitors_by_monitored_id,
@@ -122,14 +124,18 @@ def _enforce_competitor_scrape_rate_limit(user_id: UUID) -> None:
             detail="Limite de scraping de concorrentes atingido. Tente novamente em instantes.",
         )
 
-@router.post("/scrape", status_code=status.HTTP_202_ACCEPTED, response_model=None)
+@router.post(
+    "/scrape",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=CompetitorScrapeCreationResponse,
+)
 def create_competitor_scrape(
     request: Request,
     product_data: CompetitorProductCreateScraping,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ Endpoint para monitorar e comparar um produto concorrente por meio de scraping """
+    """ Cria concorrente pendente e agenda scraping para completar informações """
     logger.info(
         "route_called",
         path=request.url.path,
@@ -194,14 +200,31 @@ def create_competitor_scrape(
         error_payload = exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail)}
         raise
 
+    pending = create_pending_competitor_product(
+        db=db,
+        monitored_product_id=mp.id,
+        product_url=normalized_url,
+    )
+
     #Cria um produto concorrente via Celery
     collect_competitor_task.delay(
         monitored_product_id=str(product_data.monitored_product_id),
         url=normalized_url,
     )
 
-    logger.info("route_completed", path=request.url.path, method=request.method, status="scheduled")
-    response_payload = {"message": "Scraping de concorrente agendado com sucesso."}
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="scheduled",
+        competitor_id=str(pending.id),
+    )
+    response_payload = CompetitorScrapeCreationResponse(
+        id=pending.id,
+        url=pending.product_url,
+        created_at=pending.created_at,
+        message="Scraping de concorrente agendado com sucesso.",
+    )
 
     return response_payload
 
@@ -283,7 +306,7 @@ def list_competitors(
 
     return PaginatedCompetitorResponse(
         items=items,
-        total=visible_total,
+        total=total,
         page=page,
         per_page=per_page,
     )

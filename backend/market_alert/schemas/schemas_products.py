@@ -34,6 +34,15 @@ class MonitoredScrapeCreationResponse(BaseModel):
     created_at: datetime = Field(..., description="Momento de criação do registro")
     message: str = Field(..., description="Resumo amigável do agendamento")
 
+class CompetitorScrapeCreationResponse(BaseModel):
+    """Retorno mínimo ao agendar scraping de um concorrente."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID = Field(..., description="Identificador do concorrente pendente")
+    url: HttpUrl = Field(..., description="Endereço canônico normalizado")
+    created_at: datetime = Field(..., description="Momento de criação do registro")
+    message: str = Field(..., description="Resumo amigável do agendamento")
+
 # ----- PRODUTO MONITORADO -----
 class MonitoredProductResponse(ProductResponse):
     """ Contrato simplificado de um produto monitorado """

@@ -25,9 +25,12 @@ def test_create_competitor_scrape_autorizado_agenda_task(
         name_identification="Notebook Gamer",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/produto-monitorado",
+        normalized_url="https://example.com/produto-monitorado",
         status=MonitoredStatus.active,
     )
     db_session.add(monitored)
+    db_session.flush()
+    monitored_id = monitored.id
     db_session.commit()
 
     captured = {}
@@ -51,15 +54,27 @@ def test_create_competitor_scrape_autorizado_agenda_task(
     response = client.post(
         "/competitors/scrape",
         json={
-            "monitored_product_id": str(monitored.id),
+            "monitored_product_id": str(monitored_id),
             "product_url": "https://www.mercadolivre.com.br/MLB-123",
         },
     )
 
     assert response.status_code == 202
+    payload = response.json()
+    assert payload["url"] == "https://mercadolivre.com.br/MLB-123"
+    assert payload["message"] == "Scraping de concorrente agendado com sucesso."
+    assert "created_at" in payload
+
+    stored = (
+        db_session.query(CompetitorProduct)
+        .filter(CompetitorProduct.monitored_product_id == monitored_id)
+        .one()
+    )
+    assert str(stored.id) == payload["id"]
+    assert stored.product_url == "https://mercadolivre.com.br/MLB-123"
     assert captured["kwargs"] == {
-        "monitored_product_id": str(monitored.id),
-        "url": "https://www.mercadolivre.com.br/MLB-123",
+        "monitored_product_id": str(monitored_id),
+        "url": "https://mercadolivre.com.br/MLB-123",
     }
 
 
@@ -86,6 +101,7 @@ def test_create_competitor_scrape_usuario_diferente_recebe_erro(
         name_identification="Monitor Ultrawide",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/produto-ultrawide",
+        normalized_url="https://example.com/produto-ultrawide",
         status=MonitoredStatus.active,
     )
     db_session.add(monitored)
@@ -114,6 +130,76 @@ def test_create_competitor_scrape_usuario_diferente_recebe_erro(
     assert response.status_code == 403
     assert response.json()["detail"] == "Usuário não possui permissão para acessar este produto monitorado."
     assert called["count"] == 0
+
+def test_create_competitor_scrape_duplicate_returns_conflict(
+    client,
+    db_session,
+    test_user,
+    prepare_test_database,
+    monkeypatch,
+):
+    """Confere que duplicidades são bloqueadas e que o cadastro pendente é reaproveitado."""
+
+    monitored = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Monitor 4K",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/produto-monitorado",
+        normalized_url="https://example.com/produto-monitorado",
+        status=MonitoredStatus.active,
+    )
+    db_session.add(monitored)
+    db_session.flush()
+    monitored_id = monitored.id
+    db_session.commit()
+
+    called = {"count": 0}
+
+    def fake_delay(*args, **kwargs):
+        """Captura chamadas de agendamento para garantir que não haja duplicidade."""
+
+        called["count"] += 1
+
+    monkeypatch.setattr(
+        "market_alert.routes.routes_competitors.collect_competitor_task.delay",
+        fake_delay,
+    )
+    monkeypatch.setattr(
+        "market_alert.routes.routes_competitors._enforce_competitor_scrape_rate_limit",
+        lambda _user_id: None,
+    )
+
+    first_response = client.post(
+        "/competitors/scrape",
+        json={
+            "monitored_product_id": str(monitored_id),
+            "product_url": "https://www.mercadolivre.com.br/MLB-123",
+        },
+    )
+
+    assert first_response.status_code == 202
+
+    duplicate_response = client.post(
+        "/competitors/scrape",
+        json={
+            "monitored_product_id": str(monitored_id),
+            "product_url": "https://www.mercadolivre.com.br/MLB-123",
+        },
+    )
+
+    assert duplicate_response.status_code == 409
+    assert (
+        duplicate_response.json()["detail"]
+        == "Concorrente já cadastrado para este produto monitorado."
+    )
+
+    total = (
+        db_session.query(CompetitorProduct)
+        .filter(CompetitorProduct.monitored_product_id == monitored_id)
+        .count()
+    )
+    assert total == 1
+    assert called["count"] == 1
     
 def test_create_competitor_scrape_respects_rate_limit(
     client,
@@ -129,6 +215,7 @@ def test_create_competitor_scrape_respects_rate_limit(
         name_identification="Monitor 4K",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/produto-monitorado",
+        normalized_url="https://example.com/produto-monitorado",
         status=MonitoredStatus.active,
     )
     db_session.add(monitored)
@@ -183,6 +270,7 @@ def test_list_competitors_returns_paginated_items(
         name_identification="Smartphone X",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/smartphone",
+        normalized_url="https://example.com/smartphone",
         status=MonitoredStatus.active,
     )
     db_session.add(monitored)
@@ -218,13 +306,13 @@ def test_list_competitors_returns_paginated_items(
         "id",
         "monitored_product_id",
         "name",
-        "product_url",
+        "url",
         "current_price",
-        "previous_price",
-        "price_change",
-        "price_change_percentage",
-        "status",
-        "last_checked",
+        "currency",
+        "collected_at",
+        "source",
+        "availability",
+        "last_status",
         "is_paused",
     }
     assert first_item["monitored_product_id"] == str(monitored.id)
@@ -242,6 +330,7 @@ def test_bulk_pause_competitors_marks_entries_as_paused(
         name_identification="Headset Gamer",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/headset",
+        normalized_url="https://example.com/headset",
         status=MonitoredStatus.active,
     )
     db_session.add(monitored)
@@ -288,6 +377,7 @@ def test_bulk_pause_and_resume_competitors(
         name_identification="Console Gamer",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/console",
+        normalized_url="https://example.com/console",
         status=MonitoredStatus.active,
     )
     db_session.add(monitored)
