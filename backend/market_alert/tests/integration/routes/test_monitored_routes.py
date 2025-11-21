@@ -1,6 +1,6 @@
 """ Testes das rotas de produtos monitorados """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
@@ -18,8 +18,11 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
         name_identification="Notebook Gamer",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/produto-1",
+        normalized_url=normalize_product_url_for_storage("https://example.com/produto-1"),
         current_price=Decimal("4200.00"),
         status=MonitoredStatus.active,
+        thumbnail="https://example.com/thumb-1.png",
+        last_scraped_at=datetime(2024, 1, 10, 12, 0, tzinfo=timezone.utc),
     )
     db_session.add(monitored)
     db_session.flush()
@@ -45,6 +48,7 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
         name_identification="Monitor Ultrawide",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/produto-2",
+        normalized_url=normalize_product_url_for_storage("https://example.com/produto-2"),
         current_price=Decimal("2550.00"),
         status=MonitoredStatus.active,
     )
@@ -55,15 +59,23 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
     assert response.status_code == 200
 
     payload = response.json()
-    assert payload["total"] == 2
-    assert payload["page"] == 1
-    assert payload["per_page"] == 50
+    assert payload["meta"]["total"] == 2
+    assert payload["meta"]["page"] == 1
+    assert payload["meta"]["per_page"] == 50
 
     ids = {item["id"] for item in payload["items"]}
     assert str(monitored.id) in ids
     assert str(outro_monitorado.id) in ids
 
     assert len(payload["items"]) == 2
+
+    item = next(
+        product for product in payload["items"] if product["id"] == str(monitored.id)
+    )
+    assert item["owner_id"] == str(test_user.id)
+    assert item["url"] == monitored.product_url
+    assert item["thumbnail"] == monitored.thumbnail
+    assert item["last_scraped_at"] == monitored.last_scraped_at.isoformat()
 
 def test_list_monitored_products_aplica_paginacao(client, db_session, test_user, prepare_test_database):
     """Verifica que o endpoint respeita os parâmetros de página e itens por página"""
@@ -73,6 +85,9 @@ def test_list_monitored_products_aplica_paginacao(client, db_session, test_user,
             name_identification=f"Produto {sufixo}",
             monitoring_type=MonitoringType.scraping,
             product_url=f"https://example.com/produto-{sufixo}",
+            normalized_url=normalize_product_url_for_storage(
+                f"https://example.com/produto-{sufixo}"
+            ),
             current_price=Decimal("100.00") + sufixo,
             status=MonitoredStatus.active,
         )
@@ -83,9 +98,9 @@ def test_list_monitored_products_aplica_paginacao(client, db_session, test_user,
     assert response.status_code == 200
 
     payload = response.json()
-    assert payload["total"] == 3
-    assert payload["page"] == 2
-    assert payload["per_page"] == 1
+    assert payload["meta"]["total"] == 3
+    assert payload["meta"]["page"] == 2
+    assert payload["meta"]["per_page"] == 1
     assert len(payload["items"]) == 1
 
 def test_list_monitored_products_filtra_por_query(client, db_session, test_user, prepare_test_database):
@@ -94,7 +109,8 @@ def test_list_monitored_products_filtra_por_query(client, db_session, test_user,
         user_id=test_user.id,
         name_identification="Console Gamer", 
         monitoring_type=MonitoringType.scraping,
-        product_url="https://example.com/console", 
+        product_url="https://example.com/console",
+        normalized_url=normalize_product_url_for_storage("https://example.com/console"),
         current_price=Decimal("5000.00"),
         status=MonitoredStatus.active,
     )
@@ -102,7 +118,8 @@ def test_list_monitored_products_filtra_por_query(client, db_session, test_user,
         user_id=test_user.id,
         name_identification="Notebook", 
         monitoring_type=MonitoringType.scraping,
-        product_url="https://example.com/notebook", 
+        product_url="https://example.com/notebook",
+        normalized_url=normalize_product_url_for_storage("https://example.com/notebook"),
         current_price=Decimal("4500.00"),
         status=MonitoredStatus.active,
     )
@@ -113,7 +130,7 @@ def test_list_monitored_products_filtra_por_query(client, db_session, test_user,
     assert response.status_code == 200
 
     payload = response.json()
-    assert payload["total"] == 1
+    assert payload["meta"]["total"] == 1
     assert len(payload["items"]) == 1
     assert payload["items"][0]["id"] == str(alvo.id)
 
@@ -124,6 +141,7 @@ def test_list_monitored_products_filtra_por_status_competitivo(client, db_sessio
         name_identification="Produto Urgente",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/urgente",
+        normalized_url=normalize_product_url_for_storage("https://example.com/urgente"),
         current_price=Decimal("100.00"),
         status=MonitoredStatus.active,
     )
@@ -132,6 +150,7 @@ def test_list_monitored_products_filtra_por_status_competitivo(client, db_sessio
         name_identification="Produto Estavel",
         monitoring_type=MonitoringType.scraping,
         product_url="https://example.com/estavel",
+        normalized_url=normalize_product_url_for_storage("https://example.com/estavel"),
         current_price=Decimal("200.00"),
         status=MonitoredStatus.active,
     )
@@ -166,9 +185,10 @@ def test_list_monitored_products_filtra_por_status_competitivo(client, db_sessio
     assert response.status_code == 200
 
     payload = response.json()
-    assert payload["total"] == 1
+    assert payload["meta"]["total"] == 1
     assert len(payload["items"]) == 1
     assert payload["items"][0]["id"] == str(produto_urgente.id)
+    assert payload["items"][0]["competitiveness_status"] == CompetitivenessStatus.URGENT.value
     
 def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_session, test_user, prepare_test_database):
     """Certifica que o POST cria registro pendente e agenda task"""

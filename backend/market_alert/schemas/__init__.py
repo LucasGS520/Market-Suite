@@ -15,6 +15,7 @@ from .schemas_products import (
     CompetitorProductResponse,
     PaginatedCompetitorResponse,
     PaginatedMonitoredProductsResponse,
+    PaginationMeta,
 )
 from .schemas_users import UserCreate, UserLogin, UserUpdate, UserResponse
 from .schemas_errors import ScrapingErrorResponse
@@ -27,6 +28,7 @@ __all__ = [
     "MonitoredProductCreateScraping",
     "MonitoredProductResponse",
     "PaginatedMonitoredProductsResponse",
+    "PaginationMeta",
     "MonitoredScrapedInfo",
     "CompetitorProductCreateScraping",
     "CompetitorProductResponse",

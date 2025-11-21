@@ -7,6 +7,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
+from market_alert.enums.enums_comparisons import CompetitivenessStatus
+
 
 class ProductResponse(BaseModel):
     """Visão simplificada do produto exposta pela API pública."""
@@ -14,7 +16,7 @@ class ProductResponse(BaseModel):
 
     id: UUID
     name: str = Field(..., description="Nome preparado para exibição")
-    product_url: HttpUrl = Field(..., description="Endereço canônico do produto")
+    url: HttpUrl = Field(..., description="Endereço canônico do produto")
     current_price: Decimal = Field(..., description="Preço obrigatório para exibição")
     currency: Optional[str] = Field(None, description="Moeda do preço informado")
     collected_at: datetime = Field(..., description="Momento da última coleta bem-sucedida")
@@ -35,15 +37,23 @@ class MonitoredScrapeCreationResponse(BaseModel):
 # ----- PRODUTO MONITORADO -----
 class MonitoredProductResponse(ProductResponse):
     """ Contrato simplificado de um produto monitorado """
+    owner_id: UUID = Field(..., description="Identificador do responsável pelo monitoramento")
     source: Literal["monitored"] = "monitored"
+    thumbnail: str | None = Field(None, description="Miniatura mais recente identificada pelo fluxo de scraping")
+    last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")
+    competitiveness_status: CompetitivenessStatus | None = Field(None,description="Classificação de competitividade calculada a partir das comparações")
     is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
+
+class PaginationMeta(BaseModel):
+    """ Metadados padronizados para paginação de listagens."""
+    total: int = Field(..., description="Quantidade total de registros disponíveis")
+    page: int = Field(..., description="Página atual baseada em 1")
+    per_page: int = Field(..., description="Quantidade de registros por página")
 
 class PaginatedMonitoredProductsResponse(BaseModel):
     """ Envelope de paginação para produtos monitorados """
     items: list[MonitoredProductResponse]
-    total: int
-    page: int
-    per_page: int
+    meta: PaginationMeta
 
 # ----- PRODUTO CONCORRENTE -----
 class CompetitorProductResponse(ProductResponse):

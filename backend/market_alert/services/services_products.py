@@ -12,6 +12,8 @@ from typing import Literal
 from fastapi import HTTPException, status
 
 from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
+from market_alert.enums.enums_comparisons import CompetitivenessStatus
+from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.schemas.schemas_products import (
     CompetitorProductResponse,
@@ -31,8 +33,15 @@ def _ensure_price(value: Decimal | None, context: str) -> Decimal:
     return value
 
 
-def build_monitored_response(monitored: MonitoredProduct) -> MonitoredProductResponse:
-    """ Converte um monitorado em contrato simplificado com preço obrigatório """
+def build_monitored_response(
+    monitored: MonitoredProduct,
+    summary: PriceComparisonSummary | None = None,
+) -> MonitoredProductResponse:
+    """Converte um monitorado em contrato simplificado com preço obrigatório.
+
+    Quando disponível, inclui status de competitividade calculado a partir do
+    último resumo armazenado para o produto.
+    """
     current_price = _ensure_price(monitored.current_price, "monitorado")
     availability = None
     if monitored.status in {MonitoredStatus.active, MonitoredStatus.pending}:
@@ -40,16 +49,30 @@ def build_monitored_response(monitored: MonitoredProduct) -> MonitoredProductRes
     elif monitored.status == MonitoredStatus.failed:
         availability = False
 
+    competitiveness_status: CompetitivenessStatus | None = None
+    if summary and summary.aggregates:
+        competitiveness_value = summary.aggregates.get("competitiveness_status")
+        if competitiveness_value:
+            try:
+                competitiveness_status = CompetitivenessStatus(competitiveness_value)
+            except ValueError:
+                #Ignora valores inesperados no agregado para não quebrar o contrato
+                competitiveness_status = None
+
     return MonitoredProductResponse(
         id=monitored.id,
+        owner_id=monitored.user_id,
         name=monitored.display_name,
-        product_url=monitored.product_url,
+        url=monitored.product_url,
         current_price=current_price,
         currency=monitored.currency,
         collected_at=monitored.collected_at,
         source="monitored",
         availability=availability,
         last_status=monitored.status.value,
+        last_scraped_at=monitored.last_scraped_at,
+        thumbnail=monitored.thumbnail,
+        competitiveness_status=competitiveness_status,
         is_featured=monitored.is_featured,
     )
 
@@ -72,7 +95,7 @@ def build_competitor_response(
         id=competitor.id,
         monitored_product_id=competitor.monitored_product_id,
         name=competitor.display_name,
-        product_url=competitor.product_url,
+        url=competitor.product_url,
         current_price=current_price,
         currency=competitor.currency,
         collected_at=competitor.collected_at,

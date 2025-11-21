@@ -15,6 +15,7 @@ from market_alert.schemas.schemas_products import (
     MonitoredProductResponse,
     PaginatedMonitoredProductsResponse,
     MonitoredScrapeCreationResponse,
+    PaginationMeta,
 )
 from market_alert.crud.crud_monitored import (
     get_all_monitored_products,
@@ -23,6 +24,10 @@ from market_alert.crud.crud_monitored import (
     delete_monitored_product,
     create_pending_monitored_product,
     get_monitored_product_by_user_and_url,
+)
+from market_alert.crud.crud_comparison import (
+    get_latest_summaries_for_products,
+    get_latest_summary,
 )
 from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.core.security import get_current_user
@@ -155,10 +160,17 @@ def list_monitored_products(
         status=status,
     )
 
+    product_ids = [product.id for product, _ in products_with_count]
+    summaries_map = get_latest_summaries_for_products(db, product_ids)
+
     response_payload: list[MonitoredProductResponse] = []
     for product, _ in products_with_count:
         try:
-            response_payload.append(build_monitored_response(product))
+            response_payload.append(
+                build_monitored_response(
+                    product, summary=summaries_map.get(product.id)
+                )
+            )
         except HTTPException as exc:
             #Ignora registros sem preço para manter o contrato enxuto
             logger.warning(
@@ -181,9 +193,7 @@ def list_monitored_products(
     )
     return PaginatedMonitoredProductsResponse(
         items=response_payload,
-        total=total,
-        page=page,
-        per_page=per_page,
+        meta=PaginationMeta(total=total, page=page, per_page=per_page),
     )
 
 @router.get("/featured", response_model=list[MonitoredProductResponse])
@@ -212,10 +222,18 @@ def list_featured_products(
         limit=MAX_FEATURED_ITEMS,
     )
 
+    summary_map = get_latest_summaries_for_products(
+        db, [product.id for product in featured_items]
+    )
+
     response_payload: list[MonitoredProductResponse] = []
     for product in featured_items:
         try:
-            response_payload.append(build_monitored_response(product))
+            response_payload.append(
+                build_monitored_response(
+                    product, summary=summary_map.get(product.id)
+                )
+            )
         except HTTPException as exc:
             #Manter o contrato consistente mesmo que algum destaque esteja sem preço
             logger.warning(
@@ -244,7 +262,8 @@ def get_product(request: Request, product_id: UUID, db: Session = Depends(get_db
         logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", product_id=str(product_id))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado.")
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
-    return build_monitored_response(product)
+    summary = get_latest_summary(db, product_id)
+    return build_monitored_response(product, summary=summary)
 
 @router.delete("/{product_id}", response_model=MonitoredProductResponse)
 def delete_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -254,7 +273,8 @@ def delete_product(request: Request, product_id: UUID, db: Session = Depends(get
     if not product or product.user_id != user.id:
         logger.warning("route_error", path=request.url.path, method=request.method, reason="not_found", product_id=str(product_id))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado.")
-    response_payload = build_monitored_response(product)
+    summary = get_latest_summary(db, product_id)
+    response_payload = build_monitored_response(product, summary=summary)
     _ = delete_monitored_product(db, product_id)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
     return response_payload
