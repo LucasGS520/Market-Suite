@@ -74,12 +74,9 @@ class CompetitorProductResponse(ProductResponse):
     is_paused: bool = Field(False, description="Indica se o monitoramento do concorrente está pausado")
 
 class PaginatedCompetitorResponse(BaseModel):
-    """Envelope padronizado para retornar concorrentes paginados."""
+    """Envelope padronizado para retornar concorrentes paginados com metadados """
     items: list[CompetitorProductResponse]
-    total: int
-    page: int
-    per_page: int
-
+    meta: PaginationMeta
 
 class BulkCompetitorActionRequest(BaseModel):
     """ Entrada de ações em massa sobre concorrentes específicos """

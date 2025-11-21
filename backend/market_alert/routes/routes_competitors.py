@@ -17,6 +17,7 @@ from market_alert.schemas.schemas_products import (
     BulkCompetitorActionResult,
     CompetitorProductResponse,
     CompetitorScrapeCreationResponse,
+    PaginationMeta,
     PaginatedCompetitorResponse,
 )
 from market_alert.services.services_competitors import (
@@ -304,11 +305,10 @@ def list_competitors(
         total=total,
     )
 
+    #Mantemos o total real retornado pela consulta paginada para consistência da API
     return PaginatedCompetitorResponse(
         items=items,
-        total=total,
-        page=page,
-        per_page=per_page,
+        meta=PaginationMeta(total=total, page=page, per_page=per_page)
     )
 
 @router.post("/bulk/resume", response_model=BulkCompetitorActionResult)

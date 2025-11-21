@@ -296,9 +296,7 @@ def test_list_competitors_returns_paginated_items(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 3
-    assert payload["page"] == 1
-    assert payload["per_page"] == 2
+    assert payload["meta"] == {"total": 3, "page": 1, "per_page": 2}
     assert len(payload["items"]) == 2
 
     first_item = payload["items"][0]
