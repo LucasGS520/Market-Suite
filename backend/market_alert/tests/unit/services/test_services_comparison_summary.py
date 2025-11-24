@@ -149,3 +149,18 @@ def test_competitiveness_status_competitive_when_cheaper() -> None:
     summary = build_comparison_summary(comparison, competitors_count=1)
 
     assert summary["competitiveness_status"] == "competitivo"
+
+def test_competitiveness_status_competitive_for_small_positive_delta() -> None:
+    """Mantém status competitivo para diferenças pequenas e positivas"""
+
+    comparison = _DummyComparison(
+        data={
+            "monitored_price": "100.50",
+            "lowest_competitor": {"price": "100.00"},
+            "discrepancies": [{"price": "100.00"}],
+        }
+    )
+
+    summary = build_comparison_summary(comparison, competitors_count=1)
+
+    assert summary["competitiveness_status"] == "competitivo"

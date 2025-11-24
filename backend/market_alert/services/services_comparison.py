@@ -245,7 +245,12 @@ def _calculate_competitiveness_status(
     monitored_price: Optional[Decimal],
     reference_price: Optional[Decimal],
 ) -> Optional[str]:
-    """ Define o status competitivo comparando o preço monitorado com o menor preço conhecido """
+    """ Define o status competitivo comparando o preço monitorado com o menor preço conhecido.
+
+    Quando a diferença percentual é positiva, porém abaixo do limiar mínimo
+    configurado, o status continua explícito como competitivo para evitar
+    resumos sem classificação.
+    """
     if (
         monitored_price is None or reference_price is None or reference_price <= Decimal("0")
     ):
@@ -261,6 +266,7 @@ def _calculate_competitiveness_status(
         return CompetitivenessStatus.ATTENTION.value
     elif price_delta >= COMPETITIVENESS_NON_COMPETITIVE_THRESHOLD:
         return CompetitivenessStatus.NON_COMPETITIVE.value
+    return CompetitivenessStatus.COMPETITIVE.value
 
 def _build_summary_from_result(
     payload: Dict[str, Any],
