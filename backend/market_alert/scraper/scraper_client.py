@@ -66,9 +66,18 @@ class ScraperFetchResult:
         return self.payload.model_dump() if self.payload else None
 
 def _build_timeout() -> httpx.Timeout:
-    """ Configura timeout composto respeitando limites do serviço """
+    """ Configura timeout composto garantindo valores coerentes com o scraper.
+
+    O timeout total precisa ser compatível com os limites de conexão e leitura
+    definidos por configuração para evitar ``ValueError`` do httpx em cenários
+    onde o total seja inferior à soma de ``connect`` e ``read``. Ajustamos o
+    total para o mínimo coerente, privilegiando estabilidade quando variáveis
+    de ambiente estiverem descalibradas
+    """
+    minimal_total = settings.SCRAPER_CONNECT_TIMEOUT + settings.SCRAPER_READ_TIMEOUT
+    total = max(settings.SCRAPER_TOTAL_TIMEOUT, minimal_total)
     return httpx.Timeout(
-        timeout=settings.SCRAPER_TOTAL_TIMEOUT,
+        timeout=total,
         connect=settings.SCRAPER_CONNECT_TIMEOUT,
         read=settings.SCRAPER_READ_TIMEOUT,
     )
@@ -261,7 +270,16 @@ class ScraperClient:
 
             if status_code == 200:
                 try:
-                    parsed_payload = ParserResponse.model_validate(response.json())
+                    raw_body = response.json()
+                except ValueError as exc:
+                    circuit_breaker.record_failure(host)
+                    raise ScraperClientError(
+                        "Corpo JSON inválido retornado pelo serviço de scraping",
+                        status_code=500,
+                    ) from exc
+
+                try:
+                    parsed_payload = ParserResponse.model_validate(raw_body)
                     parsed_payload = _sanitize_parser_response(parsed_payload)
                 except ValidationError as exc:
                     circuit_breaker.record_failure(host)

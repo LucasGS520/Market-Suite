@@ -16,6 +16,7 @@ from market_alert.scraper.scraper_client import (
     ScraperClient,
     ScraperClientError,
     ScraperFetchResult,
+    _build_timeout,
 )
 
 
@@ -178,6 +179,24 @@ async def test_fetch_handles_no_result(monkeypatch: pytest.MonkeyPatch) -> None:
     await client.aclose()
 
 @pytest.mark.asyncio
+async def test_fetch_raises_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Deve falhar quando o serviço retorna JSON malformado """
+    request = httpx.Request("POST", "http://fake/scraper/parse")
+    responses = [httpx.Response(200, content=b"not-json", request=request)]
+    monkeypatch.setattr(
+        "market_alert.scraper.scraper_client.httpx.AsyncClient",
+        lambda *a, **k: _DummyAsyncClient(responses),
+    )
+
+    client = ScraperClient(base_url="http://fake")
+
+    with pytest.raises(ScraperClientError) as exc:
+        await client.fetch(url="http://produto", monitored_id=None)
+
+    assert exc.value.status_code == 500
+    await client.aclose()
+
+@pytest.mark.asyncio
 async def test_fetch_raises_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Após exceder tentativas em erro 5xx o cliente levanta exceção."""
 
@@ -210,6 +229,24 @@ async def test_fetch_raises_after_retries(monkeypatch: pytest.MonkeyPatch) -> No
         await client.fetch(url="http://produto", monitored_id=None)
     assert exc.value.status_code == 500
     await client.aclose()
+
+def test_build_timeout_adjusts_total(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Timeout total deve respeitar mínimo coerente com connect + read"""
+
+    monkeypatch.setattr(
+        "market_alert.scraper.scraper_client.settings",
+        SimpleNamespace(
+            SCRAPER_TOTAL_TIMEOUT=5.0,
+            SCRAPER_CONNECT_TIMEOUT=3.0,
+            SCRAPER_READ_TIMEOUT=4.0,
+        ),
+    )
+
+    timeout = _build_timeout()
+
+    assert timeout.read == 4.0
+    assert timeout.connect == 3.0
+    assert timeout.pool == pytest.approx(7.0)
 
 @pytest.mark.asyncio
 async def test_fetch_uses_retry_after_header_with_http_date(monkeypatch: pytest.MonkeyPatch) -> None:
