@@ -34,12 +34,16 @@ from market_alert.services._scraper_common import (
 #Logger específico para o scraping de concorrentes
 logger = structlog.get_logger("scraper_competitor_service")
     
-def _get_existing(db: Session, payload: CompetitorProductCreateScraping) -> CompetitorProduct | None:
-    """ Recupera concorrente já persistido para reaproveitar metdados """
+def _get_existing(
+    db: Session,
+    payload: CompetitorProductCreateScraping,
+    normalized_url: str,
+) -> CompetitorProduct | None:
+    """ Recupera concorrente já persistido reutilizando a URL canônica """
     return get_competitor_by_monitored_and_url(
         db,
         payload.monitored_product_id,
-        str(payload.product_url),
+        normalized_url,
     )
 
 async def scrape_competitor_product_async(
@@ -53,7 +57,8 @@ async def scrape_competitor_product_async(
         normalized_url = canonicalize_product_url(str(url))
     except ValueError:
         normalized_url = str(url)
-    existing = _get_existing(db, payload)
+    normalized_payload = payload.model_copy(update={"product_url": normalized_url})
+    existing = _get_existing(db, normalized_payload, normalized_url)
     etag, last_modified = resolve_conditional_headers(existing)
 
     async with ScraperClient() as client:
@@ -121,7 +126,7 @@ async def scrape_competitor_product_async(
 
     competitor = create_or_update_competitor_product_scraped(
         db=db,
-        product_data=payload,
+        product_data=normalized_payload,
         scraped_info=scraped_info,
         last_checked=now,
         currency=sanitized_currency,

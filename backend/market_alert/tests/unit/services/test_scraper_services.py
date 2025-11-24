@@ -16,6 +16,7 @@ from backend.shared.schemas.shared_schemas_products import (
     MonitoredProductCreateScraping,
 )
 from backend.shared.schemas.shared_schemas_scraper import ParserResponse
+from shared.utils.url_validation import canonicalize_product_url
 
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperFetchResult
@@ -337,7 +338,7 @@ async def test_scrape_competitor_handles_not_modified(monkeypatch: pytest.Monkey
     monkeypatch.setattr(competitor.ScraperClient, "fetch", fetch_mock)
     monkeypatch.setattr(competitor.ScraperClient, "aclose", close_mock)
 
-    monkeypatch.setattr(competitor, "_get_existing", Mock(return_value=existing))
+    monkeypatch.setattr(competitor, "_get_existing", Mock(side_effect=lambda *_, **__: existing))
     update_mock = Mock()
     monkeypatch.setattr(competitor, "create_or_update_competitor_product_scraped", update_mock)
 
@@ -357,6 +358,59 @@ async def test_scrape_competitor_handles_not_modified(monkeypatch: pytest.Monkey
     assert existing.last_checked is not None
     assert result.status == "not_modified"
     assert result.product_id == str(existing_id)
+
+@pytest.mark.asyncio
+async def test_scrape_competitor_reutiliza_url_canonica(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_competitor_payload: CompetitorProductCreateScraping,
+) -> None:
+    """ Variações da URL devem reaproveitar registro e cabeçalhos condicionais """
+
+    raw_url = "HTTP://WWW.Example.com/produto//?ref=abc"
+    normalized_url = canonicalize_product_url(raw_url)
+    payload = fake_competitor_payload.model_copy(update={"product_url": raw_url})
+
+    existing = SimpleNamespace(
+        id=uuid4(),
+        etag="etag-old",
+        last_modified=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        last_checked=None,
+    )
+
+    db = Mock(spec=Session)
+    db.commit = Mock()
+
+    fetch_mock = AsyncMock(return_value=ScraperFetchResult(status_code=304, payload=None, headers={}))
+    close_mock = AsyncMock()
+    monkeypatch.setattr(competitor.ScraperClient, "fetch", fetch_mock)
+    monkeypatch.setattr(competitor.ScraperClient, "aclose", close_mock)
+
+    captured: dict[str, str] = {}
+
+    def _capture_existing(db_arg: Session, normalized_payload: CompetitorProductCreateScraping, normalized: str):
+        captured["payload_url"] = str(normalized_payload.product_url)
+        captured["normalized_url"] = normalized
+        return existing
+
+    monkeypatch.setattr(competitor, "_get_existing", _capture_existing)
+    monkeypatch.setattr(competitor, "create_or_update_competitor_product_scraped", Mock())
+
+    result = await competitor.scrape_competitor_product_async(
+        db=db,
+        user_id=uuid4(),
+        url=raw_url,
+        payload=payload,
+    )
+
+    assert captured["payload_url"] == normalized_url
+    assert captured["normalized_url"] == normalized_url
+    fetch_kwargs = fetch_mock.await_args.kwargs
+    assert fetch_kwargs["url"] == normalized_url
+    assert fetch_kwargs["etag"] == existing.etag
+    assert fetch_kwargs["last_modified"] == existing.last_modified
+    db.commit.assert_called_once()
+    assert result.status == "not_modified"
+    assert result.product_id == str(existing.id)
 
 @pytest.mark.asyncio
 async def test_scrape_competitor_sanitiza_campos(

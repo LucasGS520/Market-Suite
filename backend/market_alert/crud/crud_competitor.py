@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
-from shared.utils.url_validation import normalize_product_url_for_storage
+from shared.utils.url_validation import canonicalize_product_url, normalize_product_url_for_storage
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
@@ -40,7 +40,6 @@ def get_competitor_by_monitored_and_url(
 
 def _derive_competitor_name_from_url(product_url: str) -> str:
     """Gera um nome provisório a partir da URL para preencher o cadastro pendente."""
-
     parsed = urlparse(product_url)
     caminho = unquote(parsed.path or "").strip("/")
     ultimo_segmento = caminho.split("/")[-1] if caminho else ""
@@ -64,8 +63,12 @@ def create_pending_competitor_product(
     product_url: str,
 ) -> CompetitorProduct:
     """Cria um concorrente pendente garantindo unicidade por monitorado e URL."""
-
-    normalized_url = normalize_product_url_for_storage(str(product_url)) or str(product_url).strip()
+    normalized_url = normalize_product_url_for_storage(str(product_url))
+    if not normalized_url:
+        try:
+            normalized_url = canonicalize_product_url(str(product_url))
+        except ValueError:
+            normalized_url = str(product_url).strip()
     existing = get_competitor_by_monitored_and_url(db, monitored_product_id, normalized_url)
 
     if existing:
@@ -125,7 +128,10 @@ def create_or_update_competitor_product_scraped(
     normalized_url = normalize_product_url_for_storage(str(product_data.product_url))
     if not normalized_url:
         #Mantém fallback para registros antigos que já passaram pela validação externa
-        normalized_url = str(product_data.product_url).strip()
+        try:
+            normalized_url = canonicalize_product_url(str(product_data.product_url))
+        except ValueError:
+            normalized_url = str(product_data.product_url).strip()
 
     #Verifica se já existe um concorrente com o mesmo monitorado e URL canônica
     existing = get_competitor_by_monitored_and_url(
