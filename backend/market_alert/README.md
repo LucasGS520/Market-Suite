@@ -78,11 +78,11 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 
 | Categoria | Variáveis relevantes |
 |-----------|----------------------|
-| Banco de dados | `DATABASE_URL`, `SQLALCHEMY_POOL_SIZE`, `SQLALCHEMY_MAX_OVERFLOW`, `DB_ECHO` |
+| Banco de dados | `DATABASE_URL` |
+| Autenticação | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` |
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
-| Scraper | `SCRAPER_BASE_URL`, `SCRAPER_TIMEOUT_SECONDS`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN` |
-| Notificações | `NOTIFICATION_FROM_EMAIL`, `NOTIFICATION_WEBHOOK_URL`, `NOTIFICATION_COOLDOWN_SECONDS`, `NOTIFICATION_CHANNELS` |
-| Observabilidade | `SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `METRICS_PORT`, `LOG_LEVEL` |
+| Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
+| Comunicação e alertas | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM`, `TWILIO_WHATSAPP_FROM`, `FCM_SERVER_KEY` |
 
 ### Padrões de contratos
 - **Paginação**: todas as rotas de listagem utilizam envelope `{ items: [], meta: { total, page, per_page } }` com paginação base 1.
@@ -109,12 +109,19 @@ CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/1
 CELERY_TASK_ROUTES={"tasks.monitor_tasks.*": {"queue": "scraping"}}
 
-SCRAPER_BASE_URL=http://market_scraper:8010
-SCRAPER_TIMEOUT_SECONDS=15
+SCRAPER_SERVICE_URL=http://market_scraper:8010
+SCRAPER_CONNECT_TIMEOUT=5.0
+SCRAPER_READ_TIMEOUT=25.0
+SCRAPER_TOTAL_TIMEOUT=8.0
+SCRAPER_SERVICE_AUTH_HEADER=X-Internal-Token
 SCRAPER_SERVICE_AUTH_TOKEN=token-exemplo
 
-NOTIFICATION_FROM_EMAIL=alerts@empresa.dev
-SERVICE_NAME=market-alert
+SMTP_HOST=smtp.mailtrap.io
+SMTP_PORT=587
+SMTP_USERNAME=usuario
+SMTP_PASSWORD=senha
+SMTP_TLS=1
+SMTP_FROM=alerts@empresa.dev
 ```
 
 ## Segurança e Observabilidade
@@ -126,8 +133,7 @@ SERVICE_NAME=market-alert
 - **Observabilidade:**
   - Métricas expostas em `/metrics`
   - Logs estruturados via `structlog`
-   - Métricas Celery disponíveis em `beat_with_metrics.py` na porta configurada, incluindo contadores de scraping e latência (`market_alert_monitoring_tasks_total`, `market_alert_scrape_latency_seconds`).
-  - Tracing opcional via OTEL (`OTEL_EXPORTER_OTLP_ENDPOINT`)
+     - Métricas Celery disponíveis em `beat_with_metrics.py` na porta configurada, incluindo contadores de scraping e latência (`market_alert_monitoring_tasks_total`, `market_alert_scrape_latency_seconds`).
 
 ## Execução Local
 - **Docker Compose** (recomendado):
@@ -152,10 +158,10 @@ pytest market_alert -q
 As suítes cobrem rotas, tasks e integrações simuladas com o scraper; utilize `-k` ou `-m` para isolar cenários específicos.
 
 ## Troubleshooting Rápido
-- **Falhas ao contatar o scraper:** verifique `SCRAPER_BASE_URL`, tokens de serviço e métricas `SCRAPER_CLIENT_REQUESTS_TOTAL` em `shared/metrics`.
+- **Falhas ao contatar o scraper:** verifique `SCRAPER_SERVICE_URL`, tokens de serviço e métricas `SCRAPER_CLIENT_REQUESTS_TOTAL` em `shared/metrics`.`SCRAPER_CLIENT_REQUESTS_TOTAL` em `shared/metrics`.
 - **Fila Celery acumulada:** confira o estado do Redis e monitore `CELERY_TASKS_TOTAL` por fila; ajuste `concurrency` do worker conforme necessário.
 - **Rate limit excedido:** erros 429 indicam configuração do `Limiter`; ajuste limites ou whitelists em `main.py`.
 - **Problemas de banco:** monitore `DB_POOL_SIZE`, `DB_POOL_CHECKOUTS` (expostos em `/metrics`) e revise parâmetros de pool no `.env`.
-- **Métricas ausentes**: confirme porta configurada (`METRICS_PORT`) e se `beat_with_metrics.py` está ativo.
+- **Métricas ausentes**: confirme porta exposta pelo `beat_with_metrics.py` e se o processo está ativo.
 
 Atualize este documento sempre que rotas, tasks, filas ou dependências forem alteradas.
