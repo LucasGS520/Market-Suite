@@ -116,6 +116,9 @@ class Settings(ConfigBase):
     COMPARISON_IDEMPOTENCY_TTL_SECONDS: int = int(
         os.getenv("COMPARISON_IDEMPOTENCY_TTL_SECONDS", str(60 * 60))
     ) #TTL específico para deduplicação de comparações automáticas
+    COMPARISON_STORE_RAW_RESULT: bool = os.getenv(
+        "COMPARISON_STORE_RAW_RESULT", "0"
+    ).lower() in {"1", "true", "yes", "on"} #Habilita persistência do payload completo para depuração
 
 #Instância única de settings para a aplicação
 settings = Settings()

@@ -136,7 +136,7 @@ def run_price_comparison(
         encoded_result = jsonable_encoder(raw_result)
         alerts = encoded_result.get("alerts", [])
 
-        persist_raw_result = settings.COMPARISON_STORE_RAW_RESULT
+        persist_raw_result = getattr(settings, "COMPARISON_STORE_RAW_RESULT", False)
         stored_payload = (
             encoded_result
             if persist_raw_result
