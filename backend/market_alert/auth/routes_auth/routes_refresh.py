@@ -15,5 +15,10 @@ router = APIRouter(prefix="/auth", tags=["Autenticação"])
 @router.post("/refresh", response_model=TokenPairResponse)
 def refresh_tokens(payload: RefreshRequest, request: Request, db: Session = Depends(get_db)):
     """ Troca um Refresh Token válido por um novo par de tokens (access + refresh) """
-    logger.info("refresh_route_called", token=payload.refresh_token, ip=request.client.host)
+    #Evitamos registrar o valor do refresh token para não expor segredos em logs.
+    logger.info(
+        "refresh_route_called",
+        ip=request.client.host,
+        token_presente=bool(payload.refresh_token),
+    )
     return refresh_token_service(db, payload, request)

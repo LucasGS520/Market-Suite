@@ -130,6 +130,12 @@ SMTP_FROM=alerts@empresa.dev
   - Filtragem de payloads e segregação de permissões por usuário
   - Segredos permanecem em arquivos `.env` ignorados pelo Git.
 
+- **Política de logs e proteção de dados:**
+  - Nunca registre tokens de acesso/refresh, cabeçalhos `Authorization`, códigos de verificação ou senhas; utilize apenas flags booleanas para indicar presença.
+  - Não serialize ou propague variáveis de ambiente sensíveis (`SMTP_*`, `TWILIO_*`, `FCM_SERVER_KEY`, `SCRAPER_SERVICE_AUTH_TOKEN`) em mensagens de log ou respostas de API.
+  - Logs devem priorizar contexto seguro (IP, status da operação, identificadores internos) e adotar `structlog` para manter rastreabilidade sem expor credenciais.
+  - Em fluxos de auditoria, prefira `token_id` ou `user_id` em vez do valor cru de chaves ou tokens.
+
 - **Observabilidade:**
   - Métricas expostas em `/metrics`
   - Logs estruturados via `structlog`
@@ -144,7 +150,7 @@ SMTP_FROM=alerts@empresa.dev
   ```
 
 - **Sem Docker:**
-  1. Ative virtualenv e instale dependências: `pip install -r ../requirements.txt`.
+  1. Pré-requisitos: Python 3.11, Postgres e Redis acessíveis; instale deps com `pip install -r ../requirements.txt`.
   2. Configure `.env.common` e `.env.market_alert` com valores locais.
   3. Execute migrações: `alembic upgrade head`.
   4. Inicie API: `uvicorn market_alert.main:app --reload --port 8000`.

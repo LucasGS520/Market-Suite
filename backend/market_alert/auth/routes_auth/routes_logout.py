@@ -16,6 +16,11 @@ router = APIRouter(prefix="/auth", tags=["Autenticação"])
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(payload: RefreshRequest, request: Request, db: Session = Depends(get_db)):
     """ Revoga o Refresh Token enviado, encerrando a sessão """
-    logger.info("logout_route_called", token=payload.refresh_token, ip=request.client.host)
+    #Não registramos tokens crus para prevenir vazamento de credenciais nos logs.
+    logger.info(
+        "logout_route_called",
+        ip=request.client.host,
+        token_presente=bool(payload.refresh_token),
+    )
     logout_service(db, payload, request)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
