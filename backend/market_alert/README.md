@@ -105,6 +105,8 @@ Exemplo mínimo de `.env.market_alert`:
 ```env
 DATABASE_URL=postgresql+asyncpg://market:market@db:5432/market
 
+REDIS_URL=redis://:senha@redis:6379/0
+REDIS_PASSWORD=senha
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/1
 CELERY_TASK_ROUTES={"tasks.monitor_tasks.*": {"queue": "scraping"}}
@@ -122,6 +124,19 @@ SMTP_USERNAME=usuario
 SMTP_PASSWORD=senha
 SMTP_TLS=1
 SMTP_FROM=alerts@empresa.dev
+
+TWILIO_ACCOUNT_SID=id_conta_twilio
+TWILIO_AUTH_TOKEN=token_autenticacao_twilio
+TWILIO_SMS_FROM=numeor_sms_twilio
+TWILIO_WHATSAPP_FROM=whats_twilio
+
+FCM_SERVER_KEY=chave_fcm
+SLACK_WEBHOOK_URL=url_slack
+SECRET_KEY=chave_secreta_jwt
+
+ADAPTIVE_RECHECK_BASE_INTERVAL=7200
+SCRAPER_SERVICE_URL=url_servico_scraping
+
 ```
 
 ## Segurança e Observabilidade

@@ -35,6 +35,11 @@ class Settings(ConfigBase):
 
     #Segurança e tokens
     SECRET_KEY: str = os.getenv("SECRET_KEY") #Chave para asisnar JWTs
+    #Falha rápida evita tokens sem assinatura forte em ambientes mal configurados
+    if not SECRET_KEY:
+        raise ValueError(
+            "SECRET_KEY não foi encontrada no arquivo .env.market_alert; defina uma chave segura para assinar os JWTs"
+        )
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256") #Algoritmo de assinatura
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60)
