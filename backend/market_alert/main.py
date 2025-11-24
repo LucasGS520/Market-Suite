@@ -19,6 +19,7 @@ from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 
 from slowapi import Limiter
+from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
@@ -182,6 +183,7 @@ def create_app() -> FastAPI:
     app.add_middleware(MetricsMiddleware)
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+    app.add_middleware(SlowAPIMiddleware)
 
     # Endpoint que expõe todas as métricas para o Prometheus
     @app.get("/metrics")
