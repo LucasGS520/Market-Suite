@@ -1,3 +1,5 @@
+""" Canal de envio de notificações via Webhook do Slack """
+
 from __future__ import annotations
 
 import httpx
@@ -28,6 +30,6 @@ class SlackChannel(NotificationChannel):
                 )
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
-                logger.error("slack_http_error", error=str(exc))
+                logger.exception("slack_http_error")
                 return None
         return {"status": resp.status_code}

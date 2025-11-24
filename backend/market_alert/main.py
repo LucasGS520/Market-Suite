@@ -236,7 +236,7 @@ def create_app() -> FastAPI:
             count_enabled = db.query(AlertRule).filter(AlertRule.enabled.is_(True)).count()
             ALERT_RULES_ACTIVE.set(count_enabled)
     except Exception as exc:
-        logger.error("init_alert_rule_metric_failed", error=str(exc))
+        logger.exception("init_alert_rule_metric_failed")
 
     logger.info("app_initialized", service="marketalert")
     return app

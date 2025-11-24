@@ -155,9 +155,8 @@ def _collect_batch_products(db, batch: Iterable, *, task, logger_bound) -> tuple
             )
         except ScraperClientError as error:
             status = "failure"
-            product_logger.error(
+            product_logger.exception(
                 "recheck_monitored_http_error",
-                error=str(error),
                 status_code=error.status_code,
                 url=product.product_url,
             )
@@ -165,7 +164,7 @@ def _collect_batch_products(db, batch: Iterable, *, task, logger_bound) -> tuple
             continue
         except Exception as exc:
             status = "failure"
-            product_logger.error("recheck_monitored_unexpected_error", error=str(exc))
+            product_logger.exception("recheck_monitored_unexpected_error")
             _persist_scraping_error(db, product.id, product.product_url, str(exc), ScrapingErrorType.parsing_error, logger_bound=product_logger)
             _mark_monitored_failed(db, product.id, logger_bound=product_logger)
             continue
@@ -218,9 +217,8 @@ def _collect_batch_competitors(db, batch: Iterable, *, task, logger_bound) -> tu
             )
         except ScraperClientError as error:
             status = "failure"
-            competitor_logger.error(
+            competitor_logger.exception(
                 "recheck_competitor_http_error",
-                error=str(error),
                 status_code=error.status_code,
                 url=competitor.product_url,
             )
@@ -229,7 +227,7 @@ def _collect_batch_competitors(db, batch: Iterable, *, task, logger_bound) -> tu
 
         except Exception as exc:
             status = "failure"
-            competitor_logger.error("recheck_competitor_unexpected_error", error=str(exc))
+            competitor_logger.exception("recheck_competitor_unexpected_error")
             _persist_scraping_error(
                 db,
                 competitor.monitored_product_id,
@@ -329,14 +327,14 @@ def recheck_monitored_products(self) -> None:
 
     except self.MaxRetriesExceededError as exc:
         status = "failure"
-        task_logger.error("recheck_monitored_max_retries", error=str(exc))
+        task_logger.exception("recheck_monitored_max_retries")
     except ScraperClientError as exc:
         #Erros não tratados em _collect_* sçao convertidos em log crítico
         status = "failure"
-        task_logger.error("recheck_monitored_unhandled_http", error=str(exc), status_code=exc.status_code)
+        task_logger.exception("recheck_monitored_unhandled_http", status_code=exc.status_code)
     except Exception as exc:
         status = "failure"
-        task_logger.error("recheck_monitored_failed", error=str(exc))
+        task_logger.exception("recheck_monitored_failed")
         raise
     finally:
         _observe_latency("monitor_scraper", started_at)
@@ -377,13 +375,13 @@ def recheck_competitor_products(self) -> None:
 
     except self.MaxRetriesExceededError as exc:
         status = "failure"
-        task_logger.error("recheck_competitors_max_retries", error=str(exc))
+        task_logger.exception("recheck_competitors_max_retries")
     except ScraperClientError as exc:
         status = "failure"
-        task_logger.error("recheck_competitors_unhandled_http", error=str(exc), status_code=exc.status_code)
+        task_logger.exception("recheck_competitors_unhandled_http", status_code=exc.status_code)
     except Exception as exc:
         status = "failure"
-        task_logger.error("recheck_competitors_failed", error=str(exc))
+        task_logger.exception("recheck_competitors_failed")
         raise
     finally:
         _observe_latency("monitor_competitor", started_at)

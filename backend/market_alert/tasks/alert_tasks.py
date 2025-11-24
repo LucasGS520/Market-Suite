@@ -81,7 +81,7 @@ def send_alert_task(self, notification_log_id: str) -> None:
                 channel=log.channel.value
             ).observe(time.time() - start)
             db.commit()
-            logger.error("alert_send_failed", channel=log.channel.value, error=error)
+            logger.exception("alert_send_failed", channel=log.channel.value)
             raise self.retry(exc=exc)
 
         #Atualiza o log de envio com o resultado

@@ -386,7 +386,7 @@ def collect_product_task(
         normalized_url = normalize_product_url(url)
     except ValueError as exc:
         status = "failure"
-        task_logger.error("invalid_url_payload", error=str(exc))
+        task_logger.exception("invalid_url_payload")
         _mark_failed_product(product_id, task_logger=task_logger)
         _observe_metrics(start, "collect_product_task", status)
         SCRAPER_IN_FLIGHT.dec()
@@ -405,7 +405,7 @@ def collect_product_task(
         payload = MonitoredProductCreateScraping.model_validate(payload_data)
     except Exception as exc:
         status = "failure"
-        task_logger.error("invalid_payload", error=str(exc))
+        task_logger.exception("invalid_payload")
         _mark_failed_product(product_id, task_logger=task_logger)
         _observe_metrics(start, "collect_product_task", status)
         SCRAPER_IN_FLIGHT.dec()
@@ -417,7 +417,7 @@ def collect_product_task(
             user_uuid = UUID(user_id)
         except (TypeError, ValueError) as exc:
             status = "failure"
-            task_logger.error("invalid_user_reference", error=str(exc))
+            task_logger.exception("invalid_user_reference")
             _mark_failed_product(product_id, task_logger=task_logger)
             _observe_metrics(start, "collect_product_task", status)
             SCRAPER_IN_FLIGHT.dec()
@@ -502,9 +502,8 @@ def collect_product_task(
         except ScraperClientError as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
-            task_logger.error(
+            task_logger.exception(
                 "collect_product_http_error",
-                error=str(req_err),
                 monitored_product_id=product_id,
                 url=normalized_url,
                 status_code=req_err.status_code,
@@ -533,11 +532,11 @@ def collect_product_task(
             raise ScraperError(status_code=req_err.status_code or 500, detail=str(req_err))
         except self.MaxRetriesExceededError as exc:
             status = "failure"
-            task_logger.error("max_retries_exceeded", error=str(exc))
+            task_logger.exception("max_retries_exceeded")
             _mark_failed_product(product_id, db=db, task_logger=task_logger)
         except Exception as exc:
             status = "failure"
-            task_logger.error("collect_product_failed", error=str(exc))
+            task_logger.exception("collect_product_failed")
             _register_scraping_error(
                 db,
                 product_id,
@@ -623,7 +622,7 @@ def collect_competitor_task(
         normalized_url = normalize_product_url(url)
     except ValueError as exc:
         status = "failure"
-        task_logger.error("invalid_url_payload", error=str(exc))
+        task_logger.exception("invalid_url_payload")
         _observe_metrics(start, "collect_competitor_task", status)
         SCRAPER_IN_FLIGHT.dec()
         return
@@ -638,7 +637,7 @@ def collect_competitor_task(
         })
     except Exception as exc:
         status = "failure"
-        task_logger.error("invalid_payload", error=str(exc))
+        task_logger.exception("invalid_payload")
         _observe_metrics(start, "collect_competitor_task", status)
         SCRAPER_IN_FLIGHT.dec()
         return
@@ -708,9 +707,8 @@ def collect_competitor_task(
         except ScraperClientError as req_err:
             status = "failure"
             SCRAPER_HEAD_FAILURES_TOTAL.inc()
-            task_logger.error(
+            task_logger.exception(
                 "collect_competitor_http_error",
-                error=str(req_err),
                 monitored_product_id=monitored_product_id,
                 url=normalized_url,
                 status_code=req_err.status_code,
@@ -739,11 +737,11 @@ def collect_competitor_task(
         
         except self.MaxRetriesExceededError as exc:
             status = "failure"
-            task_logger.error("max_retries_exceeded", error=str(exc))
+            task_logger.exception("max_retries_exceeded")
 
         except Exception as exc:
             status = "failure"
-            task_logger.error("collect_competitor_failed", error=str(exc))
+            task_logger.exception("collect_competitor_failed")
 
         finally:
             _observe_metrics(start, "collect_competitor_task", status)

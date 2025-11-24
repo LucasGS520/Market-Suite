@@ -45,7 +45,7 @@ def verify_access_token(token: str) -> dict:
         )
     except JWTError as e:
         #Qualquer erro de decodificação diferente de expiração indica token inválido
-        logger.error("jwt_invalid", error=str(e))
+        logger.exception("jwt_invalid")
         #Retorna 403 para tokens corrompidos ou assinados com chave incorreta
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

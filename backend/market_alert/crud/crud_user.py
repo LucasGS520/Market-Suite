@@ -77,15 +77,15 @@ def create_user(db: Session, user_data: UserCreate) -> UserResponse:
         logger.info("user_created", user_id=str(new_user.id))
         return UserResponse.model_validate(new_user)
 
-    except IntegrityError as e:
+    except IntegrityError:
         db.rollback()  #Reverte a transação caso haja erro de integridade
-        logger.error("integrity_error_create_user", error=str(e))
+        logger.exception("integrity_error_create_user", email=user_data.email)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Erro de integridade: E-mail ou telefone já cadastrados")
 
-    except Exception as e:
+    except Exception:
         db.rollback()
-        logger.exception("unexpected_error_create_user", error=str(e))
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erro interno: {str(e)}")
+        logger.exception("unexpected_error_create_user", email=user_data.email)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro interno durante criação de usuário")
 
 def update_user(db: Session, user_id: UUID, updates: UserUpdate) -> UserResponse:
     """ Atualiza os Dados de um usuário existente """

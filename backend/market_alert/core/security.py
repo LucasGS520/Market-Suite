@@ -35,8 +35,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(o
     except HTTPException:
         #JWT expirado ou inválido, lança HTTPException adequado
         raise
-    except Exception as e:
-        logger.error("invalid_token_format", error=str(e))
+    except Exception:
+        logger.exception("invalid_token_format")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido: sub ausente",

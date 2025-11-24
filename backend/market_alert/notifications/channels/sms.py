@@ -1,3 +1,5 @@
+""" Canal de envio de mensagens SMS via Twilio """
+
 from __future__ import annotations
 
 from twilio.http.async_http_client import AsyncTwilioHttpClient

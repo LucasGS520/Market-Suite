@@ -71,7 +71,7 @@ def compare_prices_task(self, monitored_id: str) -> None:
                 send_notification_task.delay(monitored_id, alerts)
 
         except Exception as exc:
-            task_logger.error("compare_prices_failed", error=str(exc))
+            task_logger.exception("compare_prices_failed")
             raise self.retry(exc=exc)
 
         finally:

@@ -25,9 +25,9 @@ def health_check():
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         status["postgres"] = {"status": "ok"}
-    except SQLAlchemyError as e:
-        logger.error("postgres_unavailable", errors=str(e))
-        status["postgres"] = {"status": "error", "detail": str(e)}
+    except SQLAlchemyError:
+        logger.exception("postgres_unavailable")
+        status["postgres"] = {"status": "error", "detail": "Postgres indisponível"}
         status["overall"] = "error"
 
     #Verificação do Redis
@@ -36,9 +36,9 @@ def health_check():
         redis_client = redis.from_url(settings.redis_url)
         redis_client.ping()
         status["redis"] = {"status": "ok"}
-    except Exception as e:
-        logger.error("redis_unavailable", error=str(e))
-        status["redis"] = {"status": "error", "detail": str(e)}
+    except Exception:
+        logger.exception("redis_unavailable")
+        status["redis"] = {"status": "error", "detail": "Redis indisponível"}
         status["overall"] = "error"
 
 
@@ -62,9 +62,9 @@ def health_check():
         else:
             status["beat"] = {"status": "missing"}
             status["overall"] = "error"
-    except Exception as e:
-        logger.error("beat_check_failed", error=str(e))
-        status["beat"] = {"status": "error", "detail": str(e)}
+    except Exception:
+        logger.exception("beat_check_failed")
+        status["beat"] = {"status": "error", "detail": "Falha ao obter heartbeat"}
         status["overall"] = "error"
 
     logger.info("health_check_result", status=status)

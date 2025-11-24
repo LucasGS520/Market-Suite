@@ -166,7 +166,7 @@ class NotificationManager:
         except Exception as exc:
             success = False
             error = str(exc)
-            logger.error("notification_failed", channel=channel_type.value, error=error)
+            logger.exception("notification_failed", channel=channel_type.value)
         finally:
             duration = time.time() - start
             metrics.NOTIFICATION_SEND_DURATION_SECONDS.labels(channel=channel_type.value).observe(duration)

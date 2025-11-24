@@ -1,3 +1,5 @@
+""" Canal de notificações push usando Firebase Cloud MEssaging """
+
 from __future__ import annotations
 
 import httpx
@@ -33,6 +35,6 @@ class PushChannel(NotificationChannel):
                 )
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
-                logger.error("push_http_error", error=str(exc))
+                logger.exception("push_http_error")
                 return None
         return {"status": resp.status_code}

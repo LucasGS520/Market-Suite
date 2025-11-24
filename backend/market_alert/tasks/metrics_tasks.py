@@ -67,7 +67,7 @@ def collect_celery_metrics():
                     total_pending=total_pending, workers=total_workers, concurrency=total_concurrency)
 
     except Exception as exc:
-        logger.error("failed_collecting_celery_metrics", error=str(exc))
+        logger.exception("failed_collecting_celery_metrics")
 
 #Sinais para medir duração de cada task
 @signals.task_prerun.connect
@@ -100,7 +100,7 @@ def collect_db_metrics():
         DB_POOL_SIZE.set(engine.pool.size())
         DB_POOL_CHECKOUTS.set(engine.pool.checkedout())
     except Exception as exc:
-        logger.error("failed_collecting_db_metrics", error=str(exc))
+        logger.exception("failed_collecting_db_metrics")
 
 @shared_task(name="market_alert.tasks.metrics_tasks.cleanup_cache")
 def cleanup_cache():
@@ -125,4 +125,4 @@ def cleanup_cache():
             CACHE_CLEANUP_TOTAL.inc(removed)
         logger.info("cleanup_cache_success", removed=removed)
     except Exception as exc:
-        logger.error("cleanup_cache_failure", error=str(exc))
+        logger.exception("cleanup_cache_failure")

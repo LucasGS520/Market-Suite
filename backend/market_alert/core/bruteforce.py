@@ -21,8 +21,8 @@ def block_ip(request: Request) -> None:
     try:
         #Recupera o contador de falhas para este IP
         attempts = int(redis_client.get(key) or 0)
-    except Exception as e:
-        logger.error("redis_unavailable_in_block_ip", error=str(e), ip=ip)
+    except Exception:
+        logger.exception("redis_unavailable_in_block_ip", ip=ip)
         #Em caso de falha no Redis, não bloqueia por segurança
         return
 
@@ -45,9 +45,9 @@ def record_failed_attempt(request: Request) -> None:
             #Define expiração apenas na primeira falha e evita armazenamento eterno de tentativas
             redis_client.expire(key, settings.BRUTE_FORCE_BLOCK_DURATION)
         logger.info("failed_login_attempt", ip=ip, attempts=attempts)
-    except Exception as e:
+    except Exception:
         #Erro de comunicação com Redis impede a contagem
-        logger.error("redis_unavailable_in_record_failed", error=str(e), ip=ip)
+        logger.exception("redis_unavailable_in_record_failed", ip=ip)
 
 def reset_failed_attempts(request: Request) -> None:
     """ Limpa o contador de falhas de login para um IP após autenticação bem-sucedida """
@@ -58,6 +58,6 @@ def reset_failed_attempts(request: Request) -> None:
     try:
         redis_client.delete(key)
         logger.info("reset_failed_attempts", ip=ip)
-    except Exception as e:
+    except Exception:
         #Falha de comunicação torna a limpeza impossível
-        logger.error("redis_unavailable_in_reset", error=str(e), ip=ip)
+        logger.exception("redis_unavailable_in_reset", ip=ip)
