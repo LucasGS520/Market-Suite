@@ -89,6 +89,8 @@ pdm.lock
 # celery
 celerybeat-schedule*
 celerybeat.pid
+backend/market_alert/celerybeat-schedule*
+backend/market_alert/**/__pycache__/
 
 # SageMath parsed files
 *.sage.py
