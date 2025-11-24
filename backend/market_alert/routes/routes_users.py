@@ -32,17 +32,15 @@ def _validate_admin_permission(current_user: User) -> None:
 def add_user(
     request: Request,
     user_data: UserCreate,
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """ Endpoint para criar um usuário"""
-    _validate_admin_permission(current_user)
+    """ Endpoint público para criar um usuário """
+    # Esta rota permanece aberta para permitir o cadastro inicial de usuários antes de qualquer autenticação
     logger.info(
         "route_called",
         path=request.url.path,
         method=request.method,
         email=user_data.email,
-        actor_id=str(current_user.id),
     )
     user = create_user(db, user_data)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(user.id))
