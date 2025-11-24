@@ -6,6 +6,8 @@ from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, field_validator, ConfigDict
 
+from market_alert.schemas.schemas_auth import password_validator
+
 
 #Classe base para reutilizar atributos comuns
 class UserBase(BaseModel):
@@ -38,14 +40,12 @@ class UserCreate(UserBase):
     password: str #senha recebida em texto, mas será armazenada com hash
     notifications_enabled: bool = True
 
-    #Valida senha com no mínimo 8 caracteres
-    @field_validator("password")
+    #Valida senha exigindo complexidade mínima
+    @field_validator("password", mode="before")
     @classmethod
     def validate_password(cls, value):
-        """ Valida senha com no mínimo 8 dígitos """
-        if len(value) < 8:
-            raise ValueError("A senha deve ter no mínimo 8 caracteres.")
-        return value
+        """ Reutiliza a validação padrão de senha, garantindo letras e números """
+        return password_validator(value)
 
 #Esquema de entrada para Login
 class UserLogin(BaseModel):
