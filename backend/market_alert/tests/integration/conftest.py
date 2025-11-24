@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from uuid import uuid4
+from contextlib import contextmanager
 
 from shared.infra.db import Base
 from shared.infra.db import get_db
@@ -95,23 +96,65 @@ def test_user(db_session):
     return user
 
 @pytest.fixture()
-def client(db_session, test_user):
+def admin_user(db_session):
+    """Cria um usuário administrador para testes que exigem permissões elevadas."""
+    unique = uuid4().hex
+    hashed = hash_password("minha_senha_test")
+    user = User(
+        id=uuid4(),
+        name="Administrador Teste",
+        email=f"admin_{unique}@example.com",
+        phone_number=f"118{unique[:8]}",
+        password=hashed,
+        role="admin",
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+@contextmanager
+def _build_client(db_session, user: User | None):
+    """Configura o TestClient com overrides de dependências isolados por teste."""
+    original_overrides = dict(app.dependency_overrides)
     def override_get_db():
         try:
             yield db_session
         finally:
             db_session.close()
 
-    app.dependency_overrides[get_db] = override_get_db
-    user_id = test_user.id
+    overrides = {**original_overrides, get_db: override_get_db}
 
-    def override_get_current_user():
-        """Retorna o usuário sempre reanexado à sessão de teste"""
+    if user:
+        user_id = user.id
 
-        # Garante que o usuário utilizado na autenticação esteja associado ao db_session atual
-        return db_session.get(User, user_id)
+        def override_get_current_user():
+            """Reanexa o usuário à sessão atual antes de retorná-lo."""
+            return db_session.get(User, user_id)
 
-    app.dependency_overrides[get_current_user] = override_get_current_user
+        overrides[get_current_user] = override_get_current_user
+    else:
+        overrides.pop(get_current_user, None)
 
-    with TestClient(app) as c:
-        yield c
+    app.dependency_overrides = overrides
+
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides = original_overrides
+
+@pytest.fixture()
+def client(db_session, test_user):
+    with _build_client(db_session, test_user) as client_instance:
+        yield client_instance
+
+@pytest.fixture()
+def admin_client(db_session, admin_user):
+    with _build_client(db_session, admin_user) as client_instance:
+        yield client_instance
+
+@pytest.fixture()
+def unauthenticated_client(db_session):
+    """Disponibiliza cliente de teste sem autenticação para validar bloqueios de acesso."""
+    with _build_client(db_session, user=None) as client_instance:
+        yield client_instance

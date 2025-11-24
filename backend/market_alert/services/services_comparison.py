@@ -82,6 +82,26 @@ def get_paginated_comparisons_for_user(
         meta={"total": total, "page": page, "per_page": per_page},
     )
 
+def get_comparison_summary_for_user(
+    *, db: Session, monitored_id: UUID, user: User
+) -> PriceComparisonSummaryResponse:
+    """Retorna o resumo mais recente garantindo que o produto pertença ao usuário."""
+    ensure_user_can_view_monitored(db=db, monitored_id=monitored_id, user=user)
+
+    stored_summary = get_latest_summary(db, monitored_product_id=monitored_id)
+    comparison = None
+
+    if stored_summary and stored_summary.comparison_id:
+        comparison = get_comparison_by_id(db, stored_summary.comparison_id)
+
+    normalized_summary = build_comparison_summary(
+        comparison,
+        competitors_count=stored_summary.competitors_count if stored_summary else 0,
+        stored_summary=stored_summary,
+    )
+
+    return PriceComparisonSummaryResponse(monitored_product_id=monitored_id, **normalized_summary)
+
 def get_comparison_detail_for_user(
     *,
     db: Session,
