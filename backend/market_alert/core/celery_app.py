@@ -1,8 +1,9 @@
-""" Configura a aplicação Celery do `market_alert` com métricas padronizadas """
+""" Configura a aplicação Celery do `market_alert` e registra tasks e métricas """
 
 #Registra métricas antes de iniciar o HTTP server
 import os
 import logging
+from importlib import import_module
 
 import structlog
 from structlog.typing import BindableLogger, EventDict
@@ -24,13 +25,15 @@ from market_alert.core.celery_schedule import (
     TASK_ROUTES,
 )
 
-
 SERVICE_LABEL = "market_alert_worker"
 NOISY_EVENT_NAMES = {
     "channel_vars_missing",
     "collected_celery_metrics",
     "collect_audit_metrics_noop",
 }
+
+logger = structlog.get_logger("celery_app")
+
 
 def drop_repeated_events(
     _logger: BindableLogger,
@@ -104,6 +107,23 @@ if CeleryInstrumentor:
     #Instrumenta o Celery para observabilidade distribuída
     CeleryInstrumentor().instrument()
 
+def _force_import_task_modules() -> None:
+    """ Garante importação explícita dos módulos de tasks registrados 
+    
+    Celery carrega os módulos listados em ``include`` quando inicializado
+    via CLI. Em execuções fora do worker (ex.: testes ou inicialização da
+    aplicação) realizamos import explícito para registrar as tasks e evitar
+    surpresas com módulos não descobertos.
+    """
+    for module_path in TASK_MODULES:
+        try:
+            import_module(module_path)
+            logger.debug("task_module_imported", module=module_path)
+        except Exception:
+            logger.exception("task_module_import_failed", module=module_path)
+
+
+_force_import_task_modules()
 
 @worker_ready.connect
 def _start_prometheus_server(**kwargs):

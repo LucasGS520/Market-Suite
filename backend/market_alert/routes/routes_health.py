@@ -2,10 +2,11 @@
 
 import structlog
 import redis
-from fastapi import APIRouter
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from datetime import datetime, timezone
 
 from shared.infra.db import get_engine
 from market_alert.core.config_alert import settings
@@ -69,3 +70,31 @@ def health_check():
 
     logger.info("health_check_result", status=status)
     return status
+
+@router.get("/readiness", tags=["Health"])
+def readiness_check():
+    """Valida se as dependências principais estão prontas para uso."""
+    status = {"overall": "ok"}
+
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+        status["postgres"] = {"status": "ok"}
+    except SQLAlchemyError:
+        logger.exception("readiness_postgres_unavailable")
+        status["postgres"] = {"status": "error", "detail": "Postgres indisponível"}
+        status["overall"] = "error"
+
+    try:
+        redis_client = redis.from_url(settings.redis_url)
+        redis_client.ping()
+        status["redis"] = {"status": "ok"}
+    except Exception:
+        logger.exception("readiness_redis_unavailable")
+        status["redis"] = {"status": "error", "detail": "Redis indisponível"}
+        status["overall"] = "error"
+
+    if status["overall"] != "ok":
+        raise HTTPException(status_code=503, detail=status)
+
+    return {"status": "ready", **status}
