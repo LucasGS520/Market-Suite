@@ -10,6 +10,24 @@ from prometheus_client import Counter, Gauge, Histogram
 
 
 #Métricas focadas no pipeline determinístico do scraper
+SCRAPER_TASK_RETRY_ATTEMPTS_TOTAL = Counter(
+    "scraper_task_retry_attempts_total",
+    "Total de tentativas de retry realizadas pelas tasks de scraping",
+    ["task", "reason"],
+)
+
+SCRAPER_TASK_RETRY_EXHAUSTED_TOTAL = Counter(
+    "scraper_task_retry_exhausted_total",
+    "Total de retries esgotados nas tasks de scraping",
+    ["task", "reason"],
+)
+
+SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL = Counter(
+    "scraper_circuit_open_events_total",
+    "Total de bloqueios por circuito aberto ao chamar o scraper",
+    ["host"],
+)
+
 SCRAPER_STEP_SUCCESS_TOTAL = Counter(
     "scraper_step_success_total",
     "Total de execuções bem-sucedidas por etapa do pipeline do scraper",
@@ -166,6 +184,9 @@ __all__ = [
     "SCRAPING_LATENCY_SECONDS",
     "SCRAPER_IN_FLIGHT",
     "SCRAPER_HEAD_FAILURES_TOTAL",
+    "SCRAPER_TASK_RETRY_ATTEMPTS_TOTAL",
+    "SCRAPER_TASK_RETRY_EXHAUSTED_TOTAL",
+    "SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL",
     "SCRAPER_CACHE_LOOKUPS_TOTAL",
     "SCRAPER_CACHE_SIZE",
     "SCRAPER_CACHE_EVICTIONS_TOTAL",

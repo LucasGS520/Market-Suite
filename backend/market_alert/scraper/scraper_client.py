@@ -22,6 +22,7 @@ import structlog
 
 from pydantic import ValidationError
 
+from backend.shared.metrics_scraper import SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL
 from backend.shared.schemas.shared_schemas_scraper import ParserRequest, ParserResponse
 from shared.utils.redis_client import get_redis_client
 
@@ -131,7 +132,7 @@ circuit_breaker = CircuitBreaker(
 
 @dataclass
 class ScraperClient:
-    """ Cliente HTTP assíncrono com retries, rate limit e circuit breaker """
+    """ Cliente HTTP síncrono com retries, rate limit e circuit breaker """
     base_url: str = settings.SCRAPER_SERVICE_URL
     client: httpx.Client = field(init=False)
     _closed: bool = field(default=False, init=False)
@@ -159,6 +160,7 @@ class ScraperClient:
         host = parsed.netloc or "unknown"
 
         if circuit_breaker.is_open(host):
+            SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL.labels(host=host).inc()
             raise ScraperClientError(
                 "Circuito aberto para host solicitado",
                 status_code=503,

@@ -300,3 +300,54 @@ def test_fetch_uses_retry_after_header_with_http_date(monkeypatch: pytest.Monkey
     assert result.status_code == 200
     assert sleep_calls, "esperava chamada de retry baseada no cabeçalho"
     assert 5 <= sleep_calls[0] <= 7
+
+def test_fetch_converts_http_date_retry_after_to_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Garante atraso determinístico ao converter ``Retry-After`` com HTTP-date."""
+
+    fixed_now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    header_value = "Mon, 01 Jan 2024 12:02:00 GMT"
+
+    responses = [
+        _build_response(429, headers={"Retry-After": header_value}),
+        _build_response(200, {"name": "A", "current_price": 10, "url": "http://a", "source": "test"}),
+    ]
+
+    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.Client", lambda *a, **k: _DummyClient(responses))
+
+    class _FixedDateTime:
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    monkeypatch.setattr("market_alert.scraper.scraper_client.datetime", _FixedDateTime)
+
+    sleep_calls: list[float] = []
+
+    def _fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr("market_alert.scraper.scraper_client.time.sleep", _fake_sleep)
+    monkeypatch.setattr("market_alert.scraper.scraper_client.settings", SimpleNamespace(
+        SCRAPER_TOTAL_TIMEOUT=8.0,
+        SCRAPER_CONNECT_TIMEOUT=5.0,
+        SCRAPER_READ_TIMEOUT=5.0,
+        SCRAPER_RETRY_ATTEMPTS=2,
+        SCRAPER_RETRY_BACKOFF_MIN=30.0,
+        SCRAPER_RETRY_BACKOFF_MAX=60.0,
+        SCRAPER_HOST_RATE_LIMIT=10,
+        SCRAPER_HOST_RATE_WINDOW_SECONDS=60,
+        SCRAPER_CIRCUIT_FAILURE_THRESHOLD=5,
+        SCRAPER_CIRCUIT_WINDOW_SECONDS=600,
+        SCRAPER_CIRCUIT_COOLDOWN_SECONDS=600,
+        SCRAPER_SERVICE_URL="http://fake",
+        SCRAPER_SERVICE_AUTH_HEADER=None,
+        SCRAPER_SERVICE_AUTH_TOKEN=None,
+    ))
+
+    client = ScraperClient(base_url="http://fake")
+    result = client.fetch(url="http://produto", monitored_id=None)
+    client.close()
+
+    assert result.status_code == 200
+    assert sleep_calls == [120]
+    

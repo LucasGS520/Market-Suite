@@ -17,7 +17,13 @@ from sqlalchemy.orm import Session
 from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
 from shared.exceptions import ScraperError
-from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS, SCRAPER_HEAD_FAILURES_TOTAL, SCRAPER_IN_FLIGHT
+from shared.metrics.metrics_scraper import (
+    SCRAPING_LATENCY_SECONDS,
+    SCRAPER_HEAD_FAILURES_TOTAL,
+    SCRAPER_IN_FLIGHT,
+    SCRAPER_TASK_RETRY_ATTEMPTS_TOTAL,
+    SCRAPER_TASK_RETRY_EXHAUSTED_TOTAL,
+)
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.enums.error_codes import ScrapingErrorType
@@ -301,6 +307,14 @@ def _observe_metrics(start: datetime, task_name: str, status: str) -> None:
     duration = (datetime.now(timezone.utc) - start).total_seconds()
     SCRAPING_LATENCY_SECONDS.labels(source="scraper").observe(duration)
 
+def _count_retry_attempt(task_name: str, reason: str) -> None:
+    """Incrementa contador de retries disparados para visibilidade operacional."""
+    SCRAPER_TASK_RETRY_ATTEMPTS_TOTAL.labels(task=task_name, reason=reason).inc()
+
+def _count_retry_exhausted(task_name: str, reason: str) -> None:
+    """Marca quando uma task atingiu o limite de retries configurado."""
+    SCRAPER_TASK_RETRY_EXHAUSTED_TOTAL.labels(task=task_name, reason=reason).inc()
+
 def _compute_retry_delay(base: float, attempt: int, limit: int) -> int:
     """ Calcula atraso exponencial limitado para retries no Celery """
     delay = base * (2 ** max(0, attempt - 1))
@@ -391,6 +405,15 @@ def collect_product_task(
     except ValueError as exc:
         status = "failure"
         task_logger.exception("invalid_url_payload")
+        with SessionLocal() as db:
+            _register_scraping_error(
+                db,
+                product_id,
+                str(url),
+                str(exc),
+                ScrapingErrorType.parsing_error,
+                task_logger=task_logger,
+            )
         _mark_failed_product(product_id, task_logger=task_logger)
         _observe_metrics(start, "collect_product_task", status)
         SCRAPER_IN_FLIGHT.dec()
@@ -410,6 +433,15 @@ def collect_product_task(
     except Exception as exc:
         status = "failure"
         task_logger.exception("invalid_payload")
+        with SessionLocal() as db:
+            _register_scraping_error(
+                db,
+                product_id,
+                normalized_url,
+                str(exc),
+                ScrapingErrorType.parsing_error,
+                task_logger=task_logger,
+            )
         _mark_failed_product(product_id, task_logger=task_logger)
         _observe_metrics(start, "collect_product_task", status)
         SCRAPER_IN_FLIGHT.dec()
@@ -422,6 +454,14 @@ def collect_product_task(
         except (TypeError, ValueError) as exc:
             status = "failure"
             task_logger.exception("invalid_user_reference")
+            _register_scraping_error(
+                db,
+                product_id,
+                normalized_url,
+                str(exc),
+                ScrapingErrorType.parsing_error,
+                task_logger=task_logger,
+            )
             _mark_failed_product(product_id, task_logger=task_logger)
             _observe_metrics(start, "collect_product_task", status)
             SCRAPER_IN_FLIGHT.dec()
@@ -476,6 +516,7 @@ def collect_product_task(
                     ScrapingErrorType.no_result,
                     task_logger=task_logger,
                 )
+                _count_retry_attempt("collect_product_task", "no_result")
                 retry_delay = min(
                     settings.SCRAPER_NO_RESULT_RETRY_SECONDS * (self.request.retries + 1),
                     settings.SCRAPER_MAX_RETRY_DELAY_SECONDS,
@@ -523,6 +564,7 @@ def collect_product_task(
             )
             
             if req_err.status_code and 500 <= req_err.status_code < 600:
+                _count_retry_attempt("collect_product_task", "http_5xx")
                 delay = _compute_retry_delay(
                     settings.SCRAPER_RETRY_BACKOFF_MIN,
                     self.request.retries + 1,
@@ -531,6 +573,7 @@ def collect_product_task(
                 raise self.retry(countdown=delay)
             
             if req_err.status_code == 429 and req_err.retry_after:
+                _count_retry_attempt("collect_product_task", "http_429")
                 raise self.retry(countdown=req_err.retry_after)
             
             _mark_failed_product(product_id, db=db, task_logger=task_logger)
@@ -538,6 +581,15 @@ def collect_product_task(
         except self.MaxRetriesExceededError as exc:
             status = "failure"
             task_logger.exception("max_retries_exceeded")
+            _register_scraping_error(
+                db,
+                product_id,
+                normalized_url,
+                "limite de tentativas de retry atingido",
+                ScrapingErrorType.parsing_error,
+                task_logger=task_logger,
+            )
+            _count_retry_exhausted("collect_product_task", "max_retries")
             _mark_failed_product(product_id, db=db, task_logger=task_logger)
         except Exception as exc:
             status = "failure"
@@ -693,6 +745,7 @@ def collect_competitor_task(
                     ScrapingErrorType.no_result,
                     task_logger=task_logger,
                 )
+                _count_retry_attempt("collect_competitor_task", "no_result")
                 delay = min(
                     settings.SCRAPER_NO_RESULT_RETRY_SECONDS * (self.request.retries + 1),
                     settings.SCRAPER_MAX_RETRY_DELAY_SECONDS,
@@ -728,6 +781,7 @@ def collect_competitor_task(
             )
             
             if req_err.status_code and 500 <= req_err.status_code < 600:
+                _count_retry_attempt("collect_competitor_task", "http_5xx")
                 delay = _compute_retry_delay(
                     settings.SCRAPER_RETRY_BACKOFF_MIN,
                     self.request.retries + 1,
@@ -736,6 +790,7 @@ def collect_competitor_task(
                 raise self.retry(countdown=delay)
             
             if req_err.status_code == 429 and req_err.retry_after:
+                _count_retry_attempt("collect_competitor_task", "http_429")
                 raise self.retry(countdown=req_err.retry_after)
             
             raise ScraperError(status_code=req_err.status_code or 500, detail=str(req_err))
@@ -743,10 +798,27 @@ def collect_competitor_task(
         except self.MaxRetriesExceededError as exc:
             status = "failure"
             task_logger.exception("max_retries_exceeded")
+            _register_scraping_error(
+                db,
+                monitored_product_id,
+                normalized_url,
+                "limite de tentativas de retry atingido",
+                ScrapingErrorType.parsing_error,
+                task_logger=task_logger,
+            )
+            _count_retry_exhausted("collect_competitor_task", "max_retries")
 
         except Exception as exc:
             status = "failure"
             task_logger.exception("collect_competitor_failed")
+            _register_scraping_error(
+                db,
+                monitored_product_id,
+                normalized_url,
+                str(exc),
+                ScrapingErrorType.parsing_error,
+                task_logger=task_logger,
+            )
 
         finally:
             _observe_metrics(start, "collect_competitor_task", status)
