@@ -1,4 +1,4 @@
-""" Implementação simplificada de rate limit por host usando Redis """
+""" Controle de vazão por host usando Redis com fallback seguro """
 
 from __future__ import annotations
 

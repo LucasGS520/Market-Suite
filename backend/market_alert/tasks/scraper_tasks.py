@@ -39,7 +39,9 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 
 
 logger = structlog.get_logger("scraper_tasks")
-redis_client = get_redis_client()
+def _redis_client():
+    """Recupera cliente Redis sob demanda evitando inicialização no import"""
+    return get_redis_client()
 
 #TTL de idempotência para evitar reprocessamento repetido do mesmo produto
 IDEMPOTENCY_TTL_SECONDS = getattr(settings, "SCRAPER_IDEMPOTENCY_TTL_SECONDS", 3600)
@@ -81,10 +83,11 @@ def _request_id_key(request_id: str | None) -> str | None:
 def _acquire_request_guard(request_id: str | None, *, task_logger) -> bool:
     """ Bloqueia reprocessamento quando mesmo ``request_id`` ja foi processado """
     key = _request_id_key(request_id)
-    if key is None or redis_client is None:
+    client = _redis_client()
+    if key is None or client is None:
         return True
     
-    acquired = bool(redis_client.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS))
+    acquired = bool(client.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS))
     if not acquired:
         task_logger.info("request_idempotency_skip", request_id=request_id)
     return acquired
@@ -111,10 +114,11 @@ def _build_idempotency_key(
 
 def _acquire_idempotency_slot(key: str | None, *, task_logger) -> bool:
     """ Registra execução em Redis evitando execuções duplicadas do mesmo payload """
-    if key is None or redis_client is None:
+    client = _redis_client()
+    if key is None or client is None:
         return True
     
-    acquired = bool(redis_client.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS))
+    acquired = bool(client.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_SECONDS))
     if not acquired:
         task_logger.info("idempotency_skip", key=key)
     return acquired
@@ -486,8 +490,9 @@ def collect_product_task(
                 price_changed=price_changed,
                 availability_changed=availability_changed,
             )
-            if redis_client is not None:
-                redis_client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
+            client = _redis_client()
+            if client is not None:
+                client.set("beat:last_success", datetime.now(timezone.utc).isoformat())
 
             if price_changed or availability_changed:
                 _dispatch_comparison_task(
