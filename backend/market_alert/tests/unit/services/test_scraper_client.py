@@ -172,6 +172,24 @@ def test_fetch_handles_no_result(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.error_code == "no_result"
     client.close()
 
+def test_fetch_raises_on_invalid_json_422(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Deve falhar com exceção quando o corpo 422 não for JSON válido """
+
+    request = httpx.Request("POST", "http://fake/scraper/parse")
+    responses = [httpx.Response(422, content=b"not-json", request=request)]
+    monkeypatch.setattr(
+        "market_alert.scraper.scraper_client.httpx.Client",
+        lambda *a, **k: _DummyClient(responses),
+    )
+
+    client = ScraperClient(base_url="http://fake")
+
+    with pytest.raises(ScraperClientError) as exc:
+        client.fetch(url="http://produto", monitored_id=None)
+
+    assert exc.value.status_code == 500
+    client.close()
+
 def test_fetch_raises_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Deve falhar quando o serviço retorna JSON malformado """
     request = httpx.Request("POST", "http://fake/scraper/parse")

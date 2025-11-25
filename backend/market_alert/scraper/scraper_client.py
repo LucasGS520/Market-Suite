@@ -262,7 +262,14 @@ class ScraperClient:
                 )
 
             if status_code == 422:
-                body = response.json()
+                try:
+                    body = response.json()
+                except ValueError as exc:
+                    circuit_breaker.record_failure(host)
+                    raise ScraperClientError(
+                        "Corpo JSON inválido retornado pelo serviço de scraping",
+                        status_code=500,
+                    ) from exc
                 error_code = body.get("error_code")
                 circuit_breaker.record_success(host)
                 return ScraperFetchResult(
