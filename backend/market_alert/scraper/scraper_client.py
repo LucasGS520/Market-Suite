@@ -22,9 +22,9 @@ import structlog
 
 from pydantic import ValidationError
 
-from backend.shared.metrics_scraper import SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL
 from backend.shared.schemas.shared_schemas_scraper import ParserRequest, ParserResponse
 from shared.utils.redis_client import get_redis_client
+from shared.metrics.metrics_scraper import SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL
 
 from market_alert.core.config_alert import settings
 from market_alert.utils.circuit_breaker import CircuitBreaker
