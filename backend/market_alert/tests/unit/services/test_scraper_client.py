@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from types import SimpleNamespace
 from uuid import UUID
-from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -20,17 +19,17 @@ from market_alert.scraper.scraper_client import (
 )
 
 
-class _DummyAsyncClient:
+class _DummyClient:
     """ Cliente HTTP falso que devolve respostas pré-configuradas """
     def __init__(self, responses: list[httpx.Response]):
         self._responses = responses
         self.calls = 0
         self.sent_headers: list[dict[str, str]] = []
 
-    async def post(
-        self, 
-        url: str, 
-        json: dict[str, str], 
+    def post(
+        self,
+        url: str,
+        json: dict[str, str],
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         self.sent_headers.append(dict(headers or {}))
@@ -38,7 +37,7 @@ class _DummyAsyncClient:
         self.calls += 1
         return response
 
-    async def aclose(self) -> None:
+    def close(self) -> None:
         return None
     
 @pytest.fixture(autouse=True)
@@ -60,35 +59,33 @@ def _build_response(status: int, json_payload: dict | None = None, headers: dict
         request=request,
     )
 
-@pytest.mark.asyncio
-async def test_fetch_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Quando o scraper responde 200 o payload deve ser retornado """
     responses = [_build_response(200, {"name": "A", "current_price": 10, "url": "http://a", "source": "test"})]
-    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.AsyncClient", lambda *a, **k: _DummyAsyncClient(responses))
+    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.Client", lambda *a, **k: _DummyClient(responses))
 
     client = ScraperClient(base_url="http://fake")
-    result = await client.fetch(url="http://produto", monitored_id=None)
+    result = client.fetch(url="http://produto", monitored_id=None)
     assert isinstance(result, ScraperFetchResult)
     assert result.status_code == 200
     assert result.payload is not None
     assert result.payload.name == "A"
-    await client.aclose()
+    client.close()
 
-@pytest.mark.asyncio
-async def test_fetch_returns_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_returns_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Status 304 deve retornar resultado sem payload """
 
     responses = [_build_response(304, None, {"ETag": "abc"})]
-    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.AsyncClient", lambda *a, **k: _DummyAsyncClient(responses))
+    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.Client", lambda *a, **k: _DummyClient(responses))
+
 
     client = ScraperClient(base_url="http://fake")
-    result = await client.fetch(url="http://produto", monitored_id=None, etag="abc")
+    result = client.fetch(url="http://produto", monitored_id=None, etag="abc")
     assert result.status_code == 304
     assert result.payload is None
-    await client.aclose()
+    client.close()
 
-@pytest.mark.asyncio
-async def test_fetch_does_not_leak_conditional_headers(
+def test_fetch_does_not_leak_conditional_headers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """ Garante que cabeçalhos condicionais não vazem entre chamadas consecutivas """
@@ -101,55 +98,53 @@ async def test_fetch_does_not_leak_conditional_headers(
         ),
     ]
 
-    dummy_client = _DummyAsyncClient(responses)
+    dummy_client = _DummyClient(responses)
     monkeypatch.setattr(
-        "market_alert.scraper.scraper_client.httpx.AsyncClient",
+        "market_alert.scraper.scraper_client.httpx.Client",
         lambda *a, **k: dummy_client,
     )
 
     client = ScraperClient(base_url="http://fake")
-    await client.fetch(url="http://produto", monitored_id=None, etag="abc")
-    await client.fetch(url="http://produto", monitored_id=None)
-    await client.aclose()
+    client.fetch(url="http://produto", monitored_id=None, etag="abc")
+    client.fetch(url="http://produto", monitored_id=None)
+    client.close()
 
     assert dummy_client.sent_headers[0].get("If-None-Match") == "abc"
     assert "If-None-Match" not in dummy_client.sent_headers[1]
     assert "If-Modified-Since" not in dummy_client.sent_headers[1]
 
-@pytest.mark.asyncio
-async def test_parse_returns_none_on_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parse_returns_none_on_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:
     """Parse deve retornar ``None`` quando o scraper responder 304"""
-    fetch_mock = AsyncMock(
+    fetch_mock = Mock(
         return_value=ScraperFetchResult(status_code=304, payload=None, headers={})
     )
     monkeypatch.setattr(ScraperClient, "fetch", fetch_mock)
 
     client = ScraperClient(base_url="http://fake")
-    resultado = await client.parse(
+    resultado = client.parse(
         url="http://produto",
         etag="abc",
         last_modified=datetime(2024, 1, 1, tzinfo=timezone.utc),
         force_refresh=False,
     )
-    await client.aclose()
+    client.close()
 
-    fetch_mock.assert_awaited_once()
+    fetch_mock.assert_called_once()
     assert resultado is None
 
-@pytest.mark.asyncio
-async def test_parse_forwards_conditional_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parse_forwards_conditional_headers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Confere se parâmetros condicionais são repassados para ``fetch``"""
 
-    fetch_mock = AsyncMock(
+    fetch_mock = Mock(
         return_value=ScraperFetchResult(status_code=304, payload=None, headers={})
     )
     monkeypatch.setattr(ScraperClient, "fetch", fetch_mock)
 
     client = ScraperClient(base_url="http://fake")
     last_modified = datetime(2024, 5, 1, 12, 0, tzinfo=timezone.utc)
-    await client.parse(
+    client.parse(
         url="http://produto",
-        monitored_id="mid", 
+        monitored_id="mid",
         product_type="monitored",
         user_id=UUID("00000000-0000-0000-0000-000000000001"),
         metadata={"a": "b"},
@@ -157,56 +152,53 @@ async def test_parse_forwards_conditional_headers(monkeypatch: pytest.MonkeyPatc
         last_modified=last_modified,
         force_refresh=True,
     )
-    await client.aclose()
+    client.close()
 
-    args = fetch_mock.await_args
+    args = fetch_mock.call_args
     assert args is not None
     assert args.kwargs["etag"] == "xyz"
     assert args.kwargs["last_modified"] == last_modified
     assert args.kwargs["force_refresh"] is True
 
-@pytest.mark.asyncio
-async def test_fetch_handles_no_result(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_handles_no_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Resposta 422 com ``no_result`` deve ser devolvida ao chamador """
 
     responses = [_build_response(422, {"error_code": "no_result"})]
-    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.AsyncClient", lambda *a, **k: _DummyAsyncClient(responses))
+    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.Client", lambda *a, **k: _DummyClient(responses))
 
     client = ScraperClient(base_url="http://fake")
-    result = await client.fetch(url="http://produto", monitored_id=None)
+    result = client.fetch(url="http://produto", monitored_id=None)
     assert result.status_code == 422
     assert result.error_code == "no_result"
-    await client.aclose()
+    client.close()
 
-@pytest.mark.asyncio
-async def test_fetch_raises_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_raises_on_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Deve falhar quando o serviço retorna JSON malformado """
     request = httpx.Request("POST", "http://fake/scraper/parse")
     responses = [httpx.Response(200, content=b"not-json", request=request)]
     monkeypatch.setattr(
-        "market_alert.scraper.scraper_client.httpx.AsyncClient",
-        lambda *a, **k: _DummyAsyncClient(responses),
+        "market_alert.scraper.scraper_client.httpx.Client",
+        lambda *a, **k: _DummyClient(responses),
     )
 
     client = ScraperClient(base_url="http://fake")
 
     with pytest.raises(ScraperClientError) as exc:
-        await client.fetch(url="http://produto", monitored_id=None)
+        client.fetch(url="http://produto", monitored_id=None)
 
     assert exc.value.status_code == 500
-    await client.aclose()
+    client.close()
 
-@pytest.mark.asyncio
-async def test_fetch_raises_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_raises_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Após exceder tentativas em erro 5xx o cliente levanta exceção."""
 
     responses = [_build_response(500), _build_response(500), _build_response(500)]
-    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.AsyncClient", lambda *a, **k: _DummyAsyncClient(responses))
+    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.Client", lambda *a, **k: _DummyClient(responses))
 
-    async def _fake_sleep(*_: object) -> None:
+    def _fake_sleep(*_: object) -> None:
         return None
 
-    monkeypatch.setattr("market_alert.scraper.scraper_client.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("market_alert.scraper.scraper_client.time.sleep", _fake_sleep)
     monkeypatch.setattr("market_alert.scraper.scraper_client.settings", SimpleNamespace(
         SCRAPER_TOTAL_TIMEOUT=8.0,
         SCRAPER_CONNECT_TIMEOUT=5.0,
@@ -226,9 +218,9 @@ async def test_fetch_raises_after_retries(monkeypatch: pytest.MonkeyPatch) -> No
 
     client = ScraperClient(base_url="http://fake")
     with pytest.raises(ScraperClientError) as exc:
-        await client.fetch(url="http://produto", monitored_id=None)
+        client.fetch(url="http://produto", monitored_id=None)
     assert exc.value.status_code == 500
-    await client.aclose()
+    client.close()
 
 def test_build_timeout_adjusts_total(monkeypatch: pytest.MonkeyPatch) -> None:
     """Timeout total deve respeitar mínimo coerente com connect + read"""
@@ -248,8 +240,7 @@ def test_build_timeout_adjusts_total(monkeypatch: pytest.MonkeyPatch) -> None:
     assert timeout.connect == 3.0
     assert timeout.pool == pytest.approx(7.0)
 
-@pytest.mark.asyncio
-async def test_fetch_uses_retry_after_header_with_http_date(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_uses_retry_after_header_with_http_date(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Confere se cabeçalho ``Retry-After`` em formato HTTP-date é respeitado """
     future = datetime.now(timezone.utc) + timedelta(seconds=7)
     header_value = format_datetime(future, usegmt=True)
@@ -259,14 +250,14 @@ async def test_fetch_uses_retry_after_header_with_http_date(monkeypatch: pytest.
         _build_response(200, {"name": "A", "current_price": 10, "url": "http://a", "source": "test"}),
     ]
 
-    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.AsyncClient", lambda *a, **k: _DummyAsyncClient(responses))
+    monkeypatch.setattr("market_alert.scraper.scraper_client.httpx.Client", lambda *a, **k: _DummyClient(responses))
 
     sleep_calls: list[float] = []
 
-    async def _fake_sleep(delay: float) -> None:
+    def _fake_sleep(delay: float) -> None:
         sleep_calls.append(delay)
 
-    monkeypatch.setattr("market_alert.scraper.scraper_client.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("market_alert.scraper.scraper_client.time.sleep", _fake_sleep)
     monkeypatch.setattr("market_alert.scraper.scraper_client.settings", SimpleNamespace(
         SCRAPER_TOTAL_TIMEOUT=8.0,
         SCRAPER_CONNECT_TIMEOUT=5.0,
@@ -285,10 +276,9 @@ async def test_fetch_uses_retry_after_header_with_http_date(monkeypatch: pytest.
     ))
 
     client = ScraperClient(base_url="http://fake")
-    result = await client.fetch(url="http://produto", monitored_id=None)
-    await client.aclose()
+    result = client.fetch(url="http://produto", monitored_id=None)
+    client.close()
 
     assert result.status_code == 200
     assert sleep_calls, "esperava chamada de retry baseada no cabeçalho"
     assert 5 <= sleep_calls[0] <= 7
-    

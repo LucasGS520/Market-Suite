@@ -1,13 +1,18 @@
-""" Cliente resiliente para integração com ``market_scraper`` """
+""" Cliente resiliente e síncrono para integração com ``market_scraper``.
+
+O objetivo é evitar dependências de event loop dentro das tasks Celery,
+criando um cliente de vida curta por execução e encerrando-o sempre ao
+final da chamada. Dessa forma o worker permanece previsível e livre de
+erros como "event loop is closed".
+"""
 
 from __future__ import annotations
 
-import asyncio
 import random
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import format_datetime, parsedate_to_datetime
-from threading import Lock
 from typing import Any, Mapping
 from urllib.parse import urlparse
 from uuid import UUID
@@ -82,25 +87,22 @@ def _build_timeout() -> httpx.Timeout:
         read=settings.SCRAPER_READ_TIMEOUT,
     )
 
-def _build_async_client(
+def _build_sync_client(
     base_url: str,
     headers: dict[str, str] | None,
-) -> httpx.AsyncClient:
-    """ Cria ``AsyncClient`` com limites de conexão configurados """
+) -> httpx.Client:
+    """ Cria ``Client`` síncrono com limites de conexão configurados """
     limits = httpx.Limits(
         max_connections=getattr(settings, "SCRAPER_HTTP_MAX_CONNECTIONS", 100),
         max_keepalive_connections=getattr(settings, "SCRAPER_HTTP_MAX_KEEPALIVE", 20),
         keepalive_expiry=getattr(settings, "SCRAPER_HTTP_KEEPALIVE_EXPIRY", 30.0),
     )
-    return httpx.AsyncClient(
+    return httpx.Client(
         base_url=base_url,
         timeout=_build_timeout(),
         headers=headers,
         limits=limits,
     )
-
-_CLIENT_POOL: dict[str, tuple[httpx.AsyncClient, int]] = {}
-_POOL_LOCK = Lock()
 
 def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
     """Reduz o payload retornado pelo scraper apenas ao que é essencial.
@@ -113,46 +115,6 @@ def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
     extras = dict(response.payload or {})
     filtered_payload = {k: v for k, v in extras.items() if k in ALLOWED_SCRAPER_FIELDS}
     return response.model_copy(update={"payload": filtered_payload or None})
-
-def _acquire_http_client(
-    base_url: str,
-    headers: dict[str, str] | None,
-) -> tuple[httpx.AsyncClient, str]:
-    """ Retorna cliente compartilhado incrementando o contador de uso 
-    
-    Cabeçalhos adicionais são aplicados apenas na criação inicial para
-    impedir que uma chamada altere o estado global usado por outras
-    requisições reutilizadas.
-    """
-    key = base_url
-    with _POOL_LOCK:
-        entry = _CLIENT_POOL.get(key)
-        if entry:
-            client, refcount = entry
-            _CLIENT_POOL[key] = (client, refcount + 1)
-            return client, key
-        
-        client = _build_async_client(base_url, headers)
-        _CLIENT_POOL[key] = (client, 1)
-        return client, key
-    
-async def _release_http_client(key: str, client: httpx.AsyncClient) -> None:
-    """ Diminui contador de uso e encerra cliente quanado não há consumidores """
-    close_client = False
-    with _POOL_LOCK:
-        entry = _CLIENT_POOL.get(key)
-        if not entry:
-            close_client = True
-        else:
-            pooled_client, refcount = entry
-            if pooled_client is not client or refcount <= 1:
-                close_client = True
-                _CLIENT_POOL.pop(key, None)
-            else:
-                _CLIENT_POOL[key] = (pooled_client, refcount - 1)
-
-    if close_client:
-        await client.aclose()
 
 rate_limiter = RateLimiter(
     get_redis_client,
@@ -171,19 +133,16 @@ circuit_breaker = CircuitBreaker(
 class ScraperClient:
     """ Cliente HTTP assíncrono com retries, rate limit e circuit breaker """
     base_url: str = settings.SCRAPER_SERVICE_URL
-    client: httpx.AsyncClient = field(init=False)
-    _client_key: str = field(init=False)
+    client: httpx.Client = field(init=False)
     _closed: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        """ Inicializa o ``AsyncClient`` com parâmetros de timeout configurados """
+        """ Inicializa o ``Client`` com parâmetros de timeout configurados """
         user_agent = getattr(settings, "HTTP_USER_AGENT", None)
         default_headers = {"User-Agent": user_agent} if user_agent else None
-        self.client, self._client_key = _acquire_http_client(
-            self.base_url, default_headers
-        )
+        self.client = _build_sync_client(self.base_url, default_headers)
 
-    async def fetch(
+    def fetch(
         self,
         *,
         url: str,
@@ -245,7 +204,7 @@ class ScraperClient:
         while True:
             attempt += 1
             try:
-                response = await self.client.post(
+                response = self.client.post(
                     "/scraper/parse",
                     json=request_payload,
                     headers=headers or None,
@@ -257,7 +216,7 @@ class ScraperClient:
                         "Tempo limite ao consultar o serviço de scraping",
                         status_code=504,
                     ) from exc
-                await asyncio.sleep(self._compute_backoff(backoff, attempt))
+                time.sleep(self._compute_backoff(backoff, attempt))
                 continue
             except httpx.RequestError as exc:
                 circuit_breaker.record_failure(host)
@@ -322,7 +281,7 @@ class ScraperClient:
                         status_code=status_code,
                         retry_after=retry_after,
                     )
-                await asyncio.sleep(self._calculate_retry_delay(backoff, attempt, retry_after))
+                time.sleep(self._calculate_retry_delay(backoff, attempt, retry_after))
                 continue
 
             if 500 <= status_code < 600:
@@ -332,7 +291,7 @@ class ScraperClient:
                         "Erro 5xx ao consultar o serviço de scraping",
                         status_code=status_code,
                     )
-                await asyncio.sleep(self._compute_backoff(backoff, attempt))
+                time.sleep(self._compute_backoff(backoff, attempt))
                 continue
 
             circuit_breaker.record_failure(host)
@@ -341,22 +300,22 @@ class ScraperClient:
                 status_code=status_code,
             )
 
-    async def aclose(self) -> None:
-        """ Encerra a sessão HTTP assíncrona para liberar recursos """
+    def close(self) -> None:
+        """ Encerra a sessão HTTP síncrona para liberar recursos """
         if self._closed:
             return
         self._closed = True
-        await _release_http_client(self._client_key, self.client)
+        self.client.close()
 
-    async def __aenter__(self) -> "ScraperClient":
-        """ Permite usar ``ScraperClient`` como contexto assíncrono """
+    def __enter__(self) -> "ScraperClient":
+        """ Permite usar ``ScraperClient`` como contexto síncrono """
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, exc_type, exc, tb) -> None:
         """ Garante que o cliente seja fechado ao sair do contexto """
-        await self.aclose()
+        self.close()
 
-    async def parse(
+    def parse(
         self,
         *,
         url: str,
@@ -369,7 +328,7 @@ class ScraperClient:
         force_refresh: bool = False,
     ) -> ParserResponse | None:
         """ Executa ``fetch`` reaproveitando cabeçalhos condicionais e força atualização """
-        result = await self.fetch(
+        result = self.fetch(
             url=url,
             monitored_id=monitored_id,
             etag=etag,

@@ -19,7 +19,6 @@ from market_alert.crud.crud_competitor import (
 )
 from market_alert.models.models_products import CompetitorProduct
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
-from market_alert.utils._async_helpers import _run_sync
 from market_alert.services._scraper_common import (
     execute_scraper_fetch,
     ensure_name,
@@ -46,13 +45,13 @@ def _get_existing(
         normalized_url,
     )
 
-async def scrape_competitor_product_async(
+def scrape_competitor_product(
     db: Session,
     user_id: UUID,
     url: str,
     payload: CompetitorProductCreateScraping,
 ) -> ScrapeResult:
-    """ Executa scraping de concorrentes retornando ``ScraperResult`` estruturado """
+    """ Executa scraping de concorrentes de forma síncrona e determinística """
     try:
         normalized_url = canonicalize_product_url(str(url))
     except ValueError:
@@ -61,8 +60,8 @@ async def scrape_competitor_product_async(
     existing = _get_existing(db, normalized_payload, normalized_url)
     etag, last_modified = resolve_conditional_headers(existing)
 
-    async with ScraperClient() as client:
-        response = await execute_scraper_fetch(
+    with ScraperClient() as client:
+        response = execute_scraper_fetch(
             client,
             url=normalized_url,
             monitored_id=str(payload.monitored_product_id),
@@ -141,12 +140,3 @@ async def scrape_competitor_product_async(
         availability_changed=bool(getattr(competitor, "_availability_changed", True)),
         http_status=200,
     )
-
-def scrape_competitor_product(
-    db: Session,
-    user_id: UUID,
-    url: str,
-    payload: CompetitorProductCreateScraping,
-) -> ScrapeResult:
-    """ Executa scaping de forma síncrona reutilizando o loop atual """
-    return _run_sync(scrape_competitor_product_async(db, user_id, url, payload))

@@ -7,11 +7,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 from uuid import UUID
 
-try:
-    from unittest.mock import AsyncMock
-except ImportError:
-    AsyncMock = None
-
 from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 from shared.utils import sanitize_text
 
@@ -124,7 +119,7 @@ def to_float(value: Any) -> float | None:
         return None
     
 
-async def maybe_call_mocked_parse(
+def maybe_call_mocked_parse(
     client: ScraperClient,
     *,
     url: str,
@@ -136,21 +131,16 @@ async def maybe_call_mocked_parse(
     user_id: UUID | None,
     metadata: Mapping[str, Any] | None,
 ) -> ScraperFetchResult | None:
-    """ Invoca ``parse`` quando foi substituído por mock (testes) """
+    """ Invoca ``parse`` mockado em testes para manter previsibilidade síncrona """
     parse_callable = getattr(client, "parse", None)
     if parse_callable is None:
         return None
-    
-    is_mock = False
-    if AsyncMock and isinstance(parse_callable, AsyncMock):
-        is_mock = True
-    elif getattr(parse_callable, "__module__", "").startswith("unittest.mock"):
-        is_mock = True
 
+    is_mock = getattr(parse_callable, "__module__", "").startswith("unittest.mock")
     if not is_mock:
         return None
     
-    parsed = await parse_callable(
+    parsed = parse_callable(
         url=url,
         product_type=product_type,
         monitored_id=monitored_id,
@@ -169,7 +159,7 @@ async def maybe_call_mocked_parse(
 
     return ScraperFetchResult(status_code=200, payload=parsed, headers={})
 
-async def execute_scraper_fetch(
+def execute_scraper_fetch(
     client: ScraperClient,
     *,
     url: str,
@@ -182,7 +172,7 @@ async def execute_scraper_fetch(
     force_refresh: bool,
 ) -> ScraperFetchResult:
     """ Executa chamadas ao scraper respeitando mocks e condicionais HTTP """
-    result = await maybe_call_mocked_parse(
+    result = maybe_call_mocked_parse(
         client,
         url=url,
         monitored_id=monitored_id,
@@ -197,7 +187,7 @@ async def execute_scraper_fetch(
     if result is not None:
         return result
     
-    return await client.fetch(
+    return client.fetch(
         url=url,
         monitored_id=monitored_id,
         etag=etag,

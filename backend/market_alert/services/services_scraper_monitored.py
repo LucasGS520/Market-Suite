@@ -20,7 +20,6 @@ from market_alert.crud.crud_monitored import (
 )
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
-from market_alert.utils._async_helpers import _run_sync
 from market_alert.services._scraper_common import (
     compute_force_refresh,
     ensure_price,
@@ -33,7 +32,7 @@ from market_alert.services._scraper_common import (
 #Logger específico para o fluxo de monitorados
 logger = structlog.get_logger("scraper_monitored_service")
 
-async def _handle_response(
+def _handle_response(
     db: Session,
     user_id: UUID,
     monitored_payload: MonitoredProductCreateScraping,
@@ -120,13 +119,13 @@ async def _handle_response(
         http_status=200,
     )
 
-async def scrape_monitored_product_async(
+def scrape_monitored_product(
     db: Session,
     url: str,
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
 ) -> ScrapeResult:
-    """ Executa scraping para produto monitorado de forma assíncrona """
+    """ Executa scraping para produto monitorado de forma síncrona """
     try:
         normalized_url = normalize_product_url(str(url))
     except ValueError:
@@ -152,8 +151,8 @@ async def scrape_monitored_product_async(
         ttl_seconds=settings.SCRAPER_FORCE_REFRESH_TTL_SECONDS,
     ) if existing else False
 
-    async with ScraperClient() as client:
-        result = await execute_scraper_fetch(
+    with ScraperClient() as client:
+        result = execute_scraper_fetch(
             client,
             url=normalized_url,
             monitored_id=str(existing.id) if existing else None,
@@ -165,7 +164,7 @@ async def scrape_monitored_product_async(
             metadata=None,
         )
 
-    outcome = await _handle_response(
+    outcome = _handle_response(
         db,
         user_id,
         payload,
@@ -176,12 +175,3 @@ async def scrape_monitored_product_async(
     )
 
     return outcome
-
-def scrape_monitored_product(
-    db: Session,
-    url: str,
-    user_id: UUID,
-    payload: MonitoredProductCreateScraping,
-) -> ScrapeResult:
-    """ Executa o scraping de forma síncrona reutilizando o loop corrente """
-    return _run_sync(scrape_monitored_product_async(db, url, user_id, payload))
