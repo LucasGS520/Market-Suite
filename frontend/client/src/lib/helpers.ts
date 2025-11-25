@@ -5,23 +5,21 @@
  * em cards, tabelas e páginas, evitando duplicação e divergências.
  */
 
+import { parseMoneyValue, formatMoney } from '@/lib/money';
 import { sanitizeExternalUrl } from '@/lib/utils';
 import type { Competitor } from '@/lib/api';
 
 /**
- * Converte números em representação monetária no padrão brasileiro.
- * - Utiliza Intl.NumberFormat para garantir consistência com a interface.
+ * Converte números ou strings monetárias em representação formatada no padrão brasileiro.
  */
-export const formatCurrency = (value: number | null): string => {
-  if (value === null || Number.isNaN(value)) {
+export const formatCurrency = (value: number | string | null | undefined): string => {
+  const parsed = parseMoneyValue(value ?? null);
+
+  if (parsed === null || Number.isNaN(parsed)) {
     return 'Valor indisponível';
   }
 
-  return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-    minimumFractionDigits: 2,
-  }).format(value);
+  return formatMoney(parsed);
 };
 
 /**

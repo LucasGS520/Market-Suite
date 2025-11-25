@@ -24,6 +24,7 @@ import type {
   PriceComparisonAlert,
 } from '@/lib/api';
 import { getCompetitors, getMonitoredProduct } from '@/lib/api';
+import { parseMoneyValue } from '@/lib/money';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import useComparisonSummary from '@/hooks/useComparisonSummary';
@@ -157,20 +158,16 @@ const deriveBadgeLabelFromMessage = (message: string | null | undefined): string
 /**
  * Converte string/número potencialmente inválido em número ou ``null``.
  */
-const toNumberOrNull = (value: string | number | null | undefined): number | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
+const toNumberOrNull = (value: string | number | null | undefined): number | null =>
+  parseMoneyValue(value ?? null);
 
 /**
  * Formata valores monetários com fallback amigável.
  */
-const formatCurrency = (value: number | null): string => {
-  if (value === null || Number.isNaN(value)) {
+const formatCurrency = (value: number | string | null | undefined): string => {
+  const parsed = parseMoneyValue(value ?? null);
+
+  if (parsed === null || Number.isNaN(parsed)) {
     return 'Valor indisponível';
   }
 
@@ -178,7 +175,7 @@ const formatCurrency = (value: number | null): string => {
     style: 'currency',
     currency: 'BRL',
     minimumFractionDigits: 2,
-  }).format(value);
+  }).format(parsed);
 };
 
 /**
@@ -304,7 +301,7 @@ const describePosition = (
  */
 const describePotentialAdjustment = (summary: ComparisonSummary | null | undefined): {
   adjustmentLabel: string;
-  competitiveness: CompetitivenessDescriptor;
+  competitiveness: CompetitiveDescriptor;
 } => {
   if (!summary) {
     return {
@@ -320,11 +317,11 @@ const describePotentialAdjustment = (summary: ComparisonSummary | null | undefin
     };
   }
 
-  const potentialSavings = summary.potential_adjustment ?? 0;
+  const potentialSavings = parseMoneyValue(summary.potential_adjustment ?? null) ?? 0;
   const absoluteSavings = Math.abs(potentialSavings);
   const formatted = formatCurrency(absoluteSavings);
 
-  if (summary.potential_adjustment === null || summary.potential_adjustment <= 0) {
+  if (summary.potential_adjustment === null || potentialSavings <= 0) {
     return {
       adjustmentLabel: 'Nenhum ajuste necessário',
       competitiveness: { label: 'Competitivo', tone: 'positive' },

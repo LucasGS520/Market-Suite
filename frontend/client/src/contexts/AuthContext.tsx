@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
+import { clearAuthTokenProvider, setAuthTokenProvider } from '@/lib/http/client';
 import {
   SESSION_EXPIRED_EVENT,
   TOKENS_REFRESHED_EVENT,

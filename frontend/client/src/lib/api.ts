@@ -1,138 +1,37 @@
+import axios, { type AxiosRequestConfig } from 'axios';
+import {
+  ACCESS_TOKEN_STORAGE_KEY,
+  REFRESH_TOKEN_STORAGE_KEY,
+  SESSION_EXPIRED_EVENT,
+  TOKENS_REFRESHED_EVENT,
+  clearStoredTokens,
+  getStoredAccessToken,
+  getStoredRefreshToken,
+  persistTokens,
+} from './auth/storage';
+import {
+  apiClient,
+  extractErrorMessage,
+  normalizePaginated,
+  type PaginatedPayload,
+} from './http/client';
+import { parseMoneyValue } from './money';
+
+export {
+  SESSION_EXPIRED_EVENT,
+  TOKENS_REFRESHED_EVENT,
+  clearStoredTokens,
+  getStoredAccessToken,
+  getStoredRefreshToken,
+  persistTokens,
+} from './auth/storage';
+
 /**
  * Cliente HTTP para comunicação com o backend market_alert
  *
  * Contém funções utilitárias para chamadas HTTP autenticadas e
  * tipos/contratos usados pelo frontend para consumir a API.
  */
-
-/**
- * URL padrão usada quando nenhuma variável de ambiente é fornecida.
- */
-const DEFAULT_API_URL = 'http://localhost:8000/';
-
-/** Chave de armazenamento para o access token persistido. */
-export const ACCESS_TOKEN_STORAGE_KEY = 'auth_token';
-
-/** Chave de armazenamento para o refresh token persistido. */
-export const REFRESH_TOKEN_STORAGE_KEY = 'auth_refresh_token';
-
-/** Evento disparado globalmente quando um novo par de tokens é obtido. */
-export const TOKENS_REFRESHED_EVENT = 'auth-tokens-refreshed';
-
-/** Nome do evento emitido globalmente quando a sessão expira (401) */
-export const SESSION_EXPIRED_EVENT = 'session-expired';
-
-/**
- * Normaliza e valida a URL base da API informada via variável de ambiente.
- * 
- * - Remove espaços em branco acidentais
- * - Garante a presença de esquema/host válidos utilizando URL nativa do navegador
- * - Força o término com uma única barra para simplificar a concatenação de endpoints
- */
-export const normalizeBaseApiUrl = (rawUrl?: string): string => {
-  const trimmed = rawUrl?.trim();
-
-  if (!trimmed) {
-    return DEFAULT_API_URL;
-  }
-
-  try {
-    const parsed = new URL(trimmed);
-    // Limpa query/hash passados inadvertidamente
-    parsed.search = '';
-    parsed.hash = '';
-
-    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
-    parsed.pathname = normalizedPath ? `${normalizedPath}/` : '/';
-
-    return parsed.toString();
-  } catch (error) {
-    console.warn('URL base da API inválida, retornamos o fallback padrão.', error);
-    return DEFAULT_API_URL;
-  }
-};
-
-/**
- * Retorna a URL base da API (variável de ambiente Vite normalizada ou fallback).
- */
-export const getApiUrl = () => normalizeBaseApiUrl(import.meta.env.VITE_FRONTEND_FORGE_API_URL);
-
-/**
- * Monta a URL final da requisição garantindo que o endpoint tenha formato consistente.
- */
-const buildApiUrl = (endpoint: string): string => {
-  const sanitizedEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-  const base = getApiUrl();
-
-  try {
-    return new URL(sanitizedEndpoint, base).toString();
-  } catch (error) {
-    const normalizedBase = base.endsWith('/') ? base : `${base}/`;
-    return `${normalizedBase}${sanitizedEndpoint}`;
-  }
-};
-
-/**
- * Monta a URL do WebSocket de notificações autenticada com token JWT.
- * 
- * Mantido por compatibilidade enquanto o streaming em tempo real está desativado no backend.
- */
-export const buildNotificationsWebSocketUrl = (token: string): string => {
-  const base = getApiUrl();
-  const url = new URL(base);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-
-  const normalizedPath = url.pathname.replace(/\/+$/, '');
-  url.pathname = `${normalizedPath}/ws`;
-  url.search = '';
-  url.hash = '';
-  url.searchParams.set('token', token);
-
-  return url.toString();
-};
-
-/** Lê o access token persistido (quando disponível no ambiente de navegador). */
-export const getStoredAccessToken = (): string | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  return localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
-};
-
-/** Lê o refresh token persistido (quando disponível no ambiente de navegador). */
-export const getStoredRefreshToken = (): string | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  return localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
-};
-
-/** Persiste o par de tokens no localStorage garantindo limpeza segura quando faltante. */
-export const persistTokens = (accessToken: string, refreshToken?: string | null): void => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, accessToken);
-
-  if (refreshToken) {
-    localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
-  } else {
-    localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
-  }
-};
-
-/** Remove tokens persistidos liberando cache local para novas sessões. */
-export const clearStoredTokens = (): void => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
-};
 
 /**
  * Decodifica o payload de um JWT retornando objeto plano.
@@ -184,92 +83,34 @@ const persistAndBroadcastTokens = (tokenPair: TokenPairResponse): void => {
 
 /** Solicita novos tokens utilizando refresh token bruto. */
 const requestTokenRefresh = async (refreshToken: string): Promise<TokenPairResponse> => {
-  const response = await fetch(buildApiUrl('/auth/refresh'), {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ refresh_token: refreshToken }),
+  const response = await apiClient.post<TokenPairResponse>('/auth/refresh', {
+    refresh_token: refreshToken,
   });
 
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || 'Falha ao renovar token');
-  }
-
-  return response.json();
+  return response.data;
 };
 
 /**
  * Função auxiliar para fazer requisições HTTP com autenticação.
  *
  * - Aceita um token opcional que é colocado no header Authorization.
- * - Mantém compatibilidade com RequestInit do fetch (method, body, etc).
- * - Converte o body para JSON quando necessário (caller já envia JSON.stringify).
- * - Lança erro com mensagem padrão quando a resposta não for ok.
+ * - Adiciona timeout padrão e converte erros para mensagens legíveis.
  */
-export interface ApiRequestOptions extends RequestInit {
+export interface ApiRequestOptions extends AxiosRequestConfig {
   token?: string;
   timeoutMs?: number;
   retryOnAuthFailure?: boolean;
   allowAuthRefresh?: boolean;
+  body?: unknown;
 }
 
 export const apiRequest = async <T = any>(
   endpoint: string,
   options: ApiRequestOptions = {},
 ): Promise<T> => {
-  const {
-    token,
-    headers: requestHeaders,
-    timeoutMs,
-    signal: callerSignal,
-    retryOnAuthFailure = true,
-    allowAuthRefresh = true,
-    ...fetchOptions
-  } = options;
-  const url = buildApiUrl(endpoint);
+  const { token, timeoutMs, retryOnAuthFailure = true, allowAuthRefresh = true, ...axiosOptions } = options;
   const effectiveToken = token ?? getStoredAccessToken();
   let dispatchedSessionExpiration = false;
-
-  const headers = new Headers(requestHeaders as HeadersInit | undefined);
-
-  if (!headers.has('Accept')) {
-    headers.set('Accept', 'application/json');
-  }
-
-  const body = fetchOptions.body;
-  const shouldSetJsonContentType =
-    body !== undefined &&
-    !headers.has('Content-Type') &&
-    !(body instanceof FormData) &&
-    !(body instanceof URLSearchParams) &&
-    !(body instanceof Blob);
-
-  if (shouldSetJsonContentType) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  if (effectiveToken) {
-    // Utilizamos set para garantir que o header Authorization seja persistido no objeto Headers
-    headers.set('Authorization', `Bearer ${effectiveToken}`);
-  }
-
-  const controller = new AbortController();
-  const timeout = typeof timeoutMs === 'number' ? timeoutMs : 15_000;
-
-  if (callerSignal) {
-    if (callerSignal.aborted) {
-      controller.abort();
-    } else {
-      callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
-    }
-  }
-
-  const timeoutId = setTimeout(() => {
-    controller.abort();
-  }, timeout);
 
   const performAuthRefresh = async (): Promise<TokenPairResponse | null> => {
     const refreshToken = getStoredRefreshToken();
@@ -292,142 +133,67 @@ export const apiRequest = async <T = any>(
     }
   };
 
-  let response: Response;
+  const headers: AxiosRequestConfig['headers'] = {
+    Accept: 'application/json',
+    ...(axiosOptions.headers ?? {}),
+  }; 
+
+  if (effectiveToken && !(headers && 'Authorization' in headers)) {
+    (headers as Record<string, string>).Authorization = `Bearer ${effectiveToken}`;
+  }
+
+  const timeout = timeoutMs ?? axiosOptions.timeout ?? 15_000;
+  const { body, data, ...requestOptions } = axiosOptions as AxiosRequestConfig & {
+    body?: unknown;
+  };
+  const payload = data ?? body;
 
   try {
-    response = await fetch(url, {
-      ...fetchOptions,
+    const response = await apiClient.request<T>({
+      url: endpoint,
+      ...requestOptions,
+      data: payload,
       headers,
-      signal: controller.signal,
+      timeout,
     });
+
+    return response.data;
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
+    const axiosError = axios.isAxiosError(error) ? error : null;
+
+    if (axiosError) {
+      if (axiosError.code === 'ECONNABORTED') {
+        throw new Error('Tempo limite atingido. Verifique sua conexão e tente novamente.');
+      }
+
+      const status = axiosError.response?.status;
+      const isAuthFailure = status === 401 || status === 403;
+
+      if (isAuthFailure && retryOnAuthFailure && effectiveToken) {
+        const refreshed = await performAuthRefresh();
+        if (refreshed) {
+          return apiRequest<T>(endpoint, {
+            ...options,
+            token: refreshed.access_token,
+            retryOnAuthFailure: false,
+            allowAuthRefresh,
+          });
+        }
+      }
+
+      if (effectiveToken && status === 401 && typeof window !== 'undefined' && !dispatchedSessionExpiration) {
+        window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+      }
+
+      throw new Error(extractErrorMessage(axiosError));
+    }
+
+    if (error instanceof Error && error.name === 'CanceledError') {
       throw new Error('Tempo limite atingido. Verifique sua conexão e tente novamente.');
     }
 
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
+    throw new Error(extractErrorMessage(error));
   }
-
-  // Tratamento aprimorado de erro: prioriza mensagens do backend antes do fallback genérico
-  if (!response.ok) {
-    const prioritizedFields: Array<'detail' | 'message' | 'msg'> = ['detail', 'message', 'msg'];
-
-    // Função recursiva para transformar qualquer estrutura em uma mensagem legível
-    const toReadableMessage = (value: unknown): string | null => {
-      if (value === null || value === undefined) {
-        return null;
-      }
-
-      if (typeof value === 'string') {
-        return value.trim() || null;
-      }
-
-      if (typeof value === 'number' || typeof value === 'boolean') {
-        return String(value);
-      }
-
-      if (Array.isArray(value)) {
-        const aggregated = value
-          .map((item) => toReadableMessage(item))
-          .filter((message): message is string => Boolean(message));
-
-        return aggregated.length > 0 ? aggregated.join(' | '): null;
-      }
-
-      if (typeof value === 'object') {
-        const record = value as Record<string, unknown>;
-
-        for (const field of prioritizedFields) {
-          if (field in record) {
-            const nested = toReadableMessage(record[field]);
-
-            if (nested) {
-              return nested;
-            }
-          }
-        }
-
-        const fallbackMessages = Object.values(record)
-          .map((item) => toReadableMessage(item))
-          .filter((message): message is string => Boolean(message));
-
-        return fallbackMessages.length > 0 ? fallbackMessages.join(' | ') : null;
-      }
-
-      return null;
-    };
-
-    let parsedBody: unknown = null;
-
-    try {
-      // Clonamos a resposta para evitar perder o body caso não seja JSON
-      parsedBody = await response.clone().json();
-    } catch (error) {
-      // Manteremos parsedBody como null quando backend não retornar JSON
-      parsedBody = null;
-    }
-
-    let extractedMessage: string | null = null;
-
-    if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody)) {
-      const bodyRecord = parsedBody as Record<string, unknown>;
-
-      for (const field of prioritizedFields) {
-        if (field in bodyRecord) {
-          extractedMessage = toReadableMessage(bodyRecord[field]);
-
-          if (extractedMessage) {
-            break;
-          }
-        }
-      }
-
-      if (!extractedMessage) {
-        extractedMessage = toReadableMessage(bodyRecord);
-      }
-    } else {
-      extractedMessage = toReadableMessage(parsedBody);
-    }
-
-    if (!extractedMessage) {
-      try {
-        const textBody = await response.text();
-        extractedMessage = textBody.trim() || null;
-      } catch (error) {
-        // Se nem texto conseguir obter, mantem fallback genérico
-        extractedMessage = null;
-      }
-    }
-
-    const isAuthFailure = response.status === 401 || response.status === 403;
-
-    if (isAuthFailure && retryOnAuthFailure && effectiveToken) {
-      const refreshed = await performAuthRefresh();
-      if (refreshed) {
-        return apiRequest<T>(endpoint, {
-          ...options,
-          token: refreshed.access_token,
-          retryOnAuthFailure: false,
-          allowAuthRefresh,
-        });
-      }
-    }
-
-    if (effectiveToken && response.status === 401 && typeof window !== 'undefined' && !dispatchedSessionExpiration) {
-      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
-    }
-
-    const message =
-      extractedMessage || (response.status === 401 ? 'Sessão expirada' : `Erro ${response.status}`);
-
-    // Ao lançar a exceção, garantimos que a mensagem reflita o conteúdo retornado pelo backend
-    throw new Error(message);
-  }
-
-  // Deserializa o corpo JSON da resposta
-  return response.json();
 };
 
 /**
@@ -589,16 +355,10 @@ export interface ComparisonSummary {
 }
 
 /**
- * Converte valores decimais/strings em números ou null quando invalido.
+ * Converte valores decimais/strings em números ou null utilizando Decimal para precisão.
  */
-const toNumberOrNull = (value: string | number | null | undefined): number | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
+const toNumberOrNull = (value: string | number | null | undefined): number | null =>
+  parseMoneyValue(value);
 
 /**
  * Normaliza o payload recebido da API para o formato consumido na UI 
@@ -746,13 +506,6 @@ interface CompetitorListItemApiResponse {
   is_paused: boolean;
 }
 
-interface PaginatedCompetitorsApiResponse {
-  items: CompetitorListItemApiResponse[];
-  total: number;
-  page: number;
-  per_page: number;
-}
-
 /**
  * Interface de notificação (Alert) conforme NotificationLogResponse do backend.
  * Representa cada tentativa de envio de alerta registrada, incluindo metadados do canal e status.
@@ -853,10 +606,11 @@ export const getMonitoredProducts = async (
   const queryString = searchParams.toString();
   const endpoint = queryString ? `/monitored?${queryString}` : '/monitored';
 
-  const data = await apiRequest<PaginatedResponse<MonitoredProductApiResponse>>(endpoint, { token });
+  const data = await apiRequest<PaginatedPayload<MonitoredProductApiResponse>>(endpoint, { token });
+  const normalized = normalizePaginated(data);
   return {
-    ...data,
-    items: data.items.map(mapMonitoredProductFromApi),
+    ...normalized,
+    items: normalized.items.map(mapMonitoredProductFromApi),
   };
 };
 
@@ -923,15 +677,17 @@ export const getCompetitors = async (
   if (params?.sort_by) searchParams.set('sort_by', params.sort_by);
   if (params?.sort_direction) searchParams.set('sort_direction', params.sort_direction);
 
-  const data = await apiRequest<PaginatedCompetitorsApiResponse>(`/competitors?${searchParams.toString()}`, {
-    token,
-  });
+  const data = await apiRequest<PaginatedPayload<CompetitorListItemApiResponse>>(
+    `/competitors?${searchParams.toString()}`,
+    {
+      token,
+    },
+  );
+  const normalized = normalizePaginated(data);
 
   return {
-    items: data.items.map(mapCompetitorFromApi),
-    total: data.total,
-    page: data.page,
-    per_page: data.per_page,
+    ...normalized,
+    items: normalized.items.map(mapCompetitorFromApi),
   };
 };
 
