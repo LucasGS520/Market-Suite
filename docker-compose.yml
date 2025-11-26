@@ -272,7 +272,7 @@ services:
     image: node:20-alpine
     working_dir: /app
     environment:
-      - VITE_FRONTEND_FORGE_API_URL=http://localhost:8000
+      - VITE_API_URL=http://localhost:8000
       - FRONTEND_PORT=5173
     entrypoint:
       - sh

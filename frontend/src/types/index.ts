@@ -149,8 +149,8 @@ export type CompetitivenessStatus = 'competitivo' | 'atencao' | 'nao_competitivo
  * Payload usado para criar um scraping ao cadastrar um produto monitorado.
  */
 export interface MonitoredProductCreateScraping {
-  url: string; // URL do produto a ser raspado
-  name?: string; // Nome opcional para melhor identificação
+  product_url: string; // URL do produto a ser raspado (contrato do backend)
+  name_identification?: string; // Nome opcional para identificar o item no painel
 }
 
 /**
@@ -158,8 +158,7 @@ export interface MonitoredProductCreateScraping {
  */
 export interface CompetitorProductCreateScraping {
   monitored_product_id: string; // ID do produto monitorado pai
-  url: string; // URL do concorrente a ser raspado
-  name?: string; // Nome opcional do concorrente
+  product_url: string; // URL do concorrente a ser raspado (contrato do backend)
 }
 
 /**

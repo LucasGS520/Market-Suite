@@ -66,6 +66,8 @@ const Products: React.FC = () => {
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto
+  const [creationFeedback, setCreationFeedback] = useState<string | null>(null); // mensagem pós-criação
+  const [creationError, setCreationError] = useState<string | null>(null); // erro ao criar produto
 
   // Query para buscar produtos monitorados. A chave depende de pagina, busca e filtro.
   const { data, isLoading, error } = useQuery({
@@ -89,7 +91,14 @@ const Products: React.FC = () => {
       setOpenAddDialog(false);
       setNewProductUrl('');
       setNewProductName('');
+      setCreationError(null);
+      // Feedback explícito para sinalizar que o backend ainda processará o scraping
+      setCreationFeedback('Produto criado e scraping em andamento. Lista atualizada automaticamente.');
     },
+    onError: () => {
+      // Mantém mensagem amigável para orientar ajuste de URL ou reautenticação
+      setCreationError('Não foi possível criar o produto. Verifique a URL e tente novamente.');
+    }
   });
 
   /**
@@ -99,8 +108,8 @@ const Products: React.FC = () => {
   const handleAddProduct = () => {
     if (!newProductUrl) return;
     createProductMutation.mutate({
-      url: newProductUrl,
-      name: newProductName || undefined,
+      product_url: newProductUrl,
+      name_identification: newProductName || undefined,
     });
   };
 
@@ -204,6 +213,18 @@ const Products: React.FC = () => {
           </ToggleButton>
         </ToggleButtonGroup>
       </Box>
+
+      {/* Feedback para criação de produto */}
+      {creationFeedback && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {creationFeedback}
+        </Alert>
+      )}
+      {creationError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {creationError}
+        </Alert>
+      )}
 
       {/* Conteúdo */}
       {isLoading ? (

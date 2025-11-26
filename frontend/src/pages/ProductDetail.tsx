@@ -56,6 +56,8 @@ const ProductDetail: React.FC = () => {
   const [openAddCompetitorDialog, setOpenAddCompetitorDialog] = useState(false);
   const [competitorUrl, setCompetitorUrl] = useState('');
   const [competitorName, setCompetitorName] = useState('');
+  const [competitorFeedback, setCompetitorFeedback] = useState<string | null>(null);
+  const [competitorError, setCompetitorError] = useState<string | null>(null);
 
   // Query: detalhes do produto monitorado
   const { data: product, isLoading: productLoading, error: productError } = useQuery({
@@ -94,7 +96,13 @@ const ProductDetail: React.FC = () => {
       setOpenAddCompetitorDialog(false);
       setCompetitorUrl('');
       setCompetitorName('');
+      // Mensagem clara para indicar que scraping foi agendado e será atualizado em breve
+      setCompetitorFeedback('Concorrente criado e scraping em andamento. Listagem atualizada automaticamente.');
     },
+    onError: () => {
+      // Orienta o usuário a revisar a URL ou a sessão antes de tentar novamente
+      setCompetitorError('Não foi possível adicionar concorrente. Revise a URL e tente novamente')
+    }
   });
 
   /**
@@ -105,8 +113,7 @@ const ProductDetail: React.FC = () => {
     if (!competitorUrl || !id) return;
     createCompetitorMutation.mutate({
       monitored_product_id: id,
-      url: competitorUrl,
-      name: competitorName || undefined,
+      product_url: competitorUrl,
     });
   };
 
@@ -311,6 +318,18 @@ const ProductDetail: React.FC = () => {
               Adicionar Concorrente
             </Button>
           </Box>
+
+          {/* Feedback para usuário sobre concorrentes */}
+          {competitorFeedback && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {competitorFeedback}
+            </Alert>
+          )}
+          {competitorError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {competitorError}
+            </Alert>
+          )}
 
           {competitorsLoading ? (
             // Spinner enquanto carrega a lista de concorrentes
