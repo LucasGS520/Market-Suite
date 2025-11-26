@@ -1,25 +1,7 @@
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
-import { User } from '../types';
+import React, { useState, useEffect, ReactNode } from 'react';
 import { authService } from '../services/authService';
-
-/**
- * Contexto de autenticação que concentra o estado do usuário e operações ligadas ao cliclo de login.
- */
-interface AuthContextType {
-  user: User | null;
-  isLoading: boolean;
-  isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-  register: (email: string, password: string, name?: string) => Promise<void>;
-  refreshUser: () => Promise<void>;
-}
-
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-interface AuthProviderProps {
-  children: ReactNode;
-}
+import { AuthContext, AuthContextType } from './AuthContext';
+import { User } from '../types';
 
 /**
  * Provider responsável por manter o estado de autenticação da aplicação.
@@ -27,6 +9,10 @@ interface AuthProviderProps {
  * - Carrega o usuário atual ao montar o provider.
  * - Mantém side-effects (armazenamento de tokens, limpeza em erros) encapsulados via authService.
  */
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Estado do usuário atualmente autenticado (ou null se não houver)
   const [user, setUser] = useState<User | null>(null);
