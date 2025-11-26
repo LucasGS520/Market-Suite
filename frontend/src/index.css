@@ -1,0 +1,51 @@
+/*
+  Estilos globais (Market Alert)
+  - Contém as diretivas do Tailwind e regras globais mínimas utilizadas pela aplicação.
+*/
+
+/* Diretivas do Tailwind: importa reset/base, componentes e utilitários */
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+/* Variáveis e configurações de raiz do documento
+   - Definem tipografia básica, comportamento de renderização e suporte a tema escuro.
+*/
+:root {
+  /* Pilha de fontes: prioriza Inter, depois fontes do sistema e alternativas seguras */
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+
+  /* Altura de linha padrão para melhorar legibilidade */
+  line-height: 1.5;
+
+  /* Peso de fonte padrão da aplicação */
+  font-weight: 400;
+
+  /* Indica que a interface suporta modos claro e escuro para o navegador */
+  color-scheme: light dark;
+
+  /* Evita síntese automática exagerada de fontes (ligaduras, etc.) */
+  font-synthesis: none;
+
+  /* Otimizações de renderização de texto para melhor legibilidade */
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Regras básicas do elemento <body>
+   - Remove margem padrão e define dimensões mínimas para evitar layout quebrado em telas pequenas.
+*/
+body {
+  margin: 0;
+  min-width: 320px; /* largura mínima suportada para responsividade */
+  min-height: 100vh; /* garante que o body ocupe a altura total da viewport */
+}
+
+/* Box sizing global
+   - Facilita cálculo de largura/altura ao incluir padding/border no tamanho total do elemento.
+   - Recomenda-se aplicar globalmente para evitar surpresas em layouts.
+*/
+* {
+  box-sizing: border-box;
+}
