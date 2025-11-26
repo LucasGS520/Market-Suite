@@ -1,3 +1,5 @@
+# Root .gitignore - consolidado para monorepo
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -11,9 +13,11 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+dist-ssr/
 downloads/
 eggs/
 .eggs/
+lib/
 lib64/
 parts/
 sdist/
@@ -33,7 +37,7 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Github Chatmodes
+# GitHub / meta
 .github/
 
 # Unit test / coverage reports
@@ -54,17 +58,15 @@ cover/
 *.mo
 *.pot
 
-# Django stuff:
+# Django / Flask / local DB
 *.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-
-# Flask stuff:
 instance/
 .webassets-cache
 
-# Scrapy stuff:
+# Scrapy
 .scrapy
 
 # PyBuilder
@@ -80,22 +82,21 @@ ipython_config.py
 # pyenv
 .python-version
 
-# pipenv
+# Pipfile / PDM
 Pipfile.lock
-
-# PDM
 pdm.lock
 
-# celery
+# Celery
 celerybeat-schedule*
 celerybeat.pid
-backend/market_alert/celerybeat-schedule*
-backend/market_alert/**/__pycache__/
 
-# SageMath parsed files
+# Service caches and bytecode
+**/__pycache__/
+
+# SageMath
 *.sage.py
 
-# Environments
+# Environments - ignore real env files but keep examples
 .env
 *.env
 .env.*
@@ -106,23 +107,20 @@ ENV/
 env.bak/
 venv.bak/
 
-# Diagnosticos de scraping
+# Diagnostics
 diagnostics_output/
 
 # IDEs and editors
 .idea/
 .vscode/
+!.vscode/extensions.json
 .ropeproject
 
-# mypy
+# Type checker caches
 .mypy_cache/
 .dmypy.json
 dmypy.json
-
-# Pyre type checker
 .pyre/
-
-# pytype static type analyzer
 .pytype/
 
 # Cython debug symbols
@@ -131,33 +129,31 @@ cython_debug/
 # Integration test logs
 tests/integration/services/logs/
 
-# Docker environment
+# Docker environment files
 infra/.env
-node_modules
-/.pnpm-store/
+../infra/.env
 
-#frontend
-node_modules
-dist
-dist-ssr
+# Node / frontend
+node_modules/
+/.pnpm-store/
+dist/
+dist-ssr/
 *.local
+.pnpm-store/
 
 # Logs
-logs
-*.log
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# Editor and OS files
 .DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
+*.swp
+*.swo
