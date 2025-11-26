@@ -1,0 +1,82 @@
+/*
+  Estilos principais do App React (Vite).
+*/
+
+/* Container raiz da aplicação:
+  - Centraliza conteúdo com largura máxima para legibilidade.
+  - Padding para espaçamento interno consistente.
+  - text-align:center para alinhamento visual dos elementos iniciais.
+*/
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+/* Logo (base)
+  - Define tamanho visual e espaçamento interno.
+  - will-change: filter indica ao browser que a propriedade 'filter' pode mudar,
+    permitindo otimizações de renderização.
+  - transition suaviza a alteração do filtro no hover (300ms).
+*/
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+
+/* Efeito de foco/hover genérico da logo:
+  - Aplica um drop-shadow para dar destaque visual ao passar o mouse.
+*/
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+
+/* Efeito de hover específico para a logo do React:
+  - Usa um tom diferente (verde-azulado) para identificar visualmente a logo React.
+  - Mantém a mesma animação/tempo definido acima.
+*/
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+/* Animação de rotação da logo
+  - 'logo-spin' gira a logo de 0 a 360 graus.
+  - Separado em keyframes para reutilização clara e legível.
+*/
+@keyframes logo-spin {
+  from {
+   transform: rotate(0deg);
+  }
+  to {
+   transform: rotate(360deg);
+  }
+}
+
+/* Preferência de movimento do usuário:
+  - Respeita usuários que selecionaram "reduced motion" no sistema.
+  - Só ativa a animação quando o usuário NÃO requisitou redução de movimento.
+  - O seletor 'a:nth-of-type(2) .logo' normalmente aponta para o segundo link
+    que envolve a logo (ex.: link para docs). Ajuste se a estrutura do HTML mudar.
+*/
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+   animation: logo-spin infinite 20s linear;
+  }
+}
+
+/* Cartões de conteúdo:
+  - Espaçamento interno consistente em elementos do tipo "card".
+*/
+.card {
+  padding: 2em;
+}
+
+/* Texto auxiliar de leitura de documentação:
+  - Cor atenuada para não competir com conteúdo principal.
+*/
+.read-the-docs {
+  color: #888;
+}

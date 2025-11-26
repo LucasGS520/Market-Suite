@@ -1,35 +1,7 @@
-// Configurações do TypeScript para o frontend
-// Contém regras de compilação e resoluções de módulo usadas pelo editor, bundler e ferramentas de verificação.
-
 {
-  // Arquivos/padrões incluídos na análise do TypeScript (editor/IDE, lint e build incremental)
-  "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
-
-  // Padrões excluídos da análise (dependências, artefatos de build e testes)
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
-
-  "compilerOptions": {
-    "incremental": true, // Habilita build incremental para acelerar compilações sucessivas
-    "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo", // Local do arquivo de estado do build incremental
-    "lib": ["esnext", "dom", "dom.iterable"], // Bibliotecas padrão que o projeto espera (ESNext + APIs do navegador)
-    "module": "ESNext", // Tipo do módulo gerado / esperado (compatível com bundlers modernos)
-    
-    /* Modo para bundler / resolução de módulos */
-    "moduleResolution": "bundler", // Estratégia de resolução de módulos (usado por bundlers modernos)
-    "allowImportingTsExtensions": true, // Permite importar arquivos com extensão .ts/.tsx diretamente (quando necessário)
-    "baseUrl": ".", // Base para resolução de paths relativos
-    "noEmit": true, // Não emitir arquivos .js (usado quando apenas checagem de tipos é necessária)
-
-    /* Regras de lint/checagem estrita */
-    "strict": true, // Ativa verificações estritas de tipos (strict mode)
-    "jsx": "preserve", // JSX deve ser preservado para que o bundler/transformador trate (ex.: React/Next)
-    "esModuleInterop": true, // Interoperabilidade com módulos CommonJS
-    "skipLibCheck": true, // Pula checagem de tipos em arquivos de dependências (aumenta velocidade)
-    
-    // Alias de import para facilitar caminhos absolutos no código fonte
-    "paths": {
-      "@/*": ["./client/src/*"],
-      "@shared/*": ["./shared/*"]
-    }
-  }
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
 }

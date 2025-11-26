@@ -1,84 +1,34 @@
 /**
- * Arquivo de configuração do Vite para o frontend.
- * Contém plugins, aliases de importação, diretórios de ambiente/raiz,
- * configurações de build e do servidor de desenvolvimento.
+ * Configuração do Vite para a aplicação frontend (React + Vite).
+ *
+ * Este arquivo define as opções principais do dev server usadas 
+ * durante desenvolvimento local (porta, host e proxy para a API backend).
  */
 
-import { jsxLocPlugin } from "@builder.io/vite-plugin-jsx-loc";
-import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
-import fs from "node:fs";
-import path from "path";
-import process from "node:process";
-import { defineConfig } from "vite";
-import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
-
-// Lista de plugins aplicados pelo Vite durante o build/dev
-// - react(): suporte a React (JSX/TSX)
-// - tailwindcss(): integração com Tailwind via plugin oficial
-// - jsxLocPlugin(): adiciona metadados de localização JSX (útil para debugging)
-// - vitePluginManusRuntime(): plugin específico do projeto (runtime customizado)
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime()];
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  plugins,
+  plugins: [react()],
 
-  // Resolução de caminhos e aliases para facilitar imports absolutos
-  resolve: {
-    alias: {
-      // Alias para a pasta do cliente (código fonte do frontend)
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      // Alias para diretório compartilhado entre serviços
-      "@shared": path.resolve(import.meta.dirname, "shared"),
-      // Alias para assets anexados ao projeto
-      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
-    },
-  },
-
-  // Diretório onde estão os arquivos .env usados pelo Vite (variáveis de ambiente)
-  envDir: path.resolve(import.meta.dirname),
-
-  // Diretório raiz do projeto frontend (onde o Vite considera o index.html)
-  root: path.resolve(import.meta.dirname, "client"),
-
-  // Configurações de build de produção
-  build: {
-    // Pasta de saída final dos artefatos públicos gerados pelo build
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
-    // Limpa o diretório de saída antes de gerar novos arquivos
-    emptyOutDir: true,
-  },
-
-  // Configurações do servidor de desenvolvimento (vite dev server)
+  // Configurações do servidor de desenvolvimento
   server: {
-    // Porta utilizada pelo servidor de desenvolvimento (FRONTEND_PORT ou 5173)
-    port: Number(process.env.FRONTEND_PORT ?? 5173),
-    // Se false, falha ao tentar ligar na porta; true permite tentar a próxima porta livre
-    strictPort: false, // Encontrará a próxima porta disponível se a porta alvo estiver em uso
-    // Habilita binding do host para acessos externos (útil em containers)
+    port: 5173, // Porta padrão do Vite para dev server
+
+    // Host true permite que o servidor seja acessado por interfaces externas
+    // (0.0.0.0), útil para testes em dispositivos na mesma rede ou em contêineres.
+    // Em produção, a app deve ser empacotada e servida por um servidor apropriado.
     host: true,
-    // Configuração explícita do HMR para ambientes Docker/WSL onde localhost não resolve dentro do container
-    hmr: {
-      // Porta exposta pelo container; reutilizamos a mesma porta do servidor HTTP
-      port: Number(process.env.HMR_PORT ?? process.env.FRONTEND_PORT ?? 5173),
-      // Porta que o cliente no navegador deve usar para abrir o websocket (necessário quando há mapeamento de portas)
-      clientPort: Number(process.env.HMR_CLIENT_PORT ?? process.env.FRONTEND_PORT ?? 5173),
-      // Host utilizado pelo cliente; localhost funciona no navegador do host mesmo quando vite roda em container
-      host: process.env.HMR_HOST ?? "localhost",
-      // Protocolo padrão do websocket em desenvolvimento
-      protocol: process.env.HMR_PROTOCOL === "wss" ? "wss" : "ws",
-    },
-    // Hosts permitidos para requisições durante o desenvolvimento
-    allowedHosts: [
-      "localhost",
-      "127.0.0.1",
-    ],
-    // Controle de acesso ao sistema de arquivos pelo dev server do Vite
-    fs: {
-      // Quando true, o Vite só permitirá acesso a pastas explicitamente dentro do root/permitidas
-      strict: true,
-      // Padrões negados; aqui evita acesso a arquivos ocultos (ex.: .git, .env locais)
-      deny: ["**/.*"],
+
+    // Proxy para encaminhar chamadas de API durante desenvolvimento.
+    // Isso evita CORS no ambiente dev e espelha o comportamento do frontend em produção, que consome a API pública do backend.
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000', // Endereço do backend de desenvolvimento (FastAPI rodando localmente).
+        // changeOrigin ajusta o header Host da requisição para o target, útil quando o backend espera um Host específico.
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''), // Reescreve o path removendo o prefixo /api antes de encaminhar.
+      },
     },
   },
-});
+})
