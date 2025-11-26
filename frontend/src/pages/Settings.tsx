@@ -7,7 +7,7 @@
 import React from 'react';
 import { Box, Typography, Card, CardContent, TextField, Button } from '@mui/material';
 import Grid from '@mui/material/Grid';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 import Layout from '../components/Layout';
 
 /**

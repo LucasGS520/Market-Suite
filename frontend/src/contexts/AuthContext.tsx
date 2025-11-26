@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
 
+/**
+ * Contexto de autenticação que concentra o estado do usuário e operações ligadas ao cliclo de login.
+ */
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
@@ -12,19 +15,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-/**
- * Hook personalizado para acessar o contexto de autenticação.
- * Lança um erro caso seja usado fora do AuthProvider, garantindo que componentes consumidores sempre estejam encapsulados pelo provedor.
- */
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth deve ser usado dentro de um AuthProvider');
-  }
-  return context;
-};
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 interface AuthProviderProps {
   children: ReactNode;

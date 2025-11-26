@@ -25,7 +25,7 @@ import {
   AccountCircle,
   Menu as MenuIcon,
 } from '@mui/icons-material';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 
 /**
  * Header
