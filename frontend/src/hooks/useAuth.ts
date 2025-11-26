@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { AuthContext } from '../contexts/AuthProvider';
+import { AuthContext } from '../contexts/AuthContext';
 
 /**
  * Hook personalizado para acessar o AuthContext sem repetir lógica de verificação.
