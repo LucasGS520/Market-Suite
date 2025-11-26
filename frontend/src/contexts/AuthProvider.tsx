@@ -117,3 +117,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Provider encapsula a árvore de componentes e fornece o estado de autenticação
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
+
+// Export default para facilitar importações em componentes de alto nível
+export default AuthProvider;
