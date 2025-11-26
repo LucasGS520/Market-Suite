@@ -4,9 +4,9 @@
 */
 
 /* Diretivas do Tailwind: importa reset/base, componentes e utilitários */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
 
 /* Variáveis e configurações de raiz do documento
    - Definem tipografia básica, comportamento de renderização e suporte a tema escuro.

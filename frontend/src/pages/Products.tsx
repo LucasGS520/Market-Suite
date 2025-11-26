@@ -27,7 +27,6 @@ import {
   TableHead,
   TableRow,
   Paper,
-  IconButton,
   CircularProgress,
   Alert,
   Dialog,
@@ -43,8 +42,6 @@ import {
   ViewList as ViewListIcon,
   ViewModule as ViewModuleIcon,
   TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Remove as RemoveIcon,
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
@@ -65,7 +62,7 @@ const Products: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'table'>('list'); // modo de exibição
   const [searchQuery, setSearchQuery] = useState(''); // texto de busca
   const [statusFilter, setStatusFilter] = useState(''); // filtro por status de competitividade
-  const [page, setPage] = useState(1); // página atual (para paginação)
+  const [page] = useState(1); // página atual (para paginação)
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto

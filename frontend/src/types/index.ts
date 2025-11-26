@@ -61,7 +61,7 @@ export interface PriceComparison {
   id: string; // Identificador único da comparação
   monitored_id: string; // ID do produto monitorado
   timestamp: string; // Timestamp da comparação
-  data: Record<string, any>; // Payload genérico com dados da comparação
+  data: Record<string, unknown>; // Payload genérico com dados da comparação
 }
 
 /**
@@ -82,8 +82,8 @@ export interface PriceComparisonSummary {
   potential_adjustment?: number; // Ajuste de preço sugerido
   comparison_insights?: string; // Insights textuais adicionais
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
-  discrepancies: any[]; // Lista de discrepâncias detectadas
-  alerts: any[]; // Alertas gerados a partir dessa comparação
+  discrepancies: Array<Record<string, unknown>>; // Lista de discrepâncias detectadas
+  alerts: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
 }
 
 /**
@@ -169,4 +169,19 @@ export interface ScrapeCreationResponse {
   id: string; // ID do job criado
   url: string; // URL alvo do scraping
   created_at: string; // Timestamp de criação
+}
+
+/**
+ * Estrutura genérica de resposta de erro vinda da API.
+ */
+export interface ApiErrorResponse {
+  detail?: string; // Mensagem detalhada de erro retornada pela API
+}
+
+/**
+ * Resposta padrão para ações em lote em concorrentes.
+ */
+export interface BulkActionResponse {
+  message?: string; // Mensagem amigável retornada pelo backend
+  updated_ids?: string[]; // IDs afetados pela ação solicitada
 }

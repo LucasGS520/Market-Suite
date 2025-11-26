@@ -8,6 +8,7 @@ import {
   CompetitorProductCreateScraping,
   ScrapeCreationResponse,
   DashboardStats,
+  BulkActionResponse,
 } from '../types';
 
 /**
@@ -66,7 +67,9 @@ export const productsService = {
   /**
    * Obtém detalhes de um produto monitorado
    */
-  async getMonitoredProduct(productId: string): Promise<MonitoredProduct> {
+  async getMonitoredProduct(
+    productId: string
+  ): Promise<MonitoredProduct> {
     const response = await apiClient.get<MonitoredProduct>(`/monitored/${productId}`);
     return response.data;
   },
@@ -88,7 +91,9 @@ export const productsService = {
   /**
    * Remove um produto monitorado
    */
-  async deleteMonitoredProduct(productId: string): Promise<MonitoredProduct> {
+  async deleteMonitoredProduct(
+    productId: string
+  ): Promise<MonitoredProduct> {
     const response = await apiClient.delete<MonitoredProduct>(`/monitored/${productId}`);
     return response.data;
   },
@@ -132,7 +137,9 @@ export const productsService = {
    * Remove concorrentes de um produto monitorado
    * Remove todos os concorrentes associados ao ID do produto monitorado.
    */
-  async deleteCompetitors(monitoredProductId: string): Promise<CompetitorProduct[]> {
+  async deleteCompetitors(
+    monitoredProductId: string
+  ): Promise<CompetitorProduct[]> {
     const response = await apiClient.delete<CompetitorProduct[]>(
       `/competitors/${monitoredProductId}`
     );
@@ -143,7 +150,9 @@ export const productsService = {
    * Pausa concorrentes em massa
    * Envia uma requisição para pausar múltiplos concorrentes.
    */
-  async pauseCompetitors(competitorIds: string[]): Promise<any> {
+  async pauseCompetitors(
+    competitorIds: string[]
+  ): Promise<BulkActionResponse> {
     const response = await apiClient.post('/competitors/bulk/pause', {
       competitor_ids: competitorIds,
     });
@@ -154,7 +163,9 @@ export const productsService = {
    * Retoma concorrentes em massa
    * Reverte a ação de pausa para os concorrentes informados.
    */
-  async resumeCompetitors(competitorIds: string[]): Promise<any> {
+  async resumeCompetitors(
+    competitorIds: string[]
+  ): Promise<BulkActionResponse> {
     const response = await apiClient.post('/competitors/bulk/resume', {
       competitor_ids: competitorIds,
     });
@@ -165,7 +176,9 @@ export const productsService = {
    * Remove concorrentes em massa
    * Aciona o endpoint que exclui vários concorrentes de uma só vez.
    */
-  async removeCompetitors(competitorIds: string[]): Promise<any> {
+  async removeCompetitors(
+    competitorIds: string[]
+  ): Promise<BulkActionResponse> {
     const response = await apiClient.post('/competitors/bulk/remove', {
       competitor_ids: competitorIds,
     });

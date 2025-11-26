@@ -20,7 +20,9 @@ import {
   Alert,
   CircularProgress,
 } from '@mui/material';
+import { AxiosError } from 'axios';
 import { useAuth } from '../hooks/useAuth';
+import { ApiErrorResponse } from '../types';
 
 /**
  * Componente de registro de usuário.
@@ -73,12 +75,12 @@ const Register: React.FC = () => {
       await register(email, password, name);
       // Redireciona o usuário para o dashboard após registro bem-sucedido
       navigate('/dashboard');
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Tenta extrair mensagem detalhada da resposta; senão, mostra mensagem genérica
-      setError(
-        err?.response?.data?.detail ||
-          'Erro ao criar conta. Tente novamente.'
-      );
+      const axiosError = err as AxiosError<ApiErrorResponse>;
+      const detailMessage = axiosError.response?.data?.detail;
+
+      setError(detailMessage || 'Erro ao criar conta. Tente novamente.');
     } finally {
       setIsLoading(false);
     }
