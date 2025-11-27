@@ -19,4 +19,5 @@ class ProductStatus(str, Enum):
     """ Estado atual do anúncio no marketplace """
     available = "available" #Produto disponível
     unavailable = "unavailable" #Produto indisponível
+    pending = "pending" #Aguardando disponibilidade
     removed = "removed" #Anúncio removido
