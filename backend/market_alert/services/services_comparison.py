@@ -348,11 +348,12 @@ def _build_summary_from_result(
     highest_price = _to_decimal((payload.get("highest_competitor") or {}).get("price"))
 
     if monitored_price is not None:
-        summary["monitored_price"] = str(monitored_price)
+        #Mantemos ``Decimal`` para que o encoder do FastAPI converta em número JSON evitando strings que quebram o consumo no frontend.
+        summary["monitored_price"] = monitored_price
     if lowest_price is not None:
-        summary["competitors_min"] = str(lowest_price)
+        summary["competitors_min"] = lowest_price
     if highest_price is not None:
-        summary["competitors_max"] = str(highest_price)
+        summary["competitors_max"] = highest_price
 
     status = _calculate_competitiveness_status(monitored_price, lowest_price)
     if status is not None:
