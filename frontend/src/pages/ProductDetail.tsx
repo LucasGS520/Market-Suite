@@ -40,6 +40,7 @@ import {
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
+import { formatCurrency } from '../utils/currency';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -177,7 +178,7 @@ const ProductDetail: React.FC = () => {
   /**
    * Formata o preço exibindo estado de coleta quando ainda não existe valor salvo
    */
-  const renderPrice = (value: string | null) => {
+  const renderPrice = (value: string | number | null) => {
     if (value === null) {
       return (
         <Box display="flex" alignItems="center" gap={1}>
@@ -189,7 +190,7 @@ const ProductDetail: React.FC = () => {
       );
     }
 
-    return `R$ ${Number(value).toFixed(2)}`;
+    return formatCurrency(value);
   };
 
   return (
@@ -258,7 +259,7 @@ const ProductDetail: React.FC = () => {
                     Menor Concorrente
                   </Typography>
                   <Typography variant="h4" color="success.main">
-                    R$ {summary?.competitors_min?.toFixed(2) || '0,00'}
+                    {formatCurrency(summary?.competitors_min)}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} sm={4}>
@@ -294,7 +295,7 @@ const ProductDetail: React.FC = () => {
                   Preço Médio
                 </Typography>
                 <Typography variant="h6">
-                  R$ {summary.competitors_mean?.toFixed(2) || '0,00'}
+                  {formatCurrency(summary?.competitors_mean)}
                 </Typography>
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
@@ -302,15 +303,23 @@ const ProductDetail: React.FC = () => {
                   Preço Máximo
                 </Typography>
                 <Typography variant="h6">
-                  R$ {summary.competitors_max?.toFixed(2) || '0,00'}
+                  {formatCurrency(summary.competitors_max)}
                 </Typography>
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
                 <Typography variant="body2" color="text.secondary">
                   Ajuste Potencial
                 </Typography>
-                <Typography variant="h6" color={summary.potential_adjustment && summary.potential_adjustment < 0 ? 'success.main' : 'error'}>
-                  R$ {summary.potential_adjustment?.toFixed(2) || '0,00'}
+                <Typography
+                  variant="h6"
+                  color={
+                    Number.isFinite(Number(summary.potential_adjustment)) &&
+                    Number(summary.potential_adjustment) < 0
+                      ? 'success.main'
+                      : 'error'
+                  }
+                >
+                  {formatCurrency(summary.potential_adjustment)}
                 </Typography>
               </Grid>
             </Grid>

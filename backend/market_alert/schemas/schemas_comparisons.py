@@ -31,7 +31,8 @@ class PriceComparisonResponse(BaseModel):
 
 class PriceComparisonSummaryResponse(BaseModel):
     """ Resumo consolidado da última comparação executada para um produto monitorado """
-    model_config = ConfigDict()
+    #Garante que valores monetários sejam seralizados como números JSON, evitando strings no frontend.
+    model_config = ConfigDict(json_encoders={Decimal: float})
     monitored_product_id: UUID
     comparison_id: Optional[UUID] = None
     last_comparison_at: Optional[datetime] = None

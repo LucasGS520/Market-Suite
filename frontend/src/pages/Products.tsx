@@ -45,6 +45,7 @@ import {
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
+import { formatCurrency } from '../utils/currency';
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -135,12 +136,12 @@ const Products: React.FC = () => {
   /**
    * Formata o preço exibindo rótulo de coleta quando ainda não há valor disponível.
    */
-  const renderPrice = (value: string | null) => {
+  const renderPrice = (value: string | number | null) => {
     if (value === null) {
       return 'Coletando preço...';
     }
 
-    return `R$ ${Number(value).toFixed(2)}`;
+    return formatCurrency(value);
   };
 
   /**
