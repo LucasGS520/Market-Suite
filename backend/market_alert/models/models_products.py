@@ -106,7 +106,7 @@ class CompetitorProduct(Base):
     name_competitor = Column("name", String, nullable=False)
     product_url = Column(Text, nullable=False)
 
-    current_price = Column(Numeric(10,2), nullable=False)
+    current_price = Column(Numeric(10,2), nullable=True)
     old_price = Column(Numeric(10,2), nullable=True)
     free_shipping = Column(Boolean, default=False)
     seller = Column(String, nullable=True)

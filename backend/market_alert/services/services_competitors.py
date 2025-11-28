@@ -34,6 +34,7 @@ from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_
 from market_alert.core.config_alert import settings
 
 from shared.utils.url_validation import normalize_and_validate_product_url
+from shared import metrics
 
 
 logger = structlog.get_logger(__name__)
@@ -214,6 +215,15 @@ def create_competitor_scrape_request(
         db=db,
         monitored_product_id=monitored_product.id,
         product_url=normalized_url,
+    )
+
+    metrics.PENDING_COMPETITOR_CREATED_TOTAL.inc()
+    logger.info(
+        "pending_competitor_created",
+        competitor_id=str(pending.id),
+        monitored_id=str(monitored_product.id),
+        status=pending.status.value,
+        **context,
     )
 
     #Agendamento via Celery garante processamento assíncrono do scraping

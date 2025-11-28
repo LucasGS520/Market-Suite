@@ -17,7 +17,7 @@ class ProductResponse(BaseModel):
     id: UUID
     name: str = Field(..., description="Nome preparado para exibição")
     url: HttpUrl = Field(..., description="Endereço canônico do produto")
-    current_price: Decimal = Field(..., description="Preço obrigatório para exibição")
+    current_price: Decimal | None = Field(None, description="Preço para exibição quando disponível")
     currency: Optional[str] = Field(None, description="Moeda do preço informado")
     collected_at: datetime = Field(..., description="Momento da última coleta bem-sucedida")
     source: Literal["monitored", "competitor"]

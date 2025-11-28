@@ -133,6 +133,17 @@ const Products: React.FC = () => {
   };
 
   /**
+   * Formata o preço exibindo rótulo de coleta quando ainda não há valor disponível.
+   */
+  const renderPrice = (value: string | null) => {
+    if (value === null) {
+      return 'Coletando preço...';
+    }
+
+    return `R$ ${Number(value).toFixed(2)}`;
+  };
+
+  /**
    * Retorna label legível para o status de competitividade.
    */
   const getStatusLabel = (status?: string) => {
@@ -275,11 +286,11 @@ const Products: React.FC = () => {
                         {/* Informações de preço resumidas */}
                         <Grid container spacing={2} sx={{ mt: 2 }}>
                           <Grid item xs={4}>
-                            <Typography variant="body2" color="text.secondary">
+                          <Typography variant="body2" color="text.secondary">
                               MEU PREÇO
                             </Typography>
                             <Typography variant="h5" color="primary">
-                              R$ {parseFloat(product.current_price).toFixed(2)}
+                              {renderPrice(product.current_price)}
                             </Typography>
                           </Grid>
                           <Grid item xs={4}>
@@ -356,7 +367,7 @@ const Products: React.FC = () => {
                       </Box>
                     </TableCell>
                     <TableCell align="right">
-                      R$ {parseFloat(product.current_price).toFixed(2)}
+                      {renderPrice(product.current_price)}
                     </TableCell>
                     <TableCell align="right">R$ 0,00</TableCell>
                     <TableCell align="right">

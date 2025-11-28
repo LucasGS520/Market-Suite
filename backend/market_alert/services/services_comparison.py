@@ -91,12 +91,14 @@ def get_comparison_summary_for_user(
     stored_summary = get_latest_summary(db, monitored_product_id=monitored_id)
     comparison = None
 
+    competitors_count = _extract_competitors_count(stored_summary)
+
     if stored_summary and stored_summary.comparison_id:
         comparison = get_comparison_by_id(db, stored_summary.comparison_id)
 
     normalized_summary = build_comparison_summary(
         comparison,
-        competitors_count=stored_summary.competitors_count if stored_summary else 0,
+        competitors_count=competitors_count,
         stored_summary=stored_summary,
     )
 
@@ -240,6 +242,26 @@ def _to_decimal(value: Any) -> Optional[Decimal]:
     except (InvalidOperation, ValueError, TypeError):
         #Retorna None quando o valor não pode ser convertido sem perdas
         return None
+    
+def _extract_competitors_count(
+    stored_summary: PriceComparisonSummary | None,
+) -> int:
+    """ Obtém a contagem de concorrentes a partir dos agregados persistidos.
+
+    O campo ``competitors_count`` é armazenado no JSON ``aggregates`` e não
+    como atributo direto do modelo. A extração defensiva evita ``AttributeError``
+    quando o snapshot foi salvo sem este campo ou com tipos inesperados.
+    """
+    if stored_summary is None:
+        return 0
+
+    aggregates = stored_summary.aggregates if isinstance(stored_summary.aggregates, dict) else {}
+
+    try:
+        return int(aggregates.get("competitors_count", 0))
+    except (TypeError, ValueError):
+        #Padroniza a contagem em zero quando o valor não puder ser interpretado como inteiro
+        return 0
     
 def _empty_summary(competitors_count: int) -> Dict[str, Any]:
     """ Cria estrutura base do resumo competitivo com valores padrão """

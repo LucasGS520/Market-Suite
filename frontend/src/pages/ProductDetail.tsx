@@ -174,6 +174,24 @@ const ProductDetail: React.FC = () => {
     }
   };
 
+  /**
+   * Formata o preço exibindo estado de coleta quando ainda não existe valor salvo
+   */
+  const renderPrice = (value: string | null) => {
+    if (value === null) {
+      return (
+        <Box display="flex" alignItems="center" gap={1}>
+          <CircularProgress size={18} />
+          <Typography variant="body2" color="text.secondary">
+            Scraping em andamento
+          </Typography>
+        </Box>
+      );
+    }
+
+    return `R$ ${Number(value).toFixed(2)}`;
+  };
+
   return (
     <Layout>
       {/* Cabeçalho da página com botão de voltar */}
@@ -232,7 +250,7 @@ const ProductDetail: React.FC = () => {
                     Preço Atual
                   </Typography>
                   <Typography variant="h4" color="primary">
-                    R$ {parseFloat(product.current_price).toFixed(2)}
+                    {renderPrice(product.current_price)}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} sm={4}>
@@ -371,7 +389,7 @@ const ProductDetail: React.FC = () => {
                         </Box>
                       </TableCell>
                       <TableCell align="right">
-                        R$ {parseFloat(competitor.current_price).toFixed(2)}
+                        {renderPrice(product.current_price)}
                       </TableCell>
                       <TableCell align="center">
                         <Chip

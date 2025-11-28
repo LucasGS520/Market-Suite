@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 import uuid
 from decimal import Decimal
 
-from market_alert.services.services_comparison import build_comparison_summary
+from market_alert.services import services_comparison
+from market_alert.services.services_comparison import (
+    build_comparison_summary,
+    get_comparison_summary_for_user,
+)
 
 
 class _DummyComparison:
@@ -28,6 +32,56 @@ class _DummySummary:
         self.timestamp = timestamp or datetime.now(timezone.utc)
         self.comparison_id = comparison_id or uuid.uuid4()
 
+def test_get_comparison_summary_for_user_reads_aggregates(monkeypatch) -> None:
+    """Usa a contagem persistida no JSON de agregados ao montar o resumo."""
+
+    monitored_id = uuid.uuid4()
+    stored = _DummySummary({"competitors_count": 5, "competitors_mean": "50.00"})
+
+    monkeypatch.setattr(
+        services_comparison,
+        "ensure_user_can_view_monitored",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        services_comparison, "get_latest_summary", lambda *_args, **_kwargs: stored
+    )
+    monkeypatch.setattr(
+        services_comparison, "get_comparison_by_id", lambda *_args, **_kwargs: None
+    )
+
+    response = get_comparison_summary_for_user(
+        db=None, monitored_id=monitored_id, user=object()
+    )
+
+    assert response.competitors_count == 5
+    assert response.monitored_product_id == monitored_id
+
+
+def test_get_comparison_summary_for_user_defaults_missing_count(monkeypatch) -> None:
+    """Garante fallback seguro quando o snapshot não possui contagem salva."""
+
+    monitored_id = uuid.uuid4()
+    stored = _DummySummary({})
+
+    monkeypatch.setattr(
+        services_comparison,
+        "ensure_user_can_view_monitored",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        services_comparison, "get_latest_summary", lambda *_args, **_kwargs: stored
+    )
+    monkeypatch.setattr(
+        services_comparison, "get_comparison_by_id", lambda *_args, **_kwargs: None
+    )
+
+    response = get_comparison_summary_for_user(
+        db=None, monitored_id=monitored_id, user=object()
+    )
+
+    assert response.competitors_count == 0
+    assert response.monitored_product_id == monitored_id
 
 def test_build_comparison_summary_without_data() -> None:
     """ Garante que valores nulos são mantidos quando não há comparação salva """

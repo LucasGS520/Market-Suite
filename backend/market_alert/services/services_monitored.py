@@ -139,7 +139,7 @@ def get_monitored_product(
         )
 
     summary = get_latest_summary(db, product_id)
-    return build_monitored_response(product, summary=summary)
+    return build_monitored_response(product, summary=summary, allow_missing_price=True)
 
 
 def delete_monitored_product_entry(
@@ -158,7 +158,7 @@ def delete_monitored_product_entry(
         )
 
     summary = get_latest_summary(db, product_id)
-    response_payload = build_monitored_response(product, summary=summary)
+    response_payload = build_monitored_response(product, summary=summary, allow_missing_price=True)
     _ = delete_monitored_product(db, product_id)
     return response_payload
 

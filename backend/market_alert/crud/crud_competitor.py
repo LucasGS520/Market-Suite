@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from uuid import UUID
 from datetime import datetime
-from decimal import Decimal
 from typing import Iterable, List, Sequence
 from urllib.parse import unquote, urlparse
 
@@ -76,16 +75,16 @@ def create_pending_competitor_product(
 
     pending = CompetitorProduct(
         monitored_product_id=monitored_product_id,
-        name_competitor=(normalized_url),
+        name_competitor=_derive_competitor_name_from_url(product_url),
         product_url=normalized_url,
-        current_price=Decimal("0.00"),
+        current_price=None,
         old_price=None,
         free_shipping=False,
         seller=None,
         seller_rating=None,
         currency=None,
         thumbnail=None,
-        status=ProductStatus.unavailable,
+        status=ProductStatus.pending,
         last_checked=None,
         last_scraped_at=None,
     )
@@ -263,6 +262,11 @@ def paginate_competitors(
     """ Retorna concorrentes paginados usando apenas filtros essenciais. """
     query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
+    )
+
+    query = query.filter(
+        CompetitorProduct.status != ProductStatus.pending,
+        CompetitorProduct.current_price.isnot(None),
     )
 
     if not include_paused:

@@ -27,7 +27,7 @@ export interface MonitoredProduct {
   owner_id: string; // ID do usuário que monitora o produto
   name: string; // Nome do produto
   url: string; // URL do produto
-  current_price: string; // Preço atual do produto
+  current_price: string | null; // Preço atual do produto
   currency?: string; // Código da moeda
   thumbnail?: string; // URL da imagem em miniatura
   is_featured: boolean; // Indica se o produto é destacado
@@ -45,7 +45,7 @@ export interface CompetitorProduct {
   monitored_id: string; // ID do produto monitorado ao qual este pertence
   name: string; // Nome do produto concorrente
   url: string; // URL do produto concorrente
-  current_price: string; // Preço atual do concorrente (string para preservar formato)
+  current_price: string | null; // Preço atual do concorrente (string para preservar formato)
   currency?: string; // Código da moeda (opcional)
   thumbnail?: string; // URL da imagem em miniatura (opcional)
   availability?: boolean; // Disponibilidade do concorrente (opcional)

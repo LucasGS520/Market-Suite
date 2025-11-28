@@ -45,7 +45,7 @@ interface FeaturedProduct {
   name: string;
   url?: string;
   thumbnail?: string;
-  current_price: string | number;
+  current_price: string | number | null;
   competitiveness_status?: 'competitivo' | 'atencao' | 'nao_competitivo' | 'urgente' | string;
 }
 
@@ -142,6 +142,23 @@ const Dashboard: React.FC = () => {
       default:
         return 'default';
     }
+  };
+
+  /**
+   * Formata preços exibindo rótulo quando ainda não há valor disponível
+   */
+  const renderPrice = (value: string | number | null) => {
+    if (value === null) {
+      return 'Em processamento';
+    }
+    // Normaliza entradas do backend que podem ser string (ex: "5699.05") ou número já parseado. 
+    // Remove quaisquer caracteres não numéricos (ex: 'R$ ', pontos de milhar ou espaços) antes de converter.
+    const cleaned = typeof value === 'string' ? value.replace(/[^0-9.,-]/g, '').replace(',', '.') : String(value);
+    const num = Number(cleaned);
+    if (!Number.isFinite(num)) return 'Em processamento';
+
+    // Formata para pt-BR com símbolo de moeda BRL
+    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
   /**
@@ -256,7 +273,7 @@ const Dashboard: React.FC = () => {
                         {/* Exibição de preço com formatação mínima.
                             Usamos parseFloat por segurança caso a API retorne string. */}
                         <Typography variant="h6" color="primary">
-                          R$ {parseFloat(String(product.current_price || 0)).toFixed(2)}
+                          {renderPrice(product.current_price)}
                         </Typography>
                       </Box>
                     </Box>

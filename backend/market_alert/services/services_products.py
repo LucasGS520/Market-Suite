@@ -21,9 +21,20 @@ from market_alert.schemas.schemas_products import (
 )
 
 
-def _ensure_price(value: Decimal | None, context: str) -> Decimal:
-    """ Garante presença do preço antes de expor o produto ao frontend """
-    if value is None:
+def _ensure_price(
+    value: Decimal | None,
+    context: str,
+    *,
+    allow_missing_price: bool = False
+) -> Decimal | None:
+    """Garante presença do preço antes de expor o produto ao frontend.
+
+    Quando o preço ainda não foi coletado e a chamada tolera itens pendentes,
+    o valor é propagado como ``None`` para que a camada superior indique o
+    estado de scraping em andamento.
+    """
+
+    if value is None and not allow_missing_price:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -36,13 +47,15 @@ def _ensure_price(value: Decimal | None, context: str) -> Decimal:
 def build_monitored_response(
     monitored: MonitoredProduct,
     summary: PriceComparisonSummary | None = None,
+    *,
+    allow_missing_price: bool = False,
 ) -> MonitoredProductResponse:
     """Converte um monitorado em contrato simplificado com preço obrigatório.
 
     Quando disponível, inclui status de competitividade calculado a partir do
     último resumo armazenado para o produto.
     """
-    current_price = _ensure_price(monitored.current_price, "monitorado")
+    current_price = _ensure_price(monitored.current_price, "monitorado", allow_missing_price=allow_missing_price)
     availability = None
     if monitored.status in {MonitoredStatus.active, MonitoredStatus.pending}:
         availability = True
@@ -81,10 +94,11 @@ def build_competitor_response(
     competitor: CompetitorProduct,
     *,
     source: Literal["competitor"] = "competitor",
+    allow_missing_price: bool = False,
 ) -> CompetitorProductResponse:
     """ Converte um concorrente em contrato simplificado com preço obrigatório """
 
-    current_price = _ensure_price(competitor.current_price, "concorrente")
+    current_price = _ensure_price(competitor.current_price, "concorrente", allow_missing_price=allow_missing_price)
     availability = None
     if competitor.status == ProductStatus.available:
         availability = True
