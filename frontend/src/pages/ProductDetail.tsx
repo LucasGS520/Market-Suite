@@ -258,7 +258,7 @@ const ProductDetail: React.FC = () => {
                   <Typography variant="body2" color="text.secondary">
                     Menor Concorrente
                   </Typography>
-                  <Typography variant="h4" color="success.main">
+                  <Typography variant="h4">
                     {formatCurrency(summary?.competitors_min)}
                   </Typography>
                 </Grid>
@@ -267,7 +267,9 @@ const ProductDetail: React.FC = () => {
                     Posição no Ranking
                   </Typography>
                   <Typography variant="h4">
-                    #{summary?.position_rank || 1} de {(summary?.competitors_count || 0) + 1}
+                    {summary?.position_rank !== undefined && summary?.position_rank !== null
+                      ? `#${summary.position_rank} de ${(summary?.competitors_count || 0) + 1}`
+                      : '—'}
                   </Typography>
                 </Grid>
               </Grid>
@@ -398,7 +400,7 @@ const ProductDetail: React.FC = () => {
                         </Box>
                       </TableCell>
                       <TableCell align="right">
-                        {renderPrice(product.current_price)}
+                        {renderPrice(competitor.current_price)}
                       </TableCell>
                       <TableCell align="center">
                         <Chip

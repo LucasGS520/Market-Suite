@@ -317,49 +317,27 @@ def _build_summary_from_result(
     comparison_id: UUID | None,
     competitors_count: int,
 ) -> Dict[str, Any]:
-    """ Monta um resumo enxuto com base no resultado bruto do comparador.
+    """ Monta um resumo completo a partir do resultado do comparador.
 
-    A função evita cálculos derivados complexos e prioriza apenas os campos
-    necessários para dashboards e notificações rápidas.
+    A lógica reaproveita o cálculo detalhado para garantir que média,
+    mínimos, ranking e ajuste potencial sejam persistidos sempre que
+    o endpoint de comparação for chamado.
     """
-    summary = _empty_summary(competitors_count)
-    summary["last_comparison_at"] = timestamp
-    summary["computed_at"] = timestamp
-    summary["competitors_count"] = competitors_count
+    payload_dict = payload if isinstance(payload, dict) else {}
 
-    if comparison_id is not None:
-        summary["comparison_id"] = str(comparison_id)
+    detailed_summary = _compute_summary_from_payload(
+        payload_dict,
+        timestamp=timestamp,
+        comparison_id=comparison_id,
+        competitors_count=competitors_count,
+    )
 
-    if isinstance(payload, dict):
-        raw_alerts = payload.get("alerts")
-        summary["alerts"] = raw_alerts if isinstance(raw_alerts, list) else []
-
-        discrepancies = payload.get("discrepancies")
-        if isinstance(discrepancies, list):
-            summary["discrepancies"] = discrepancies
-            summary["competitors_with_price_count"] = sum(
-                1
-                for item in discrepancies
-                if isinstance(item, dict) and item.get("price") is not None
-            )
-
-    monitored_price = _to_decimal(payload.get("monitored_price"))
-    lowest_price = _to_decimal((payload.get("lowest_competitor") or {}).get("price"))
-    highest_price = _to_decimal((payload.get("highest_competitor") or {}).get("price"))
-
-    if monitored_price is not None:
-        #Mantemos ``Decimal`` para que o encoder do FastAPI converta em número JSON evitando strings que quebram o consumo no frontend.
-        summary["monitored_price"] = monitored_price
-    if lowest_price is not None:
-        summary["competitors_min"] = lowest_price
-    if highest_price is not None:
-        summary["competitors_max"] = highest_price
-
-    status = _calculate_competitiveness_status(monitored_price, lowest_price)
-    if status is not None:
-        summary["competitiveness_status"] = status
-
-    return summary
+    return _apply_summary_defaults(
+        detailed_summary,
+        timestamp=timestamp,
+        comparison_id=comparison_id,
+        competitors_count=competitors_count,
+    )
 
 def _compute_summary_from_payload(
     payload: Dict[str, Any],

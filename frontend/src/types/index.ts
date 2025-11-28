@@ -20,6 +20,11 @@ export interface TokenPair {
 }
 
 /**
+ * Valor monetário aceito pelas respostas: número, string ou nulo.
+ */
+export type MonetaryValue = number | string | null;
+
+/**
  * Produto monitorado pelo usuário no Market-Suite.
  */
 export interface MonitoredProduct {
@@ -27,7 +32,7 @@ export interface MonitoredProduct {
   owner_id: string; // ID do usuário que monitora o produto
   name: string; // Nome do produto
   url: string; // URL do produto
-  current_price: string | null; // Preço atual do produto
+  current_price: MonetaryValue; // Preço atual do produto
   currency?: string; // Código da moeda
   thumbnail?: string; // URL da imagem em miniatura
   is_featured: boolean; // Indica se o produto é destacado
@@ -43,9 +48,10 @@ export interface MonitoredProduct {
 export interface CompetitorProduct {
   id: string; // Identificador do produto concorrente
   monitored_id: string; // ID do produto monitorado ao qual este pertence
+  monitored_product_id?: string; // Alias opcional usado pelo backend
   name: string; // Nome do produto concorrente
   url: string; // URL do produto concorrente
-  current_price: string | null; // Preço atual do concorrente (string para preservar formato)
+  current_price: MonetaryValue; // Preço atual do concorrente (string para preservar formato)
   currency?: string; // Código da moeda (opcional)
   thumbnail?: string; // URL da imagem em miniatura (opcional)
   availability?: boolean; // Disponibilidade do concorrente (opcional)
@@ -68,22 +74,23 @@ export interface PriceComparison {
  * Resumo agregado de uma comparação de preços, usado em dashboards/visões rápidas.
  */
 export interface PriceComparisonSummary {
-  monitored_id: string; // ID do produto monitorado
+  monitored_id?: string; // ID do produto monitorado
+  monitored_product_id?: string; // Alias opcional retornado pelo backend
   comparison_id?: string; // ID da comparação associada
   last_comparison_at?: string; // Última vez que houve uma comparação
   computed_at?: string; // Quando esse resumo foi computado
-  monitored_price: number; // Preço do produto monitorado
-  competitors_count: number; // Quantidade total de concorrentes considerados
-  competitors_with_price_count: number; // Quantidade de concorrentes com preço disponível
-  competitors_mean?: number; // Média dos preços dos concorrentes
-  competitors_min?: number; // Menor preço entre concorrentes
-  competitors_max?: number; // Maior preço entre concorrentes
-  position_rank?: number; // Posição/ranking do monitorado
-  potential_adjustment?: number; // Ajuste de preço sugerido
+  monitored_price?: MonetaryValue; // Preço do produto monitorado
+  competitors_count?: number; // Quantidade total de concorrentes considerados
+  competitors_with_price_count?: number; // Quantidade de concorrentes com preço disponível
+  competitors_mean?: MonetaryValue; // Média dos preços dos concorrentes
+  competitors_min?: MonetaryValue; // Menor preço entre concorrentes
+  competitors_max?: MonetaryValue; // Maior preço entre concorrentes
+  position_rank?: number | null; // Posição/ranking do monitorado
+  potential_adjustment?: MonetaryValue; // Ajuste de preço sugerido
   comparison_insights?: string; // Insights textuais adicionais
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
-  discrepancies: Array<Record<string, unknown>>; // Lista de discrepâncias detectadas
-  alerts: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
+  discrepancies?: Array<Record<string, unknown>>; // Lista de discrepâncias detectadas
+  alerts?: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
 }
 
 /**

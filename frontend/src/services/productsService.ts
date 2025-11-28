@@ -116,7 +116,28 @@ export const productsService = {
       '/competitors',
       { params }
     );
-    return response.data;
+    const normalizedItems = (response.data.items || []).map((competitor) => {
+      const fallbackName = (() => {
+        try {
+          return new URL(competitor.url).hostname;
+        } catch {
+          return 'Concorrente';
+        }
+      })();
+
+      return {
+        ...competitor,
+        name: competitor.name || fallbackName,
+        current_price: competitor.current_price ?? null,
+        monitored_id: competitor.monitored_id || competitor.monitored_product_id || params.monitored_id,
+        monitored_product_id: competitor.monitored_product_id || competitor.monitored_id || params.monitored_id,
+      };
+    });
+
+    return {
+      ...response.data,
+      items: normalizedItems,
+    };
   },
 
   /**
@@ -196,6 +217,22 @@ export const productsService = {
     const response = await apiClient.get<PriceComparisonSummary>(
       `/comparisons/${monitoredId}/summary`
     );
-    return response.data;
+    const summary = response.data || {};
+
+    return {
+      ...summary,
+      monitored_id: summary.monitored_id || summary.monitored_product_id || monitoredId,
+      monitored_product_id: summary.monitored_product_id || summary.monitored_id || monitoredId,
+      competitors_count: summary.competitors_count ?? 0,
+      competitors_with_price_count: summary.competitors_with_price_count ?? 0,
+      competitors_mean: summary.competitors_mean ?? null,
+      competitors_min: summary.competitors_min ?? null,
+      competitors_max: summary.competitors_max ?? null,
+      monitored_price: summary.monitored_price ?? null,
+      potential_adjustment: summary.potential_adjustment ?? null,
+      position_rank: summary.position_rank ?? null,
+      discrepancies: summary.discrepancies || [],
+      alerts: summary.alerts || [],
+    };
   },
 };
