@@ -193,6 +193,27 @@ const ProductDetail: React.FC = () => {
     return formatCurrency(value);
   };
 
+  const renderSummaryCurrency = (value?: string | number | null) => {
+    if (value === null || value === undefined) {
+      return '—';
+    }
+
+    return formatCurrency(value, { fallbackLabel: '—' });
+  };
+
+  const resolveAdjustmentColor = (value?: string | number | null) => {
+    if (value === null || value === undefined) {
+      return 'text.primary';
+    }
+
+    const adjustmentNumber = Number(value);
+    if (Number.isFinite(adjustmentNumber) && adjustmentNumber < 0) {
+      return 'success.main';
+    }
+
+    return 'error';
+  };
+
   return (
     <Layout>
       {/* Cabeçalho da página com botão de voltar */}
@@ -259,7 +280,7 @@ const ProductDetail: React.FC = () => {
                     Menor Concorrente
                   </Typography>
                   <Typography variant="h4">
-                    {formatCurrency(summary?.competitors_min)}
+                    {renderSummaryCurrency(summary?.competitors_min)}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} sm={4}>
@@ -297,7 +318,7 @@ const ProductDetail: React.FC = () => {
                   Preço Médio
                 </Typography>
                 <Typography variant="h6">
-                  {formatCurrency(summary?.competitors_mean)}
+                  {renderSummaryCurrency(summary?.competitors_mean)}
                 </Typography>
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
@@ -305,7 +326,7 @@ const ProductDetail: React.FC = () => {
                   Preço Máximo
                 </Typography>
                 <Typography variant="h6">
-                  {formatCurrency(summary.competitors_max)}
+                  {renderSummaryCurrency(summary?.competitors_max)}
                 </Typography>
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
@@ -314,14 +335,9 @@ const ProductDetail: React.FC = () => {
                 </Typography>
                 <Typography
                   variant="h6"
-                  color={
-                    Number.isFinite(Number(summary.potential_adjustment)) &&
-                    Number(summary.potential_adjustment) < 0
-                      ? 'success.main'
-                      : 'error'
-                  }
+                  color={resolveAdjustmentColor(summary?.potential_adjustment)}
                 >
-                  {formatCurrency(summary.potential_adjustment)}
+                  {renderSummaryCurrency(summary?.potential_adjustment)}
                 </Typography>
               </Grid>
             </Grid>

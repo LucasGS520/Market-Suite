@@ -114,15 +114,62 @@ def test_build_comparison_summary_with_metrics() -> None:
 
     summary = build_comparison_summary(comparison, competitors_count=2)
 
-    assert summary["competitors_mean"] == Decimal("90.00")
+    assert summary["competitors_mean"] == Decimal("100.00")
     assert summary["competitors_min"] == Decimal("80.00")
     assert summary["competitors_max"] == Decimal("120.00")
     assert summary["position_rank"] == 2
     assert summary["potential_adjustment"] == Decimal("20.00")
     assert summary["competitors_with_price_count"] == 2
-    assert summary["comparison_insights"] == "Preço monitorado acima da média dos concorrentes."
+    assert "25.00%" in summary["comparison_insights"]
+    assert "R$20.00" in summary["comparison_insights"]
     assert summary["alerts"] == [{"type": "price_below_monitored"}]
     assert summary["competitiveness_status"] == "urgente"
+
+def test_compute_summary_with_multiple_competitors_generates_rank_and_insights() -> None:
+    """Gera média, ranking, ajuste e insights quando preços estão disponíveis."""
+
+    comparison = _DummyComparison(
+        data={
+            "monitored_price": 150,
+            "discrepancies": [
+                {"price": "80.00"},
+                {"price": 120},
+            ],
+        }
+    )
+
+    summary = build_comparison_summary(comparison, competitors_count=2)
+
+    assert summary["competitors_mean"] == Decimal("100.00")
+    assert summary["competitors_min"] == Decimal("80.00")
+    assert summary["competitors_max"] == Decimal("120.00")
+    assert summary["position_rank"] == 3
+    assert summary["potential_adjustment"] == Decimal("70.00")
+    assert "87.50%" in summary["comparison_insights"]
+    assert "R$70.00" in summary["comparison_insights"]
+
+
+def test_compute_summary_without_competitor_prices_keeps_null_fields() -> None:
+    """Mantém campos dependentes de preço nulos quando não há valores de concorrentes."""
+
+    comparison = _DummyComparison(
+        data={
+            "monitored_price": "120.00",
+            "discrepancies": [
+                {"price": None},
+                {"price": ""},
+            ],
+        }
+    )
+
+    summary = build_comparison_summary(comparison, competitors_count=2)
+
+    assert summary["competitors_with_price_count"] == 0
+    assert summary["competitors_mean"] is None
+    assert summary["competitors_min"] is None
+    assert summary["potential_adjustment"] is None
+    assert summary["position_rank"] is None
+    assert summary["comparison_insights"] is None
     
 def test_build_comparison_summary_with_stored_snapshot() -> None:
     """ Usa resumo persistido quando disponível """

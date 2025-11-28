@@ -346,7 +346,17 @@ def _compute_summary_from_payload(
     comparison_id: UUID | None,
     competitors_count: int,
 ) -> Dict[str, Any]:
-    """Calcula agregados a partir do payload cru armazenado na comparação """
+    """ Calcula o resumo competitivo a partir do payload cru armazenado.
+
+    O cálculo utiliza todos os preços convertidos via ``_to_decimal`` e aplica:
+    - ``competitors_mean``: média aritmética dos preços dos concorrentes (2 casas decimais, ``ROUND_HALF_UP``)
+    - ``competitors_min``/``competitors_max``: menor e maior preço conhecido
+    - ``position_rank``: 1 + quantidade de concorrentes com preço menor que o monitorado
+    - ``potential_adjustment``: diferença absoluta entre o preço monitorado e o menor preço concorrente quando o monitorado está acima (2 casas decimais,``ROUND_HALF_UP``)
+
+    Requer ao menos um preço de concorrente e um preço monitorado para gerar ranking, ajuste potencial e insights textuais. 
+    Em cenários sem preços suficientes, os campos permanecem nulos para sinalizar ausência de dados.
+    """
     summary = _empty_summary(competitors_count)
     summary["last_comparison_at"] = timestamp
     summary["computed_at"] = timestamp
@@ -367,65 +377,129 @@ def _compute_summary_from_payload(
         summary["monitored_price"] = monitored_price
 
     competitor_prices: list[Decimal] = []
+
+    def _append_price(value: Any) -> None:
+        price = _to_decimal(value)
+        if price is not None and price not in competitor_prices:
+            competitor_prices.append(price)
+
     for item in summary["discrepancies"]:
         if isinstance(item, dict):
-            price = _to_decimal(item.get("price"))
-            if price is not None:
-                competitor_prices.append(price)
+            _append_price(item.get("price"))
+
+    lowest_price = _to_decimal(payload.get("lowest_competitor", {}).get("price"))
+    highest_price = _to_decimal(payload.get("highest_competitor", {}).get("price"))
+
+    _append_price(lowest_price)
+    _append_price(highest_price)
 
     summary["competitors_with_price_count"] = len(competitor_prices)
 
-    average_price = _to_decimal(payload.get("average_competitor_price"))
-    if average_price is None and competitor_prices:
-        average_price = (
+    if competitor_prices:
+        competitors_min = min(competitor_prices)
+        competitors_max = max(competitor_prices)
+        competitors_mean = (
             sum(competitor_prices) / len(competitor_prices)
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    lowest_block = payload.get("lowest_competitor") or {}
-    highest_block = payload.get("highest_competitor") or {}
-    lowest_price = _to_decimal(lowest_block.get("price"))
-    highest_price = _to_decimal(highest_block.get("price"))
-
-    if lowest_price is None and competitor_prices:
-        lowest_price = min(competitor_prices)
-    if highest_price is None and competitor_prices:
-        highest_price = max(competitor_prices)
-    if average_price is not None:
-        summary["competitors_mean"] = average_price
-    if lowest_price is not None:
-        summary["competitors_min"] = lowest_price
-    if highest_price is not None:
-        summary["competitors_max"] = highest_price
+        summary["competitors_min"] = competitors_min
+        summary["competitors_max"] = competitors_max
+        summary["competitors_mean"] = competitors_mean
 
     if (
         monitored_price is not None
-        and lowest_price is not None
-        and monitored_price > lowest_price
+        and summary.get("competitors_min") is not None
+        and monitored_price > summary.get("competitors_min")
     ):
         summary["potential_adjustment"] = (
-            monitored_price - lowest_price
+            monitored_price - summary.get("competitors_min")
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     if monitored_price is not None and competitor_prices:
-        #Rank considera quantos concorrentes possuem preço inferior ao monitorado
         cheaper_count = sum(1 for price in competitor_prices if price < monitored_price)
         summary["position_rank"] = cheaper_count + 1
 
-        if average_price is not None and monitored_price > average_price:
-            summary["comparison_insights"] = "Preço monitorado acima da média dos concorrentes."
-        elif lowest_price is not None and monitored_price <= lowest_price:
-            summary["comparison_insights"] = "Produto monitorado está com melhor preço entre os concorrentes."
-        elif highest_price is not None and monitored_price >= highest_price:
-            summary["comparison_insights"] = "Produto monitorado é o mais caro entre os concorrentes."
-        else:
-            summary["comparison_insights"] = "Preço monitorado alinhado com a concorrência."
-
-    status_reference = lowest_price or average_price
+    status_reference = summary.get("competitors_min") or summary.get("competitors_mean")
     status = _calculate_competitiveness_status(monitored_price, status_reference)
     if status is not None:
         summary["competitiveness_status"] = status
 
+    summary["comparison_insights"] = _build_comparison_insights(
+        monitored_price=monitored_price,
+        competitors_min=summary.get("competitors_min"),
+        competitors_count=competitors_count,
+        position_rank=summary.get("position_rank"),
+        potential_adjustment=summary.get("potential_adjustment"),
+        competitiveness_status=summary.get("competitiveness_status"),
+    )
+
     return summary
+
+def _calculate_percentage_delta(
+    monitored_price: Optional[Decimal], reference_price: Optional[Decimal]
+) -> Optional[Decimal]:
+    """ Calcula variação percentual entre o preço monitorado e uma referência.
+
+    Retorna ``None`` quando algum dos valores é inexistente ou quando a
+    referência é menor ou igual a zero para evitar divisões inválidas.
+    """
+    if (
+        monitored_price is None
+        or reference_price is None
+        or reference_price <= Decimal("0")
+    ):
+        return None
+
+    percentage_delta = (
+        (monitored_price - reference_price) / reference_price
+    ) * Decimal("100")
+    return percentage_delta.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _build_comparison_insights(
+    *,
+    monitored_price: Optional[Decimal],
+    competitors_min: Optional[Decimal],
+    competitors_count: int,
+    position_rank: Optional[int],
+    potential_adjustment: Optional[Decimal],
+    competitiveness_status: Optional[str],
+) -> Optional[str]:
+    """ Gera texto explicativo sobre competitividade e ajuste recomendado """
+    if monitored_price is None:
+        return "Preço do produto monitorado não disponível; recoletores em andamento."
+    if competitors_min is None or position_rank is None or competitors_count is None:
+        return None
+
+    total_itens = competitors_count + 1 if competitors_count >= 0 else 1
+    delta_vs_min = _calculate_percentage_delta(monitored_price, competitors_min)
+
+    if delta_vs_min is None:
+        return None
+
+    adjustment_value = potential_adjustment or Decimal("0.00")
+    adjustment_pct = None
+    if potential_adjustment is not None and monitored_price > Decimal("0"):
+        adjustment_pct = (
+            (potential_adjustment / monitored_price) * Decimal("100")
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if adjustment_value <= 0:
+        return (
+            f"Preço alinhado ao menor concorrente (R${competitors_min}). "
+            f"Posição atual: #{position_rank} de {total_itens}."
+        )
+    adjustment_suffix = f" (~{adjustment_pct}%)" if adjustment_pct is not None else ""
+    status_hint = (
+        f" Status: {competitiveness_status}." if competitiveness_status else ""
+    )
+
+    return (
+        f"Você está {delta_vs_min}% acima do menor concorrente (R${competitors_min}). "
+        f"Posição atual: #{position_rank} de {total_itens}. "
+        f"Recomendação: reduzir R${adjustment_value}{adjustment_suffix} para igualar o menor preço."
+        f"{status_hint}"
+    )
 
 def _apply_summary_defaults(
     payload: Dict[str, Any],
@@ -495,8 +569,21 @@ def build_comparison_summary(
 ) -> Dict[str, Any]:
     """ Normaliza os dados de resumo para exposição na API pública """
     if stored_summary is not None:
+        stored_payload = stored_summary.aggregates or {}
+        recomputed_payload = _compute_summary_from_payload(
+            stored_payload,
+            timestamp=stored_summary.timestamp,
+            comparison_id=stored_summary.comparison_id,
+            competitors_count=competitors_count,
+        )
+
+        merged_payload = stored_payload.copy()
+        for key, value in recomputed_payload.items():
+            if merged_payload.get(key) is None:
+                merged_payload[key] = value
+
         return _apply_summary_defaults(
-            stored_summary.aggregates or {},
+            merged_payload,
             timestamp=stored_summary.timestamp,
             comparison_id=stored_summary.comparison_id,
             competitors_count=competitors_count,
