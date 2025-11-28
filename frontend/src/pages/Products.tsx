@@ -35,6 +35,7 @@ import {
   DialogActions,
   ToggleButton,
   ToggleButtonGroup,
+  Divider,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import {
@@ -47,7 +48,7 @@ import {
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
-import type { MonitoredProduct } from '../types';
+import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types';
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -69,6 +70,7 @@ const Products: React.FC = () => {
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto
+  const [newCompetitorUrl, setNewCompetitorUrl] = useState(''); // URL opcional do concorrente inicial
   const [creationFeedback, setCreationFeedback] = useState<string | null>(null); // mensagem pós-criação
   const [creationError, setCreationError] = useState<string | null>(null); // erro ao criar produto
 
@@ -94,6 +96,7 @@ const Products: React.FC = () => {
       setOpenAddDialog(false);
       setNewProductUrl('');
       setNewProductName('');
+      setNewCompetitorUrl('');
       setCreationError(null);
       // Feedback explícito para sinalizar que o backend ainda processará o scraping
       setCreationFeedback('Produto criado e scraping em andamento. Lista atualizada automaticamente.');
@@ -110,10 +113,18 @@ const Products: React.FC = () => {
    */
   const handleAddProduct = () => {
     if (!newProductUrl) return;
-    createProductMutation.mutate({
+    const payload: MonitoredProductCreateScraping = {
       product_url: newProductUrl,
       name_identification: newProductName || undefined,
-    });
+    };
+
+    if (newCompetitorUrl) {
+      payload.initial_competitor = {
+        product_url: newCompetitorUrl,
+      };
+    }
+
+    createProductMutation.mutate(payload);
   };
 
   /**
@@ -221,7 +232,7 @@ const Products: React.FC = () => {
           startIcon={<AddIcon />}
           onClick={() => setOpenAddDialog(true)}
         >
-          Adicionar Produto
+          Adicionar Seu Produto
         </Button>
 
         <TextField
@@ -391,19 +402,32 @@ const Products: React.FC = () => {
                           </Grid>
                           
                           {/* Rodapé do cartão com ações */}
-                          <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}></Box>
+                          <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
                             <Typography variant="body2" color="text.secondary">
                               {rankingLabel}
                             </Typography>
-                            <Button
-                              variant="contained"
-                              size="small"
-                              onClick={() => navigate(`/product/${product.id}`)}
-                            >
-                              Ver Detalhes
-                            </Button>
-                          </Box>  
+                            <Box display="flex" gap={1}>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                component="a"
+                                href={product.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Ver Anúncio
+                              </Button>
+                              <Button
+                                variant="contained"
+                                size="small"
+                                onClick={() => navigate(`/product/${product.id}`)}
+                              >
+                                Ver Detalhes
+                              </Button>
+                            </Box>
+                          </Box>
                         </Box>
+                      </Box>
                     </CardContent>
                   </Card>
                 </Grid>
@@ -490,13 +514,25 @@ const Products: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell align="center">
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => navigate(`/product/${product.id}`)}
-                        >
-                          Ver
-                        </Button>
+                        <Box display="flex" justifyContent="center" gap={1}>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            component="a"
+                            href={product.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Ver Anúncio
+                          </Button>
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={() => navigate(`/product/${product.id}`)}
+                          >
+                            Ver Detalhes
+                          </Button>
+                        </Box>
                       </TableCell>
                     </TableRow>
                   );
@@ -517,6 +553,15 @@ const Products: React.FC = () => {
         <DialogTitle>Adicionar Produto Monitorado</DialogTitle>
         <DialogContent>
           <TextField
+            margin="dense"
+            label="Nome de Identificação"
+            type="text"
+            fullWidth
+            value={newProductName}
+            onChange={(e) => setNewProductName(e.target.value)}
+            placeholder="Ex: Monitor Gamer 27''"
+          />
+          <TextField
             autoFocus
             margin="dense"
             label="URL do Produto"
@@ -527,17 +572,18 @@ const Products: React.FC = () => {
             onChange={(e) => setNewProductUrl(e.target.value)}
             placeholder="https://exemplo.com/produto"
           />
+          <Divider sx={{ my: 2 }} />
           <TextField
             margin="dense"
-            label="Nome de Identificação (opcional)"
-            type="text"
+            label="Adicionar Concorrente (opcional)"
+            type="url"
             fullWidth
-            value={newProductName}
-            onChange={(e) => setNewProductName(e.target.value)}
-            placeholder="Ex: Monitor Gamer 27''"
+            value={newCompetitorUrl}
+            onChange={(e) => setNewCompetitorUrl(e.target.value)}
+            placeholder="https://exemplo.com/concorrente"
           />
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            O produto será processado de forma assíncrona. Aguarde alguns instantes para que apareça na lista.
+            O produto será processado de forma assíncrona. Caso informe um concorrente, ele será criado junto ao monitorado.
           </Typography>
         </DialogContent>
         <DialogActions>

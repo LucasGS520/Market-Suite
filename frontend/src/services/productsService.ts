@@ -127,7 +127,7 @@ export const productsService = {
 
       return {
         ...competitor,
-        name: competitor.name || fallbackName,
+        name: competitor.name || competitor.title || fallbackName,
         current_price: competitor.current_price ?? null,
         monitored_id: competitor.monitored_id || competitor.monitored_product_id || params.monitored_id,
         monitored_product_id: competitor.monitored_product_id || competitor.monitored_id || params.monitored_id,

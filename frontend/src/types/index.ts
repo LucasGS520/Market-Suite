@@ -51,6 +51,7 @@ export interface CompetitorProduct {
   monitored_id: string; // ID do produto monitorado ao qual este pertence
   monitored_product_id?: string; // Alias opcional usado pelo backend
   name: string; // Nome do produto concorrente
+  title?: string; //Nome bruto retornado pelo scraper quando disponível
   url: string; // URL do produto concorrente
   current_price: MonetaryValue; // Preço atual do concorrente (string para preservar formato)
   currency?: string; // Código da moeda (opcional)
@@ -157,8 +158,16 @@ export type CompetitivenessStatus = 'competitivo' | 'atencao' | 'nao_competitivo
  * Payload usado para criar um scraping ao cadastrar um produto monitorado.
  */
 export interface MonitoredProductCreateScraping {
-  product_url: string; // URL do produto a ser raspado (contrato do backend)
   name_identification?: string; // Nome opcional para identificar o item no painel
+  product_url: string; // URL do produto a ser raspado (contrato do backend)
+  initial_competitor?: InitialCompetitorPayload; // Concorrente inicial opcional enviado junto à criação
+}
+
+/**
+ * Payload opcional usado para criar um concorrente inicial junto ao monitorado
+ */
+export interface InitialCompetitorPayload {
+  product_url: string; // URL do concorrente
 }
 
 /**

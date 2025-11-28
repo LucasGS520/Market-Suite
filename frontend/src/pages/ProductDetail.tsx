@@ -37,6 +37,7 @@ import {
   Delete as DeleteIcon,
   Pause as PauseIcon,
   PlayArrow as PlayArrowIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
@@ -323,6 +324,14 @@ const ProductDetail: React.FC = () => {
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
                 <Typography variant="body2" color="text.secondary">
+                  Preço Mínimo
+                </Typography>
+                <Typography variant="h6">
+                  {renderSummaryCurrency(summary?.competitors_min)}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography variant="body2" color="text.secondary">
                   Preço Máximo
                 </Typography>
                 <Typography variant="h6">
@@ -331,7 +340,7 @@ const ProductDetail: React.FC = () => {
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
                 <Typography variant="body2" color="text.secondary">
-                  Ajuste Potencial
+                  Reduzir seu Preço
                 </Typography>
                 <Typography
                   variant="h6"
@@ -433,6 +442,16 @@ const ProductDetail: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell align="center">
+                        <IconButton
+                          size="small"
+                          component="a"
+                          href={competitor.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="Ver anúncio do concorrente"
+                        >
+                          <OpenInNewIcon />
+                        </IconButton>
                         {/* Ações não implementadas: apenas botões visuais por ora */}
                         <IconButton size="small" color={competitor.is_paused ? 'success' : 'warning'}>
                           {competitor.is_paused ? <PlayArrowIcon /> : <PauseIcon />}
