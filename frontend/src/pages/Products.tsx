@@ -42,10 +42,12 @@ import {
   ViewList as ViewListIcon,
   ViewModule as ViewModuleIcon,
   TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
+import type { MonitoredProduct } from '../types';
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -136,12 +138,50 @@ const Products: React.FC = () => {
   /**
    * Formata o preço exibindo rótulo de coleta quando ainda não há valor disponível.
    */
-  const renderPrice = (value: string | number | null) => {
-    if (value === null) {
-      return 'Coletando preço...';
+  const parseToNumber = (value: string | number | null | undefined) => {
+    if (value === null || value === undefined) {
+      return null;
     }
 
-    return formatCurrency(value);
+    const numericValue =
+      typeof value === 'string' ? Number.parseFloat(value.replace(',', '.')) : Number(value);
+
+    return Number.isFinite(numericValue) ? numericValue : null;
+  };
+
+  const renderPrice = (value: string | number | null) => {
+    return formatCurrency(value, { fallbackLabel: 'Coletando preço...' });
+  };
+
+  const getDifferenceValue = (product: MonitoredProduct) => {
+    const potentialAdjustment = product.comparison_summary?.potential_adjustment;
+    if (potentialAdjustment !== null && potentialAdjustment !== undefined) {
+      const adjustmentValue = parseToNumber(potentialAdjustment);
+      if (adjustmentValue !== null) {
+        return adjustmentValue;
+      }
+    }
+
+    const monitoredPrice = parseToNumber(product.current_price);
+    const lowestCompetitorPrice = parseToNumber(product.comparison_summary?.competitors_min);
+
+    if (monitoredPrice !== null && lowestCompetitorPrice !== null) {
+      return monitoredPrice - lowestCompetitorPrice;
+    }
+
+    return null;
+  };
+
+  const getRankingLabel = (product: MonitoredProduct) => {
+    const positionRank = product.comparison_summary?.position_rank;
+    const competitorsCount = product.comparison_summary?.competitors_count ?? 0;
+
+    if (positionRank === null || positionRank === undefined) {
+      return 'Ranking —';
+    }
+
+    const totalSellers = competitorsCount + 1; // inclui o produto monitorado
+    return `Ranking #${positionRank} de ${totalSellers}`;
   };
 
   /**
@@ -251,89 +291,124 @@ const Products: React.FC = () => {
         viewMode === 'list' ? (
           // Modo Lista - exibe cartões por produto
           <Grid container spacing={3}>
-            {data.items.map((product) => (
-              <Grid item xs={12} key={product.id}>
-                <Card elevation={2}>
-                  <CardContent>
-                    <Box display="flex" gap={2}>
-                      {product.thumbnail && (
-                        <Box
-                          component="img"
-                          src={product.thumbnail}
-                          alt={product.name}
-                          sx={{
-                            width: 100,
-                            height: 100,
-                            objectFit: 'cover',
-                            borderRadius: 1,
-                          }}
-                        />
-                      )}
-                      <Box flex={1}>
-                        <Box display="flex" justifyContent="space-between" alignItems="start">
-                          <Box>
-                            <Typography variant="h6">{product.name}</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              Origem: {new URL(product.url).hostname}
-                            </Typography>
-                          </Box>
-                          <Chip
-                            label={getStatusLabel(product.competitiveness_status)}
-                            color={getStatusColor(product.competitiveness_status)}
-                            size="small"
-                          />
-                        </Box>
+            {data.items.map((product) => {
+              const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
+              const differenceValue = getDifferenceValue(product);
+              const differenceLabel = formatCurrency(differenceValue);
 
-                        {/* Informações de preço resumidas */}
-                        <Grid container spacing={2} sx={{ mt: 2 }}>
-                          <Grid item xs={4}>
-                          <Typography variant="body2" color="text.secondary">
-                              MEU PREÇO
-                            </Typography>
-                            <Typography variant="h5" color="primary">
-                              {renderPrice(product.current_price)}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={4}>
-                            <Typography variant="body2" color="text.secondary">
-                              MENOR CONCORRENTE
-                            </Typography>
-                            <Typography variant="h5" color="success.main">
-                              R$ 0,00
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={4}>
-                            <Typography variant="body2" color="text.secondary">
-                              DIFERENÇA
-                            </Typography>
-                            <Box display="flex" alignItems="center" gap={0.5}>
-                              <TrendingUpIcon color="error" />
-                              <Typography variant="h5" color="error">
-                                R$ 0,00
+              const monitoredPriceNum = parseToNumber(product.current_price);
+              const lowestPriceNum = parseToNumber(product.comparison_summary?.competitors_min);
+
+              // cor do menor concorrente: verde quando concorrente maior (sou mais barato),
+              // vermelho quando concorrente menor (sou mais caro), preto quando igual/indisponível
+              let lowestColor = 'text.primary';
+              if (lowestPriceNum !== null && monitoredPriceNum !== null) {
+                if (lowestPriceNum > monitoredPriceNum) lowestColor = 'success.main';
+                else if (lowestPriceNum < monitoredPriceNum) lowestColor = 'error.main';
+                else lowestColor = 'text.primary';
+              }
+
+              // ícone e cor da diferença: >0 -> seta pra cima (vermelha), <0 -> seta pra baixo (verde), 0/null -> neutro
+              let diffIconComponent = <TrendingUpIcon color="primary" />;
+              let diffTextColor = 'text.primary';
+              if (differenceValue !== null) {
+                if (differenceValue > 0) {
+                  diffIconComponent = <TrendingUpIcon color="error" />;
+                  diffTextColor = 'error.main';
+                } else if (differenceValue < 0) {
+                  diffIconComponent = <TrendingDownIcon color="success" />;
+                  diffTextColor = 'success.main';
+                } else {
+                  diffIconComponent = <TrendingUpIcon color="primary" />;
+                  diffTextColor = 'text.primary';
+                }
+              }
+
+              const rankingLabel = `${getRankingLabel(product)} | ${product.comparison_summary?.competitors_count ?? 0} concorrentes`;
+
+              return (
+                <Grid item xs={12} key={product.id}>
+                  <Card elevation={2}>
+                    <CardContent>
+                      <Box display="flex" gap={2}>
+                        {product.thumbnail && (
+                          <Box
+                            component="img"
+                            src={product.thumbnail}
+                            alt={product.name}
+                            sx={{
+                              width: 100,
+                              height: 100,
+                              objectFit: 'cover',
+                              borderRadius: 1,
+                            }}
+                          />
+                        )}
+                        <Box flex={1}>
+                          <Box display="flex" justifyContent="space-between" alignItems="start">
+                            <Box>
+                              <Typography variant="h6">{product.name}</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Origem: {new URL(product.url).hostname}
                               </Typography>
                             </Box>
-                          </Grid>
-                        </Grid>
+                            <Chip
+                              label={getStatusLabel(product.competitiveness_status)}
+                              color={getStatusColor(product.competitiveness_status)}
+                              size="small"
+                            />
+                          </Box>
 
-                        {/* Rodapé do cartão com ações */}
-                        <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
-                          <Typography variant="body2" color="text.secondary">
-                            Ranking #1 de 1 | 0 concorrentes
-                          </Typography>
-                          <Button
-                            variant="contained"
-                            size="small"
-                            onClick={() => navigate(`/product/${product.id}`)}
-                          >
-                            Ver Detalhes
-                          </Button>
+                          {/* Informações de preço resumidas */}
+                          <Grid container spacing={2} sx={{ mt: 2 }}>
+                            <Grid item xs={4}>
+                              <Typography variant="body2" color="text.secondary">
+                                MEU PREÇO
+                              </Typography>
+                              <Typography variant="h5" color="primary">
+                                {renderPrice(product.current_price)}
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={4}>
+                              <Typography variant="body2" color="text.secondary">
+                                MENOR CONCORRENTE
+                              </Typography>
+                                <Typography variant="h5" sx={{ color: lowestColor }}>
+                                  {lowestCompetitorLabel}
+                                </Typography>
+                            </Grid>
+                            <Grid item xs={4}>
+                              <Typography variant="body2" color="text.secondary">
+                                DIFERENÇA
+                              </Typography>
+                              <Box display="flex" alignItems="center" gap={0.5}>
+                                {diffIconComponent}
+                                <Typography variant="h5" sx={{ color: diffTextColor }}>
+                                  {differenceLabel}
+                                </Typography>
+                              </Box>
+                            </Grid>
+                          </Grid>
+                          
+                          {/* Rodapé do cartão com ações */}
+                          <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}></Box>
+                            <Typography variant="body2" color="text.secondary">
+                              {rankingLabel}
+                            </Typography>
+                            <Button
+                              variant="contained"
+                              size="small"
+                              onClick={() => navigate(`/product/${product.id}`)}
+                            >
+                              Ver Detalhes
+                            </Button>
+                          </Box>  
                         </Box>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
           </Grid>
         ) : (
           // Modo Tabela - exibe produtos em linhas
@@ -352,48 +427,80 @@ const Products: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.items.map((product) => (
-                  <TableRow key={product.id} hover>
-                    <TableCell>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        {product.thumbnail && (
-                          <Box
-                            component="img"
-                            src={product.thumbnail}
-                            alt={product.name}
-                            sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
-                          />
-                        )}
-                        <Typography variant="body2">{product.name}</Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell align="right">
-                      {renderPrice(product.current_price)}
-                    </TableCell>
-                    <TableCell align="right">R$ 0,00</TableCell>
-                    <TableCell align="right">
-                      <Typography color="error">R$ 0,00</Typography>
-                    </TableCell>
-                    <TableCell align="center">0</TableCell>
-                    <TableCell align="center">#1 de 1</TableCell>
-                    <TableCell align="center">
-                      <Chip
-                        label={getStatusLabel(product.competitiveness_status)}
-                        color={getStatusColor(product.competitiveness_status)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell align="center">
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => navigate(`/product/${product.id}`)}
-                      >
-                        Ver
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {data.items.map((product) => {
+                  const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
+                  const differenceValue = getDifferenceValue(product);
+                  const differenceLabel = formatCurrency(differenceValue);
+
+                  const monitoredPriceNum = parseToNumber(product.current_price);
+                  const lowestPriceNum = parseToNumber(product.comparison_summary?.competitors_min);
+
+                  let lowestColor = 'text.primary';
+                  if (lowestPriceNum !== null && monitoredPriceNum !== null) {
+                    if (lowestPriceNum > monitoredPriceNum) lowestColor = 'success.main';
+                    else if (lowestPriceNum < monitoredPriceNum) lowestColor = 'error.main';
+                  }
+
+                  const competitorsCount = product.comparison_summary?.competitors_count ?? 0;
+                  const rankingLabel = getRankingLabel(product);
+                  const isCheaperOrEqual = differenceValue !== null ? differenceValue <= 0 : null;
+
+                  return (
+                    <TableRow key={product.id} hover>
+                      <TableCell>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          {product.thumbnail && (
+                            <Box
+                              component="img"
+                              src={product.thumbnail}
+                              alt={product.name}
+                              sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
+                            />
+                          )}
+                          <Typography variant="body2">{product.name}</Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">
+                        {renderPrice(product.current_price)}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography sx={{ color: lowestColor }}>{lowestCompetitorLabel}</Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography
+                          sx={{
+                            color:
+                              isCheaperOrEqual === null
+                                ? 'text.primary'
+                                : isCheaperOrEqual
+                                  ? 'success.main'
+                                  : 'error.main',
+                          }}
+                        >
+                          {differenceLabel}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">{competitorsCount}</TableCell>
+                      <TableCell align="center">{rankingLabel}</TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={getStatusLabel(product.competitiveness_status)}
+                          color={getStatusColor(product.competitiveness_status)}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => navigate(`/product/${product.id}`)}
+                        >
+                          Ver
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>

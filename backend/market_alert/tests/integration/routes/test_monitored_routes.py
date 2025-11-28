@@ -76,6 +76,8 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
     assert item["url"] == monitored.product_url
     assert item["thumbnail"] == monitored.thumbnail
     assert item["last_scraped_at"] == monitored.last_scraped_at.isoformat()
+    assert "comparison_summary" in item
+    assert item["comparison_summary"] is None
 
 def test_list_monitored_products_aplica_paginacao(client, db_session, test_user, prepare_test_database):
     """Verifica que o endpoint respeita os parâmetros de página e itens por página"""

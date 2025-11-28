@@ -8,6 +8,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
+from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryResponse
 
 
 class ProductResponse(BaseModel):
@@ -52,6 +53,10 @@ class MonitoredProductResponse(ProductResponse):
     last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")
     competitiveness_status: CompetitivenessStatus | None = Field(None,description="Classificação de competitividade calculada a partir das comparações")
     is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
+    comparison_summary: PriceComparisonSummaryResponse | None = Field(default=None,
+        description=("Último resumo consolidado de comparação de preços com métricas normalizadas para exibição imediata no frontend."),
+    )
+
 
 class PaginationMeta(BaseModel):
     """ Metadados padronizados para paginação de listagens."""

@@ -15,6 +15,7 @@ from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
+from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryResponse
 from market_alert.schemas.schemas_products import (
     CompetitorProductResponse,
     MonitoredProductResponse,
@@ -63,6 +64,7 @@ def build_monitored_response(
         availability = False
 
     competitiveness_status: CompetitivenessStatus | None = None
+    comparison_summary: PriceComparisonSummaryResponse | None = None
     if summary and summary.aggregates:
         competitiveness_value = summary.aggregates.get("competitiveness_status")
         if competitiveness_value:
@@ -71,6 +73,19 @@ def build_monitored_response(
             except ValueError:
                 #Ignora valores inesperados no agregado para não quebrar o contrato
                 competitiveness_status = None
+
+        from market_alert.services.services_comparison import _extract_competitors_count, build_comparison_summary
+        #Reutiliza a normalização padrão para evitar formatos divergentes no frontend
+        normalized_summary = build_comparison_summary(
+            None,
+            competitors_count=_extract_competitors_count(summary),
+            stored_summary=summary,
+        )
+
+        comparison_summary = PriceComparisonSummaryResponse(
+            monitored_product_id=monitored.id,
+            **normalized_summary,
+        )
 
     return MonitoredProductResponse(
         id=monitored.id,
@@ -86,6 +101,7 @@ def build_monitored_response(
         last_scraped_at=monitored.last_scraped_at,
         thumbnail=monitored.thumbnail,
         competitiveness_status=competitiveness_status,
+        comparison_summary=comparison_summary,
         is_featured=monitored.is_featured,
     )
 

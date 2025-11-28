@@ -40,6 +40,7 @@ export interface MonitoredProduct {
   availability?: boolean; // Disponibilidade do produto
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
   last_status?: string; // Último status registrado
+  comparison_summary?: PriceComparisonSummary; // Resumo consolidado de comparação para renderização imediata
 }
 
 /**
