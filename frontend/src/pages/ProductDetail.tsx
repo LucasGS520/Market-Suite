@@ -29,6 +29,7 @@ import {
   DialogActions,
   TextField,
   IconButton,
+  Tooltip,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import {
@@ -116,7 +117,20 @@ const ProductDetail: React.FC = () => {
     createCompetitorMutation.mutate({
       monitored_product_id: id,
       product_url: competitorUrl,
+      name: competitorName.trim() || undefined,
     });
+  };
+
+  /**
+   * Gera um nome amigável a partir do domínio/URL quando não há nome salvo.
+   */
+  const fallbackFromUrl = (url: string) => {
+    try {
+      const parsedUrl = new URL(url);
+      return parsedUrl.hostname || 'Concorrente';
+    } catch {
+      return 'Concorrente';
+    }
   };
 
   // Estado de carregamento do produto: mostra spinner enquanto carrega
@@ -405,64 +419,88 @@ const ProductDetail: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {competitors.items.map((competitor) => (
-                    <TableRow key={competitor.id}>
-                      <TableCell>
-                        <Box display="flex" alignItems="center" gap={1}>
-                          {competitor.thumbnail && (
-                            <Box
-                              component="img"
-                              src={competitor.thumbnail}
-                              alt={competitor.name}
-                              sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
-                            />
-                          )}
-                          <Box>
-                            <Typography variant="body2">{competitor.name}</Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {new URL(competitor.url).hostname}
-                            </Typography>
+                  {competitors.items.map((competitor) => {
+                    const resolvedName =
+                      competitor.name || competitor.display_name || fallbackFromUrl(competitor.url);
+                    const isPendingName = !competitor.name && !competitor.display_name;
+
+                    const nameContent = (
+                      <Typography
+                        variant="body2"
+                        sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
+                      >
+                        {resolvedName}
+                      </Typography>
+                    );
+
+                    const wrappedName = isPendingName ? (
+                      <Tooltip title="Coletando nome...">{nameContent}</Tooltip>
+                    ) : (
+                      nameContent
+                    );
+
+                    return (
+                      <TableRow key={competitor.id}>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            {competitor.thumbnail && (
+                              <Box
+                                component="img"
+                                src={competitor.thumbnail}
+                                alt={resolvedName}
+                                sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
+                              />
+                            )}
+                            <Box>
+                              {wrappedName}
+                              <Typography variant="caption" color="text.secondary">
+                                {new URL(competitor.url).hostname}
+                              </Typography>
+                              {isPendingName && (
+                                <Typography variant="caption" color="text.secondary">
+                                  Coletando nome...
+                                </Typography>
+                              )}
+                            </Box>
                           </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="right">
-                        {renderPrice(competitor.current_price)}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={competitor.availability ? 'Disponível' : 'Indisponível'}
-                          color={competitor.availability ? 'success' : 'default'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Chip
-                          label={competitor.is_paused ? 'Pausado' : 'Ativo'}
-                          color={competitor.is_paused ? 'default' : 'success'}
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <IconButton
-                          size="small"
-                          component="a"
-                          href={competitor.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label="Ver anúncio do concorrente"
-                        >
-                          <OpenInNewIcon />
-                        </IconButton>
-                        {/* Ações não implementadas: apenas botões visuais por ora */}
-                        <IconButton size="small" color={competitor.is_paused ? 'success' : 'warning'}>
-                          {competitor.is_paused ? <PlayArrowIcon /> : <PauseIcon />}
-                        </IconButton>
-                        <IconButton size="small" color="error">
-                          <DeleteIcon />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                        <TableCell align="right">{renderPrice(competitor.current_price)}</TableCell>
+                        <TableCell align="center">
+                          <Chip
+                            label={competitor.availability ? 'Disponível' : 'Indisponível'}
+                            color={competitor.availability ? 'success' : 'default'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Chip
+                            label={competitor.is_paused ? 'Pausado' : 'Ativo'}
+                            color={competitor.is_paused ? 'default' : 'success'}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <IconButton
+                            size="small"
+                            component="a"
+                            href={competitor.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Ver anúncio do concorrente"
+                          >
+                            <OpenInNewIcon />
+                          </IconButton>
+                          {/* Ações não implementadas: apenas botões visuais por ora */}
+                          <IconButton size="small" color={competitor.is_paused ? 'success' : 'warning'}>
+                            {competitor.is_paused ? <PlayArrowIcon /> : <PauseIcon />}
+                          </IconButton>
+                          <IconButton size="small" color="error">
+                            <DeleteIcon />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </TableContainer>

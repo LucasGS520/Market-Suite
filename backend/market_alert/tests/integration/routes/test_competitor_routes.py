@@ -304,6 +304,7 @@ def test_list_competitors_returns_paginated_items(
     assert set(first_item.keys()) == {
         "id",
         "monitored_product_id",
+        "display_name",
         "name",
         "url",
         "current_price",
@@ -376,6 +377,44 @@ def test_list_competitors_meta_respects_filtered_items(
     payload = response.json()
     assert payload["meta"] == {"total": 1, "page": 1, "per_page": 1}
     assert len(payload["items"]) == 1
+
+def test_list_competitors_returns_friendly_name_when_missing(
+    client,
+    db_session,
+    test_user,
+    prepare_test_database,
+):
+    """ Garante fallback de nome amigável quando o cadastro está sem display_name """
+    monitored = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Mouse Gamer",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/mouse",
+        normalized_url="https://example.com/mouse",
+        status=MonitoredStatus.active,
+    )
+    db_session.add(monitored)
+    db_session.flush()
+
+    competitor = CompetitorProduct(
+        monitored_product_id=monitored.id,
+        name_competitor="",
+        product_url="https://loja.exemplo.com/produto-123",
+        current_price=Decimal("199.90"),
+        old_price=None,
+        status=ProductStatus.available,
+    )
+    db_session.add(competitor)
+    db_session.commit()
+
+    response = client.get(
+        f"/competitors?monitored_id={monitored.id}&per_page=5&page=1&include_paused=true",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][0]["name"] == "loja.exemplo.com"
+
 
 def test_bulk_pause_competitors_marks_entries_as_paused(
     client,

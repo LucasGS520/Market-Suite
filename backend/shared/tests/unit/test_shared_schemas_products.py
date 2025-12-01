@@ -68,3 +68,26 @@ def test_competitor_product_invalid_url():
             product_url="url-invalida",
         )
     assert "url" in str(exc.value).lower()
+
+def test_competitor_product_optional_name():
+    from uuid import uuid4
+
+    payload = CompetitorProductCreateScraping(
+        monitored_product_id=uuid4(),
+        product_url="https://example.com/produto",
+        name=" Concorrente Teste ",
+    )
+
+    assert payload.name == "Concorrente Teste"
+
+
+def test_competitor_product_blank_name_becomes_none():
+    from uuid import uuid4
+
+    payload = CompetitorProductCreateScraping(
+        monitored_product_id=uuid4(),
+        product_url="https://example.com/produto",
+        name="   ",
+    )
+
+    assert payload.name is None

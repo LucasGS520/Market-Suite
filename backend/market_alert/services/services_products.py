@@ -8,6 +8,7 @@ de fallback ou mensagens de erro inconsistentes pelas rotas.
 
 from decimal import Decimal
 from typing import Literal
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 
@@ -20,6 +21,7 @@ from market_alert.schemas.schemas_products import (
     CompetitorProductResponse,
     MonitoredProductResponse,
 )
+from shared.utils import sanitize_text
 
 
 def _ensure_price(
@@ -90,6 +92,7 @@ def build_monitored_response(
     return MonitoredProductResponse(
         id=monitored.id,
         owner_id=monitored.user_id,
+        display_name=monitored.display_name,
         name=monitored.display_name,
         url=monitored.product_url,
         current_price=current_price,
@@ -106,6 +109,16 @@ def build_monitored_response(
     )
 
 
+def _friendly_name_from_url(url: str) -> str:
+    """ Deriva nome amigável usando host, evitando expor identificadores internos """
+    parsed = urlparse(url)
+    hostname = sanitize_text(parsed.hostname or parsed.netloc)
+    if hostname:
+        return hostname
+    
+    fallback = sanitize_text(url)
+    return fallback or "Concorrente"
+
 def build_competitor_response(
     competitor: CompetitorProduct,
     *,
@@ -121,10 +134,14 @@ def build_competitor_response(
     elif competitor.status == ProductStatus.unavailable:
         availability = False
 
+    sanitized_display_name = sanitize_text(competitor.display_name)
+    friendly_name = sanitized_display_name or _friendly_name_from_url(competitor.product_url)
+
     return CompetitorProductResponse(
         id=competitor.id,
         monitored_product_id=competitor.monitored_product_id,
-        name=competitor.display_name,
+        display_name=sanitized_display_name or friendly_name,
+        name=friendly_name,
         url=competitor.product_url,
         current_price=current_price,
         currency=competitor.currency,

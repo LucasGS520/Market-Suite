@@ -215,6 +215,7 @@ def create_competitor_scrape_request(
         db=db,
         monitored_product_id=monitored_product.id,
         product_url=normalized_url,
+        display_name=product_data.name,
     )
 
     metrics.PENDING_COMPETITOR_CREATED_TOTAL.inc()

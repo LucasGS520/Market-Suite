@@ -60,8 +60,14 @@ def create_pending_competitor_product(
     db: Session,
     monitored_product_id: UUID,
     product_url: str,
+    *,
+    display_name: str | None = None,
 ) -> CompetitorProduct:
-    """Cria um concorrente pendente garantindo unicidade por monitorado e URL."""
+    """ Cria um concorrente pendente garantindo unicidade por monitorado e URL.
+    
+    O nome exibido é sanitizado quando fornecido manualmente, caso contrário, 
+    um rótulo é derivado da URL para evitar que o frontend exiba o ID bruto.
+    """
     normalized_url = normalize_product_url_for_storage(str(product_url))
     if not normalized_url:
         try:
@@ -72,10 +78,13 @@ def create_pending_competitor_product(
 
     if existing:
         return existing
+    
+    sanitized_display_name = sanitize_text(display_name) if display_name else None
+    resolved_display_name = sanitized_display_name or _derive_competitor_name_from_url(product_url)
 
     pending = CompetitorProduct(
         monitored_product_id=monitored_product_id,
-        name_competitor=_derive_competitor_name_from_url(product_url),
+        name_competitor=resolved_display_name,
         product_url=normalized_url,
         current_price=None,
         old_price=None,
@@ -145,6 +154,8 @@ def create_or_update_competitor_product_scraped(
         previous_status = existing.status
         existing.old_price = existing.current_price
         existing.current_price = scraped_info.current_price
+        
+        #Atualiza thumbnail, frete, moeda, etag, timestamps e status
         existing.thumbnail = scraped_info.thumbnail
         existing.free_shipping = scraped_info.free_shipping
         existing.currency = currency or scraped_info.currency or existing.currency
@@ -154,6 +165,13 @@ def create_or_update_competitor_product_scraped(
         existing.last_scraped_at = last_checked
         existing.status = ProductStatus.available
         existing.product_url = normalized_url
+        
+        #Sanitiza e persiste somente se tivermos um nome útil retornado pelo scraper.
+        if getattr(scraped_info, "name", None):
+            sanitized_name = sanitize_text(scraped_info.name)
+            if sanitized_name:
+                existing.name_competitor = sanitized_name
+        
         db.commit()
         db.refresh(existing)
 

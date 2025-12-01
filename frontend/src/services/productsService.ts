@@ -125,9 +125,12 @@ export const productsService = {
         }
       })();
 
+      const displayName = competitor.display_name || competitor.name || competitor.title || fallbackName;
+
       return {
         ...competitor,
-        name: competitor.name || competitor.title || fallbackName,
+        display_name: competitor.display_name || competitor.name || competitor.title,
+        name: displayName,
         current_price: competitor.current_price ?? null,
         monitored_id: competitor.monitored_id || competitor.monitored_product_id || params.monitored_id,
         monitored_product_id: competitor.monitored_product_id || competitor.monitored_id || params.monitored_id,

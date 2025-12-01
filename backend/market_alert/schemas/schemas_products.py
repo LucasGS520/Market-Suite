@@ -16,6 +16,7 @@ class ProductResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    display_name: str | None = Field(None, description="Nome original cadastrado/coletado sem ajustes de fallback")
     name: str = Field(..., description="Nome preparado para exibição")
     url: HttpUrl = Field(..., description="Endereço canônico do produto")
     current_price: Decimal | None = Field(None, description="Preço para exibição quando disponível")

@@ -30,6 +30,7 @@ export type MonetaryValue = number | string | null;
 export interface MonitoredProduct {
   id: string; // Identificador do produto monitorado
   owner_id: string; // ID do usuário que monitora o produto
+  display_name?: string; // Nome original armazenado no backend
   name: string; // Nome do produto
   url: string; // URL do produto
   current_price: MonetaryValue; // Preço atual do produto
@@ -51,6 +52,7 @@ export interface CompetitorProduct {
   monitored_id: string; // ID do produto monitorado ao qual este pertence
   monitored_product_id?: string; // Alias opcional usado pelo backend
   name: string; // Nome do produto concorrente
+  display_name?: string; // Nome bruto retornado pelo backend quando disponível
   title?: string; //Nome bruto retornado pelo scraper quando disponível
   url: string; // URL do produto concorrente
   current_price: MonetaryValue; // Preço atual do concorrente (string para preservar formato)
@@ -176,6 +178,7 @@ export interface InitialCompetitorPayload {
 export interface CompetitorProductCreateScraping {
   monitored_product_id: string; // ID do produto monitorado pai
   product_url: string; // URL do concorrente a ser raspado (contrato do backend)
+  name?: string; // Nome opcional informado pelo usuário para identificação
 }
 
 /**

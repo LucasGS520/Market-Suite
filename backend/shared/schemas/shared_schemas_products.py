@@ -99,12 +99,25 @@ class MonitoredScrapedInfo(ProductCore):
 class CompetitorProductCreateScraping(BaseModel):
     """ Esquema compartilhado para a criação de produto concorrente via scraping """
 
+    model_config = ConfigDict(extra="ignore")
     monitored_product_id: UUID = Field(
         ..., description="ID do produto monitorado ao qual este concorrente pertence"
     )
     product_url: HttpUrl = Field(
         ..., description="URL do produto concorrente para scraping"
     )
+    name: str | None = Field(
+        default=None, description="Nome opcional informado pelo usuário para identificar concorrente"
+    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_optional_name(cls, value: str | None) -> str | None:
+        """ Converte strings vazias em ``None`` para evitar rótulos inúteis """
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 class CompetitorScrapedInfo(ProductCore):
     """Informações de scraping unificadas para produto concorrente."""
