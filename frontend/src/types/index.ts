@@ -38,6 +38,9 @@ export interface MonitoredProduct {
   thumbnail?: string; // URL da imagem em miniatura
   is_featured: boolean; // Indica se o produto é destacado
   last_scraped_at?: string; // Timestamp do último scraping
+  created_at?: string; // Data de criação do monitoramento
+  last_price_change_at?: string; // Última mudança de preço registrada
+  alerts_sent?: number | null; // Total de alertas enviados relacionados ao produto
   availability?: boolean; // Disponibilidade do produto
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
   last_status?: string; // Último status registrado

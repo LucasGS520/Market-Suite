@@ -7,6 +7,7 @@ de fallback ou mensagens de erro inconsistentes pelas rotas.
 """
 
 from decimal import Decimal
+from datetime import datetime
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -52,6 +53,8 @@ def build_monitored_response(
     summary: PriceComparisonSummary | None = None,
     *,
     allow_missing_price: bool = False,
+    last_price_change_at: datetime | None = None,
+    alerts_sent: int | None = None,
 ) -> MonitoredProductResponse:
     """Converte um monitorado em contrato simplificado com preço obrigatório.
 
@@ -106,8 +109,10 @@ def build_monitored_response(
         competitiveness_status=competitiveness_status,
         comparison_summary=comparison_summary,
         is_featured=monitored.is_featured,
+        created_at=monitored.created_at,
+        last_price_change_at=last_price_change_at,
+        alerts_sent=alerts_sent,
     )
-
 
 def _friendly_name_from_url(url: str) -> str:
     """ Deriva nome amigável usando host, evitando expor identificadores internos """

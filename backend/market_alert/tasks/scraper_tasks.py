@@ -45,8 +45,12 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 
 
 logger = structlog.get_logger("scraper_tasks")
+redis_client = None #Cliente exposto para facilitar monkeypatch em testes unitários sem abrir conexão real
+
 def _redis_client():
-    """Recupera cliente Redis sob demanda evitando inicialização no import"""
+    """ Recupera cliente Redis sob demanda evitando inicialização no import """
+    if redis_client is not None:
+        return redis_client
     return get_redis_client()
 
 #TTL de idempotência para evitar reprocessamento repetido do mesmo produto

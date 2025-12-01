@@ -18,7 +18,7 @@ from shared.utils.url_validation import normalize_product_url_for_storage
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_price_history import PriceHistory
-from market_alert.models.models_alerts import AlertRule
+from market_alert.models.models_alerts import AlertRule, NotificationLog
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.enums.enums_alerts import AlertType
@@ -83,6 +83,72 @@ def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_ur
         )
         .first()
     )
+
+def get_last_price_change_for_monitored(db: Session, monitored_product_id: UUID) -> datetime | None:
+    """ Retorna o momento da última alteração de preço do monitorado
+    
+    A consulta busca a última leitura conhecida e identifica quando o preço
+    passou a assumir o valor atual, ifnorando repetição de registros com o
+    mesmo valor para evitar leituras falsas positivas.
+    """
+    latest_entry = (
+        db.query(PriceHistory)
+        .filter(PriceHistory.monitored_product_id == monitored_product_id)
+        .order_by(PriceHistory.checked_at.desc())
+        .limit(1)
+        .first()
+    )
+    if latest_entry is None:
+        return None
+    
+    previous_different = (
+        db.query(PriceHistory.checked_at)
+        .filter(
+            PriceHistory.monitored_product_id == monitored_product_id,
+            PriceHistory.price != latest_entry.price,
+            PriceHistory.checked_at < latest_entry.checked_at,
+        )
+        .order_by(PriceHistory.checked_at.desc())
+        .first()
+    )
+    resolved_change_at = latest_entry.checked_at
+
+    if previous_different:
+        first_current_value = (
+            db.query(PriceHistory.checked_at)
+            .filter(
+                PriceHistory.monitored_product_id == monitored_product_id,
+                PriceHistory.price == latest_entry.price,
+                PriceHistory.checked_at > previous_different[0],
+            )
+            .order_by(PriceHistory.checked_at.asc())
+            .limit(1)
+            .first()
+        )
+
+        if first_current_value:
+            resolved_change_at = first_current_value[0]
+
+    if resolved_change_at and resolved_change_at.tzinfo is None:
+        resolved_change_at = resolved_change_at._replace(tzinfo=timezone.utc)
+    return resolved_change_at
+
+def count_notifications_for_monitored_product(
+    db: Session,
+    user_id: UUID,
+    monitored_product_id: UUID
+) -> int:
+    """Conta notificações enviadas para regras vinculadas ao monitorado."""
+    result = (
+        db.query(func.count(NotificationLog.id))
+        .join(AlertRule, NotificationLog.alert_rule_id == AlertRule.id)
+        .filter(
+            NotificationLog.user_id == user_id,
+            AlertRule.monitored_product_id == monitored_product_id,
+        )
+        .scalar()
+    )
+    return int(result or 0)
 
 def create_pending_monitored_product(
     db: Session,

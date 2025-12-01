@@ -218,7 +218,7 @@ const Products: React.FC = () => {
       {/* Cabeçalho */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" gutterBottom>
-          Produtos Monitorados
+          PRODUTOS MONITORADOS
         </Typography>
         <Typography variant="body1" color="text.secondary">
           Gerencie e visualize todos os seus produtos monitorados
@@ -237,14 +237,14 @@ const Products: React.FC = () => {
 
         <TextField
           size="small"
-          placeholder="Buscar produtos..."
+          placeholder="BUSCAR PRODUTOS..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           sx={{ minWidth: 200 }}
         />
 
         <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel>Status</InputLabel>
+          <InputLabel>STATUS</InputLabel>
           <Select
             value={statusFilter}
             label="Status"
@@ -335,7 +335,7 @@ const Products: React.FC = () => {
                 }
               }
 
-              const rankingLabel = `${getRankingLabel(product)} | ${product.comparison_summary?.competitors_count ?? 0} concorrentes`;
+              const rankingLabel = `${getRankingLabel(product)} | ${product.comparison_summary?.competitors_count ?? 0} Concorrentes`;
 
               return (
                 <Grid item xs={12} key={product.id}>

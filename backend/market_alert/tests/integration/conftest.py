@@ -43,6 +43,9 @@ def patch_redis(monkeypatch):
         def exists(self, *args, **kwargs): return False
         def script_load(self, *args, **kwargs): return "mock_sha"
         def evalsha(self, *args, **kwargs): return 1
+        def register_script(self, *args, **kwargs):
+            """ Retorna callback simplificado simulando execução de script Lua no Redis """
+            return lambda *a, **k: (1, 0)
 
     class DummyCacheManager:
         def __init__(self):

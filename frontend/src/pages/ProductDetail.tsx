@@ -229,6 +229,29 @@ const ProductDetail: React.FC = () => {
     return 'error';
   };
 
+  const renderDateTime = (value?: string | null) => {
+    if (!value) {
+      return '—';
+    }
+
+    const parsedDate = new Date(value);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return '—';
+    }
+
+    return parsedDate.toLocaleString('pt-BR');
+  };
+
+  const resolveAlertLabel = (alert: Record<string, unknown>) => {
+    const typedAlert = alert as { message?: string; title?: string; type?: string };
+    const message = typedAlert.message || typedAlert.title || typedAlert.type;
+    return message || 'Alerta disponível';
+  };
+
+  const summaryAlerts = summary?.alerts || [];
+  const highlightedAlerts = summaryAlerts.slice(0, 3);
+  const monitoredSince = product.created_at;
+
   return (
     <Layout>
       {/* Cabeçalho da página com botão de voltar */}
@@ -242,276 +265,389 @@ const ProductDetail: React.FC = () => {
           Voltar para Produtos
         </Button>
         <Typography variant="h4" gutterBottom>
-          Detalhes do Produto
+          DETALHES DO PRODUTO
         </Typography>
       </Box>
 
-      {/* Cartão com informações principais do produto */}
-      <Card elevation={2} sx={{ mb: 3 }}>
-        <CardContent>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={3}>
-              {product.thumbnail && (
-                <Box
-                  component="img"
-                  src={product.thumbnail}
-                  alt={product.name}
-                  sx={{
-                    width: '100%',
-                    maxWidth: 200,
-                    height: 'auto',
-                    objectFit: 'cover',
-                    borderRadius: 1,
-                  }}
-                />
-              )}
-            </Grid>
-            <Grid item xs={12} md={9}>
-              <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
-                <Box>
-                  <Typography variant="h5" gutterBottom>
-                    {product.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {product.url}
-                  </Typography>
-                </Box>
-                <Chip
-                  label={getStatusLabel(product.competitiveness_status)}
-                  color={getStatusColor(product.competitiveness_status)}
-                />
-              </Box>
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={8}>
+          <Box display="flex" flexDirection="column" gap={3}>
+            
+            {/* Cartão com informações principais do produto */}
+            <Card elevation={2}>
+              <CardContent>
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={3}>
+                    {product.thumbnail && (
+                      <Box
+                        component="img"
+                        src={product.thumbnail}
+                        alt={product.name}
+                        sx={{
+                          width: '100%',
+                          maxWidth: 200,
+                          height: 'auto',
+                          objectFit: 'cover',
+                          borderRadius: 1,
+                        }}
+                      />
+                    )}
+                  </Grid>
+                  <Grid item xs={12} md={9}>
+                    <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
+                      <Box>
+                        <Typography variant="h5" gutterBottom>
+                          {product.name}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {product.url}
+                        </Typography>
+                      </Box>
+                      <Chip
+                        label={getStatusLabel(product.competitiveness_status)}
+                        color={getStatusColor(product.competitiveness_status)}
+                      />
+                    </Box>
 
-              <Grid container spacing={2} sx={{ mt: 2 }}>
-                <Grid item xs={12} sm={4}>
-                  <Typography variant="body2" color="text.secondary">
-                    Preço Atual
-                  </Typography>
-                  <Typography variant="h4" color="primary">
-                    {renderPrice(product.current_price)}
-                  </Typography>
+                    <Grid container spacing={2} sx={{ mt: 2 }}>
+                      <Grid item xs={12} sm={4}>
+                        <Typography variant="body2" color="text.secondary">
+                          Preço Atual
+                        </Typography>
+                        <Typography variant="h4" color="primary">
+                          {renderPrice(product.current_price)}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={12} sm={4}>
+                        <Typography variant="body2" color="text.secondary">
+                          Menor Concorrente
+                        </Typography>
+                        <Typography variant="h4">
+                          {renderSummaryCurrency(summary?.competitors_min)}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={12} sm={4}>
+                        <Typography variant="body2" color="text.secondary">
+                          Posição no Ranking
+                        </Typography>
+                        <Typography variant="h4">
+                          {summary?.position_rank !== undefined && summary?.position_rank !== null
+                            ? `#${summary.position_rank} de ${(summary?.competitors_count || 0) + 1}`
+                            : '—'}
+                        </Typography>
+                      </Grid>
+                    </Grid>
+                  </Grid>
                 </Grid>
-                <Grid item xs={12} sm={4}>
-                  <Typography variant="body2" color="text.secondary">
-                    Menor Concorrente
+              </CardContent>
+            </Card>
+
+            {/* Cartão com resumo de comparação (quando disponível) */}
+            {summary && (
+              <Card elevation={2}>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    RESUMO DE COMPARAÇÃO
                   </Typography>
-                  <Typography variant="h4">
-                    {renderSummaryCurrency(summary?.competitors_min)}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <Typography variant="body2" color="text.secondary">
-                    Posição no Ranking
-                  </Typography>
-                  <Typography variant="h4">
-                    {summary?.position_rank !== undefined && summary?.position_rank !== null
-                      ? `#${summary.position_rank} de ${(summary?.competitors_count || 0) + 1}`
-                      : '—'}
-                  </Typography>
-                </Grid>
-              </Grid>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* Cartão com resumo de comparação (quando disponível) */}
-      {summary && (
-        <Card elevation={2} sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Resumo de Comparação
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
-                  Total de Concorrentes
-                </Typography>
-                <Typography variant="h6">{summary.competitors_count}</Typography>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
-                  Preço Médio
-                </Typography>
-                <Typography variant="h6">
-                  {renderSummaryCurrency(summary?.competitors_mean)}
-                </Typography>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
-                  Preço Mínimo
-                </Typography>
-                <Typography variant="h6">
-                  {renderSummaryCurrency(summary?.competitors_min)}
-                </Typography>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
-                  Preço Máximo
-                </Typography>
-                <Typography variant="h6">
-                  {renderSummaryCurrency(summary?.competitors_max)}
-                </Typography>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Typography variant="body2" color="text.secondary">
-                  Reduzir seu Preço
-                </Typography>
-                <Typography
-                  variant="h6"
-                  color={resolveAdjustmentColor(summary?.potential_adjustment)}
-                >
-                  {renderSummaryCurrency(summary?.potential_adjustment)}
-                </Typography>
-              </Grid>
-            </Grid>
-            {summary.comparison_insights && (
-              <Alert severity="info" sx={{ mt: 2 }}>
-                {summary.comparison_insights}
-              </Alert>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Cartão com lista de concorrentes e ações */}
-      <Card elevation={2}>
-        <CardContent>
-          <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-            <Typography variant="h6">Concorrentes</Typography>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setOpenAddCompetitorDialog(true)}
-            >
-              Adicionar Concorrente
-            </Button>
-          </Box>
-
-          {/* Feedback para usuário sobre concorrentes */}
-          {competitorFeedback && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              {competitorFeedback}
-            </Alert>
-          )}
-          {competitorError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {competitorError}
-            </Alert>
-          )}
-
-          {competitorsLoading ? (
-            // Spinner enquanto carrega a lista de concorrentes
-            <Box display="flex" justifyContent="center" py={4}>
-              <CircularProgress />
-            </Box>
-          ) : competitors && competitors.items.length > 0 ? (
-            // Tabela de concorrentes quando houver itens
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Produto</TableCell>
-                    <TableCell align="right">Preço</TableCell>
-                    <TableCell align="center">Disponibilidade</TableCell>
-                    <TableCell align="center">Status</TableCell>
-                    <TableCell align="center">Ações</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {competitors.items.map((competitor) => {
-                    const resolvedName =
-                      competitor.name || competitor.display_name || fallbackFromUrl(competitor.url);
-                    const isPendingName = !competitor.name && !competitor.display_name;
-
-                    const nameContent = (
-                      <Typography
-                        variant="body2"
-                        sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
-                      >
-                        {resolvedName}
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Typography variant="body2" color="text.secondary">
+                        Total de Concorrentes
                       </Typography>
-                    );
+                      <Typography variant="h6">{summary.competitors_count}</Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Typography variant="body2" color="text.secondary">
+                        Preço Médio
+                      </Typography>
+                      <Typography variant="h6">
+                        {renderSummaryCurrency(summary?.competitors_mean)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Typography variant="body2" color="text.secondary">
+                        Preço Mínimo
+                      </Typography>
+                      <Typography variant="h6">
+                        {renderSummaryCurrency(summary?.competitors_min)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Typography variant="body2" color="text.secondary">
+                        Preço Máximo
+                      </Typography>
+                      <Typography variant="h6">
+                        {renderSummaryCurrency(summary?.competitors_max)}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Typography variant="body2" color="text.secondary">
+                        Reduzir seu Preço
+                      </Typography>
+                      <Typography
+                        variant="h6"
+                        color={resolveAdjustmentColor(summary?.potential_adjustment)}
+                      >
+                        {renderSummaryCurrency(summary?.potential_adjustment)}
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                </CardContent>
+              </Card>
+            )}
 
-                    const wrappedName = isPendingName ? (
-                      <Tooltip title="Coletando nome...">{nameContent}</Tooltip>
-                    ) : (
-                      nameContent
-                    );
+            {/* Cartão com lista de concorrentes e ações */}
+            <Card elevation={2}>
+              <CardContent>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                  <Typography variant="h6">CONCORRENTES</Typography>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setOpenAddCompetitorDialog(true)}
+                  >
+                    Adicionar Concorrente
+                  </Button>
+                </Box>
 
-                    return (
-                      <TableRow key={competitor.id}>
-                        <TableCell>
-                          <Box display="flex" alignItems="center" gap={1}>
-                            {competitor.thumbnail && (
-                              <Box
-                                component="img"
-                                src={competitor.thumbnail}
-                                alt={resolvedName}
-                                sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
-                              />
-                            )}
-                            <Box>
-                              {wrappedName}
-                              <Typography variant="caption" color="text.secondary">
-                                {new URL(competitor.url).hostname}
-                              </Typography>
-                              {isPendingName && (
-                                <Typography variant="caption" color="text.secondary">
-                                  Coletando nome...
-                                </Typography>
-                              )}
-                            </Box>
-                          </Box>
-                        </TableCell>
-                        <TableCell align="right">{renderPrice(competitor.current_price)}</TableCell>
-                        <TableCell align="center">
-                          <Chip
-                            label={competitor.availability ? 'Disponível' : 'Indisponível'}
-                            color={competitor.availability ? 'success' : 'default'}
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <Chip
-                            label={competitor.is_paused ? 'Pausado' : 'Ativo'}
-                            color={competitor.is_paused ? 'default' : 'success'}
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <IconButton
-                            size="small"
-                            component="a"
-                            href={competitor.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            aria-label="Ver anúncio do concorrente"
-                          >
-                            <OpenInNewIcon />
-                          </IconButton>
-                          {/* Ações não implementadas: apenas botões visuais por ora */}
-                          <IconButton size="small" color={competitor.is_paused ? 'success' : 'warning'}>
-                            {competitor.is_paused ? <PlayArrowIcon /> : <PauseIcon />}
-                          </IconButton>
-                          <IconButton size="small" color="error">
-                            <DeleteIcon />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : (
-            // Mensagem quando não há concorrentes cadastrados
-            <Alert severity="info">
-              Nenhum concorrente cadastrado. Adicione concorrentes para comparar preços.
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
+                {/* Feedback para usuário sobre concorrentes */}
+                {competitorFeedback && (
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    {competitorFeedback}
+                  </Alert>
+                )}
+                {competitorError && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {competitorError}
+                  </Alert>
+                )}
+
+                {competitorsLoading ? (
+                  // Spinner enquanto carrega a lista de concorrentes
+                  <Box display="flex" justifyContent="center" py={4}>
+                    <CircularProgress />
+                  </Box>
+                ) : competitors && competitors.items.length > 0 ? (
+                  // Tabela de concorrentes quando houver itens
+                  <TableContainer>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Produto</TableCell>
+                          <TableCell align="right">Preço</TableCell>
+                          <TableCell align="center">Disponibilidade</TableCell>
+                          <TableCell align="center">Status</TableCell>
+                          <TableCell align="center">Ações</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {competitors.items.map((competitor) => {
+                          const resolvedName =
+                            competitor.name || competitor.display_name || fallbackFromUrl(competitor.url);
+                          const isPendingName = !competitor.name && !competitor.display_name;
+
+                          const nameContent = (
+                            <Typography
+                              variant="body2"
+                              sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
+                            >
+                              {resolvedName}
+                            </Typography>
+                          );
+
+                          const wrappedName = isPendingName ? (
+                            <Tooltip title="Coletando nome...">{nameContent}</Tooltip>
+                          ) : (
+                            nameContent
+                          );
+
+                          return (
+                            <TableRow key={competitor.id}>
+                              <TableCell>
+                                <Box display="flex" alignItems="center" gap={1}>
+                                  {competitor.thumbnail && (
+                                    <Box
+                                      component="img"
+                                      src={competitor.thumbnail}
+                                      alt={resolvedName}
+                                      sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
+                                    />
+                                  )}
+                                  <Box>
+                                    {wrappedName}
+                                    <Typography variant="caption" color="text.secondary">
+                                      {new URL(competitor.url).hostname}
+                                    </Typography>
+                                    {isPendingName && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        Coletando nome...
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                </Box>
+                              </TableCell>
+                              <TableCell align="right">{renderPrice(competitor.current_price)}</TableCell>
+                              <TableCell align="center">
+                                <Chip
+                                  label={competitor.availability ? 'Disponível' : 'Indisponível'}
+                                  color={competitor.availability ? 'success' : 'default'}
+                                  size="small"
+                                />
+                              </TableCell>
+                              <TableCell align="center">
+                                <Chip
+                                  label={competitor.is_paused ? 'Pausado' : 'Ativo'}
+                                  color={competitor.is_paused ? 'default' : 'success'}
+                                  size="small"
+                                />
+                              </TableCell>
+                              <TableCell align="center">
+                                <IconButton
+                                  size="small"
+                                  component="a"
+                                  href={competitor.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label="Ver anúncio do concorrente"
+                                >
+                                  <OpenInNewIcon />
+                                </IconButton>
+                                {/* Ações não implementadas: apenas botões visuais por ora */}
+                                <IconButton size="small" color={competitor.is_paused ? 'success' : 'warning'}>
+                                  {competitor.is_paused ? <PlayArrowIcon /> : <PauseIcon />}
+                                </IconButton>
+                                <IconButton size="small" color="error">
+                                  <DeleteIcon />
+                                </IconButton>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  // Mensagem quando não há concorrentes cadastrados
+                  <Alert severity="info">
+                    Nenhum concorrente cadastrado. Adicione concorrentes para comparar preços.
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
+          </Box>
+        </Grid>
+
+        <Grid item xs={12} md={4}>
+          <Box display="flex" flexDirection="column" gap={3}>
+            <Card elevation={2}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  INSIGHTS DE COMPARAÇÃO
+                </Typography>
+                {summary?.comparison_insights ? (
+                  <Alert severity="info" sx={{ mb: highlightedAlerts.length ? 2 : 0 }}>
+                    {summary.comparison_insights}
+                  </Alert>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Sem Insights disponíveis no momento.
+                  </Typography>
+                )}
+
+                {highlightedAlerts.length > 0 && (
+                  <Box mt={1} display="flex" flexDirection="column" gap={1}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Alertas recentes
+                    </Typography>
+                    {highlightedAlerts.map((alert, index) => (
+                      <Alert key={`alert-${index}`} severity="warning" icon={false} sx={{ py: 0.5 }}>
+                        {resolveAlertLabel(alert)}
+                      </Alert>
+                    ))}
+                  </Box>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card elevation={2}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  AÇÕES RÁPIDAS
+                </Typography>
+                <Box display="flex" flexDirection="column" gap={1.5}>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setOpenAddCompetitorDialog(true)}
+                  >
+                    Adicionar Concorrente
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<OpenInNewIcon />}
+                    component="a"
+                    href={product.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Ver Anúncio
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    startIcon={<PauseIcon />}
+                    onClick={() => handlePlaceholderAction('Monitoramento marcado como pausado (visual).')}
+                  >
+                    Pausar Monitoramento
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => handlePlaceholderAction('Produto removido visualmente; ação final pendente de backend.')}
+                  >
+                    Remover Produto
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
+
+            <Card elevation={2}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  ESTATÍSTICAS DO MONITORAMENTO
+                </Typography>
+                <Box display="flex" flexDirection="column" gap={1.5}>
+                  <Box display="flex" justifyContent="space-between">
+                    <Typography variant="body2" color="text.secondary">
+                      Última Coleta
+                    </Typography>
+                    <Typography variant="body1">{renderDateTime(product.last_scraped_at)}</Typography>
+                  </Box>
+                  <Box display="flex" justifyContent="space-between">
+                    <Typography variant="body2" color="text.secondary">
+                      Última Mudança de Preço
+                    </Typography>
+                    <Typography variant="body1">{renderDateTime(product.last_price_change_at)}</Typography>
+                  </Box>
+                  <Box display="flex" justifyContent="space-between">
+                    <Typography variant="body2" color="text.secondary">
+                      Monitorado desde
+                    </Typography>
+                    <Typography variant="body1">{renderDateTime(monitoredSince)}</Typography>
+                  </Box>
+                  <Box display="flex" justifyContent="space-between">
+                    <Typography variant="body2" color="text.secondary">
+                      Alertas enviados
+                    </Typography>
+                    <Typography variant="body1">{product.alerts_sent ?? '—'}</Typography>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Box>
+        </Grid>
+      </Grid>
 
       {/* Dialog para adicionar novo concorrente */}
       <Dialog
@@ -520,11 +656,20 @@ const ProductDetail: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Adicionar Concorrente</DialogTitle>
+        <DialogTitle>ADICIONAR CONCORRENTE</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2 }}>
             Adicionar concorrente para: <strong>{product.name}</strong>
           </Alert>
+          <TextField
+            margin="dense"
+            label="Nome de Identificação (opcional)"
+            type="text"
+            fullWidth
+            value={competitorName}
+            onChange={(e) => setCompetitorName(e.target.value)}
+            placeholder="Ex: Produto Concorrente"
+          />
           <TextField
             autoFocus
             margin="dense"
@@ -535,15 +680,6 @@ const ProductDetail: React.FC = () => {
             value={competitorUrl}
             onChange={(e) => setCompetitorUrl(e.target.value)}
             placeholder="https://exemplo.com/produto-concorrente"
-          />
-          <TextField
-            margin="dense"
-            label="Nome de Identificação (opcional)"
-            type="text"
-            fullWidth
-            value={competitorName}
-            onChange={(e) => setCompetitorName(e.target.value)}
-            placeholder="Ex: Concorrente A"
           />
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
             O concorrente será adicionado.

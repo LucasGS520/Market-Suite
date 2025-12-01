@@ -1,12 +1,15 @@
 """ Testes das rotas de produtos monitorados """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from market_alert.enums.enums_alerts import AlertType, ChannelType, NotificationStatus
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
+from market_alert.models.models_price_history import PriceHistory
+from market_alert.models.models_alerts import AlertRule, NotificationLog
 from market_alert.tasks import scraper_tasks
 from shared.utils.url_validation import normalize_product_url_for_storage
 
@@ -307,4 +310,75 @@ def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_sessi
     )
     assert reloaded.name_identification == "Console Atualizado"
     assert captured == {}
+
+def test_get_monitored_product_expoe_metricas_derivadas(client, db_session, test_user, prepare_test_database):
+    """Confere que o detalhe inclui data de criação, variação de preço e alertas."""
+
+    monitored = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Console Premium",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/produto/console-premium",
+        normalized_url=normalize_product_url_for_storage(
+            "https://example.com/produto/console-premium"
+        ),
+        current_price=Decimal("3999.90"),
+        status=MonitoredStatus.active,
+    )
+    db_session.add(monitored)
+    db_session.flush()
+
+    inicio = datetime(2024, 2, 10, 12, 0, tzinfo=timezone.utc)
+    history_entries = [
+        PriceHistory(
+            monitored_product_id=monitored.id,
+            price=Decimal("4200.00"),
+            currency="BRL",
+            checked_at=inicio,
+        ),
+        PriceHistory(
+            monitored_product_id=monitored.id,
+            price=Decimal("4050.00"),
+            currency="BRL",
+            checked_at=inicio + timedelta(hours=2),
+        ),
+        PriceHistory(
+            monitored_product_id=monitored.id,
+            price=Decimal("4050.00"),
+            currency="BRL",
+            checked_at=inicio + timedelta(hours=3),
+        ),
+    ]
+    expected_change_at = history_entries[1].checked_at
+    db_session.add_all(history_entries)
+
+    rule = AlertRule(
+        user_id=test_user.id,
+        monitored_product_id=monitored.id,
+        rule_type=AlertType.PRICE_CHANGE,
+        enabled=True,
+    )
+    db_session.add(rule)
+    db_session.flush()
+
+    notification = NotificationLog(
+        user_id=test_user.id,
+        alert_rule_id=rule.id,
+        channel=ChannelType.EMAIL,
+        subject="Preço ajustado",
+        message="Valor atualizado no monitoramento",
+        status=NotificationStatus.SENT,
+    )
+    db_session.add(notification)
+    db_session.commit()
+
+    response = client.get(f"/monitored/{monitored.id}")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["created_at"] == monitored.created_at.isoformat()
+    assert payload["monitored_since"] == monitored.created_at.isoformat()
+    payload_change = datetime.fromisoformat(payload["last_price_change_at"].replace("Z", "+00:00"))
+    assert payload_change == expected_change_at
+    assert payload["alerts_sent"] == 1
     

@@ -18,6 +18,8 @@ from market_alert.crud.crud_monitored import (
     get_featured_monitored_products,
     get_monitored_product_by_id,
     delete_monitored_product,
+    get_last_price_change_for_monitored,
+    count_notifications_for_monitored_product,
 )
 from market_alert.crud.crud_comparison import (
     get_latest_summaries_for_products,
@@ -139,7 +141,18 @@ def get_monitored_product(
         )
 
     summary = get_latest_summary(db, product_id)
-    return build_monitored_response(product, summary=summary, allow_missing_price=True)
+    last_price_change_at = get_last_price_change_for_monitored(db, product_id)
+    alerts_sent = count_notifications_for_monitored_product(
+        db, user_id=user_id, monitored_product_id=product_id
+    )
+
+    return build_monitored_response(
+        product,
+        summary=summary,
+        allow_missing_price=True,
+        last_price_change_at=last_price_change_at,
+        alerts_sent=alerts_sent,
+    )
 
 
 def delete_monitored_product_entry(
