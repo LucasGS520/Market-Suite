@@ -45,11 +45,9 @@ from market_alert.services.services_competitors import ensure_user_can_access_mo
 
 logger = structlog.get_logger("comparison_service")
 
-#Limites percentuais para classificar a competitividade frente ao menor preço.
-#Diferença >= 10% sinaliza urgência; entre 3% e 10% requer atenção; abaixo disso é competitivo.
-COMPETITIVENESS_NON_COMPETITIVE_THRESHOLD = Decimal("0.01")
-COMPETITIVENESS_ATTENTION_THRESHOLD = Decimal("0.03")
-COMPETITIVENESS_URGENT_THRESHOLD = Decimal("0.10")
+#Limiares em porcentagem para classificar a competitividade frente ao menor preço.
+COMPETITIVENESS_NON_COMPETITIVE_PCT = Decimal("1")  #Até 1% -> nao_competitivo
+COMPETITIVENESS_ATTENTION_PCT = Decimal("5")      #>1% até 5% -> atencao
 
 def ensure_user_can_view_monitored(
     *, db: Session, monitored_id: UUID, user: User
@@ -289,26 +287,41 @@ def _calculate_competitiveness_status(
 ) -> Optional[str]:
     """ Define o status competitivo comparando o preço monitorado com o menor preço conhecido.
 
-    Quando a diferença percentual é positiva, porém abaixo do limiar mínimo
-    configurado, o status continua explícito como competitivo para evitar
-    resumos sem classificação.
+    A lógica segue as faixas solicitadas: diferenças menores ou iguais a zero
+    são competitivas, positivas até 1% são ``nao_competitivas``, de 1% até 5%
+    entram em ``atencao`` e acima de 5% tornam-se ``urgente``. Referências
+    ausentes ou iguais a zero não são classificadas para evitar divisões
+    inválidas.
     """
     if (
-        monitored_price is None or reference_price is None or reference_price <= Decimal("0")
+        monitored_price is None
+        or reference_price is None
+        or reference_price <= Decimal("0")
     ):
         return None
-    
-    price_delta = (monitored_price - reference_price) / reference_price
 
-    if price_delta <= 0:
+    #Se o monitorado for menor ou igual ao menor concorrente, é competitivo
+    if monitored_price <= reference_price:
         return CompetitivenessStatus.COMPETITIVE.value
-    elif price_delta >= COMPETITIVENESS_URGENT_THRESHOLD:
-        return CompetitivenessStatus.URGENT.value
-    elif price_delta >= COMPETITIVENESS_ATTENTION_THRESHOLD:
-        return CompetitivenessStatus.ATTENTION.value
-    elif price_delta >= COMPETITIVENESS_NON_COMPETITIVE_THRESHOLD:
+
+    #Calcula delta fractional e percentual com precisão para evitar que arredondamentos prejudiquem a classificação.
+    try:
+        delta_fraction = (monitored_price - reference_price) / reference_price
+    except (InvalidOperation, ZeroDivisionError):
+        return None
+
+    if delta_fraction <= Decimal("0"):
+        return CompetitivenessStatus.COMPETITIVE.value
+
+    #Percentual em termos de porcentagem (ex.: 1.23 = 1.23%)
+    percentage = (delta_fraction * Decimal("100")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+    #Aplicar faixas: >0% até 1% => nao_competitivo; >1% até 5% => atencao; >5% => urgente
+    if percentage > Decimal("0") and percentage <= COMPETITIVENESS_NON_COMPETITIVE_PCT:
         return CompetitivenessStatus.NON_COMPETITIVE.value
-    return CompetitivenessStatus.COMPETITIVE.value
+    if percentage <= COMPETITIVENESS_ATTENTION_PCT:
+        return CompetitivenessStatus.ATTENTION.value
+    return CompetitivenessStatus.URGENT.value
 
 def _build_summary_from_result(
     payload: Dict[str, Any],
@@ -419,7 +432,7 @@ def _compute_summary_from_payload(
         cheaper_count = sum(1 for price in competitor_prices if price < monitored_price)
         summary["position_rank"] = cheaper_count + 1
 
-    status_reference = summary.get("competitors_min") or summary.get("competitors_mean")
+    status_reference = summary.get("competitors_min")
     status = _calculate_competitiveness_status(monitored_price, status_reference)
     if status is not None:
         summary["competitiveness_status"] = status
@@ -535,7 +548,7 @@ def _apply_summary_defaults(
 
     if summary.get("competitiveness_status") is None:
         monitored_price = summary.get("monitored_price")
-        status_reference = summary.get("competitors_min") or summary.get("competitors_mean")
+        status_reference = summary.get("competitors_min")
         status = _calculate_competitiveness_status(monitored_price, status_reference)
         if status is not None:
             summary["competitiveness_status"] = status
@@ -577,9 +590,11 @@ def build_comparison_summary(
             competitors_count=competitors_count,
         )
 
+        #Preferir valores recomputados quando disponíveis (sobrescrever snapshots antigos) 
+        #Garantir que classificações reflitam os preços atuais sempre que houver dados novos.
         merged_payload = stored_payload.copy()
         for key, value in recomputed_payload.items():
-            if merged_payload.get(key) is None:
+            if value is not None:
                 merged_payload[key] = value
 
         return _apply_summary_defaults(

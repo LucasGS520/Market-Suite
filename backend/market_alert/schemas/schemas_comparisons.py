@@ -65,7 +65,7 @@ class PriceComparisonSummaryResponse(BaseModel):
         default=None,
         description=(
             "Status calculado a partir da diferença percentual para o menor preço "
-            "disponível: competitivo, nao competitivo, atencao ou urgente."
+            "disponível: competitivo, nao_competitivo, atencao ou urgente."
         ),
     )
     discrepancies: List[Dict[str, Any]] = Field(default_factory=list)

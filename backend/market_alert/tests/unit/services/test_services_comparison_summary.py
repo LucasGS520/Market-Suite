@@ -170,6 +170,7 @@ def test_compute_summary_without_competitor_prices_keeps_null_fields() -> None:
     assert summary["potential_adjustment"] is None
     assert summary["position_rank"] is None
     assert summary["comparison_insights"] is None
+    assert summary["competitiveness_status"] is None
     
 def test_build_comparison_summary_with_stored_snapshot() -> None:
     """ Usa resumo persistido quando disponível """
@@ -221,7 +222,7 @@ def test_build_comparison_summary_preserves_last_comparison_at() -> None:
     assert summary["competitors_count"] == 3
     
 def test_competitiveness_status_attention_threshold() -> None:
-    """Classifica como atenção quando a diferença fica entre 3% e 10%"""
+    """Classifica como atenção quando a diferença fica entre 1% e 5%"""
 
     comparison = _DummyComparison(
         data={
@@ -251,8 +252,8 @@ def test_competitiveness_status_competitive_when_cheaper() -> None:
 
     assert summary["competitiveness_status"] == "competitivo"
 
-def test_competitiveness_status_competitive_for_small_positive_delta() -> None:
-    """Mantém status competitivo para diferenças pequenas e positivas"""
+def test_competitiveness_status_non_competitive_for_small_positive_delta() -> None:
+    """Classifica como não competitivo para diferenças positivas abaixo de 1%"""
 
     comparison = _DummyComparison(
         data={
@@ -264,4 +265,80 @@ def test_competitiveness_status_competitive_for_small_positive_delta() -> None:
 
     summary = build_comparison_summary(comparison, competitors_count=1)
 
-    assert summary["competitiveness_status"] == "competitivo"
+    assert summary["competitiveness_status"] == "nao_competitivo"
+
+def test_competitiveness_status_respects_requested_thresholds() -> None:
+    """Valida limites de 0%, 1% e 5% conforme regras solicitadas."""
+
+    cases = [
+        ("100.00", "100.00", "competitivo"),
+        ("100.10", "100.00", "nao_competitivo"),
+        ("101.00", "100.00", "nao_competitivo"),
+        ("101.01", "100.00", "atencao"),
+        ("105.00", "100.00", "atencao"),
+        ("105.01", "100.00", "urgente"),
+    ]
+
+    for monitored_price, reference_price, expected in cases:
+        comparison = _DummyComparison(
+            data={
+                "monitored_price": monitored_price,
+                "lowest_competitor": {"price": reference_price},
+                "discrepancies": [{"price": reference_price}],
+            }
+        )
+
+        summary = build_comparison_summary(comparison, competitors_count=1)
+
+        assert summary["competitiveness_status"] == expected
+
+
+def test_competitiveness_status_none_when_reference_missing_or_invalid() -> None:
+    """Evita classificação quando o preço de referência está ausente ou zerado."""
+
+    comparison = _DummyComparison(
+        data={
+            "monitored_price": "100.00",
+            "lowest_competitor": {"price": "0"},
+            "discrepancies": [{"price": "0"}],
+        }
+    )
+
+    summary = build_comparison_summary(comparison, competitors_count=1)
+
+    assert summary["competitiveness_status"] is None
+
+
+def test_competitiveness_status_uses_lowest_competitor_as_reference() -> None:
+    """Garante que apenas o menor preço conhecido seja usado como referência."""
+
+    stored = _DummySummary(
+        aggregates={
+            "monitored_price": "110.00",
+            "competitors_mean": "90.00",
+            "competitors_min": None,
+        }
+    )
+
+    summary = build_comparison_summary(
+        None, competitors_count=3, stored_summary=stored
+    )
+
+    assert summary["competitiveness_status"] is None
+
+
+def test_competitiveness_status_small_delta_case() -> None:
+    """Reproduz caso real: diferença pequena (centavos) deve ser classificada como nao_competitivo."""
+
+    comparison = _DummyComparison(
+        data={
+            # meu preço maior por R$0.92 sobre o menor concorrente
+            "monitored_price": "10348.99",
+            "lowest_competitor": {"price": "10348.07"},
+            "discrepancies": [{"price": "10348.07"}],
+        }
+    )
+
+    summary = build_comparison_summary(comparison, competitors_count=2)
+
+    assert summary["competitiveness_status"] == "nao_competitivo"
