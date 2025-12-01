@@ -43,6 +43,7 @@ import {
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
+import { formatDateOnly, formatRelativeTime } from '../utils/date';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -131,6 +132,13 @@ const ProductDetail: React.FC = () => {
     } catch {
       return 'Concorrente';
     }
+  };
+
+  /**
+   * Exibe aviso simples para ações que ainda não foram conectadas ao backend.
+   */
+  const handlePlaceholderAction = (message: string) => {
+    alert(message);
   };
 
   // Estado de carregamento do produto: mostra spinner enquanto carrega
@@ -251,6 +259,7 @@ const ProductDetail: React.FC = () => {
   const summaryAlerts = summary?.alerts || [];
   const highlightedAlerts = summaryAlerts.slice(0, 3);
   const monitoredSince = product.created_at;
+  const monitoringPaused = product.is_paused ?? false;
 
   return (
     <Layout>
@@ -265,7 +274,7 @@ const ProductDetail: React.FC = () => {
           Voltar para Produtos
         </Button>
         <Typography variant="h4" gutterBottom>
-          DETALHES DO PRODUTO
+          Detalhes do Produto
         </Typography>
       </Box>
 
@@ -347,7 +356,7 @@ const ProductDetail: React.FC = () => {
               <Card elevation={2}>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
-                    RESUMO DE COMPARAÇÃO
+                    Resumo de Comparação
                   </Typography>
                   <Grid container spacing={2}>
                     <Grid item xs={12} sm={6} md={3}>
@@ -400,7 +409,7 @@ const ProductDetail: React.FC = () => {
             <Card elevation={2}>
               <CardContent>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                  <Typography variant="h6">CONCORRENTES</Typography>
+                  <Typography variant="h6">Concorrentes</Typography>
                   <Button
                     variant="contained"
                     startIcon={<AddIcon />}
@@ -504,6 +513,7 @@ const ProductDetail: React.FC = () => {
                               <TableCell align="center">
                                 <IconButton
                                   size="small"
+                                  color="default"
                                   component="a"
                                   href={competitor.url}
                                   target="_blank"
@@ -542,7 +552,7 @@ const ProductDetail: React.FC = () => {
             <Card elevation={2}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  INSIGHTS DE COMPARAÇÃO
+                  Insights de Comparação
                 </Typography>
                 {summary?.comparison_insights ? (
                   <Alert severity="info" sx={{ mb: highlightedAlerts.length ? 2 : 0 }}>
@@ -572,7 +582,7 @@ const ProductDetail: React.FC = () => {
             <Card elevation={2}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  AÇÕES RÁPIDAS
+                  Ações Rápidas
                 </Typography>
                 <Box display="flex" flexDirection="column" gap={1.5}>
                   <Button
@@ -598,7 +608,7 @@ const ProductDetail: React.FC = () => {
                     startIcon={<PauseIcon />}
                     onClick={() => handlePlaceholderAction('Monitoramento marcado como pausado (visual).')}
                   >
-                    Pausar Monitoramento
+                    {monitoringPaused ? 'Ativar Monitoramento' : 'Pausar Monitoramento'}
                   </Button>
                   <Button
                     variant="outlined"
@@ -615,26 +625,28 @@ const ProductDetail: React.FC = () => {
             <Card elevation={2}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  ESTATÍSTICAS DO MONITORAMENTO
+                  Estatísticas
                 </Typography>
                 <Box display="flex" flexDirection="column" gap={1.5}>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
-                      Última Coleta
+                      Última coleta
                     </Typography>
                     <Typography variant="body1">{renderDateTime(product.last_scraped_at)}</Typography>
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
-                      Última Mudança de Preço
+                      Última mudança de preço
                     </Typography>
-                    <Typography variant="body1">{renderDateTime(product.last_price_change_at)}</Typography>
+                    <Typography variant="body1">
+                      {formatRelativeTime(product.last_price_change_at)}
+                    </Typography>
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
                       Monitorado desde
                     </Typography>
-                    <Typography variant="body1">{renderDateTime(monitoredSince)}</Typography>
+                    <Typography variant="body1">{formatDateOnly(monitoredSince)}</Typography>
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
@@ -656,7 +668,7 @@ const ProductDetail: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>ADICIONAR CONCORRENTE</DialogTitle>
+        <DialogTitle>Adicionar Concorrente</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2 }}>
             Adicionar concorrente para: <strong>{product.name}</strong>

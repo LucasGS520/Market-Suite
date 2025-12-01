@@ -218,7 +218,7 @@ const Products: React.FC = () => {
       {/* Cabeçalho */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" gutterBottom>
-          PRODUTOS MONITORADOS
+          Produtos Monitorados
         </Typography>
         <Typography variant="body1" color="text.secondary">
           Gerencie e visualize todos os seus produtos monitorados
@@ -237,14 +237,14 @@ const Products: React.FC = () => {
 
         <TextField
           size="small"
-          placeholder="BUSCAR PRODUTOS..."
+          placeholder="Buscar Produtos..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           sx={{ minWidth: 200 }}
         />
 
         <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel>STATUS</InputLabel>
+          <InputLabel>Status</InputLabel>
           <Select
             value={statusFilter}
             label="Status"

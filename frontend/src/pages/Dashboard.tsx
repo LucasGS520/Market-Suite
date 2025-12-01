@@ -187,7 +187,7 @@ const Dashboard: React.FC = () => {
       {/* Cabeçalho do Dashboard */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" gutterBottom>
-          DASHBOARD
+          Dashboard
         </Typography>
         <Typography variant="body1" color="text.secondary">
           Visão geral do monitoramento de preços
@@ -223,7 +223,7 @@ const Dashboard: React.FC = () => {
       {/* Seção: Produtos em Destaque */}
       <Box sx={{ mb: 2 }}>
         <Typography variant="h5" gutterBottom>
-          PRODUTOS EM DESTAQUE
+          Produtos em Destaque
         </Typography>
         <Typography variant="body2" color="text.secondary" gutterBottom>
           Produtos que requerem mais atenção

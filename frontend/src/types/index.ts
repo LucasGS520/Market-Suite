@@ -45,6 +45,7 @@ export interface MonitoredProduct {
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
   last_status?: string; // Último status registrado
   comparison_summary?: PriceComparisonSummary; // Resumo consolidado de comparação para renderização imediata
+  is_paused?: boolean; // Indica se o monitoramento do produto está pausado
 }
 
 /**
