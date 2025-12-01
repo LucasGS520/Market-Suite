@@ -306,6 +306,7 @@ const Dashboard: React.FC = () => {
       <Box sx={{ mt: 4, textAlign: 'center' }}>
         <Button
           variant="outlined"
+          color="secondary"
           size="large"
           onClick={() => navigate('/products')}
         >

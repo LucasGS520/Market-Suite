@@ -223,6 +223,7 @@ const ProductDetail: React.FC = () => {
           startIcon={<ArrowBackIcon />}
           onClick={() => navigate('/products')}
           sx={{ mb: 2 }}
+          color="secondary"
         >
           Voltar para Produtos
         </Button>
@@ -511,7 +512,9 @@ const ProductDetail: React.FC = () => {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenAddCompetitorDialog(false)}>Cancelar</Button>
+          <Button onClick={() => setOpenAddCompetitorDialog(false)} color="secondary">
+            Cancelar
+          </Button>
           <Button
             onClick={handleAddCompetitor}
             variant="contained"

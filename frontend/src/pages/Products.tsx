@@ -409,6 +409,7 @@ const Products: React.FC = () => {
                             <Box display="flex" gap={1}>
                               <Button
                                 variant="outlined"
+                                color="secondary"
                                 size="small"
                                 component="a"
                                 href={product.url}
@@ -517,6 +518,7 @@ const Products: React.FC = () => {
                         <Box display="flex" justifyContent="center" gap={1}>
                           <Button
                             variant="outlined"
+                            color="secondary"
                             size="small"
                             component="a"
                             href={product.url}
@@ -587,7 +589,9 @@ const Products: React.FC = () => {
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenAddDialog(false)}>Cancelar</Button>
+          <Button onClick={() => setOpenAddDialog(false)} color="secondary">
+            Cancelar
+          </Button>
           <Button
             onClick={handleAddProduct}
             variant="contained"
