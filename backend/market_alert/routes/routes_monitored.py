@@ -56,11 +56,11 @@ def list_monitored_products(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     page: int = Query(1, ge=1, description="Página atual (base 1)"),
-    per_page: int = Query(
-        50,
+    per_page: int | None = Query(
+        default=None,
         ge=1,
         le=200,
-        description="Quantidade de itens por página (máximo 200)",
+        description="Quantidade de itens por página (máximo 200). Se omitido, retorna todos.",
     ),
     query: str | None = Query(
         default=None,
@@ -73,7 +73,11 @@ def list_monitored_products(
         description="Filtra pelo status de competitividade mais recente",
     ),
 ):
-    """ Lista produtos monitorados aplicando filtros textuais e de competitividade  """
+    """ Lista produtos monitorados aplicando filtros textuais e de competitividade.
+
+    Permite omitir `per_page` para entregas completas em fluxos onde a paginação é
+    controlada no cliente, mantendo validação de teto quando o parâmetro é usado.
+    """
     logger.info(
         "route_called",
         path=request.url.path,

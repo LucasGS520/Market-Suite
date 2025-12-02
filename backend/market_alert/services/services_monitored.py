@@ -49,7 +49,7 @@ def list_monitored_products(
     db: Session,
     user_id: UUID,
     page: int,
-    per_page: int,
+    per_page: int | None,
     query: str | None = None,
     status: CompetitivenessStatus | None = None,
 ) -> PaginatedMonitoredProductsResponse:
@@ -58,7 +58,7 @@ def list_monitored_products(
     A função mantém a lógica de obtenção de resumos mais recentes e montagem
     do DTO de monitorados, filtrando itens sem preço para preservar o contrato.
     """
-    products_with_count, total = get_all_monitored_products(
+    products_with_count, total, resolved_per_page = get_all_monitored_products(
         db,
         user_id,
         page=page,
@@ -66,6 +66,9 @@ def list_monitored_products(
         query=query,
         status=status,
     )
+
+    #Protege paginação client-side quando o frontend optar por trazer todos os itens
+    resolved_page = page if per_page is not None else 1
 
     product_ids = [product.id for product, _ in products_with_count]
     summaries_map = get_latest_summaries_for_products(db, product_ids)
@@ -90,7 +93,11 @@ def list_monitored_products(
 
     return PaginatedMonitoredProductsResponse(
         items=response_payload,
-        meta=PaginationMeta(total=total, page=page, per_page=per_page),
+        meta=PaginationMeta(
+            total=total,
+            page=resolved_page,
+            per_page=resolved_per_page,
+        ),
     )
 
 

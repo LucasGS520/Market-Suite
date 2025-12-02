@@ -348,13 +348,20 @@ def get_all_monitored_products(
     monitoring_type: Optional[MonitoringType] = None,
     *,
     page: int = 1,
-    per_page: int = 50,
+    per_page: int | None = None,
     query: str | None = None,
     status: CompetitivenessStatus | None = None,
-) -> tuple[list[tuple[MonitoredProduct, int]], int]:
-    """ Lista produtos monitorados com filtros avançados e contagem de concorrentes """
+) -> tuple[list[tuple[MonitoredProduct, int]], int, int]:
+    """ Lista produtos monitorados com filtros avançados e contagem de concorrentes.
+
+    Aceita `per_page=None` para retornar todos os itens disponíveis, mantendo um teto
+    defensivo quando o parâmetro é enviado e preservando ordenação determinística
+    para evitar variações entre chamadas paginadas.
+    """
     normalized_page = max(page, 1)
-    normalized_per_page = max(per_page, 1)
+    max_per_page = 200
+    apply_pagination = per_page is not None
+    normalized_per_page = None if per_page is None else min(max(per_page, 1), max_per_page)
 
     base_query = db.query(MonitoredProduct).filter(
         MonitoredProduct.user_id == user_id,
@@ -390,18 +397,21 @@ def get_all_monitored_products(
 
     total = base_query.count()
     if total == 0:
-        return [], 0
+        return [], 0, 0
 
-    offset = (normalized_page - 1) * normalized_per_page
-    products = (
-        base_query.order_by(MonitoredProduct.created_at.desc())
-        .offset(offset)
-        .limit(normalized_per_page)
-        .all()
+    ordered_query = base_query.order_by(
+        MonitoredProduct.created_at.desc(),
+        MonitoredProduct.id.desc(),
     )
+    if apply_pagination and normalized_per_page:
+        offset = (normalized_page - 1) * normalized_per_page
+        ordered_query = ordered_query.offset(offset).limit(normalized_per_page)
+
+    products = ordered_query.all()
 
     if not products:
-        return [], total
+        resolved_per_page = normalized_per_page if apply_pagination and normalized_per_page else 0
+        return [], total, resolved_per_page
     product_ids = [product.id for product in products]
 
     competitor_rows = (
@@ -418,7 +428,8 @@ def get_all_monitored_products(
     }
 
     items = [(product, competitors_map.get(product.id, 0)) for product in products]
-    return items, total
+    resolved_per_page = normalized_per_page if apply_pagination and normalized_per_page else len(items)
+    return items, total, resolved_per_page
 
 def get_featured_monitored_products(
     db: Session,

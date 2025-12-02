@@ -33,14 +33,11 @@ export const productsService = {
   },
 
   /**
-   * Lista produtos monitorados com paginação e filtros
-   * - page: número da página (padrão no backend)
-   * - per_page: itens por página
-   * - query: texto de busca
-   * - status: filtro por status do monitoramento
+   * Lista produtos monitorados com filtros opcionais e paginação sob demanda.
    *
-   * @param {Object} params Parâmetros de paginação e filtro
-   * @returns {Promise<PaginatedResponse<MonitoredProduct>>} Resposta paginada de produtos monitorados
+   * A função apenas envia parâmetros definidos, permitindo que o frontend
+   * assuma paginação client-side quando necessário sem forçar `per_page` ou
+   * `page` por padrão.
    */
   async getMonitoredProducts(params?: {
     page?: number;
@@ -48,9 +45,15 @@ export const productsService = {
     query?: string;
     status?: string;
   }): Promise<PaginatedResponse<MonitoredProduct>> {
+    const sanitizedParams = params
+      ? Object.fromEntries(
+          Object.entries(params).filter(([, value]) => value !== undefined && value !== null)
+        )
+      : undefined;
+
     const response = await apiClient.get<PaginatedResponse<MonitoredProduct>>(
       '/monitored',
-      { params }
+      { params: sanitizedParams }
     );
     return response.data;
   },

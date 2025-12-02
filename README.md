@@ -80,6 +80,7 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 - **UX responsiva**: componentes baseados em Radix UI e Tailwind garantem adaptação a diferentes dispositivos.
 - **Sincronização de estado**: `react-query` evita chamadas duplicadas e trata revalidação automática.
 - **Isolamento de mock**: a aplicação pode rodar com mocks locais para demonstração sem depender do backend, útil para testes de UI.
+- **Paginação ajustável na listagem de produtos**: a tela de Produtos controla paginação no cliente, oferecendo 5/10/25 itens por página ou carregamento total (200 itens) em modo tabela; o backend apenas responde aos parâmetros `page` e `per_page` sem impor lógicas adicionais.
 
 
 ## Integração frontend ⇄ backend

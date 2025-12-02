@@ -5,7 +5,7 @@
  * adicionar produtos monitorados pelo usuário.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -67,7 +67,7 @@ const Products: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'table'>('list'); // modo de exibição
   const [searchQuery, setSearchQuery] = useState(''); // texto de busca
   const [statusFilter, setStatusFilter] = useState(''); // filtro por status de competitividade
-  const [page] = useState(1); // página atual (para paginação)
+  const [page, setPage] = useState(1); // página atual para paginação em modo lista
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto
@@ -77,15 +77,41 @@ const Products: React.FC = () => {
 
   // Query para buscar produtos monitorados. A chave depende de pagina, busca e filtro.
   const { data, isLoading, error } = useQuery({
-    queryKey: ['monitoredProducts', page, searchQuery, statusFilter],
+    queryKey: ['monitoredProducts', searchQuery, statusFilter],
     queryFn: () =>
       productsService.getMonitoredProducts({
-        page,
-        per_page: viewMode === 'list' ? 5 : 100,
         query: searchQuery || undefined,
         status: statusFilter || undefined,
       }),
   });
+
+  // Ajusta paginação client-side quando filtros ou modo de visualização mudam
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter, viewMode]);
+
+  const listPageSize = 5;
+  const paginatedItems = useMemo(() => {
+    if (!data?.items || viewMode !== 'list') return data?.items ?? [];
+    const offset = (page - 1) * listPageSize;
+    return data.items.slice(offset, offset + listPageSize);
+  }, [data?.items, page, viewMode]);
+
+  const totalPages = useMemo(() => {
+    if (!data?.items || viewMode !== 'list') return 1;
+    return Math.max(1, Math.ceil(data.items.length / listPageSize));
+  }, [data?.items, viewMode]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const handlePageSelect = (newPage: number) => {
+    const boundedPage = Math.min(Math.max(newPage, 1), totalPages);
+    setPage(boundedPage);
+  };
 
   // Mutation para criação de produto monitorado.
   const createProductMutation = useMutation({
@@ -303,7 +329,7 @@ const Products: React.FC = () => {
         viewMode === 'list' ? (
           // Modo Lista - exibe cartões por produto
           <Grid container spacing={3}>
-            {data.items.map((product) => {
+            {paginatedItems.map((product) => {
               const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
               const differenceValue = getDifferenceValue(product);
               const differenceLabel = formatCurrency(differenceValue);
@@ -443,6 +469,31 @@ const Products: React.FC = () => {
                 </Grid>
               );
             })}
+            {data.items.length > listPageSize && (
+              <Grid item xs={12}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
+                  <Button
+                    variant="outlined"
+                    disabled={page <= 1}
+                    onClick={() => handlePageSelect(page - 1)}
+                  >
+                    Anterior
+                  </Button>
+
+                  <Typography variant="body2" color="text.secondary">
+                    Página {page} de {totalPages}
+                  </Typography>
+
+                  <Button
+                    variant="outlined"
+                    disabled={page >= totalPages}
+                    onClick={() => handlePageSelect(page + 1)}
+                  >
+                    Próxima
+                  </Button>
+                </Box>
+              </Grid>
+            )}
           </Grid>
         ) : (
           // Modo Tabela - exibe produtos em linhas
