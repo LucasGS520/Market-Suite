@@ -7,6 +7,7 @@ Os esquemas de scraping de produtos são compartilhados em
 from backend.shared.schemas.shared_schemas_products import (
     MonitoredProductCreateScraping,
     MonitoredScrapedInfo,
+    InitialCompetitorCreateScraping,
     CompetitorProductCreateScraping,
     CompetitorScrapedInfo,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "PaginatedMonitoredProductsResponse",
     "PaginationMeta",
     "MonitoredScrapedInfo",
+    "InitialCompetitorCreateScraping",
     "CompetitorProductCreateScraping",
     "CompetitorProductResponse",
     "PaginatedCompetitorResponse",

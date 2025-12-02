@@ -60,6 +60,26 @@ class ProductCore(BaseModel):
 
 
 # ----- PRODUTO MONITORADO -----
+class InitialCompetitorCreateScraping(BaseModel):
+    """ Dados mínimos do concorrente enviados junto ao monitorado inicial """
+
+    name: str | None = Field(
+        default=None,
+        description="Nome opcional exibido durante a criação do concorrente",
+    )
+    product_url: HttpUrl = Field(
+        ..., description="URL do concorrente que deve ser coletado após o monitorado",
+    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_optional_name(cls, value: str | None) -> str | None:
+        """ Evita persistir rótulos vazios vindos do frontend """
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return value
+
 class MonitoredProductCreateScraping(BaseModel):
     """ Esquema compartilhado para criação de produto monitorado via scraping """
     
@@ -70,6 +90,10 @@ class MonitoredProductCreateScraping(BaseModel):
     )
     product_url: HttpUrl = Field(
         ..., description="link do produto que deseja monitorar"
+    )
+    initial_competitor: InitialCompetitorCreateScraping | None = Field(
+        default=None,
+        description="Concorrente opcional enviado no mesmo fluxo do monitorado",
     )
 
     @field_validator("name_identification", mode="before")

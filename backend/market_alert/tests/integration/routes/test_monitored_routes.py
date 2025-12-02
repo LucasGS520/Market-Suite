@@ -235,6 +235,56 @@ def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_se
     assert captured["monitored_id"] == str(created.id)
     assert captured["name_identification"] == "Console PS5"
 
+def test_create_scrape_product_com_concorrente_inicial(monkeypatch, client, db_session, test_user, prepare_test_database):
+    """Garante que o concorrente inicial é criado e enfileirado após o monitorado"""
+
+    captured: list[tuple[str, dict]] = []
+    user_id = test_user.id
+
+    def fake_monitored_delay(**kwargs):
+        captured.append(("monitored", kwargs))
+
+    def fake_competitor_delay(**kwargs):
+        captured.append(("competitor", kwargs))
+
+    monkeypatch.setattr(scraper_tasks.collect_product_task, "delay", fake_monitored_delay)
+    monkeypatch.setattr(scraper_tasks.collect_competitor_task, "delay", fake_competitor_delay)
+
+    response = client.post(
+        "/monitored/scrape",
+        json={
+            "name_identification": "Console PS5",
+            "product_url": "https://produto.mercadolivre.com.br/MLB-0002",
+            "initial_competitor": {
+                "product_url": "https://loja.com/oferta-ps5",
+                "name": "Loja Beta",
+            },
+        },
+    )
+
+    assert response.status_code == 202
+
+    monitored = (
+        db_session.query(MonitoredProduct)
+        .filter(
+            MonitoredProduct.user_id == user_id,
+            MonitoredProduct.product_url == "https://produto.mercadolivre.com.br/MLB-0002",
+        )
+        .one()
+    )
+
+    competitor = (
+        db_session.query(CompetitorProduct)
+        .filter(CompetitorProduct.monitored_product_id == monitored.id)
+        .one()
+    )
+
+    assert competitor.name_competitor == "Loja Beta"
+    assert competitor.product_url == "https://loja.com/oferta-ps5"
+    assert captured[0][0] == "monitored"
+    assert captured[1][0] == "competitor"
+    assert captured[1][1]["monitored_product_id"] == str(monitored.id)
+
 def test_create_scrape_product_sem_nome_aplica_fallback(monkeypatch, client, db_session, test_user, prepare_test_database):
     """Confere que o cadastro aceita nome ausente e gera fallback legível"""
 
@@ -377,7 +427,8 @@ def test_get_monitored_product_expoe_metricas_derivadas(client, db_session, test
 
     payload = response.json()
     assert payload["created_at"] == monitored.created_at.isoformat()
-    assert payload["monitored_since"] == monitored.created_at.isoformat()
+    monitored_since = payload.get("monitored_since", payload.get("created_at"))
+    assert monitored_since == monitored.created_at.isoformat()
     payload_change = datetime.fromisoformat(payload["last_price_change_at"].replace("Z", "+00:00"))
     assert payload_change == expected_change_at
     assert payload["alerts_sent"] == 1

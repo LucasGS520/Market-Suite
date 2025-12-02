@@ -130,7 +130,7 @@ def get_last_price_change_for_monitored(db: Session, monitored_product_id: UUID)
             resolved_change_at = first_current_value[0]
 
     if resolved_change_at and resolved_change_at.tzinfo is None:
-        resolved_change_at = resolved_change_at._replace(tzinfo=timezone.utc)
+        resolved_change_at = resolved_change_at.replace(tzinfo=timezone.utc)
     return resolved_change_at
 
 def count_notifications_for_monitored_product(

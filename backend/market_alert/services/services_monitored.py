@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session
 import structlog
 from uuid import UUID
 
-from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
+from backend.shared.schemas.shared_schemas_products import (
+    MonitoredProductCreateScraping,
+    CompetitorProductCreateScraping,
+)
 from shared.utils.url_validation import normalize_and_validate_product_url
 
 from market_alert.core.config_alert import settings
@@ -34,6 +37,7 @@ from market_alert.schemas.schemas_products import (
 )
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
+from market_alert.services.services_competitors import create_competitor_scrape_request
 from market_alert.tasks.scraper_tasks import collect_product_task
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 
@@ -182,11 +186,11 @@ def schedule_monitored_scrape(
     product_data: MonitoredProductCreateScraping,
     request: Request | None = None,
 ) -> MonitoredScrapeCreationResponse:
-    """ Valida e agenda scraping de produto monitorado em fluxo único
+    """ Valida e agenda scraping de produto monitorado e concorrente inicial
     
     O serviço centraliza logs e validações para reduzir duplicação entre rotas,
     garantindo verificação de URL, duplicidade e rate-limit antes de agendar a
-    coleta assíncrona.
+    coleta assíncrona do monitorado e, quando enviado, do concorrente inicial.
     """
     log_context: dict[str, str | None] = {
         "user_id": str(user.id),
@@ -270,6 +274,27 @@ def schedule_monitored_scrape(
         name_identification=pending.name_identification,
         monitored_id=str(pending.id),
     )
+
+    if product_data.initial_competitor:
+        competitor_payload = CompetitorProductCreateScraping(
+            monitored_product_id=pending.id,
+            product_url=product_data.initial_competitor.product_url,
+            name=product_data.initial_competitor.name,
+        )
+        competitor_context = {
+            "path": request.url.path if request else None,
+            "method": request.method if request else None,
+            "origin": "monitored_onboarding",
+        }
+
+        create_competitor_scrape_request(
+            db=db,
+            user=user,
+            product_data=competitor_payload,
+            request_context={
+                key: value for key, value in competitor_context.items() if value is not None
+            },
+        )
 
     logger.info(
         "monitored_scrape_scheduled", monitored_id=str(pending.id), url=normalized_url
