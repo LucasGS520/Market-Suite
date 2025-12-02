@@ -28,6 +28,7 @@ import {
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
+import TruncatedText from '../utils/TruncatedText';
 
 /**
  * Tipagens locais para maior clareza e manutenção.
@@ -257,12 +258,8 @@ const Dashboard: React.FC = () => {
                       />
                     )}
                     <Box flex={1}>
-                      <Typography variant="h6" noWrap>
-                        {product.name}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        {product.url}
-                      </Typography>
+                      <TruncatedText text={product.name} variant="h6" lines={2} maxWidth="100%" tooltip={false} />
+                      <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
                       <Box display="flex" alignItems="center" gap={1} mt={1}>
                         {/* Chip indicando status de competitividade */}
                         <Chip

@@ -49,6 +49,7 @@ import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
 import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types';
+import TruncatedText from '../utils/TruncatedText';
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -358,10 +359,18 @@ const Products: React.FC = () => {
                         <Box flex={1}>
                           <Box display="flex" justifyContent="space-between" alignItems="start">
                             <Box>
-                              <Typography variant="h6">{product.name}</Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                Origem: {new URL(product.url).hostname}
-                              </Typography>
+                              <TruncatedText
+                                text={product.name}
+                                variant="h6"
+                                lines={2}
+                                maxWidth={420}
+                              />
+                              <TruncatedText
+                                text={`Origem: ${new URL(product.url).hostname}`}
+                                variant="body2"
+                                color="text.secondary"
+                                maxWidth={420}
+                              />
                             </Box>
                             <Chip
                               label={getStatusLabel(product.competitiveness_status)}
@@ -472,7 +481,7 @@ const Products: React.FC = () => {
 
                   return (
                     <TableRow key={product.id} hover>
-                      <TableCell>
+                      <TableCell sx={{ maxWidth: 360, width: 360 }}>
                         <Box display="flex" alignItems="center" gap={1}>
                           {product.thumbnail && (
                             <Box
@@ -482,7 +491,15 @@ const Products: React.FC = () => {
                               sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
                             />
                           )}
-                          <Typography variant="body2">{product.name}</Typography>
+                          <Box sx={{ maxWidth: 300, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                            <TruncatedText text={product.name} variant="body2" lines={2} maxWidth={300} />
+                            <TruncatedText
+                              text={new URL(product.url).hostname}
+                              variant="caption"
+                              color="text.secondary"
+                              maxWidth={300}
+                            />
+                          </Box>
                         </Box>
                       </TableCell>
                       <TableCell align="right">

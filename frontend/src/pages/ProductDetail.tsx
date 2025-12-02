@@ -44,6 +44,7 @@ import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
 import { formatDateOnly, formatRelativeTime } from '../utils/date';
+import TruncatedText from '../utils/TruncatedText';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -304,13 +305,22 @@ const ProductDetail: React.FC = () => {
                   </Grid>
                   <Grid item xs={12} md={9}>
                     <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
-                      <Box>
-                        <Typography variant="h5" gutterBottom>
-                          {product.name}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {product.url}
-                        </Typography>
+                      <Box sx={{ maxWidth: 500 }}>
+                        <TruncatedText
+                          text={product.name}
+                          variant="h5"
+                          gutterBottom
+                          lines={2}
+                          maxWidth={480}
+                          tooltip={false}
+                        />
+                        <TruncatedText
+                          text={product.url}
+                          variant="body2"
+                          color="text.secondary"
+                          maxWidth={480}
+                          tooltip={true}
+                        />
                       </Box>
                       <Chip
                         label={getStatusLabel(product.competitiveness_status)}
@@ -442,11 +452,19 @@ const ProductDetail: React.FC = () => {
                     <Table>
                       <TableHead>
                         <TableRow>
-                          <TableCell>Produto</TableCell>
-                          <TableCell align="right">Preço</TableCell>
-                          <TableCell align="center">Disponibilidade</TableCell>
-                          <TableCell align="center">Status</TableCell>
-                          <TableCell align="center">Ações</TableCell>
+                          <TableCell sx={{ maxWidth: 420, width: 420 }}>Produto</TableCell>
+                          <TableCell align="right" sx={{ width: 160 }}>
+                            Preço
+                          </TableCell>
+                          <TableCell align="center" sx={{ width: 180 }}>
+                            Disponibilidade
+                          </TableCell>
+                          <TableCell align="center" sx={{ width: 140 }}>
+                            Status
+                          </TableCell>
+                          <TableCell align="center" sx={{ width: 160 }}>
+                            Ações
+                          </TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -455,14 +473,16 @@ const ProductDetail: React.FC = () => {
                             competitor.name || competitor.display_name || fallbackFromUrl(competitor.url);
                           const isPendingName = !competitor.name && !competitor.display_name;
 
-                          const nameContent = (
-                            <Typography
-                              variant="body2"
-                              sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
-                            >
-                              {resolvedName}
-                            </Typography>
-                          );
+                            const nameContent = (
+                              <TruncatedText
+                                text={resolvedName}
+                                variant="body2"
+                                lines={2}
+                                maxWidth={380}
+                                tooltip={false}
+                                sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
+                              />
+                            );
 
                           const wrappedName = isPendingName ? (
                             <Tooltip title="Coletando nome...">{nameContent}</Tooltip>
@@ -472,7 +492,7 @@ const ProductDetail: React.FC = () => {
 
                           return (
                             <TableRow key={competitor.id}>
-                              <TableCell>
+                              <TableCell sx={{ maxWidth: 420, width: 420 }}>
                                 <Box display="flex" alignItems="center" gap={1}>
                                   {competitor.thumbnail && (
                                     <Box
@@ -482,15 +502,23 @@ const ProductDetail: React.FC = () => {
                                       sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
                                     />
                                   )}
-                                  <Box>
+                                  <Box sx={{ maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
                                     {wrappedName}
-                                    <Typography variant="caption" color="text.secondary">
-                                      {new URL(competitor.url).hostname}
-                                    </Typography>
+                                    <TruncatedText
+                                      text={new URL(competitor.url).hostname}
+                                      variant="caption"
+                                      color="text.secondary"
+                                      maxWidth={360}
+                                      tooltip={true}
+                                    />
                                     {isPendingName && (
-                                      <Typography variant="caption" color="text.secondary">
-                                        Coletando nome...
-                                      </Typography>
+                                      <TruncatedText
+                                        text="Coletando nome..."
+                                        variant="caption"
+                                        color="text.secondary"
+                                        maxWidth={360}
+                                        tooltip={false}
+                                      />
                                     )}
                                   </Box>
                                 </Box>
@@ -510,7 +538,7 @@ const ProductDetail: React.FC = () => {
                                   size="small"
                                 />
                               </TableCell>
-                              <TableCell align="center">
+                              <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
                                 <IconButton
                                   size="small"
                                   color="default"
@@ -594,11 +622,17 @@ const ProductDetail: React.FC = () => {
                   </Button>
                   <Button
                     variant="outlined"
+                    color="inherit"
                     startIcon={<OpenInNewIcon />}
                     component="a"
                     href={product.url}
                     target="_blank"
                     rel="noopener noreferrer"
+                    sx={{
+                      color: 'text.primary',
+                      borderColor: 'divider',
+                      '&:hover': { backgroundColor: 'action.hover' },
+                    }}
                   >
                     Ver Anúncio
                   </Button>
