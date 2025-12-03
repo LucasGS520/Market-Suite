@@ -164,8 +164,6 @@ const Products: React.FC = () => {
         return 'success';
       case 'atencao':
         return 'warning';
-      case 'nao_competitivo':
-        return 'warning';
       case 'urgente':
         return 'error';
       default:
@@ -231,8 +229,6 @@ const Products: React.FC = () => {
         return 'Competitivo';
       case 'atencao':
         return 'Atenção';
-      case 'nao_competitivo':
-        return 'Não Competitivo';
       case 'urgente':
         return 'Urgente';
       default:
@@ -280,7 +276,6 @@ const Products: React.FC = () => {
             <MenuItem value="">Todos</MenuItem>
             <MenuItem value="competitivo">Competitivo</MenuItem>
             <MenuItem value="atencao">Atenção</MenuItem>
-            <MenuItem value="nao_competitivo">Não Competitivo</MenuItem>
             <MenuItem value="urgente">Urgente</MenuItem>
           </Select>
         </FormControl>

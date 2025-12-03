@@ -265,15 +265,16 @@ def test_competitiveness_status_non_competitive_for_small_positive_delta() -> No
 
     summary = build_comparison_summary(comparison, competitors_count=1)
 
-    assert summary["competitiveness_status"] == "nao_competitivo"
+    # Pequenas diferenças agora são consideradas 'atencao'
+    assert summary["competitiveness_status"] == "atencao"
 
 def test_competitiveness_status_respects_requested_thresholds() -> None:
     """Valida limites de 0%, 1% e 5% conforme regras solicitadas."""
 
     cases = [
         ("100.00", "100.00", "competitivo"),
-        ("100.10", "100.00", "nao_competitivo"),
-        ("101.00", "100.00", "nao_competitivo"),
+        ("100.10", "100.00", "atencao"),
+        ("101.00", "100.00", "atencao"),
         ("101.01", "100.00", "atencao"),
         ("105.00", "100.00", "atencao"),
         ("105.01", "100.00", "urgente"),
@@ -328,7 +329,7 @@ def test_competitiveness_status_uses_lowest_competitor_as_reference() -> None:
 
 
 def test_competitiveness_status_small_delta_case() -> None:
-    """Reproduz caso real: diferença pequena (centavos) deve ser classificada como nao_competitivo."""
+    """Reproduz caso real: diferença pequena (centavos) deve ser classificada como atencao."""
 
     comparison = _DummyComparison(
         data={
@@ -341,4 +342,4 @@ def test_competitiveness_status_small_delta_case() -> None:
 
     summary = build_comparison_summary(comparison, competitors_count=2)
 
-    assert summary["competitiveness_status"] == "nao_competitivo"
+    assert summary["competitiveness_status"] == "atencao"

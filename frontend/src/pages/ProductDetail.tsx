@@ -37,7 +37,6 @@ import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Pause as PauseIcon,
-  PlayArrow as PlayArrowIcon,
   OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
@@ -164,15 +163,13 @@ const ProductDetail: React.FC = () => {
 
   /**
    * Retorna a cor do Chip de status de competitividade com base no status recebido.
-   * Status esperados: 'competitivo', 'atencao', 'nao_competitivo', 'urgente'.
+   * Status esperados: 'competitivo', 'atencao', 'urgente'.
    */
   const getStatusColor = (status?: string) => {
     switch (status) {
       case 'competitivo':
         return 'success';
       case 'atencao':
-        return 'warning';
-      case 'nao_competitivo':
         return 'warning';
       case 'urgente':
         return 'error';
@@ -190,8 +187,6 @@ const ProductDetail: React.FC = () => {
         return 'Competitivo';
       case 'atencao':
         return 'Atenção';
-      case 'nao_competitivo':
-        return 'Não Competitivo';
       case 'urgente':
         return 'Urgente';
       default:
@@ -550,13 +545,15 @@ const ProductDetail: React.FC = () => {
                                 >
                                   <OpenInNewIcon />
                                 </IconButton>
-                                {/* Ações não implementadas: apenas botões visuais por ora */}
-                                <IconButton size="small" color={competitor.is_paused ? 'success' : 'warning'}>
-                                  {competitor.is_paused ? <PlayArrowIcon /> : <PauseIcon />}
-                                </IconButton>
-                                <IconButton size="small" color="error">
-                                  <DeleteIcon />
-                                </IconButton>
+                                
+                                {/* Excluir concorrente: ação não implementada — apresentar feedback claro e estado desabilitado */}
+                                <Tooltip title="Remoção de concorrentes não implementada" placement="top">
+                                  <span>
+                                    <IconButton size="small" color="error" disabled aria-label="Remoção não implementada">
+                                      <DeleteIcon />
+                                    </IconButton>
+                                  </span>
+                                </Tooltip>
                               </TableCell>
                             </TableRow>
                           );
@@ -636,22 +633,26 @@ const ProductDetail: React.FC = () => {
                   >
                     Ver Anúncio
                   </Button>
-                  <Button
-                    variant="outlined"
-                    color="warning"
-                    startIcon={<PauseIcon />}
-                    onClick={() => handlePlaceholderAction('Monitoramento marcado como pausado (visual).')}
-                  >
-                    {monitoringPaused ? 'Ativar Monitoramento' : 'Pausar Monitoramento'}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    startIcon={<DeleteIcon />}
-                    onClick={() => handlePlaceholderAction('Produto removido visualmente; ação final pendente de backend.')}
-                  >
-                    Remover Produto
-                  </Button>
+                  <Tooltip title="Funcionalidade não implementada — apenas visual por ora" placement="top">
+                    <Button
+                      variant="outlined"
+                      color="warning"
+                      startIcon={<PauseIcon />}
+                      onClick={() => handlePlaceholderAction('Funcionalidade não implementada: pausar monitoramento ainda não disponível.')}
+                    >
+                      {monitoringPaused ? 'Ativar Monitoramento' : 'Pausar Monitoramento'}
+                    </Button>
+                  </Tooltip>
+                  <Tooltip title="Remoção de produto não implementada" placement="top">
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      startIcon={<DeleteIcon />}
+                      onClick={() => handlePlaceholderAction('Funcionalidade não implementada: remoção de produto ainda não disponível.')}
+                    >
+                      Remover Produto
+                    </Button>
+                  </Tooltip>
                 </Box>
               </CardContent>
             </Card>

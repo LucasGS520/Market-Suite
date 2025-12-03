@@ -46,7 +46,7 @@ from market_alert.services.services_competitors import ensure_user_can_access_mo
 logger = structlog.get_logger("comparison_service")
 
 #Limiares em porcentagem para classificar a competitividade frente ao menor preço.
-COMPETITIVENESS_NON_COMPETITIVE_PCT = Decimal("1")  #Até 1% -> nao_competitivo
+COMPETITIVENESS_NON_COMPETITIVE_PCT = Decimal("1")  # Até 1% -> atenção (anteriormente 'nao_competitivo')
 COMPETITIVENESS_ATTENTION_PCT = Decimal("5")      #>1% até 5% -> atencao
 
 def ensure_user_can_view_monitored(
@@ -316,9 +316,13 @@ def _calculate_competitiveness_status(
     #Percentual em termos de porcentagem (ex.: 1.23 = 1.23%)
     percentage = (delta_fraction * Decimal("100")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
-    #Aplicar faixas: >0% até 1% => nao_competitivo; >1% até 5% => atencao; >5% => urgente
+    # Aplicar faixas: >0% até 1% => atenção (anteriormente 'nao_competitivo');
+    # >1% até 5% => atenção; >5% => urgente.
+    # Observação: mantemos os mesmos limites percentuais, mas unificamos
+    # o rótulo de até 5% como 'atencao'. Retornamos explicitamente ATTENTION
+    # para garantir consistência independentemente do nome do membro enum.
     if percentage > Decimal("0") and percentage <= COMPETITIVENESS_NON_COMPETITIVE_PCT:
-        return CompetitivenessStatus.NON_COMPETITIVE.value
+        return CompetitivenessStatus.ATTENTION.value
     if percentage <= COMPETITIVENESS_ATTENTION_PCT:
         return CompetitivenessStatus.ATTENTION.value
     return CompetitivenessStatus.URGENT.value

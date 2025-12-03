@@ -47,7 +47,7 @@ interface FeaturedProduct {
   url?: string;
   thumbnail?: string;
   current_price: string | number | null;
-  competitiveness_status?: 'competitivo' | 'atencao' | 'nao_competitivo' | 'urgente' | string;
+  competitiveness_status?: 'competitivo' | 'atencao' | 'urgente' | string;
 }
 
 /**
@@ -136,8 +136,6 @@ const Dashboard: React.FC = () => {
         return 'success';
       case 'atencao':
         return 'warning';
-      case 'nao_competitivo':
-        return 'warning';
       case 'urgente':
         return 'error';
       default:
@@ -174,8 +172,6 @@ const Dashboard: React.FC = () => {
         return 'Competitivo';
       case 'atencao':
         return 'Atenção';
-      case 'nao_competitivo':
-        return 'Não Competitivo';
       case 'urgente':
         return 'Urgente';
       default:

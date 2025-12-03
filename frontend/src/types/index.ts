@@ -154,11 +154,10 @@ export interface PaginatedResponse<T> {
 /**
  * Tipos possíveis para o status de competitividade.
  * - competitivo: posição confortável/competitiva
- * - atencao: requer atenção
- * - nao_competitivo: não competitivo
+ * - atencao: requer atenção (inclui diferenças pequenas previamente tratadas como 'não competitivo')
  * - urgente: ação urgente recomendada
  */
-export type CompetitivenessStatus = 'competitivo' | 'atencao' | 'nao_competitivo' | 'urgente';
+export type CompetitivenessStatus = 'competitivo' | 'atencao' | 'urgente';
 
 /**
  * Payload usado para criar um scraping ao cadastrar um produto monitorado.
