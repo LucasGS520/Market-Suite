@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Iterable
 from uuid import UUID
+from types import SimpleNamespace
+from typing import Callable
 
 import structlog
 from fastapi import HTTPException, status
@@ -17,15 +18,11 @@ from market_alert.crud.crud_competitor import (
     count_competitors_by_monitored,
     create_pending_competitor_product,
     get_competitor_by_monitored_and_url,
-    bulk_update_paused_status,
     paginate_competitors,
-    bulk_delete_competitors,
     delete_competitors_by_monitored_id,
 )
 from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
 from market_alert.schemas.schemas_products import (
-    BulkCompetitorActionRequest,
-    BulkCompetitorActionResult,
     PaginationMeta,
     PaginatedCompetitorResponse,
 )
@@ -79,28 +76,6 @@ def ensure_user_can_access_monitored(
         )
 
     return monitored
-
-
-def load_competitors_for_action(
-    *,
-    db: Session,
-    monitored_product_id: UUID,
-    competitor_ids: Iterable[UUID],
-) -> list[CompetitorProduct]:
-    """ Carrega concorrentes garantindo vínculo com o monitorado informado """
-    unique_ids = {UUID(str(item)) for item in competitor_ids}
-    if not unique_ids:
-        return []
-
-    return (
-        db.query(CompetitorProduct)
-        .filter(
-            CompetitorProduct.monitored_product_id == monitored_product_id,
-            CompetitorProduct.id.in_(unique_ids),
-        )
-        .all()
-    )
-
 
 def validate_competitor_limit(
     *,
@@ -297,107 +272,6 @@ def list_competitors_with_pagination(
             per_page=len(items),
         ),
     )
-
-
-def _apply_bulk_paused_status(
-    *,
-    db: Session,
-    payload: BulkCompetitorActionRequest,
-    user: User,
-    paused: bool,
-    context: dict[str, str] | None = None,
-) -> BulkCompetitorActionResult:
-    """ Executa atualização em massa de pausa/retomada com validações centralizadas """
-    ensure_user_can_access_monitored(
-        db=db,
-        product_id=payload.monitored_product_id,
-        user=user,
-        context=context,
-        hide_forbidden=False,
-    )
-
-    competitors = load_competitors_for_action(
-        db=db,
-        monitored_product_id=payload.monitored_product_id,
-        competitor_ids=payload.competitor_ids,
-    )
-
-    updated = bulk_update_paused_status(db, competitors, paused=paused)
-    processed_ids = [item.id for item in updated]
-    skipped = [cid for cid in payload.competitor_ids if cid not in processed_ids]
-    
-    return BulkCompetitorActionResult(
-        processed_ids=processed_ids,
-        skipped_ids=skipped,
-        total_processed=len(processed_ids),
-    )
-
-
-def resume_competitors_bulk(
-    *,
-    db: Session,
-    payload: BulkCompetitorActionRequest,
-    user: User,
-    context: dict[str, str] | None = None,
-) -> BulkCompetitorActionResult:
-    """ Retoma monitoramento de concorrentes garantindo consistência dos registros """
-    return _apply_bulk_paused_status(
-        db=db,
-        payload=payload,
-        user=user,
-        paused=False,
-        context=context,
-    )
-
-
-def pause_competitors_bulk(
-    *,
-    db: Session,
-    payload: BulkCompetitorActionRequest,
-    user: User,
-    context: dict[str, str] | None = None,
-) -> BulkCompetitorActionResult:
-    """ Pausa monitoramento de concorrentes mantendo resposta uniforme """
-    return _apply_bulk_paused_status(
-        db=db,
-        payload=payload,
-        user=user,
-        paused=True,
-        context=context,
-    )
-
-
-def remove_competitors_bulk(
-    *,
-    db: Session,
-    payload: BulkCompetitorActionRequest,
-    user: User,
-    context: dict[str, str] | None = None,
-) -> BulkCompetitorActionResult:
-    """ Remove concorrentes selecionados após validar vínculo com o usuário """
-    ensure_user_can_access_monitored(
-        db=db,
-        product_id=payload.monitored_product_id,
-        user=user,
-        context=context,
-        hide_forbidden=False,
-    )
-
-    competitors = load_competitors_for_action(
-        db=db,
-        monitored_product_id=payload.monitored_product_id,
-        competitor_ids=payload.competitor_ids,
-    )
-    removed = bulk_delete_competitors(db, competitors)
-    processed_ids = [item.id for item in competitors]
-    skipped = [cid for cid in payload.competitor_ids if cid not in processed_ids]
-    
-    return BulkCompetitorActionResult(
-        processed_ids=processed_ids,
-        skipped_ids=skipped,
-        total_processed=removed,
-    )
-
 
 def clear_competitors_from_monitored(
     *,

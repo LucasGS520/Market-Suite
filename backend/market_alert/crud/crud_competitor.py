@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from uuid import UUID
 from datetime import datetime
-from typing import Iterable, List, Sequence
+from typing import List, Sequence
 from urllib.parse import unquote, urlparse
 
 from sqlalchemy import desc, func
@@ -301,33 +301,3 @@ def paginate_competitors(
     )
 
     return total, items
-
-
-def bulk_update_paused_status(
-    db: Session,
-    competitors: Sequence[CompetitorProduct],
-    *,
-    paused: bool,
-) -> Sequence[CompetitorProduct]:
-    """ Atualiza o status de pausa para os concorrentes informados """
-
-    for competitor in competitors:
-        competitor.is_paused = paused
-    db.commit()
-    for competitor in competitors:
-        db.refresh(competitor)
-    return competitors
-
-
-def bulk_delete_competitors(
-    db: Session,
-    competitors: Iterable[CompetitorProduct],
-) -> int:
-    """ Remove concorrentes informados em lote """
-
-    removed = 0
-    for competitor in competitors:
-        db.delete(competitor)
-        removed += 1
-    db.commit()
-    return removed

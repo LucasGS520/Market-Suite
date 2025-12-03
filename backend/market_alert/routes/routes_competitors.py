@@ -12,8 +12,6 @@ from backend.shared.schemas.shared_schemas_products import CompetitorProductCrea
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
-    BulkCompetitorActionRequest,
-    BulkCompetitorActionResult,
     CompetitorProductResponse,
     CompetitorScrapeCreationResponse,
     PaginatedCompetitorResponse,
@@ -22,9 +20,6 @@ from market_alert.services.services_competitors import (
     clear_competitors_from_monitored,
     create_competitor_scrape_request,
     list_competitors_with_pagination,
-    pause_competitors_bulk,
-    remove_competitors_bulk,
-    resume_competitors_bulk,
 )
 from market_alert.core.security import get_current_user
 
@@ -111,140 +106,3 @@ def list_competitors(
         total=payload.meta.total,
     )
     return payload
-
-@router.post("/bulk/resume", response_model=BulkCompetitorActionResult)
-def resume_competitors(
-    request: Request,
-    payload: BulkCompetitorActionRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """ Retoma monitoramento dos concorrentes informados """
-
-    logger.info(
-        "route_called",
-        path=request.url.path,
-        method=request.method,
-        user_id=str(user.id),
-        monitored_id=str(payload.monitored_product_id),
-        competitors=len(payload.competitor_ids),
-    )
-
-    result = resume_competitors_bulk(
-        db=db,
-        payload=payload,
-        user=user,
-        context={
-            "path": request.url.path,
-            "method": request.method,
-        },
-    )
-
-    logger.info(
-        "route_completed",
-        path=request.url.path,
-        method=request.method,
-        status="success",
-        processed=result.total_processed,
-        skipped=len(result.skipped_ids),
-    )
-
-    return result
-
-@router.post("/bulk/pause", response_model=BulkCompetitorActionResult)
-def pause_competitors(
-    request: Request,
-    payload: BulkCompetitorActionRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """ Pausa o monitoramento dos concorrentes informados """
-
-    logger.info(
-        "route_called",
-        path=request.url.path,
-        method=request.method,
-        user_id=str(user.id),
-        monitored_id=str(payload.monitored_product_id),
-        competitors=len(payload.competitor_ids),
-    )
-
-    result = pause_competitors_bulk(
-        db=db,
-        payload=payload,
-        user=user,
-        context={
-            "path": request.url.path,
-            "method": request.method,
-        },
-    )
-
-    logger.info(
-        "route_completed",
-        path=request.url.path,
-        method=request.method,
-        status="success",
-        processed=result.total_processed,
-        skipped=len(result.skipped_ids),
-    )
-    return result
-
-@router.post("/bulk/remove", response_model=BulkCompetitorActionResult)
-def remove_competitors(
-    request: Request,
-    payload: BulkCompetitorActionRequest,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """ Remove definitivamente concorrentes selecionados """
-
-    logger.info(
-        "route_called",
-        path=request.url.path,
-        method=request.method,
-        user_id=str(user.id),
-        monitored_id=str(payload.monitored_product_id),
-        competitors=len(payload.competitor_ids),
-    )
-
-    result = remove_competitors_bulk(
-        db=db,
-        payload=payload,
-        user=user,
-        context={
-            "path": request.url.path,
-            "method": request.method,
-        },
-    )
-    logger.info(
-        "route_completed",
-        path=request.url.path,
-        method=request.method,
-        status="success",
-        processed=result.total_processed,
-        skipped=len(result.skipped_ids),
-    )
-    return result
-
-@router.delete("/{monitored_product_id}", response_model=List[CompetitorProductResponse])
-def delete_competitors(request: Request, monitored_product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """ Remove todos os produtos concorrentes de um produto monitorado """
-    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_product_id))
-
-    deleted = clear_competitors_from_monitored(
-        db=db,
-        monitored_product_id=monitored_product_id,
-        user=user,
-        context={
-            "path": request.url.path,
-            "method": request.method,
-        },
-    )
-    logger.info(
-        "route_completed",
-        path=request.url.path,
-        method=request.method,
-        status="success",
-        count=len(deleted)
-    )
-    return deleted

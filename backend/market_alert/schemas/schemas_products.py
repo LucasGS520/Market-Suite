@@ -12,7 +12,7 @@ from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryRespo
 
 
 class ProductResponse(BaseModel):
-    """Visão simplificada do produto exposta pela API pública."""
+    """ Visão simplificada do produto exposta pela API pública """
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -37,7 +37,7 @@ class MonitoredScrapeCreationResponse(BaseModel):
     message: str = Field(..., description="Resumo amigável do agendamento")
 
 class CompetitorScrapeCreationResponse(BaseModel):
-    """Retorno mínimo ao agendar scraping de um concorrente."""
+    """ Retorno mínimo ao agendar scraping de um concorrente """
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID = Field(..., description="Identificador do concorrente pendente")
@@ -83,18 +83,6 @@ class CompetitorProductResponse(ProductResponse):
     is_paused: bool = Field(False, description="Indica se o monitoramento do concorrente está pausado")
 
 class PaginatedCompetitorResponse(BaseModel):
-    """Envelope padronizado para retornar concorrentes paginados com metadados """
+    """ Envelope padronizado para retornar concorrentes paginados com metadados """
     items: list[CompetitorProductResponse]
     meta: PaginationMeta
-
-class BulkCompetitorActionRequest(BaseModel):
-    """ Entrada de ações em massa sobre concorrentes específicos """
-    monitored_product_id: UUID
-    competitor_ids: list[UUID] = Field(..., min_length=1)
-
-
-class BulkCompetitorActionResult(BaseModel):
-    """ Resultado das ações em massa executadas para concorrentes """
-    processed_ids: list[UUID]
-    skipped_ids: list[UUID]
-    total_processed: int

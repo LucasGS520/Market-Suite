@@ -200,11 +200,3 @@ export interface ScrapeCreationResponse {
 export interface ApiErrorResponse {
   detail?: string; // Mensagem detalhada de erro retornada pela API
 }
-
-/**
- * Resposta padrão para ações em lote em concorrentes.
- */
-export interface BulkActionResponse {
-  message?: string; // Mensagem amigável retornada pelo backend
-  updated_ids?: string[]; // IDs afetados pela ação solicitada
-}
