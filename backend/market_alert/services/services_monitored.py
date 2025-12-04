@@ -38,7 +38,7 @@ from market_alert.schemas.schemas_products import (
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_competitors import create_competitor_scrape_request
-from market_alert.tasks.scraper_tasks import collect_product_task
+from market_alert.services.collector_services import enqueue_monitored_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 
 
@@ -275,12 +275,8 @@ def schedule_monitored_scrape(
         product_url=normalized_url,
     )
 
-    collect_product_task.delay(
-        url=normalized_url,
-        user_id=str(user.id),
-        name_identification=pending.name_identification,
-        monitored_id=str(pending.id),
-    )
+    #Agendamento via Celery garante processamento assíncrono do scraping
+    enqueue_monitored_collection(pending, user_id=user.id)
 
     if product_data.initial_competitor:
         competitor_payload = CompetitorProductCreateScraping(
