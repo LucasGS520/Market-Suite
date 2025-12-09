@@ -1,6 +1,6 @@
 """ Wrapper legado para tarefas de scraping.
 
-A lógica principal foi movida para ``market_alert.tasks.collect_task``.
+A lógica principal foi movida para ``market_alert.tasks.collector_tasks``.
 Este módulo mantém aliases mínimos para compatibilidade com imports
 antigos em testes e serviços, garantindo que chamadas existentes passem
 pela task centralizada.

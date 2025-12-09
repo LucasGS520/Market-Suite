@@ -24,7 +24,7 @@ export default defineConfig({
     // Isso evita CORS no ambiente dev e espelha o comportamento do frontend em produção, que consome a API pública do backend.
     proxy: {
       '/api': {
-        target: 'http://localhost:8000', // Endereço do backend de desenvolvimento (FastAPI rodando localmente).
+        target: 'http://192.168.15.150:8000', // Endereço do backend de desenvolvimento (usar IP acessível na rede).
         // changeOrigin ajusta o header Host da requisição para o target, útil quando o backend espera um Host específico.
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''), // Reescreve o path removendo o prefixo /api antes de encaminhar.

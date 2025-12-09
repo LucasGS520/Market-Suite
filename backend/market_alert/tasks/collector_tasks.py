@@ -37,7 +37,7 @@ from market_alert.tasks.compare_prices_tasks import compare_prices_task
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 
 
-logger = structlog.get_logger("collect_task")
+logger = structlog.get_logger("collector_tasks")
 
 class _RetryableError(Exception):
     """ Erro interno para sinalizar retries controlados """
@@ -46,7 +46,7 @@ class _RetryableError(Exception):
     bind=True,
     max_retries=settings.SCRAPER_RETRY_ATTEMPTS,
     default_retry_delay=settings.SCRAPER_RETRY_BACKOFF_MIN,
-    name="market_alert.tasks.collect_task.collect_product_task",
+    name="market_alert.tasks.collector_tasks.collect_product_task",
     queue="scraping",
     acks_late=True,
 )
@@ -205,7 +205,7 @@ def _run_competitor_scrape(
 
 
 @shared_task(
-    name="market_alert.tasks.collect_task.enqueue_due_monitored",
+    name="market_alert.tasks.collector_tasks.enqueue_due_monitored",
     bind=True,
     queue="monitor",
 )

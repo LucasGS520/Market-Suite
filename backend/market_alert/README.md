@@ -147,7 +147,7 @@ SCRAPER_SERVICE_URL=url_servico_scraping
 
 ## Orquestração de coletas
 - Rota e serviços apenas enfileiram requisições via `services/collector_service.py`, que monta o payload padrão e envia sempre para a fila `scraping`.
-- A task central `market_alert.tasks.collect_task.collect_product_task` executa o scraping de monitorados e concorrentes, delegando persistência aos serviços de domínio e disparando `compare_prices_task` quando houver mudanças.
+ - A task central `market_alert.tasks.collector_tasks.collect_product_task` executa o scraping de monitorados e concorrentes, delegando persistência aos serviços de domínio e disparando `compare_prices_task` quando houver mudanças.
 - Rechecagens periódicas são feitas pela task `enqueue_due_monitored`, que varre monitorados de scraping respeitando intervalo (`ADAPTIVE_RECHECK_BASE_INTERVAL`) e agenda, em seguida, apenas concorrentes vinculados a cada monitorado.
 
 ## Segurança e Observabilidade
