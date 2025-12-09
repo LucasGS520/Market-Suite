@@ -79,13 +79,23 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> None
             SCRAPER_IN_FLIGHT.dec()
             task_logger.warning("collect_skipped_lock", kind=target_kind, product_id=lock_id)
             return
+        
+    monitored_id: UUID | None = None
+    competitor_id: UUID | None = None
 
     try:
         if target_kind == "competitor":
-            outcome, reason = _process_competitor(task_logger, payload)
+            outcome, reason, monitored_id, competitor_id = _process_competitor(task_logger, payload)
         else:
-            outcome, reason = _process_monitored(task_logger, payload)
-        _record_outcome(target_kind, outcome, reason, task_logger)
+            outcome, reason, monitored_id, competitor_id = _process_monitored(task_logger, payload)
+        _record_outcome(
+            kind=target_kind,
+            outcome=outcome,
+            reason=reason,
+            task_logger=task_logger,
+            monitored_id=monitored_id,
+            competitor_id=competitor_id,
+        )
     except Exception as exc:
         COLLECTOR_ERROR_TOTAL.labels(kind=target_kind).inc()
         task_logger.exception("collect_product_failed", kind=target_kind, error=str(exc))
@@ -95,15 +105,27 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> None
             release_product_lock(lock_id)
         SCRAPER_IN_FLIGHT.dec()
         elapsed_ms = int((datetime.now(timezone.utc) - start).total_seconds() * 1000)
-        task_logger.info("collect_product_finished", kind=target_kind, duration_ms=elapsed_ms, outcome=locals().get("outcome"))
+        task_logger.info(
+            "collect_product_finished",
+            kind=target_kind,
+            duration_ms=elapsed_ms,
+            outcome=locals().get("outcome"),
+            product_id=str(competitor_id or monitored_id) if (competitor_id or monitored_id) else None,
+            monitored_id=str(monitored_id) if monitored_id else None,
+            competitor_id=str(competitor_id) if competitor_id else None,
+        )
 
 
-def _process_monitored(task_logger, payload: Mapping[str, str]) -> tuple[str, str | None]:
+def _process_monitored(
+    task_logger,
+    payload: Mapping[str, str],
+) -> tuple[str, str | None, UUID | None, UUID | None]:
     """ Executa coleta de monitorado e enfileira concorrentes associados """
+    monitored_id: UUID | None = None
     if is_scraping_suspended():
         task_logger.warning("scraping_suspended")
         COLLECTOR_NO_DATA_TOTAL.labels(kind="monitored").inc()
-        return "no_data", "scraping_suspended"
+        return "no_data", "scraping_suspended", monitored_id, None
 
     try:
         monitored_id = UUID(str(payload["monitored_id"]))
@@ -111,7 +133,7 @@ def _process_monitored(task_logger, payload: Mapping[str, str]) -> tuple[str, st
     except Exception as exc:
         task_logger.error("invalid_monitored_reference", error=str(exc))
         COLLECTOR_ERROR_TOTAL.labels(kind="monitored").inc()
-        return "error", "invalid_reference"
+        return "error", "invalid_reference", monitored_id, None
 
     product_url = payload.get("url")
     name_identification = payload.get("name")
@@ -122,7 +144,7 @@ def _process_monitored(task_logger, payload: Mapping[str, str]) -> tuple[str, st
         if not allow_with_leaky_bucket(bucket_key, rate_limit=parsed_limit):
             task_logger.warning("monitored_rate_limit", monitored_id=str(monitored_id))
             COLLECTOR_NO_DATA_TOTAL.labels(kind="monitored").inc()
-            return "no_data", "rate_limited"
+            return "no_data", "rate_limited", monitored_id, None
 
     payload_model = MonitoredProductCreateScraping(
         product_url=product_url,
@@ -130,7 +152,11 @@ def _process_monitored(task_logger, payload: Mapping[str, str]) -> tuple[str, st
     )
 
     with SessionLocal() as db:
-        return _run_monitored_scrape(db, task_logger, monitored_id, user_id, payload_model)
+        return (
+            *_run_monitored_scrape(db, task_logger, monitored_id, user_id, payload_model),
+            monitored_id,
+            None,
+        )
 
 
 def _run_monitored_scrape(
@@ -174,19 +200,26 @@ def _run_monitored_scrape(
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL.labels(kind="monitored").inc()
     return "no_change", "not_modified"
 
-def _process_competitor(task_logger, payload: Mapping[str, str]) -> tuple[str, str | None]:
+def _process_competitor(
+    task_logger,
+    payload: Mapping[str, str],
+) -> tuple[str, str | None, UUID | None, UUID | None]:
     """ Executa coleta de concorrente e dispara comparação do monitorado """
+    monitored_id: UUID | None = None
+    competitor_id: UUID | None = None
     if is_scraping_suspended():
         task_logger.warning("scraping_suspended")
         COLLECTOR_NO_DATA_TOTAL.labels(kind="competitor").inc()
-        return "no_data", "scraping_suspended"
+        return "no_data", "scraping_suspended", monitored_id, competitor_id
 
     try:
         monitored_id = UUID(str(payload["monitored_id"]))
+        competitor_id_value = payload.get("competitor_id")
+        competitor_id = UUID(str(competitor_id_value)) if competitor_id_value else None
     except Exception as exc:
         task_logger.error("invalid_monitored_reference", error=str(exc))
         COLLECTOR_ERROR_TOTAL.labels(kind="competitor").inc()
-        return "error", "invalid_reference"
+        return "error", "invalid_reference", monitored_id, competitor_id
 
     user_id = payload.get("user_id")
     user_uuid = UUID(str(user_id)) if user_id else None
@@ -198,7 +231,11 @@ def _process_competitor(task_logger, payload: Mapping[str, str]) -> tuple[str, s
     )
 
     with SessionLocal() as db:
-        return _run_competitor_scrape(db, task_logger, monitored_id, user_uuid, payload_model)
+        return (
+            *_run_competitor_scrape(db, task_logger, monitored_id, user_uuid, payload_model),
+            monitored_id,
+            competitor_id,
+        )
 
 
 def _run_competitor_scrape(
@@ -246,10 +283,23 @@ def _run_competitor_scrape(
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL.labels(kind="competitor").inc()
     return "no_change", "not_modified"
 
-def _record_outcome(kind: str, outcome: str, reason: str | None, task_logger) -> None:
-    """Atualiza métricas e logs para o desfecho informado."""
-
-    fields = {"kind": kind, "outcome": outcome}
+def _record_outcome(
+    *,
+    kind: str,
+    outcome: str,
+    reason: str | None,
+    task_logger,
+    monitored_id: UUID | None,
+    competitor_id: UUID | None,
+) -> None:
+    """ Atualiza métricas e logs para o desfecho informado, vinculando o produto """
+    fields = {
+        "kind": kind,
+        "outcome": outcome,
+        "product_id": str(competitor_id or monitored_id) if (competitor_id or monitored_id) else None,
+        "monitored_id": str(monitored_id) if monitored_id else None,
+        "competitor_id": str(competitor_id) if competitor_id else None,
+    }
     if reason:
         fields["reason"] = reason
     task_logger.info("collect_product_outcome", **fields)
