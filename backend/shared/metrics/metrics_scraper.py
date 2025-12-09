@@ -82,6 +82,43 @@ SCRAPER_HEAD_FAILURES_TOTAL = Counter(
     "Total de falhas de scraping registradas",
 )
 
+#Contadores específicos do orquestrador de coleta
+COLLECTOR_SUCCESS_NEW_DATA_TOTAL = Counter(
+    "collector_success_new_data_total",
+    "Coletas concluídas com novos dados persistidos",
+    ["kind"],
+)
+
+COLLECTOR_SUCCESS_NO_CHANGE_TOTAL = Counter(
+    "collector_success_no_change_total",
+    "Coletas concluídas sem alterações detectadas",
+    ["kind"],
+)
+
+COLLECTOR_NO_DATA_TOTAL = Counter(
+    "collector_no_data_total",
+    "Coletas que não retornaram dados utilizáveis",
+    ["kind"],
+)
+
+COLLECTOR_ERROR_TOTAL = Counter(
+    "collector_error_total",
+    "Falhas do coletor ao tentar obter dados",
+    ["kind"],
+)
+
+COLLECTOR_LOCK_ACQUIRED_TOTAL = Counter(
+    "collector_lock_acquired_total",
+    "Locks adquiridos pelo coletor para evitar paralelismo",
+    ["kind"],
+)
+
+COLLECTOR_LOCK_SKIPPED_TOTAL = Counter(
+    "collector_lock_skipped_total",
+    "Execuções ignoradas por lock pré-existente",
+    ["kind"],
+)
+
 SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
     "scraper_cache_lookups_total",
     "Total de consultas ao cache básico do scraper por resultado",
@@ -209,4 +246,10 @@ __all__ = [
     "SCRAPER_STEP_INVALID_TOTAL",
     "SCRAPER_VALIDATION_REJECT_TOTAL",
     "SCRAPER_NO_RESULT_TOTAL",
+    "COLLECTOR_SUCCESS_NEW_DATA_TOTAL",
+    "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL",
+    "COLLECTOR_NO_DATA_TOTAL",
+    "COLLECTOR_ERROR_TOTAL",
+    "COLLECTOR_LOCK_ACQUIRED_TOTAL",
+    "COLLECTOR_LOCK_SKIPPED_TOTAL",
 ]

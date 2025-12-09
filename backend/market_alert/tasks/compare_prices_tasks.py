@@ -1,4 +1,4 @@
-"""Tarefas de comparação de preços entre produtos monitorados.
+""" Tarefas de comparação de preços entre produtos monitorados.
 
 Esta task roda de forma assíncrona via Celery. Ela carrega do banco de dados
 um produto monitorado e todos os seus concorrentes, executa a comparação de
@@ -9,7 +9,6 @@ usar a fila padrão do Celery e evitar coordenação distribuída adicional.
 import structlog
 from uuid import UUID
 from datetime import datetime, timezone
-from decimal import Decimal
 
 from shared.infra.db import SessionLocal
 from shared.utils.logging_utils import mask_identifier
@@ -20,9 +19,8 @@ from shared.metrics.metrics_price_comparison import (
 from shared.infra.redis_pubsub import publish_message
 
 from market_alert.core.celery_app import celery_app
-from market_alert.services.services_comparison import run_price_comparison
 from market_alert.tasks.alert_tasks import send_notification_task
-from market_alert.core.config_alert import settings
+from market_alert.utils.compare_runner import run_comparison
 
 
 logger = structlog.get_logger("compare_prices")
@@ -37,7 +35,7 @@ logger = structlog.get_logger("compare_prices")
     acks_late=True,
 )
 def compare_prices_task(self, monitored_id: str) -> None:
-    """Carrega um produto monitorado e executa a comparação com fluxo enxuto."""
+    """ Carrega um produto monitorado e executa a comparação com fluxo enxuto """
     task_logger = logger.bind(
         task_id=self.request.id, monitored_id=mask_identifier(monitored_id)
     )
@@ -46,14 +44,15 @@ def compare_prices_task(self, monitored_id: str) -> None:
 
     with SessionLocal() as db:
         try:
-            #Executa a comparação via serviço dedicado
-            result, alerts = run_price_comparison(
-                db,
-                UUID(monitored_id),
-                tolerance=Decimal(str(settings.PRICE_TOLERANCE)),
-            )
+            result, alerts = run_comparison(db, UUID(monitored_id))
 
-            # Log do resultado resumido para fácil consulta
+            summary = result.get("summary") or {}
+            if not summary:
+                summary = {"reason": "sem_concorrentes_disponiveis", "items": []}
+                result["summary"] = summary
+
+
+            #Log do resultado resumido para fácil consulta
             task_logger.info(
                 "compare_prices_completed",
                 lowest=result["lowest_competitor"],
@@ -86,7 +85,7 @@ def _dispatch_realtime_event(
     *,
     task_id: str | None,
 ) -> None:
-    """Publica evento no Redis com dados da comparação recém-criada."""
+    """ Publica evento no Redis com dados da comparação recém-criada """
 
     monitored_id = result.get("monitored_id")
     user_id = result.get("user_id")

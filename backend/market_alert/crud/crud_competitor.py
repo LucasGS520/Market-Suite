@@ -109,6 +109,14 @@ def create_pending_competitor_product(
         raise
 
     db.refresh(pending)
+
+    from market_alert.services.collector_services import enqueue_competitor_collection
+    try:
+        enqueue_competitor_collection(pending)
+    except Exception:
+        #Ignora falhas de enfileiramento para não quebrar a criação
+        pass
+
     return pending
 
 def count_competitors_by_monitored(db: Session, monitored_product_id: UUID, *, include_paused: bool = False) -> int:

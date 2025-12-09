@@ -201,6 +201,13 @@ def create_pending_monitored_product(
         raise
     db.refresh(pending)
 
+    from market_alert.services.collector_services import enqueue_monitored_collection
+    try:
+        enqueue_monitored_collection(pending, user_id=user_id)
+    except Exception:
+        #Evita falhas de enfileiramento quebrarem a criação do monitorado
+        pass
+
     if pending.last_checked is not None:
         pending.last_checked = None
         db.commit()
