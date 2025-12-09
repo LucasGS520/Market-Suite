@@ -106,7 +106,9 @@ def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
 
     A rotina respeita ``next_check_at`` e ignora itens com ``checking_in_progress``
     a menos que já tenham estourado o tempo máximo configurado em
-    ``RECHECK_TIMEOUT_SECONDS``.
+    ``RECHECK_TIMEOUT_SECONDS``. Apenas monitorados com ``next_check_at`` definido
+    e menor ou igual ao horário de referência são enfileirados, registrando
+    contadores e logs para itens sem janela programada.
     """
     from market_alert.tasks.monitor_tasks import recheck_monitored_products
 
@@ -141,7 +143,15 @@ def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
                 continue
 
         next_run = monitored.next_check_at
-        if next_run and next_run > reference:
+        if next_run is None:
+            RECHECK_DISPATCH_TOTAL.labels(status="missing_next_check_at").inc()
+            logger.info(
+                "recheck_skip_missing_next_check_at",
+                monitored_id=str(monitored.id),
+            )
+            continue
+
+        if next_run > reference:
             RECHECK_DISPATCH_TOTAL.labels(status="not_due").inc()
             continue
         

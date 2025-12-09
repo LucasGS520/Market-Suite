@@ -24,6 +24,7 @@ from shared.metrics.metrics_scraper import (
     SCRAPER_HEAD_FAILURES_TOTAL,
 )
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended, suspend_scraping
+from shared.exceptions import ScraperError
 from backend.shared.schemas.shared_schemas_products import (
     MonitoredProductCreateScraping,
     CompetitorProductCreateScraping,
