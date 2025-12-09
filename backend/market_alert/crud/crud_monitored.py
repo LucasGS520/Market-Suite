@@ -201,7 +201,7 @@ def create_pending_monitored_product(
         raise
     db.refresh(pending)
 
-    from market_alert.services.collector_services import enqueue_monitored_collection
+    from market_alert.orchestrator.collector_services import enqueue_monitored_collection
     try:
         enqueue_monitored_collection(pending, user_id=user_id)
     except Exception:

@@ -1,4 +1,4 @@
-""" Serviço de orquestração e enfileiramento de coletas de produtos.
+""" Orquestração e enfileiramento de coletas de produtos.
 
 Este módulo concentra helpers que padronizam a criação de payloads para a
 ``collect_product_task`` e a varredura periódica de monitorados. A proposta
@@ -14,6 +14,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
+
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id

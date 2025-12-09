@@ -38,7 +38,7 @@ from market_alert.schemas.schemas_products import (
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_competitors import create_competitor_scrape_request
-from market_alert.services.collector_services import enqueue_monitored_collection
+from market_alert.orchestrator.collector_services import enqueue_monitored_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 
 

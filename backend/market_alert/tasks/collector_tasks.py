@@ -39,7 +39,7 @@ from market_alert.core.config_alert import settings
 from market_alert.core.celery_app import celery_app
 from market_alert.crud import crud_errors
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.services.collector_services import enqueue_competitors_for_monitored
+from market_alert.orchestrator.collector_services import enqueue_competitors_for_monitored
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.tasks.compare_prices_tasks import compare_prices_task
@@ -321,7 +321,7 @@ def enqueue_due_monitored(self) -> None:
 
 def schedule_due(db: Session) -> int:
     """ Executa varredura de monitorados utilizando o serviço orquestrador """
-    from market_alert.services.collector_services import schedule_due_monitored
+    from backend.market_alert.tasks.collector_services import schedule_due_monitored
 
     return schedule_due_monitored(db)
 

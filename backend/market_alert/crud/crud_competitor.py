@@ -110,7 +110,7 @@ def create_pending_competitor_product(
 
     db.refresh(pending)
 
-    from market_alert.services.collector_services import enqueue_competitor_collection
+    from market_alert.orchestrator.collector_services import enqueue_competitor_collection
     try:
         enqueue_competitor_collection(pending)
     except Exception:
