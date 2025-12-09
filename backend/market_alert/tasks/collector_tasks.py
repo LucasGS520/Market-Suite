@@ -280,6 +280,8 @@ def _run_competitor_scrape(
         COLLECTOR_SUCCESS_NEW_DATA_TOTAL.labels(kind="competitor").inc()
         return "new_data", None
     
+    #Agenda comparação mesmo quando não houve alteração para garantir difusão de preços atualizados
+    compare_prices_task.apply_async(args=[str(monitored_id)], queue="monitor")
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL.labels(kind="competitor").inc()
     return "no_change", "not_modified"
 
