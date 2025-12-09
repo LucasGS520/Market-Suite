@@ -17,6 +17,7 @@ TASK_MODULES = [
     "market_alert.tasks.metrics_tasks",
     "market_alert.tasks.compare_prices_tasks",
     "market_alert.tasks.alert_tasks",
+    "market_alert.tasks.monitor_tasks",
 ]
 
 #Exchanges separados para scraping e monitoramento
@@ -36,6 +37,10 @@ TASK_ROUTES = {
         "routing_key": "scraping",
     },
     "market_alert.tasks.collector_tasks.enqueue_due_monitored": {
+        "queue": "monitor",
+        "routing_key": "monitor",
+    },
+    "market_alert.tasks.monitor_tasks.recheck_monitored_product": {
         "queue": "monitor",
         "routing_key": "monitor",
     },

@@ -13,6 +13,8 @@ from uuid import UUID
 import structlog
 from sqlalchemy.orm import Session
 
+from shared.metrics.metrics_scraper import RECHECK_DISPATCH_TOTAL
+
 from market_alert.core.config_alert import settings
 
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
@@ -100,18 +102,52 @@ def enqueue_competitors_for_monitored(db: Session, monitored_id: UUID) -> None:
         enqueue_competitor_collection(competitor)
 
 def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
-    """ Varre monitorados de scraping e enfileira apenas os elegíveis
+    """ Varre monitorados e agenda rechecagens somente quando elegíveis.
 
-    Retorna a quantidade de itens enfileirados para facilitar logs do scheduler.
+    A rotina respeita ``next_check_at`` e ignora itens com ``checking_in_progress``
+    a menos que já tenham estourado o tempo máximo configurado em
+    ``RECHECK_TIMEOUT_SECONDS``.
     """
+    from market_alert.tasks.monitor_tasks import recheck_monitored_products
+
+    reference = now or _now()
+    timeout_limit = reference - timedelta(seconds=settings.RECHECK_TIMEOUT_SECONDS)
     candidates = get_products_by_type(db, MonitoringType.scraping)
     dispatched = 0
+
     for monitored in candidates:
         if monitored.status == MonitoredStatus.failed:
+            RECHECK_DISPATCH_TOTAL.labels(status="skip_failed").inc()
             continue
-        if not monitored_needs_recheck(monitored, now=now):
+        
+        if monitored.checking_in_progress:
+            started_at = monitored.checking_started_at
+            if started_at is None or started_at < timeout_limit:
+                monitored.checking_in_progress = False
+                monitored.checking_started_at = None
+                monitored.next_check_at = reference
+                db.commit()
+                logger.warning(
+                    "recheck_timeout_released",
+                    monitored_id=str(monitored.id),
+                    started_at=str(started_at) if started_at else None,
+                )
+            else:
+                RECHECK_DISPATCH_TOTAL.labels(status="skip_in_progress").inc()
+                logger.info(
+                    "recheck_skip_in_progress",
+                    monitored_id=str(monitored.id),
+                )
+                continue
+
+        next_run = monitored.next_check_at
+        if next_run and next_run > reference:
+            RECHECK_DISPATCH_TOTAL.labels(status="not_due").inc()
             continue
-        enqueue_monitored_collection(monitored, user_id=monitored.user_id)
+        
+        enqueue_kwargs = {"args": [str(monitored.id)], "queue": "monitor"}
+        recheck_monitored_product.apply_async(**enqueue_kwargs)
+        RECHECK_DISPATCH_TOTAL.labels(status="dispatched").inc()
         dispatched += 1
     return dispatched
 

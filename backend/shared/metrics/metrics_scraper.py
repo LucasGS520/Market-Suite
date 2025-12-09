@@ -119,6 +119,25 @@ COLLECTOR_LOCK_SKIPPED_TOTAL = Counter(
     ["kind"],
 )
 
+#Métricas específicas do ciclo de rechecagem
+RECHECK_DISPATCH_TOTAL = Counter(
+    "recheck_dispatch_total",
+    "Total de monitorados avaliados para rechecagem",
+    ["status"],
+)
+
+RECHECK_MONITORED_RESULT_TOTAL = Counter(
+    "recheck_monitored_result_total",
+    "Resultados da coleta do produto monitorado no orquestrador",
+    ["result"],
+)
+
+RECHECK_COMPETITOR_RESULT_TOTAL = Counter(
+    "recheck_competitor_result_total",
+    "Resultados das coletas individuais de concorrentes no orquestrador",
+    ["result"],
+)
+
 SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
     "scraper_cache_lookups_total",
     "Total de consultas ao cache básico do scraper por resultado",
@@ -252,4 +271,7 @@ __all__ = [
     "COLLECTOR_ERROR_TOTAL",
     "COLLECTOR_LOCK_ACQUIRED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_TOTAL",
+    "RECHECK_DISPATCH_TOTAL",
+    "RECHECK_MONITORED_RESULT_TOTAL",
+    "RECHECK_COMPETITOR_RESULT_TOTAL",
 ]
