@@ -46,9 +46,16 @@ def compare_prices_task(self, monitored_id: str) -> None:
             result, alerts = run_comparison(db, UUID(monitored_id))
 
             summary = result.get("summary") or {}
+            reason = summary.get("reason")
+            if not reason:
+                no_competitors = (
+                    summary.get("competitors_with_price_count") == 0
+                )
+                if no_competitors:
+                    summary["reason"] = "sem_concorrentes_disponiveis"
             if not summary:
                 summary = {"reason": "sem_concorrentes_disponiveis", "items": []}
-                result["summary"] = summary
+            result["summary"] = summary
 
 
             #Log do resultado resumido para fácil consulta

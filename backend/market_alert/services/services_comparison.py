@@ -279,6 +279,7 @@ def _empty_summary(competitors_count: int) -> Dict[str, Any]:
         "comparison_insights": None,
         "discrepancies": [],
         "alerts": [],
+        "reason": None,
     }
 
 def _calculate_competitiveness_status(
@@ -557,6 +558,14 @@ def _apply_summary_defaults(
         if status is not None:
             summary["competitiveness_status"] = status
 
+    #Motivo explicíto para ausência de dados competitivos facilita alertas e UI
+    if not summary.get("reason"):
+        no_competitors_available = competitors_count == 0 or summary.get(
+            "competitors_with_price_count", 0
+        ) == 0
+        if no_competitors_available:
+            summary["reason"] = "sem_concorrentes_disponiveis"
+
     return summary
 
 
@@ -598,8 +607,20 @@ def build_comparison_summary(
         #Garantir que classificações reflitam os preços atuais sempre que houver dados novos.
         merged_payload = stored_payload.copy()
         for key, value in recomputed_payload.items():
-            if value is not None:
-                merged_payload[key] = value
+            if value is None:
+                continue
+            
+            if key == "last_comparison_at" and merged_payload.get(key) is not None:
+                continue
+            
+            if (
+                key == "competitors_with_price_count"
+                and merged_payload.get(key)
+                and value == 0
+            ):
+                continue
+            
+            merged_payload[key] = value
 
         return _apply_summary_defaults(
             merged_payload,
@@ -609,7 +630,10 @@ def build_comparison_summary(
         )
 
     if comparison is None:
-        return _empty_summary(competitors_count)
+        summary = _empty_summary(competitors_count)
+        if competitors_count == 0:
+            summary["reason"] = "sem_concorrentes_disponiveis"
+        return summary
 
     payload = comparison.data or {}
 
