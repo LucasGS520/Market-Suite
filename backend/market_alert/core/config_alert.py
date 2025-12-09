@@ -51,6 +51,14 @@ class Settings(ConfigBase):
         os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200")
     ) #Base de reagendamento
 
+    #Controles operacionais de rechecagem
+    RECHECK_INTERVAL_DEFAULT: int = int(
+        os.getenv("RECHECK_INTERVAL_DEFAULT", str(5 * 60))
+    ) #Intervalo padrão entre rechecagens em segundos
+    RECHECK_TIMEOUT_SECONDS: int = int(
+        os.getenv("RECHECK_TIMEOUT_SECONDS", "120")
+    ) #Tempo máximo para manter uma rechecagem ativa antes de liberar
+
     #URL base do serviço externo de scraping
     SCRAPER_SERVICE_URL: str = os.getenv(
         "SCRAPER_SERVICE_URL", "http://market_scraper:8000"
