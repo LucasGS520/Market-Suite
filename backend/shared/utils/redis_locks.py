@@ -18,7 +18,7 @@ from shared.utils.redis_client import get_redis_client
 
 logger = structlog.get_logger(__name__)
 _LOCK_PREFIX: Final = "lock:product:"
-_DEFAULT_TTL_SECONDS: Final = 300
+_DEFAULT_TTL_SECONDS: Final = 150
 
 
 def _lock_key(product_id: UUID | str) -> str:

@@ -27,8 +27,7 @@ logger = structlog.get_logger("compare_prices")
 
 @celery_app.task(
     bind=True,
-    max_retries=3,
-    default_retry_delay=10,
+    max_retries=0,
     name="compare_prices_task",
     soft_time_limit=20,
     time_limit=40,
@@ -70,8 +69,13 @@ def compare_prices_task(self, monitored_id: str) -> None:
                 send_notification_task.delay(monitored_id, alerts)
 
         except Exception as exc:
-            task_logger.exception("compare_prices_failed")
-            raise self.retry(exc=exc)
+            #Log estruturado para acompanhar falhas e motivos antes de propagar
+            task_logger.exception(
+                "compare_prices_failed",
+                product_id=mask_identifier(monitored_id),
+                reason=str(exc),
+            )
+            raise
 
         finally:
             #Observa métricas de latência e contagem
