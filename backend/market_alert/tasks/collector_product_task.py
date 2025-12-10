@@ -35,10 +35,10 @@ from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 from market_alert.core.celery_app import celery_app
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
-from market_alert.tasks.compare_prices_tasks import compare_prices_task
+from market_alert.tasks.compare_prices_task import compare_prices_task
 
 
-logger = structlog.get_logger("collector_tasks")
+logger = structlog.get_logger("collector_product_task")
 
 def _validate_payload(payload: Mapping[str, str] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
     """ Valida campos mínimos, retornando tipo, IDs e URL.
@@ -252,7 +252,7 @@ def collect_product(
 @celery_app.task(
     bind=True,
     max_retries=0,
-    name="market_alert.tasks.collector_tasks.collect_product_task",
+    name="market_alert.tasks.collector_product_task.collect_product_task",
     queue="scraping",
     acks_late=True,
 )

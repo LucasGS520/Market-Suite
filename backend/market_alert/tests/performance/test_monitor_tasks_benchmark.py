@@ -2,7 +2,7 @@ import asyncio
 import time
 from types import SimpleNamespace
 
-from market_alert.tasks import monitor_tasks
+from backend.market_alert.tasks import monitor_recheck_tasks
 
 
 def test_parse_monitored_batch_benchmark(benchmark, monkeypatch):
@@ -15,11 +15,11 @@ def test_parse_monitored_batch_benchmark(benchmark, monkeypatch):
         return {"current_price": 10.0, "thumbnail": None, "free_shipping": False}
 
     #Substitui o cliente real por uma versão simulada
-    monkeypatch.setattr(monitor_tasks, "scraper_client", SimpleNamespace(parse=fake_parse))
+    monkeypatch.setattr(monitor_recheck_tasks, "scraper_client", SimpleNamespace(parse=fake_parse))
 
     def run():
         start = time.perf_counter()
-        asyncio.run(monitor_tasks._parse_monitored_batch(batch))
+        asyncio.run(monitor_recheck_tasks._parse_monitored_batch(batch))
         return time.perf_counter() - start
 
     tempo_execucao = benchmark(run)
@@ -38,11 +38,11 @@ def test_parse_competitor_batch_benchmark(benchmark, monkeypatch):
         return {"current_price": 10.0, "thumbnail": None, "free_shipping": False}
 
     #Substitui o cliente real por uma versão simulada
-    monkeypatch.setattr(monitor_tasks, "scraper_client", SimpleNamespace(parse=fake_parse))
+    monkeypatch.setattr(monitor_recheck_tasks, "scraper_client", SimpleNamespace(parse=fake_parse))
 
     def run():
         start = time.perf_counter()
-        asyncio.run(monitor_tasks._parse_competitor_batch(batch))
+        asyncio.run(monitor_recheck_tasks._parse_competitor_batch(batch))
         return time.perf_counter() - start
 
     tempo_execucao = benchmark(run)

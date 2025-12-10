@@ -74,7 +74,7 @@ def build_competitor_payload(competitor: CompetitorProduct, *, user_id: UUID | N
 
 def enqueue_collect(payload: dict[str, str]) -> None:
     """ Enfileira coleta na fila ``scraping`` mantendo única porta de entrada """
-    from market_alert.tasks.collector_tasks import collect_product_task
+    from market_alert.tasks.collector_product_task import collect_product_task
 
     collect_product_task.apply_async(kwargs={"payload": payload}, queue="scraping")
 
@@ -113,7 +113,7 @@ def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
     e menor ou igual ao horário de referência são enfileirados, registrando
     contadores e logs para itens sem janela programada.
     """
-    from market_alert.tasks.monitor_tasks import recheck_monitored_product
+    from market_alert.tasks.monitor_recheck_tasks import recheck_monitored_product
 
     reference = now or _now()
     timeout_limit = reference - timedelta(seconds=settings.RECHECK_TIMEOUT_SECONDS)

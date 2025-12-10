@@ -1,6 +1,6 @@
 """ Wrapper legado para tarefas de scraping.
 
-A lógica principal foi movida para ``market_alert.tasks.collector_tasks``.
+A lógica principal foi movida para ``market_alert.tasks.collector_product_task``.
 Este módulo mantém aliases mínimos para compatibilidade com imports
 antigos em testes e serviços, garantindo que chamadas existentes passem
 pela task centralizada.
@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from uuid import UUID
 
 from market_alert.core.celery_app import celery_app
-from market_alert.tasks.collector_tasks import collect_product_task
+from market_alert.tasks.collector_product_task import collect_product_task
 
 
 def _merge_competitor_payload(

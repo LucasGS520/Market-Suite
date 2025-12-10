@@ -90,11 +90,11 @@ def fake_redis_client(monkeypatch):
         monkeypatch.setattr(scraper_tasks, "redis_client", fake_redis, raising=False)
 
     try:
-        import market_alert.tasks.monitor_tasks as monitor_tasks
+        import backend.market_alert.tasks.monitor_recheck_tasks as monitor_recheck_tasks
     except ImportError:
-        monitor_tasks = None
-    if monitor_tasks is not None:
-        monkeypatch.setattr(monitor_tasks, "redis_client", fake_redis, raising=False)
+        monitor_recheck_tasks = None
+    if monitor_recheck_tasks is not None:
+        monkeypatch.setattr(monitor_recheck_tasks, "redis_client", fake_redis, raising=False)
     return fake_redis
 
 @pytest.fixture(autouse=True)

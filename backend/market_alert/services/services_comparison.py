@@ -37,7 +37,7 @@ from market_alert.schemas.schemas_comparisons import (
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
 )
-from market_alert.utils.comparator import compare_prices
+from market_alert.utils.price_comparator import compare_prices
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_competitors import ensure_user_can_access_monitored

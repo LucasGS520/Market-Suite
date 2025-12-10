@@ -1,7 +1,7 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
-from market_alert.utils.comparator import compare_prices
+from backend.market_alert.utils.price_comparator import compare_prices
 
 
 def test_compare_prices_performance(benchmark):

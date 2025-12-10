@@ -3,7 +3,7 @@ from uuid import UUID
 
 import pytest
 
-from market_alert.tasks import monitor_tasks
+from backend.market_alert.tasks import monitor_recheck_tasks
 
 
 class DummySession:
@@ -55,9 +55,9 @@ def _install_metric_mocks(monkeypatch):
     competitor_metric = DummyMetric()
     histogram_metric = DummyMetric() 
 
-    monkeypatch.setattr(monitor_tasks, "RECHECK_MONITORED_RESULT_TOTAL", monitored_metric)
-    monkeypatch.setattr(monitor_tasks, "RECHECK_COMPETITOR_RESULT_TOTAL", competitor_metric)
-    monkeypatch.setattr(monitor_tasks, "SCRAPING_LATENCY_SECONDS", histogram_metric)
+    monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_MONITORED_RESULT_TOTAL", monitored_metric)
+    monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_COMPETITOR_RESULT_TOTAL", competitor_metric)
+    monkeypatch.setattr(monitor_recheck_tasks, "SCRAPING_LATENCY_SECONDS", histogram_metric)
 
     return monitored_metric, competitor_metric, histogram_metric
 
@@ -69,25 +69,25 @@ def test_recheck_monitored_product_aborts_on_monitor_error(monkeypatch):
 
     _install_metric_mocks(monkeypatch)
 
-    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(monitor_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
-    monkeypatch.setattr(monitor_tasks, "get_competitors_by_monitored_id", lambda db, mid: [])
-    monkeypatch.setattr(monitor_tasks, "_mark_recheck_started", lambda *a, **k: True)
+    monkeypatch.setattr(monitor_recheck_tasks, "SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(monitor_recheck_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
+    monkeypatch.setattr(monitor_recheck_tasks, "get_competitors_by_monitored_id", lambda db, mid: [])
+    monkeypatch.setattr(monitor_recheck_tasks, "_mark_recheck_started", lambda *a, **k: True)
     monkeypatch.setattr(
-        monitor_tasks,
+        monitor_recheck_tasks,
         "_collect_monitored_single",
-        lambda *a, **k: monitor_tasks.CollectionOutcome(status="error", reason="boom", product_id=monitored_id),
+        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(status="error", reason="boom", product_id=monitored_id),
     )
-    monkeypatch.setattr(monitor_tasks, "run_price_comparison", lambda *a, **k: finalize_calls.setdefault("comparison", True))
+    monkeypatch.setattr(monitor_recheck_tasks, "run_price_comparison", lambda *a, **k: finalize_calls.setdefault("comparison", True))
 
     def fake_finalize(db, product_id, *, last_checked, next_check_at):
         finalize_calls["last_checked"] = last_checked
         finalize_calls["next_check_at"] = next_check_at
 
-    monkeypatch.setattr(monitor_tasks, "_finalize_recheck_state", fake_finalize)
+    monkeypatch.setattr(monitor_recheck_tasks, "_finalize_recheck_state", fake_finalize)
 
-    result = monitor_tasks.recheck_monitored_product.run(str(monitored_id))
+    result = monitor_recheck_tasks.recheck_monitored_product.run(str(monitored_id))
 
     assert result == "error"
     assert finalize_calls["last_checked"] == monitored.last_checked
@@ -103,28 +103,28 @@ def test_recheck_monitored_product_runs_comparison_on_changes(monkeypatch):
 
     _, _, _ = _install_metric_mocks(monkeypatch)
 
-    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(monitor_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
-    monkeypatch.setattr(monitor_tasks, "get_competitors_by_monitored_id", lambda db, mid: [competitor])
-    monkeypatch.setattr(monitor_tasks, "_mark_recheck_started", lambda *a, **k: True)
+    monkeypatch.setattr(monitor_recheck_tasks, "SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(monitor_recheck_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
+    monkeypatch.setattr(monitor_recheck_tasks, "get_competitors_by_monitored_id", lambda db, mid: [competitor])
+    monkeypatch.setattr(monitor_recheck_tasks, "_mark_recheck_started", lambda *a, **k: True)
 
     monkeypatch.setattr(
-        monitor_tasks,
+        monitor_recheck_tasks,
         "_collect_monitored_single",
-        lambda *a, **k: monitor_tasks.CollectionOutcome(status="success_new", product_id=monitored_id),
+        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(status="success_new", product_id=monitored_id),
     )
     monkeypatch.setattr(
-        monitor_tasks,
+        monitor_recheck_tasks,
         "_collect_competitor_single",
-        lambda *a, **k: monitor_tasks.CollectionOutcome(status="success_no_change", product_id=competitor_id),
+        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(status="success_no_change", product_id=competitor_id),
     )
 
     comparison_calls = {}
-    monkeypatch.setattr(monitor_tasks, "run_price_comparison", lambda *a, **k: comparison_calls.setdefault("called", True))
-    monkeypatch.setattr(monitor_tasks, "_finalize_recheck_state", lambda *a, **k: None)
+    monkeypatch.setattr(monitor_recheck_tasks, "run_price_comparison", lambda *a, **k: comparison_calls.setdefault("called", True))
+    monkeypatch.setattr(monitor_recheck_tasks, "_finalize_recheck_state", lambda *a, **k: None)
 
-    result = monitor_tasks.recheck_monitored_product.run(str(monitored_id))
+    result = monitor_recheck_tasks.recheck_monitored_product.run(str(monitored_id))
 
     assert result == "completed"
     assert comparison_calls["called"] is True
@@ -133,11 +133,11 @@ def test_enqueue_due_monitored_respects_suspension(monkeypatch):
     """Agendador deve ignorar execução quando suspensão global está ativa."""
 
     _, _, histogram = _install_metric_mocks(monkeypatch)
-    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: True)
-    monkeypatch.setattr(monitor_tasks, "schedule_due_monitored", lambda db: 5)
+    monkeypatch.setattr(monitor_recheck_tasks, "SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: True)
+    monkeypatch.setattr(monitor_recheck_tasks, "schedule_due_monitored", lambda db: 5)
 
-    dispatched = monitor_tasks.enqueue_due_monitored.run()
+    dispatched = monitor_recheck_tasks.enqueue_due_monitored.run()
 
     assert dispatched == 0
     assert histogram.calls, "histograma deve registrar a execução mesmo em suspensão"

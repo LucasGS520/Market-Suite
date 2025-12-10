@@ -3,8 +3,8 @@ from uuid import uuid4
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
-from market_alert.tasks import collector_tasks
-from market_alert.tasks.collector_tasks import _record_outcome
+from backend.market_alert.tasks import collector_product_task
+from backend.market_alert.tasks.collector_product_task import _record_outcome
 
 
 class LoggerStub:
@@ -102,11 +102,11 @@ def test_run_competitor_scrape_agenda_comparacao_sem_mudanca(monkeypatch):
         product_url="http://concorrente",
     )
 
-    monkeypatch.setattr(collector_tasks, "compare_prices_task", compare_stub)
-    monkeypatch.setattr(collector_tasks, "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL", counter_stub)
-    monkeypatch.setattr(collector_tasks, "scrape_competitor_product", fake_scrape_competitor_product)
+    monkeypatch.setattr(collector_product_task, "compare_prices_task", compare_stub)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL", counter_stub)
+    monkeypatch.setattr(collector_product_task, "scrape_competitor_product", fake_scrape_competitor_product)
 
-    outcome, reason = collector_tasks._run_competitor_scrape(
+    outcome, reason = collector_product_task._run_competitor_scrape(
         db=None,
         task_logger=None,
         monitored_id=monitored_id,

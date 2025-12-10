@@ -13,11 +13,11 @@ from kombu import Exchange, Queue
 
 #Módulos de tasks carregados pelo worker
 TASK_MODULES = [
-    "market_alert.tasks.collector_tasks",
+    "market_alert.tasks.collector_product_task",
     "market_alert.tasks.metrics_tasks",
-    "market_alert.tasks.compare_prices_tasks",
+    "market_alert.tasks.compare_prices_task",
     "market_alert.tasks.alert_tasks",
-    "market_alert.tasks.monitor_tasks",
+    "market_alert.tasks.monitor_recheck_tasks",
 ]
 
 #Exchanges separados para scraping e monitoramento
@@ -32,15 +32,15 @@ TASK_QUEUES = (
 
 #Roteamento explícito para manter cada domínio em sua fila
 TASK_ROUTES = {
-    "market_alert.tasks.collector_tasks.collect_product_task": {
+    "market_alert.tasks.collector_product_task.collect_product_task": {
         "queue": "scraping",
         "routing_key": "scraping",
     },
-    "market_alert.tasks.collector_tasks.enqueue_due_monitored": {
+    "market_alert.tasks.monitor_recheck_tasks.enqueue_due_monitored": {
         "queue": "monitor",
         "routing_key": "monitor",
     },
-    "market_alert.tasks.monitor_tasks.recheck_monitored_product": {
+    "market_alert.tasks.monitor_recheck_tasks.recheck_monitored_product": {
         "queue": "monitor",
         "routing_key": "monitor",
     },
@@ -72,7 +72,7 @@ BEAT_SCHEDULE = {
         crontab(minute="*/1"),
     ),
     "recheck-scraping-every-5min": _schedule_entry(
-        "market_alert.tasks.collector_tasks.enqueue_due_monitored",
+        "market_alert.tasks.monitor_recheck_tasks.enqueue_due_monitored",
         crontab(minute="*/5"),
         queue="monitor",
         routing_key="monitor",

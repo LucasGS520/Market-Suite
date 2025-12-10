@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from market_alert.tasks import collector_tasks
+from backend.market_alert.tasks import collector_product_task
 
 
 class DummyCounter:
@@ -58,23 +58,23 @@ def _patch_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     lock_skipped_counter = DummyCounter()
     in_flight_gauge = DummyGauge()
 
-    monkeypatch.setattr(collector_tasks, "COLLECTOR_ERROR_TOTAL", error_counter)
-    monkeypatch.setattr(collector_tasks, "COLLECTOR_NO_DATA_TOTAL", no_data_counter)
-    monkeypatch.setattr(collector_tasks, "COLLECTOR_SUCCESS_NEW_DATA_TOTAL", success_new_counter)
-    monkeypatch.setattr(collector_tasks, "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL", success_no_change_counter)
-    monkeypatch.setattr(collector_tasks, "COLLECTOR_LOCK_ACQUIRED_TOTAL", lock_acquired_counter)
-    monkeypatch.setattr(collector_tasks, "COLLECTOR_LOCK_SKIPPED_TOTAL", lock_skipped_counter)
-    monkeypatch.setattr(collector_tasks, "SCRAPER_IN_FLIGHT", in_flight_gauge)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_ERROR_TOTAL", error_counter)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_NO_DATA_TOTAL", no_data_counter)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_SUCCESS_NEW_DATA_TOTAL", success_new_counter)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL", success_no_change_counter)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_LOCK_ACQUIRED_TOTAL", lock_acquired_counter)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_LOCK_SKIPPED_TOTAL", lock_skipped_counter)
+    monkeypatch.setattr(collector_product_task, "SCRAPER_IN_FLIGHT", in_flight_gauge)
 
-    monkeypatch.setattr(collector_tasks, "SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(collector_product_task, "SessionLocal", lambda: DummySession())
 
 
 def test_collect_product_mapeia_payload_invalido_para_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Payload inválido deve ser normalizado para ``error`` mantendo métricas."""
 
-    monkeypatch.setattr(collector_tasks, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(collector_product_task, "is_scraping_suspended", lambda: False)
 
-    outcome, result = collector_tasks.collect_product(None, dispatch_comparison=False)
+    outcome, result = collector_product_task.collect_product(None, dispatch_comparison=False)
 
     assert outcome == "error"
     assert result is None
@@ -83,9 +83,9 @@ def test_collect_product_mapeia_payload_invalido_para_error(monkeypatch: pytest.
 def test_collect_product_mapeia_suspensao_para_no_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """Suspensão global do scraping retorna ``no_result`` sem aplicar lock."""
 
-    monkeypatch.setattr(collector_tasks, "is_scraping_suspended", lambda: True)
+    monkeypatch.setattr(collector_product_task, "is_scraping_suspended", lambda: True)
 
-    outcome, result = collector_tasks.collect_product(
+    outcome, result = collector_product_task.collect_product(
         {"monitored_id": str(uuid4()), "url": "http://produto"},
         dispatch_comparison=False,
     )
@@ -99,18 +99,18 @@ def test_collect_product_mapeia_excecoes_inesperadas(monkeypatch: pytest.MonkeyP
 
     monitored_id = uuid4()
 
-    monkeypatch.setattr(collector_tasks, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(collector_tasks, "acquire_product_lock", lambda *_a, **_k: True)
+    monkeypatch.setattr(collector_product_task, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(collector_product_task, "acquire_product_lock", lambda *_a, **_k: True)
 
     released: list[UUID] = []
-    monkeypatch.setattr(collector_tasks, "release_product_lock", lambda target: released.append(target))
+    monkeypatch.setattr(collector_product_task, "release_product_lock", lambda target: released.append(target))
 
     def _boom(*_a, **_k):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(collector_tasks, "scrape_monitored_product", _boom)
+    monkeypatch.setattr(collector_product_task, "scrape_monitored_product", _boom)
 
-    outcome, result = collector_tasks.collect_product(
+    outcome, result = collector_product_task.collect_product(
         {"monitored_id": str(monitored_id), "url": "http://produto"},
         dispatch_comparison=False,
     )

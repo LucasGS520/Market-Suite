@@ -27,7 +27,7 @@ from market_alert.schemas.schemas_products import (
     PaginatedCompetitorResponse,
 )
 from market_alert.services.services_products import build_competitor_response
-from market_alert.orchestrator.collector_services import enqueue_competitor_collection
+from market_alert.orchestrator.collector_service import enqueue_competitor_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.core.config_alert import settings
 

@@ -19,8 +19,8 @@ from shared.metrics.metrics_price_comparison import (
 from shared.infra.redis_pubsub import publish_message
 
 from market_alert.core.celery_app import celery_app
+from market_alert.services.services_comparison import run_price_comparison
 from market_alert.tasks.alert_tasks import send_notification_task
-from market_alert.utils.compare_runner import run_comparison
 
 
 logger = structlog.get_logger("compare_prices")
@@ -43,7 +43,7 @@ def compare_prices_task(self, monitored_id: str) -> None:
 
     with SessionLocal() as db:
         try:
-            result, alerts = run_comparison(db, UUID(monitored_id))
+            result, alerts = run_price_comparison(db, UUID(monitored_id))
 
             summary = result.get("summary") or {}
             reason = summary.get("reason")

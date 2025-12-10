@@ -31,15 +31,15 @@ from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.models.models_products import MonitoredProduct
-from market_alert.orchestrator.collector_services import (
+from market_alert.orchestrator.collector_service import (
     build_competitor_payload,
     build_monitored_payload,
     schedule_due_monitored,
 )
 from market_alert.services.services_comparison import run_price_comparison
-from market_alert.tasks.collector_tasks import collect_product
+from market_alert.tasks.collector_product_task import collect_product
 
-logger = structlog.get_logger("monitor_tasks")
+logger = structlog.get_logger("monitor_recheck_tasks")
 redis_client = get_redis_client()
 
 
@@ -150,7 +150,7 @@ def _collect_inline(payload: dict[str, str], *, product_id: UUID, kind: str, log
 @celery_app.task(
     bind=True,
     max_retries=0,
-    name="market_alert.tasks.monitor_tasks.recheck_monitored_product",
+    name="market_alert.tasks.monitor_recheck_tasks.recheck_monitored_product",
     queue="monitor",
     acks_late=True,
     soft_time_limit=settings.RECHECK_TIMEOUT_SECONDS,
@@ -288,7 +288,7 @@ def recheck_monitored_product(self, monitored_id: str) -> None:
 @celery_app.task(
     bind=True,
     max_retries=0,
-    name="market_alert.tasks.monitor_tasks.enqueue_due_monitored",
+    name="market_alert.tasks.monitor_recheck_tasks.enqueue_due_monitored",
     queue="monitor",
 )
 def enqueue_due_monitored(self) -> int:
