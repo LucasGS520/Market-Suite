@@ -73,7 +73,7 @@ def _validate_payload(payload: Mapping[str, str] | None) -> tuple[str, UUID | No
 
     return kind, monitored_id, competitor_id, url
 
-def _record_metrics(kind: str, result: ScrapeResult | None, *, lock_status: bool) -> str:
+def _record_metrics(kind: str, result: ScrapeResult | None, *, lock_status: str) -> str:
     """ Atualiza métricas por desfecho e retorna rótulo de outcome
 
     O parâmetro ``lock_status`` admite ``acquired`` (lock aplicado),
@@ -81,10 +81,13 @@ def _record_metrics(kind: str, result: ScrapeResult | None, *, lock_status: bool
     ``checking_in_progress``). Dessa forma mantemos contadores
     consistentes sem forçar métricas de lock quando o controle de
     concorrência for feito apenas via banco de dados.
+    A normalização garante que mesmo cenários de lock não adquirido reportem
+    ``no_result`` para manter o contrato mínimo esperado pelo orquestrador.
     """
     if lock_status == "skipped":
         COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
-        return "skipped_lock"
+        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
+        return "no_result"
 
     if result is None:
         COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
@@ -161,7 +164,12 @@ def collect_product(
             COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
         else:
             SCRAPER_IN_FLIGHT.dec()
-            task_logger.info("collect_skipped_lock", kind=kind, product_id=str(lock_target))
+            task_logger.info(
+                "collect_skipped_lock",
+                kind=kind,
+                product_id=str(lock_target),
+                note="retornando no_result para manter contrato minimalista",
+            )
             outcome = _record_metrics(kind, None, lock_status=lock_status)
             return outcome, None
     
@@ -233,7 +241,9 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
 
     A task valida o payload mínimo, aplica o lock Redis para o produto alvo e
     invoca o serviço de scraping adequado. Não executa orquestrações extras,
-    mantendo a granularidade por item e favorecendo retries simples.
+    mantendo a granularidade por item e favorecendo retries simples. Quando o
+    lock não pode ser adquirido, retorna ``no_result`` para manter o contrato
+    de status enxuto previsto pelo pipeline.
     """
     outcome, _ = collect_product(
         payload,
