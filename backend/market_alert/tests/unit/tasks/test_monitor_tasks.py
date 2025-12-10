@@ -1,247 +1,144 @@
-""" Testes das rotinas periódicas de monitoramento """
-
-from types import SimpleNamespace
+from datetime import datetime, timezone
 from uuid import UUID
-import time
 
 import pytest
 
-from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
-from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.tasks import monitor_tasks
 
 
 class DummySession:
-    """ Contexto de sessão fictício """
+    """Contexto de sessão fictício para isolar efeitos colaterais."""
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
         return False
 
-class DummyProduct:
-    """ Estrutura mínima para simular produtos monitorados """
+class DummyMetric:
+    """ Permite contar chamadas de métricas em testes sem prometheus real """
 
-    def __init__(self, product_id: UUID, user_id: UUID, url: str, name: str):
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def labels(self, **kwargs):
+        self.calls.append(kwargs)
+        return self 
+    
+    def inc(self, value: int = 1):
+        self.calls.append({"inc": value})
+
+    def observe(self, value):
+        self.calls.append({"observe": value})
+
+class DummyMonitored:
+    """Estrutura mínima para simular monitorados em orquestração."""
+
+    def __init__(self, product_id: UUID, user_id: UUID):
         self.id = product_id
         self.user_id = user_id
-        self.product_url = url
-        self.name_identification = name
-
+        self.product_url = "http://produto"
+        self.name_identification = "Produto"
+        self.status = None
+        self.last_checked = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        self.check_interval = 10
 
 class DummyCompetitor:
-    """ Estrutura mínima para simular concorrentes """
+    """ Estrutura mínima para simular concorrentes associados """
 
-    def __init__(self, competitor_id: UUID, monitored_id: UUID, url: str):
+    def __init__(self, competitor_id: UUID, monitored_id: UUID):
         self.id = competitor_id
         self.monitored_product_id = monitored_id
-        self.product_url = url
-        self.monitored_product = SimpleNamespace(user_id=monitored_id)
+        self.product_url = "http://concorrente"
 
-@pytest.mark.parametrize(
-    "task,key",
-    [
-        (monitor_tasks.recheck_monitored_products, "beat:last_scraping"),
-        (monitor_tasks.recheck_competitor_products, "beat:last_competitor"),
-    ],
-)
-def test_heartbeat_expire(monkeypatch, fake_redis_client, task, key):
-    """ Garante que o heartbeat criado expira automaticamente no Redis """
-    fake_redis = fake_redis_client
+def _install_metric_mocks(monkeypatch):
+    monitored_metric = DummyMetric()
+    competitor_metric = DummyMetric()
+    histogram_metric = DummyMetric() 
 
-    monkeypatch.setattr(monitor_tasks, "HEARTBEAT_TTL_SECONDS", 1)
-    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(monitor_tasks, "RECHECK_MONITORED_RESULT_TOTAL", monitored_metric)
+    monkeypatch.setattr(monitor_tasks, "RECHECK_COMPETITOR_RESULT_TOTAL", competitor_metric)
+    monkeypatch.setattr(monitor_tasks, "SCRAPING_LATENCY_SECONDS", histogram_metric)
+
+    return monitored_metric, competitor_metric, histogram_metric
+
+def test_recheck_monitored_product_aborts_on_monitor_error(monkeypatch):
+    """Falhas no monitorado encerram o fluxo e liberam a flag corretamente."""
+    monitored_id = UUID("123e4567-e89b-12d3-a456-426655440000")
+    monitored = DummyMonitored(monitored_id, monitored_id)
+    finalize_calls = {}
+
+    _install_metric_mocks(monkeypatch)
+
     monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(monitor_tasks, "get_products_by_type", lambda db, mt: [])
-    monkeypatch.setattr(monitor_tasks, "get_all_competitor_products", lambda db: [])
-    monkeypatch.setattr(monitor_tasks, "_collect_batch_products", lambda *a, **k: ("success", set()))
-    monkeypatch.setattr(monitor_tasks, "_collect_batch_competitors", lambda *a, **k: ("success", set()))
-    monkeypatch.setattr(monitor_tasks, "compare_prices_task", SimpleNamespace(delay=lambda *a, **k: None))
+    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(monitor_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
+    monkeypatch.setattr(monitor_tasks, "get_competitors_by_monitored_id", lambda db, mid: [])
+    monkeypatch.setattr(monitor_tasks, "_mark_recheck_started", lambda *a, **k: True)
     monkeypatch.setattr(
         monitor_tasks,
-        "SCRAPING_LATENCY_SECONDS",
-        SimpleNamespace(labels=lambda **k: SimpleNamespace(observe=lambda x: None)),
+        "_collect_monitored_single",
+        lambda *a, **k: monitor_tasks.CollectionOutcome(status="error", reason="boom", product_id=monitored_id),
     )
+    monkeypatch.setattr(monitor_tasks, "run_price_comparison", lambda *a, **k: finalize_calls.setdefault("comparison", True))
 
-    tempo = [0]
-    monkeypatch.setattr(time, "time", lambda: tempo[0])
+    def fake_finalize(db, product_id, *, last_checked, next_check_at):
+        finalize_calls["last_checked"] = last_checked
+        finalize_calls["next_check_at"] = next_check_at
 
-    task.run()
-    assert fake_redis.exists(key)
+    monkeypatch.setattr(monitor_tasks, "_finalize_recheck_state", fake_finalize)
 
-    tempo[0] = 2
-    assert fake_redis.get(key) is None
-    assert not fake_redis.exists(key)
+    result = monitor_tasks.recheck_monitored_product.run(str(monitored_id))
 
-def test_recheck_monitored_products_no_result_retry(monkeypatch):
-    """ Verifica que ``no_result`` persiste erro e agenda retry """
+    assert result == "error"
+    assert finalize_calls["last_checked"] == monitored.last_checked
+    assert "comparison" not in finalize_calls
 
-    dummy_id = UUID("123e4567-e89b-12d3-a456-426655440000")
-    product = DummyProduct(dummy_id, dummy_id, "http://produto", "Produto")
-
-    called = {}
-
-    def fake_retry(*, countdown):
-        called["countdown"] = countdown
-        raise RuntimeError("retry")
-
-    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(monitor_tasks, "get_products_by_type", lambda db, mt: [product])
-    monkeypatch.setattr(monitor_tasks, "redis_client", SimpleNamespace(set=lambda *a, **k: None))
-    monkeypatch.setattr(monitor_tasks.recheck_monitored_products, "retry", fake_retry)
-
-    def fake_scrape(*args, **kwargs):
-        return ScrapeResult(status="no_result", product_id=str(dummy_id), http_status=422)
-
-    created = {}
-
-    def fake_create(db, product_id, url, message, error_type):
-        created["product_id"] = product_id
-        created["url"] = url
-        created["error_type"] = error_type
-
-    monkeypatch.setattr(monitor_tasks, "scrape_monitored_product", fake_scrape)
-    monkeypatch.setattr(monitor_tasks.crud_errors, "create_scraping_error", fake_create)
-
-    with pytest.raises(RuntimeError):
-        monitor_tasks.recheck_monitored_products.run()
-
-    expected = min(
-        monitor_tasks.settings.SCRAPER_NO_RESULT_RETRY_SECONDS,
-        monitor_tasks.settings.SCRAPER_MAX_RETRY_DELAY_SECONDS,
-    )
-    assert called["countdown"] == expected
-    assert created["product_id"] == dummy_id
-    assert created["url"] == "http://produto"
-    assert created["error_type"].value == "no_result"
-
-
-def test_recheck_monitored_products_handles_429(monkeypatch):
-    """ Confere suspensão temporária e retry quando o scraper devolve 429 """
-
-    dummy_id = UUID("123e4567-e89b-12d3-a456-426655440001")
-    product = DummyProduct(dummy_id, dummy_id, "http://produto", "Produto")
-
-    suspend_called = {}
-
-    def fake_suspend(seconds):
-        suspend_called["seconds"] = seconds
-
-    def fake_retry(*, countdown):
-        suspend_called["countdown"] = countdown
-        raise RuntimeError("retry")
-
-    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(monitor_tasks, "get_products_by_type", lambda db, mt: [product])
-    monkeypatch.setattr(monitor_tasks, "redis_client", SimpleNamespace(set=lambda *a, **k: None))
-    monkeypatch.setattr(monitor_tasks, "suspend_scraping", fake_suspend)
-    monkeypatch.setattr(monitor_tasks.recheck_monitored_products, "retry", fake_retry)
-
-    def fake_scrape(*args, **kwargs):
-        raise ScraperClientError("limite", status_code=429, retry_after=30)
-
-    created = {}
-
-    def fake_create(db, product_id, url, message, error_type):
-        created.setdefault("calls", []).append((product_id, url, error_type))
-
-    monkeypatch.setattr(monitor_tasks, "scrape_monitored_product", fake_scrape)
-    monkeypatch.setattr(monitor_tasks.crud_errors, "create_scraping_error", fake_create)
-
-    with pytest.raises(RuntimeError):
-        monitor_tasks.recheck_monitored_products.run()
-
-    assert suspend_called["seconds"] == 30
-    assert suspend_called["countdown"] == 30
-    assert created["calls"][0][2].value == "http_error"
-
-
-def test_recheck_monitored_products_handles_robots_block(monkeypatch):
-    """ Garante que bloqueios de robots registram métrica sem retry """
-
-    dummy_id = UUID("123e4567-e89b-12d3-a456-426655440002")
-    product = DummyProduct(dummy_id, dummy_id, "http://produto", "Produto")
-
-    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(monitor_tasks, "get_products_by_type", lambda db, mt: [product])
-    monkeypatch.setattr(monitor_tasks, "redis_client", SimpleNamespace(set=lambda *a, **k: None))
-
-    counter = {"inc": 0}
-
-    monkeypatch.setattr(monitor_tasks, "SCRAPER_HEAD_FAILURES_TOTAL", SimpleNamespace(inc=lambda: counter.__setitem__("inc", counter["inc"] + 1)))
-
-    def fake_scrape(*args, **kwargs):
-        raise ScraperClientError("robots", status_code=451)
-
-    created = {}
-
-    def fake_create(db, product_id, url, message, error_type):
-        created["error_type"] = error_type
-
-    monkeypatch.setattr(monitor_tasks, "scrape_monitored_product", fake_scrape)
-    monkeypatch.setattr(monitor_tasks.crud_errors, "create_scraping_error", fake_create)
-
-    monitor_tasks.recheck_monitored_products.run()
-
-    assert counter["inc"] == 1
-    assert created["error_type"].value == "http_error"
-
-def test_recheck_monitored_products_triggers_compare(monkeypatch):
-    """Alterações detectadas no lote devem agendar comparação."""
-
-    dummy_id = UUID("123e4567-e89b-12d3-a456-426655440099")
-    product = DummyProduct(dummy_id, dummy_id, "http://produto", "Produto")
-
-    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(monitor_tasks, "get_products_by_type", lambda db, mt: [product])
-    monkeypatch.setattr(monitor_tasks, "redis_client", SimpleNamespace(set=lambda *a, **k: None))
-
-    def fake_scrape(*args, **kwargs):
-        return ScrapeResult(
-            status="success",
-            product_id=str(dummy_id),
-            price_changed=False,
-            availability_changed=True,
-        )
-
-    compare_calls = {}
-
-    monkeypatch.setattr(monitor_tasks, "scrape_monitored_product", fake_scrape)
-    monkeypatch.setattr(
-        monitor_tasks,
-        "compare_prices_task",
-        SimpleNamespace(delay=lambda value: compare_calls.setdefault("id", value)),
-    )
-
-    monitor_tasks.recheck_monitored_products.run()
-
-    assert compare_calls["id"] == str(dummy_id)
-
-def test_recheck_competitor_products_retry_on_5xx(monkeypatch):
-    """ Valida retry exponencial para erros 5xx em concorrentes """
+def test_recheck_monitored_product_runs_comparison_on_changes(monkeypatch):
+    """Alterações em monitorado ou concorrente acionam comparação inline."""
 
     monitored_id = UUID("123e4567-e89b-12d3-a456-426655440010")
-    competitor = DummyCompetitor(UUID("123e4567-e89b-12d3-a456-426655440011"), monitored_id, "http://concorrente")
+    competitor_id = UUID("123e4567-e89b-12d3-a456-426655440011")
+    monitored = DummyMonitored(monitored_id, monitored_id)
+    competitor = DummyCompetitor(competitor_id, monitored_id)
 
-    def fake_retry(*, countdown):
-        raise RuntimeError("retry")
+    _, _, _ = _install_metric_mocks(monkeypatch)
 
     monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
     monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(monitor_tasks, "get_all_competitor_products", lambda db: [competitor])
-    monkeypatch.setattr(monitor_tasks, "redis_client", SimpleNamespace(set=lambda *a, **k: None))
-    monkeypatch.setattr(monitor_tasks.recheck_competitor_products, "retry", fake_retry)
-    monkeypatch.setattr(monitor_tasks.crud_errors, "create_scraping_error", lambda *a, **k: None)
+    monkeypatch.setattr(monitor_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
+    monkeypatch.setattr(monitor_tasks, "get_competitors_by_monitored_id", lambda db, mid: [competitor])
+    monkeypatch.setattr(monitor_tasks, "_mark_recheck_started", lambda *a, **k: True)
 
-    def fake_scrape(*args, **kwargs):
-        raise ScraperClientError("erro", status_code=503)
+    monkeypatch.setattr(
+        monitor_tasks,
+        "_collect_monitored_single",
+        lambda *a, **k: monitor_tasks.CollectionOutcome(status="success_new", product_id=monitored_id),
+    )
+    monkeypatch.setattr(
+        monitor_tasks,
+        "_collect_competitor_single",
+        lambda *a, **k: monitor_tasks.CollectionOutcome(status="success_no_change", product_id=competitor_id),
+    )
 
-    monkeypatch.setattr(monitor_tasks, "scrape_competitor_product", fake_scrape)
+    comparison_calls = {}
+    monkeypatch.setattr(monitor_tasks, "run_price_comparison", lambda *a, **k: comparison_calls.setdefault("called", True))
+    monkeypatch.setattr(monitor_tasks, "_finalize_recheck_state", lambda *a, **k: None)
 
-    with pytest.raises(RuntimeError):
-        monitor_tasks.recheck_competitor_products.run()
+    result = monitor_tasks.recheck_monitored_product.run(str(monitored_id))
+
+    assert result == "completed"
+    assert comparison_calls["called"] is True
+
+def test_enqueue_due_monitored_respects_suspension(monkeypatch):
+    """Agendador deve ignorar execução quando suspensão global está ativa."""
+
+    _, _, histogram = _install_metric_mocks(monkeypatch)
+    monkeypatch.setattr(monitor_tasks, "SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(monitor_tasks, "is_scraping_suspended", lambda: True)
+    monkeypatch.setattr(monitor_tasks, "schedule_due_monitored", lambda db: 5)
+
+    dispatched = monitor_tasks.enqueue_due_monitored.run()
+
+    assert dispatched == 0
+    assert histogram.calls, "histograma deve registrar a execução mesmo em suspensão"
         

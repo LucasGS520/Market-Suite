@@ -110,7 +110,7 @@ def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
     e menor ou igual ao horário de referência são enfileirados, registrando
     contadores e logs para itens sem janela programada.
     """
-    from market_alert.tasks.monitor_tasks import recheck_monitored_products
+    from market_alert.tasks.monitor_tasks import recheck_monitored_product
 
     reference = now or _now()
     timeout_limit = reference - timedelta(seconds=settings.RECHECK_TIMEOUT_SECONDS)
