@@ -36,6 +36,8 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Monitor (`tasks.monitor_tasks.recheck_monitored_product`)**: orquestra rechecagem de um monitorado, marca `checking_in_progress` de forma atômica, dispara o collector para o monitorado e para cada concorrente e executa comparação inline antes de limpar a flag.
 - **Beat (`tasks.monitor_tasks.enqueue_due_monitored`)**: apenas decide e agenda `recheck_monitored_product` respeitando janelas de rechecagem e `checking_in_progress`.
 - **Comparação (`tasks.compare_prices_tasks.compare_prices_task`)**: idempotente e leve; usada pelo collector em cenários assíncronos e em acionamentos manuais para recalcular histórico/comparativos.
+- **Política de locks**: o collector usa `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`; o monitor confia apenas na flag `checking_in_progress`/`checking_started_at` para evitar duplicidade, sem combinar lock Redis e flag para o mesmo propósito.
+
 
 ## Diretrizes de Desenvolvimento para Agentes
 - **Linguagem, Docstrings e comentários**: mantenha docstrings e comentários em português, descrevendo propósito, parâmetros, retornos e exceções. Evite comentários redundantes; foque em contexto e decisões. Siga esse padrão para comentários e Docstrings: (Ex: #Comentário Padrão vem seguido da Hastag, """ Docstrings possui espaço após incio e fim """).

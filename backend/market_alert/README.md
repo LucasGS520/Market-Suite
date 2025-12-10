@@ -65,12 +65,12 @@ market_alert/
 - **Arquivo principal:** `core/celery_app.py`.
 - **Filas padrão:** `celery`, `scraping`, `monitor` (configuráveis via `.env.market_alert`).
 - **Tasks de destaque:**
-  - `tasks.monitor_tasks.collect_product_task`
-  - `tasks.monitor_tasks.collect_competitor_task`
+  - `tasks.collector_tasks.collect_product_task`
+  - `tasks.monitor_tasks.recheck_monitored_product`
+  - `tasks.monitor_tasks.enqueue_due_monitored`
   - `tasks.compare_prices_tasks.compare_prices_task`
   - `tasks.alert_tasks.dispatch_price_alert_task`
   - `tasks.metrics_tasks.collect_celery_metrics`, `cleanup_cache`
-  - `tasks.monitor_tasks.recheck_monitored_products`, `recheck_competitor_products`
 - **Beat com métricas:** `beat_with_metrics.py` executa agendamentos e expõe `/metrics` em porta dedicada (`8001`).
 
 ### Scraping e resiliência
@@ -87,6 +87,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 | Banco de dados | `DATABASE_URL` |
 | Autenticação | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` |
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
+| Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
 | Comunicação e alertas | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM`, `TWILIO_WHATSAPP_FROM`, `FCM_SERVER_KEY` |
 
@@ -146,8 +147,8 @@ SCRAPER_SERVICE_URL=url_servico_scraping
 ```
 
 ## Orquestração de coletas e rechecagens
-- **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_tasks.collect_product_task`. A task tenta adquirir lock Redis, retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e só dispara pós-processamentos quando há novos dados.
-- **Rechecagem centralizada:** `market_alert.tasks.monitor_tasks.recheck_monitored_product` é a entrada única para rechecagem. Marca `checking_in_progress`, coleta o monitorado e seus concorrentes e executa comparação inline, liberando a flag ao final para evitar duplicidade.
+- **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_tasks.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante.
+- **Rechecagem centralizada:** `market_alert.tasks.monitor_tasks.recheck_monitored_product` é a entrada única para rechecagem. Marca `checking_in_progress`/`checking_started_at` de forma atômica, coleta o monitorado e cada concorrente reutilizando o collector sem lock Redis e executa comparação inline antes de limpar a flag, evitando duplicidade de persistência.
 - **Agendamento via Beat:** `market_alert.tasks.monitor_tasks.enqueue_due_monitored` apenas identifica monitorados elegíveis e agenda `recheck_monitored_product` respeitando intervalos dinâmicos. O Beat não aciona scraping diretamente.
 
 ## Segurança e Observabilidade

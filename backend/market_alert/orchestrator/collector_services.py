@@ -4,6 +4,9 @@ Este módulo concentra helpers que padronizam a criação de payloads para a
 ``collect_product_task`` e a varredura periódica de monitorados. A proposta
 é manter rotas e services finos, delegando aqui toda a coordenação de filas
 (e o balanceamento entre monitorados e concorrentes) em uma única camada.
+Locks Redis são aplicados apenas pela própria task de collector, usando TTL
+configurável via ``PRODUCT_LOCK_TTL_SECONDS``; o fluxo de rechecagem usa
+somente a flag `checking_in_progress` para exclusão mútua.
 """
 from __future__ import annotations
 

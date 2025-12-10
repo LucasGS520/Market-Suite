@@ -4,7 +4,8 @@ O módulo concentra a orquestração de rechecagens: valida exclusão mútua
 via flag `checking_in_progress`, executa coletas síncronas do monitorado e
 de cada concorrente e dispara a comparação de preços inline quando houver
 dados novos. Também expõe a task de agendamento usada pelo Beat para apenas
-enfileirar rechecagens elegíveis.
+enfileirar rechecagens elegíveis. Locks Redis não são utilizados aqui para
+evitar sobreposição com o controle transacional da flag.
 """
 
 from dataclasses import dataclass
@@ -15,21 +16,13 @@ from uuid import UUID
 import structlog
 from celery.exceptions import SoftTimeLimitExceeded
 
-from shared.exceptions import ScraperError
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_scraper import (
-    COLLECTOR_LOCK_ACQUIRED_TOTAL,
-    COLLECTOR_LOCK_SKIPPED_TOTAL,
     RECHECK_COMPETITOR_RESULT_TOTAL,
     RECHECK_MONITORED_RESULT_TOTAL,
     SCRAPING_LATENCY_SECONDS,
 )
 from shared.utils.redis_client import get_redis_client, is_scraping_suspended
-from shared.utils.redis_locks import acquire_product_lock, release_product_lock
-from backend.shared.schemas.shared_schemas_products import (
-    CompetitorProductCreateScraping,
-    MonitoredProductCreateScraping,
-)
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from market_alert.core.celery_app import celery_app
@@ -38,10 +31,13 @@ from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.models.models_products import MonitoredProduct
-from market_alert.orchestrator.collector_services import schedule_due_monitored
+from market_alert.orchestrator.collector_services import (
+    build_competitor_payload,
+    build_monitored_payload,
+    schedule_due_monitored,
+)
 from market_alert.services.services_comparison import run_price_comparison
-from market_alert.services.services_scraper_competitor import scrape_competitor_product
-from market_alert.services.services_scraper_monitored import scrape_monitored_product
+from market_alert.tasks.collector_tasks import collect_product
 
 logger = structlog.get_logger("monitor_tasks")
 redis_client = get_redis_client()
@@ -53,13 +49,26 @@ class CollectionOutcome:
     status: str
     reason: str | None = None
     product_id: UUID | None = None
-    price_changed: bool = False
-    availability_changed: bool = False
+    result: ScrapeResult | None = None
+
+    @property
+    def price_changed(self) -> bool:
+        """ Informa se houve variação de preço no scrape """
+        if self.result is None:
+            return False
+        return bool(getattr(self.result, "price_changed", False))
+
+    @property
+    def availability_changed(self) -> bool:
+        """ Indica se a disponibilidade sofreu alteração """
+        if self.result is None:
+            return False
+        return bool(getattr(self.result, "availability_changed", False))
 
     @property
     def has_new_data(self) -> bool:
-        """ Indica se houve alteração relevante que justifique comparação """
-        return self.status == "success"
+        """Indica se houve alteração relevante que justifique comparação."""
+        return bool(self.price_changed or self.availability_changed)
 
 def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime) -> datetime:
     """ Calcula o próximo agendamento de rechecagem respeitando configuração dinâmica """
@@ -120,89 +129,23 @@ def _finalize_recheck_state(
         db.rollback()
         logger.warning("recheck_finalize_failed", monitored_id=str(monitored_id))
 
-def _normalize_result(status: ScrapeResult, product_id: UUID, *, logger_bound) -> CollectionOutcome:
-    """Traduz ``ScrapeResult`` em ``CollectionOutcome`` para o orquestrador."""
-    if status.status == "no_result":
-        return CollectionOutcome(status="no_result", reason="no_result", product_id=product_id)
+def _collect_inline(payload: dict[str, str], *, product_id: UUID, kind: str, logger_bound) -> CollectionOutcome:
+    """ Executa coleta reutilizando o collector, porém sem aplicar lock Redis 
+    
+    Esta rotina apoia o orquestrador de monitoramento que já garante
+    exclusão mútua via flag ``checking_in_progress`` em banco de dados,
+    evitando a combinação de dois mecanismos de sincronização.
+    """
+    contextual_logger = logger_bound.bind(kind=kind) if logger_bound is not None else logger.bind(kind=kind)
 
-    if status.status == "not_modified":
-        return CollectionOutcome(status="not_modified", reason="not_modified", product_id=product_id)
-
-    if status.status != "success":
-        logger_bound.warning("collect_failed", reason=status.status)
-        return CollectionOutcome(status="error", reason=status.status, product_id=product_id)
-
-    changed = bool(getattr(status, "price_changed", False) or getattr(status, "availability_changed", False))
-    normalized_status = "success" if changed else "not_modified"
-    return CollectionOutcome(
-        status=normalized_status,
-        reason=None,
-        product_id=product_id,
-        price_changed=getattr(status, "price_changed", False),
-        availability_changed=getattr(status, "availability_changed", False),
+    outcome, result = collect_product(
+        payload,
+        use_lock=False,
+        dispatch_comparison=False,
+        logger_bound=contextual_logger,
     )
-
-def _collect_with_lock(product_id: UUID, kind: str, collector, *, logger_bound) -> CollectionOutcome:
-    """ Encapsula aquisição/liberação de lock Redis ao executar scraping """
-    lock_acquired = acquire_product_lock(product_id)
-    if not lock_acquired:
-        COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
-        return CollectionOutcome(status="skipped_lock", reason="lock_not_acquired", product_id=product_id)
-
-    COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
-    try:
-        return collector()
-    finally:
-        release_product_lock(product_id)
-
-def _collect_monitored_single(db: SessionLocal, monitored: MonitoredProduct, *, logger_bound) -> CollectionOutcome:
-    """ Executa coleta do monitorado utilizando o serviço síncrono de scraping """
-    def _collector() -> CollectionOutcome:
-        payload = MonitoredProductCreateScraping(
-            name_identification=monitored.name_identification,
-            product_url=monitored.product_url,
-        )
-        result: ScrapeResult = scrape_monitored_product(
-            db=db,
-            url=monitored.product_url,
-            user_id=monitored.user_id,
-            payload=payload,
-        )
-        return _normalize_result(result, monitored.id, logger_bound=logger_bound)
-    
-    try:
-        return _collect_with_lock(monitored.id, "monitored", _collector, logger_bound=logger_bound)
-    except ScraperError as exc:
-        logger_bound.warning("monitored_collect_error", error=str(exc))
-        return CollectionOutcome(status="error", reason="scraper_error", product_id=monitored.id)
-    except Exception:
-        logger_bound.exception("monitored_collect_unexpected")
-        return CollectionOutcome(status="error", reason="unexpected", product_id=monitored.id)
-
-def _collect_competitor_single(db: SessionLocal, competitor, user_id: UUID, *, logger_bound) -> CollectionOutcome:
-    """ Executa coleta de concorrente isoladamente, sem interromper o fluxo principal """
-    def _collector() -> CollectionOutcome:
-        payload = CompetitorProductCreateScraping(
-            monitored_product_id=competitor.monitored_product_id,
-            product_url=competitor.product_url,
-        )
-        result: ScrapeResult = scrape_competitor_product(
-            db=db,
-            user_id=user_id,
-            url=competitor.product_url,
-            payload=payload,
-        )
-        return _normalize_result(result, competitor.id, logger_bound=logger_bound)
-    
-    try:
-        return _collect_with_lock(competitor.id, "competitor", _collector, logger_bound=logger_bound)
-    except ScraperError as exc:
-        logger_bound.warning("competitor_collect_error", error=str(exc))
-        return CollectionOutcome(status="error", reason="scraper_error", product_id=competitor.id)
-    except Exception:
-        logger_bound.exception("competitor_collect_unexpected")
-        return CollectionOutcome(status="error", reason="unexpected", product_id=competitor.id)
-    
+    reason = None if outcome in {"success", "not_modified"} else outcome
+    return CollectionOutcome(status=outcome, reason=reason, product_id=product_id, result=result)
 
 @celery_app.task(
     bind=True,
@@ -246,7 +189,13 @@ def recheck_monitored_product(self, monitored_id: str) -> None:
         next_check_at = _compute_next_check_at(monitored, started_at)
 
         try:
-            monitor_outcome = _collect_monitored_single(db, monitored, logger_bound=task_logger)
+            monitor_payload = build_monitored_payload(monitored, user_id=monitored.user_id)
+            monitor_outcome = _collect_inline(
+                monitor_payload,
+                product_id=monitored.id,
+                kind="monitored",
+                logger_bound=task_logger,
+            )
             RECHECK_MONITORED_RESULT_TOTAL.labels(result=monitor_outcome.status).inc()
             task_logger.info(
                 "monitor_collect_result",
@@ -254,7 +203,7 @@ def recheck_monitored_product(self, monitored_id: str) -> None:
                 reason=monitor_outcome.reason,
             )
 
-            if monitor_outcome.status in {"error", "no_result", "skipped_lock"}:
+            if monitor_outcome.status not in {"success", "not_modified"}:
                 _finalize_recheck_state(
                     db,
                     monitored.id,
@@ -268,10 +217,11 @@ def recheck_monitored_product(self, monitored_id: str) -> None:
             competitor_outcomes: list[CollectionOutcome] = []
 
             for competitor in competitors:
-                outcome = _collect_competitor_single(
-                    db,
-                    competitor,
-                    monitored.user_id,
+                competitor_payload = build_competitor_payload(competitor, user_id=monitored.user_id)
+                outcome = _collect_inline(
+                    competitor_payload,
+                    product_id=competitor.id,
+                    kind="competitor",
                     logger_bound=task_logger.bind(competitor_id=str(competitor.id)),
                 )
                 competitor_outcomes.append(outcome)

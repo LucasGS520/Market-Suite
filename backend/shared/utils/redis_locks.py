@@ -3,10 +3,13 @@
 As funções abaixo implementam um lock leve baseado em chaves com TTL
 para impedir execuções paralelas da mesma unidade lógica. O objetivo
 é evitar contendas durante coletas e outras tasks críticas sem
-introduzir dependências extras além do Redis já disponível.
+introduzir dependências extras além do Redis já disponível. O TTL
+adota ``PRODUCT_LOCK_TTL_SECONDS`` quando definido no ambiente para
+permitir tunning operacional sem alterar código.
 """
 from __future__ import annotations
 
+import os
 from typing import Final
 from uuid import UUID
 
@@ -18,7 +21,7 @@ from shared.utils.redis_client import get_redis_client
 
 logger = structlog.get_logger(__name__)
 _LOCK_PREFIX: Final = "lock:product:"
-_DEFAULT_TTL_SECONDS: Final = 150
+_DEFAULT_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "150"))
 
 
 def _lock_key(product_id: UUID | str) -> str:

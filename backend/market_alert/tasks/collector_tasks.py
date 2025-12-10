@@ -73,14 +73,16 @@ def _validate_payload(payload: Mapping[str, str] | None) -> tuple[str, UUID | No
 
     return kind, monitored_id, competitor_id, url
 
-def _record_metrics(kind: str, result: ScrapeResult | None, *, locked: bool) -> str:
+def _record_metrics(kind: str, result: ScrapeResult | None, *, lock_status: bool) -> str:
     """ Atualiza métricas por desfecho e retorna rótulo de outcome
 
-    Mantemos um único ponto de atualização de métricas para evitar divergências
-    entre monitorados e concorrentes. O resultado textual é reaproveitado em
-    logs para observabilidade consistente.
+    O parâmetro ``lock_status`` admite ``acquired`` (lock aplicado),
+    ``skipped`` (não adquirido) ou ``not_used`` (monitoramento com flag
+    ``checking_in_progress``). Dessa forma mantemos contadores
+    consistentes sem forçar métricas de lock quando o controle de
+    concorrência for feito apenas via banco de dados.
     """
-    if not locked:
+    if lock_status == "skipped":
         COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
         return "skipped_lock"
 
@@ -113,23 +115,27 @@ def _dispatch_comparison(monitored_id: UUID | None, result: ScrapeResult | None)
         compare_prices_task.apply_async(args=[str(monitored_id)], queue="monitor")
 
 
-@celery_app.task(
-    bind=True,
-    max_retries=0,
-    name="market_alert.tasks.collector_tasks.collect_product_task",
-    queue="scraping",
-    acks_late=True,
-)
-def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
-    """ Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
+def collect_product(
+    payload: Mapping[str, str] | None,
+    *,
+    use_lock: bool = True,
+    dispatch_comparison: bool = True,
+    lock_ttl_seconds: int | None = None,
+    logger_bound=None,
+) -> tuple[str, ScrapeResult | None]:
+    """ Executa coleta de produto de forma reutilizável para tasks e orquestradores.
 
-    A task valida o payload mínimo, aplica o lock Redis para o produto alvo e
-    invoca o serviço de scraping adequado. Não executa orquestrações extras,
-    mantendo a granularidade por item e favorecendo retries simples.
+    A função aplica validação de payload, coordena lock distribuído quando
+    ``use_lock`` estiver habilitado e registra métricas consistentes. Quando
+    utilizada pelo monitorador, ``use_lock`` deve permanecer ``False`` para
+    que a exclusão mútua seja controlada apenas pela flag
+    ``checking_in_progress``. O TTL do lock segue
+    ``PRODUCT_LOCK_TTL_SECONDS`` ou o valor informado em
+    ``lock_ttl_seconds``.
     """
     SCRAPER_IN_FLIGHT.inc()
     started_at = datetime.now(timezone.utc)
-    task_logger = logger.bind(task_id=getattr(self.request, "id", None))
+    task_logger = logger_bound or logger
 
     kind, monitored_id, competitor_id, url = _validate_payload(payload)
     lock_target = competitor_id or monitored_id
@@ -138,22 +144,26 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
         task_logger.error("invalid_payload", kind=kind)
         SCRAPER_IN_FLIGHT.dec()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
-        return "invalid_payload"
+        return "invalid_payload", None
 
     if is_scraping_suspended():
         task_logger.warning("scraping_suspended", kind=kind, product_id=str(lock_target))
         SCRAPER_IN_FLIGHT.dec()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
-        return "scraping_suspended"
+        return "scraping_suspended", None
     
-    lock_acquired = acquire_product_lock(lock_target)
-    if lock_acquired:
-        COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
-    else:
-        SCRAPER_IN_FLIGHT.dec()
-        task_logger.info("collect_skipped_lock", kind=kind, product_id=str(lock_target))
-        _record_metrics(kind, None, locked=False)
-        return "skipped_lock"
+    lock_acquired = True
+    lock_status = "not_used"
+    if use_lock:
+        lock_acquired = acquire_product_lock(lock_target, ttl_seconds=lock_ttl_seconds)
+        lock_status = "acquired" if lock_acquired else "skipped"
+        if lock_acquired:
+            COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
+        else:
+            SCRAPER_IN_FLIGHT.dec()
+            task_logger.info("collect_skipped_lock", kind=kind, product_id=str(lock_target))
+            outcome = _record_metrics(kind, None, lock_status=lock_status)
+            return outcome, None
     
     result: ScrapeResult | None = None
     try:
@@ -192,8 +202,8 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
     except Exception:
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
-        outcome = _record_metrics(kind, result, locked=lock_acquired)
-        if lock_acquired:
+        outcome = _record_metrics(kind, result, lock_status=lock_status)
+        if use_lock and lock_acquired:
             release_product_lock(lock_target)
         SCRAPER_IN_FLIGHT.dec()
         duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
@@ -202,9 +212,33 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
             kind=kind,
             duration_ms=duration_ms,
             outcome=outcome,
+            lock_status=lock_status,
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
         )
-        _dispatch_comparison(monitored_id, result)
+        if dispatch_comparison:
+            _dispatch_comparison(monitored_id, result)
 
+    return outcome, result
+
+@celery_app.task(
+    bind=True,
+    max_retries=0,
+    name="market_alert.tasks.collector_tasks.collect_product_task",
+    queue="scraping",
+    acks_late=True,
+)
+def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
+    """Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
+
+    A task valida o payload mínimo, aplica o lock Redis para o produto alvo e
+    invoca o serviço de scraping adequado. Não executa orquestrações extras,
+    mantendo a granularidade por item e favorecendo retries simples.
+    """
+    outcome, _ = collect_product(
+        payload,
+        use_lock=True,
+        dispatch_comparison=True,
+        logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
+    )
     return outcome
