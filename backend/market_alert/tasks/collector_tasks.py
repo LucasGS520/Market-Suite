@@ -73,21 +73,41 @@ def _validate_payload(payload: Mapping[str, str] | None) -> tuple[str, UUID | No
 
     return kind, monitored_id, competitor_id, url
 
-def _record_metrics(kind: str, result: ScrapeResult | None, *, lock_status: str) -> str:
-    """ Atualiza métricas por desfecho e retorna rótulo de outcome
+def _record_metrics(
+    kind: str,
+    result: ScrapeResult | None,
+    *,
+    lock_status: str,
+    reason: str | None,
+) -> str:
+    """ Atualiza métricas por desfecho e retorna rótulo normalizado.
 
     O parâmetro ``lock_status`` admite ``acquired`` (lock aplicado),
     ``skipped`` (não adquirido) ou ``not_used`` (monitoramento com flag
     ``checking_in_progress``). Dessa forma mantemos contadores
     consistentes sem forçar métricas de lock quando o controle de
-    concorrência for feito apenas via banco de dados.
-    A normalização garante que mesmo cenários de lock não adquirido reportem
-    ``no_result`` para manter o contrato mínimo esperado pelo orquestrador.
+    concorrência for feito apenas via banco de dados. A normalização
+    garante que mesmo cenários de lock não adquirido reportem ``no_result``
+    para manter o contrato mínimo esperado pelo orquestrador. O campo
+    ``reason`` preserva o motivo interno para logs, mas sempre retorna um
+    status contratual.
     """
     if lock_status == "skipped":
         COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
+    
+    if reason == "scraping_suspended":
+        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
+        return "no_result"
+
+    if reason == "invalid_payload":
+        COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
+        return "error"
+
+    if reason in {"scraper_error", "unexpected_error"}:
+        COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
+        return "error"
 
     if result is None:
         COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
@@ -106,7 +126,7 @@ def _record_metrics(kind: str, result: ScrapeResult | None, *, lock_status: str)
         return "success"
 
     COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
-    return result.status
+    return "error"
 
 def _dispatch_comparison(monitored_id: UUID | None, result: ScrapeResult | None) -> None:
     """ Agenda comparação apenas quando scraping trouxe alteração relevante """
@@ -143,74 +163,73 @@ def collect_product(
     kind, monitored_id, competitor_id, url = _validate_payload(payload)
     lock_target = competitor_id or monitored_id
 
-    if payload is None or lock_target is None or url is None:
-        task_logger.error("invalid_payload", kind=kind)
-        SCRAPER_IN_FLIGHT.dec()
-        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
-        return "invalid_payload", None
-
-    if is_scraping_suspended():
-        task_logger.warning("scraping_suspended", kind=kind, product_id=str(lock_target))
-        SCRAPER_IN_FLIGHT.dec()
-        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
-        return "scraping_suspended", None
-    
-    lock_acquired = True
     lock_status = "not_used"
-    if use_lock:
-        lock_acquired = acquire_product_lock(lock_target, ttl_seconds=lock_ttl_seconds)
-        lock_status = "acquired" if lock_acquired else "skipped"
-        if lock_acquired:
-            COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
-        else:
-            SCRAPER_IN_FLIGHT.dec()
-            task_logger.info(
-                "collect_skipped_lock",
-                kind=kind,
-                product_id=str(lock_target),
-                note="retornando no_result para manter contrato minimalista",
-            )
-            outcome = _record_metrics(kind, None, lock_status=lock_status)
-            return outcome, None
     
+    reason: str | None = None
     result: ScrapeResult | None = None
-    try:
-        user_uuid = None
-        try:
-            raw_user = payload.get("user_id") if payload else None
-            user_uuid = UUID(str(raw_user)) if raw_user else None
-        except Exception:
-            user_uuid = None
+    lock_acquired = False
 
-        with SessionLocal() as db:
-            if competitor_id is not None:
-                payload_model = CompetitorProductCreateScraping(
-                    monitored_product_id=monitored_id,
-                    product_url=url,
-                )
-                result = scrape_competitor_product(
-                    db=db,
-                    user_id=user_uuid or monitored_id or competitor_id,
-                    url=url,
-                    payload=payload_model,
-                )
-            else:
-                payload_model = MonitoredProductCreateScraping(
-                    name_identification=payload.get("name") if payload else None,
-                    product_url=url,
-                )
-                result = scrape_monitored_product(
-                    db=db,
-                    url=url,
-                    user_id=user_uuid or monitored_id,
-                    payload=payload_model,
-                )
+    try:
+        if payload is None or lock_target is None or url is None:
+            reason = "invalid_payload"
+            task_logger.error("invalid_payload", kind=kind)
+        elif is_scraping_suspended():
+            reason = "scraping_suspended"
+            task_logger.warning("scraping_suspended", kind=kind, product_id=str(lock_target))
+        else:
+            if use_lock:
+                lock_acquired = acquire_product_lock(lock_target, ttl_seconds=lock_ttl_seconds)
+                lock_status = "acquired" if lock_acquired else "skipped"
+                if lock_acquired:
+                    COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
+                else:
+                    reason = "lock_skipped"
+                    task_logger.info(
+                        "collect_skipped_lock",
+                        kind=kind,
+                        product_id=str(lock_target),
+                        note="retornando no_result para manter contrato minimalista",
+                    )
+
+            if reason is None:
+                user_uuid = None
+                try:
+                    raw_user = payload.get("user_id") if payload else None
+                    user_uuid = UUID(str(raw_user)) if raw_user else None
+                except Exception:
+                    user_uuid = None
+
+                with SessionLocal() as db:
+                    if competitor_id is not None:
+                        payload_model = CompetitorProductCreateScraping(
+                            monitored_product_id=monitored_id,
+                            product_url=url,
+                        )
+                        result = scrape_competitor_product(
+                            db=db,
+                            user_id=user_uuid or monitored_id or competitor_id,
+                            url=url,
+                            payload=payload_model,
+                        )
+                    else:
+                        payload_model = MonitoredProductCreateScraping(
+                            name_identification=payload.get("name") if payload else None,
+                            product_url=url,
+                        )
+                        result = scrape_monitored_product(
+                            db=db,
+                            url=url,
+                            user_id=user_uuid or monitored_id,
+                            payload=payload_model,
+                        )
     except ScraperError as exc:
+        reason = "scraper_error"
         task_logger.warning("scraper_error", kind=kind, error=str(exc))
     except Exception:
+        reason = "unexpected_error"
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
-        outcome = _record_metrics(kind, result, lock_status=lock_status)
+        outcome = _record_metrics(kind, result, lock_status=lock_status, reason=reason)
         if use_lock and lock_acquired:
             release_product_lock(lock_target)
         SCRAPER_IN_FLIGHT.dec()
@@ -220,6 +239,7 @@ def collect_product(
             kind=kind,
             duration_ms=duration_ms,
             outcome=outcome,
+            reason=reason,
             lock_status=lock_status,
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
