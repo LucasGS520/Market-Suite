@@ -105,7 +105,12 @@ class MonitoredProductCreateScraping(BaseModel):
         return value
 
 class MonitoredScrapedInfo(ProductCore):
-    """ Informações de scraping unificadas para produto monitorado """
+    """ Informações de scraping unificadas para produto monitorado
+
+    Estrutura alinhada ao contrato de :class:`~shared.schemas.shared_schemas_scraper.ScrapeResult`,
+    garantindo que collectors e rechecagens usem a mesma forma de armazenar
+    dados retornados pelo scraper.
+    """
     
     source: Literal["monitored"] = Field(
         "monitored",
@@ -144,7 +149,12 @@ class CompetitorProductCreateScraping(BaseModel):
         return value
 
 class CompetitorScrapedInfo(ProductCore):
-    """Informações de scraping unificadas para produto concorrente."""
+    """ Informações de scraping unificadas para produto concorrente.
+
+    Mantém compatibilidade com o contrato consumido pelo collector e evita
+    divergências entre monitorados e concorrentes na persistência do
+    scraping.
+    """
 
     source: Literal["competitor"] = Field(
         "competitor",

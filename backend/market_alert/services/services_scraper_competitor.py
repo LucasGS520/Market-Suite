@@ -38,7 +38,11 @@ def _get_existing(
     payload: CompetitorProductCreateScraping,
     normalized_url: str,
 ) -> CompetitorProduct | None:
-    """ Recupera concorrente já persistido reutilizando a URL canônica """
+    """ Recupera concorrente já persistido reutilizando a URL canônica 
+    
+    A busca centraliza a reutilização do ETag/Last-Modified para permitir
+    retornos `not_modified` coerentes no contrato de `ScrapeResult`.
+    """
     return get_competitor_by_monitored_and_url(
         db,
         payload.monitored_product_id,
@@ -51,7 +55,13 @@ def scrape_competitor_product(
     url: str,
     payload: CompetitorProductCreateScraping,
 ) -> ScrapeResult:
-    """ Executa scraping de concorrentes de forma síncrona e determinística """
+    """ Executa scraping de concorrentes de forma síncrona e determinística 
+    
+    Retorna sempre um :class:`ScrapeResult` alinhado ao contrato consumido
+    pelo collector (`success`, `not_modified`, `no_result`, `error`).
+    URLs são canônicas antes da coleta para evitar duplicação e permitir
+    reaproveitamento de cabeçalhos condicionais.
+    """
     try:
         normalized_url = canonicalize_product_url(str(url))
     except ValueError:

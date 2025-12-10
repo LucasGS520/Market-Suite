@@ -42,7 +42,13 @@ def _handle_response(
     last_checked: datetime,
     request_url: str,
 ) -> ScrapeResult:
-    """ Processa reposta recebida atualizando banco e gerando histórico """
+    """ Processa reposta do scraper e retorna ``ScrapeResult`` padronizado
+
+    O collector espera sempre um dos status suportados em
+    :class:`ScrapeResult`. Este método converte códigos HTTP e payloads do
+    scraper no contrato consumido pelas tasks, preservando `http_status`,
+    `price_changed` e `availability_changed`. 
+    """
     status_code = fetch_result.status_code
     if status_code == 304:
         if existing_id:
@@ -125,7 +131,13 @@ def scrape_monitored_product(
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
 ) -> ScrapeResult:
-    """ Executa scraping para produto monitorado de forma síncrona """
+    """ Executa scraping para produto monitorado de forma síncrona
+
+    Retorna sempre um :class:`ScrapeResult` com status dentro do contrato
+    compartilhado (`success`, `not_modified`, `no_result`, `error`). A URL
+    é normalizada antes do fetch e o ETag/Last-Modified existente é reaproveitado
+    para permitir retornos `not_modified` consistentes.
+    """
     try:
         normalized_url = normalize_product_url(str(url))
     except ValueError:

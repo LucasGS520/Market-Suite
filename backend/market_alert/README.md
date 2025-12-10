@@ -12,8 +12,7 @@ API FastAPI responsável por autenticação, gestão e monitoramento, comparaç�
 - **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
 - **Registrar métricas e logs estruturados** para Prometheus e Loki.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
-- **Regras Comparação** deve ser realizado automaticamente, sem haver possibilidade de ser realizada manualmente, ou forçar comparação, seguir um padrão para quando houver comparações entre os produtos.
-- **Simplificar alertas** priorizando apenas mudanças de preço e disponibilidade, sem thresholds dinâmicos ou idempotência distribuída (regra de alerta padronizada pelo sistema, sem possibilidade de criação de regras, alterações, etc).
+- **Regras de comparação e alertas**: comparações permanecem automáticas após coletas, priorizando mudanças de preço e disponibilidade sem thresholds dinâmicos ou idempotência distribuída. Fluxos manuais apenas disparam tasks já idempotentes (ex.: `compare_prices_task`).
 
 ## Estrutura do Diretório
 ```text
@@ -47,9 +46,10 @@ market_alert/
 | `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo e agenda coleta na fila `scraping`. |
 | `GET` | `/notifications` | Lista histórico e status de notificações geradas. |
 | `GET` | `/metrics` | Exibe métricas Prometheus da API. |
-| `Celery` | `tasks.monitor_tasks.collect_product_task` | Consome fila `scraping` para coletar dados do monitorado (payload mínimo e idempotente). |
-| `Celery` | `tasks.monitor_tasks.collect_competitor_task` | Coleta concorrentes vinculados, recalcula comparações e grava `PriceHistory`. |
-| `Celery` | `tasks.compare_prices_tasks.compare_prices_task` | Recalcula comparação e `competitiveness_status` após coletas. |
+| `Celery` | `tasks.collector_tasks.collect_product_task` | Consome fila `scraping` e processa uma URL por vez (monitorado ou concorrente), respeitando lock Redis e retornando `ScrapeResult` padronizado. |
+| `Celery` | `tasks.monitor_tasks.recheck_monitored_product` | Orquestra rechecagem de um monitorado: marca `checking_in_progress`, dispara collector do monitorado e concorrentes e executa comparação inline. |
+| `Celery` | `tasks.monitor_tasks.enqueue_due_monitored` | Beat que apenas decide e agenda `recheck_monitored_product` conforme janelas de rechecagem. |
+| `Celery` | `tasks.compare_prices_tasks.compare_prices_task` | Idempotente e leve; recalcula comparação e `competitiveness_status` quando acionado. |
 | `Celery` | `tasks.alert_tasks.dispatch_price_alert_task` | Enfileira alertas quando regras de preço são acionadas. |
 
 ### Integração com os Serviços
@@ -145,10 +145,10 @@ SCRAPER_SERVICE_URL=url_servico_scraping
 
 ```
 
-## Orquestração de coletas
-- Rota e serviços apenas enfileiram requisições via `services/collector_service.py`, que monta o payload padrão e envia sempre para a fila `scraping`.
- - A task central `market_alert.tasks.collector_tasks.collect_product_task` executa o scraping de monitorados e concorrentes, delegando persistência aos serviços de domínio e disparando `compare_prices_task` quando houver mudanças.
-- Rechecagens periódicas são feitas pela task `enqueue_due_monitored`, que varre monitorados de scraping respeitando intervalo (`ADAPTIVE_RECHECK_BASE_INTERVAL`) e agenda, em seguida, apenas concorrentes vinculados a cada monitorado.
+## Orquestração de coletas e rechecagens
+- **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_tasks.collect_product_task`. A task tenta adquirir lock Redis, retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e só dispara pós-processamentos quando há novos dados.
+- **Rechecagem centralizada:** `market_alert.tasks.monitor_tasks.recheck_monitored_product` é a entrada única para rechecagem. Marca `checking_in_progress`, coleta o monitorado e seus concorrentes e executa comparação inline, liberando a flag ao final para evitar duplicidade.
+- **Agendamento via Beat:** `market_alert.tasks.monitor_tasks.enqueue_due_monitored` apenas identifica monitorados elegíveis e agenda `recheck_monitored_product` respeitando intervalos dinâmicos. O Beat não aciona scraping diretamente.
 
 ## Segurança e Observabilidade
 - **Segurança:**

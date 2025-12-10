@@ -49,6 +49,12 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 5. **Persistência e regras de negócio**: workers Celery consolidam dados no PostgreSQL (`backend/market_alert/repositories`), recalculam comparações, aplicam regras de alerta e armazenam histórico de coletas.
 6. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 
+### Tarefas Celery do `market_alert`
+- **Collector (`tasks.collector_tasks.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir.
+- **Monitor (`tasks.monitor_tasks.recheck_monitored_product`)**: orquestra rechecagem completa para um monitorado, ativa `checking_in_progress`, chama o collector para o monitorado e para cada concorrente elegível e executa comparação inline antes de limpar a flag.
+- **Beat (`tasks.monitor_tasks.enqueue_due_monitored`)**: avalia janelas de rechecagem e apenas agenda `recheck_monitored_product` para cada monitorado elegível, sem acionar scraping direto.
+- **Comparação (`tasks.compare_prices_tasks.compare_prices_task`)**: permanece idempotente e leve, usada pelo collector e acionamentos manuais para recalcular históricos e campos derivados.
+
 #### Princípios do backend
 - **Exposição de APIs**: o FastAPI em `market_alert` oferece rotas públicas, autenticação JWT e endpoints para monitoramentos, concorrentes e comparações.
 - **Contrato único**: esquemas em `backend/shared/schemas/schemas_scraper.py` padronizam comunicação API ↔ scraper.
