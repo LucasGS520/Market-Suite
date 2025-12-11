@@ -20,7 +20,8 @@ from shared.utils.redis_client import get_redis_client
 
 
 logger = structlog.get_logger(__name__)
-_LOCK_PREFIX: Final = "lock:product:"
+_ENV_NAMESPACE: Final = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip()
+_LOCK_PREFIX: Final = f"lock:{_ENV_NAMESPACE}:" if _ENV_NAMESPACE else "lock:"
 _DEFAULT_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "30"))
 
 _RELEASE_SCRIPT: Final = """
@@ -33,7 +34,8 @@ return 0
 
 def _lock_key(product_id: UUID | str) -> str:
     """ Monta a chave padrão de lock para o produto informado """
-    return f"{_LOCK_PREFIX}{product_id}"
+    #Incluímos namespace de ambiente para evitar colisão entre stacks compartilhando Redis
+    return f"{_LOCK_PREFIX}product:{product_id}"
 
 
 def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = None) -> str | None:

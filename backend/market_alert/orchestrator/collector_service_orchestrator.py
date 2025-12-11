@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from shared.metrics.metrics_scraper import (
     RECHECK_DISPATCH_TOTAL,
     RECHECK_ENQUEUED_TOTAL,
+    RECHECK_NEXT_CHECK_MISSING_TOTAL,
     RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL,
 )
 
@@ -161,7 +162,12 @@ def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
         RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL.labels(reason="missing_next_check_at").inc(
             missing_next
         )
-        logger.info("recheck_skip_missing_next_check_at", count=missing_next)
+        RECHECK_NEXT_CHECK_MISSING_TOTAL.inc(missing_next)
+        logger.info(
+            "recheck_skip_missing_next_check_at",
+            count=missing_next,
+            batch_limit=settings.RECHECK_ENQUEUE_BATCH_SIZE,
+        )
 
     due_candidates = (
         db.query(MonitoredProduct)
@@ -176,6 +182,13 @@ def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
         .limit(settings.RECHECK_ENQUEUE_BATCH_SIZE)
         .all()
     )
+
+    if len(due_candidates) == settings.RECHECK_ENQUEUE_BATCH_SIZE:
+        logger.info(
+            "recheck_batch_limit_reached",
+            limit=settings.RECHECK_ENQUEUE_BATCH_SIZE,
+            reference_time=reference.isoformat(),
+        )
 
     for monitored in due_candidates:
         jitter = random.uniform(0, settings.RECHECK_ENQUEUE_JITTER_SECONDS)

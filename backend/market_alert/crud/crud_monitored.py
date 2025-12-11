@@ -28,6 +28,11 @@ from market_alert.crud import crud_price_history
 from market_alert.core.config_alert import settings
 
 
+def _compute_initial_next_check() -> datetime:
+    """ Calcula o primeiro agendamento padrão para novos monitorados """
+    #Centraliza o cálculo para manter consistência entre fluxos de criação
+    return datetime.now(timezone.utc) + timedelta(seconds=settings.DEFAULT_NEXT_CHECK_SECONDS)
+
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
     parsed = urlparse(product_url)
@@ -189,7 +194,7 @@ def create_pending_monitored_product(
         free_shipping=False,
         status=MonitoredStatus.pending,
         last_checked=None,
-        next_check_at=datetime.now(timezone.utc) + timedelta(seconds=settings.DEFAULT_NEXT_CHECK_SECONDS),
+        next_check_at=_compute_initial_next_check(),
     )
     db.add(pending)
 
@@ -279,6 +284,7 @@ def create_or_update_monitored_product_scraped(
         status=MonitoredStatus.active,
         last_checked=last_checked,
         last_scraped_at=last_checked,
+        next_check_at=_compute_initial_next_check(),
         currency=currency or scraped_info.currency,
         etag=etag,
         last_modified=last_modified,

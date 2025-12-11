@@ -19,6 +19,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_scraper import (
     RECHECK_COMPETITOR_RESULT_TOTAL,
+    RECHECK_FINALIZE_FAILED_TOTAL,
     RECHECK_MONITORED_RESULT_TOTAL,
     SCRAPING_LATENCY_SECONDS,
 )
@@ -109,7 +110,7 @@ def _finalize_recheck_state(
     *,
     last_checked: datetime | None,
     next_check_at: datetime,
-) -> None:
+) -> bool:
     """ Atualiza timestamps e libera a flag de progresso de forma tolerante """
     update_payload = {
         "checking_in_progress": False,
@@ -118,14 +119,25 @@ def _finalize_recheck_state(
         "last_checked": last_checked,
         "last_scraped_at": last_checked,
     }
-    try:
-        db.query(MonitoredProduct).filter(MonitoredProduct.id == monitored_id).update(
-            update_payload, synchronize_session=False
-        )
-        db.commit()
-    except Exception:
-        db.rollback()
-        logger.warning("recheck_finalize_failed", monitored_id=str(monitored_id))
+    attempts = 0
+    while attempts < 2:
+        try:
+            db.query(MonitoredProduct).filter(MonitoredProduct.id == monitored_id).update(
+                update_payload, synchronize_session=False
+            )
+            db.commit()
+            return True
+        except Exception:
+            attempts += 1
+            db.rollback()
+            logger.warning(
+                "recheck_finalize_failed",
+                monitored_id=str(monitored_id),
+                attempt=attempts,
+            )
+
+    RECHECK_FINALIZE_FAILED_TOTAL.labels(reason="commit_error").inc()
+    return False
 
 def _collect_inline(payload: dict[str, str], *, product_id: UUID, kind: str, logger_bound) -> CollectionOutcome:
     """ Executa coleta reutilizando o collector, porém sem aplicar lock Redis 
@@ -168,119 +180,108 @@ def recheck_monitored_product(self, monitored_id: str) -> None:
     except Exception:
         task_logger.error("invalid_monitored_identifier")
         return "invalid_monitored_identifier"
+    
+    try:
+        with SessionLocal() as db:
+            monitored = get_monitored_product_by_id(db, monitored_uuid)
+            if monitored is None:
+                task_logger.info("recheck_skipped_missing")
+                return "missing"
 
-    with SessionLocal() as db:
-        monitored = get_monitored_product_by_id(db, monitored_uuid)
-        if monitored is None:
-            task_logger.info("recheck_skipped_missing")
-            return "missing"
+            if monitored.status == MonitoredStatus.failed:
+                task_logger.info("recheck_skipped_failed")
+                return "failed"
 
-        if monitored.status == MonitoredStatus.failed:
-            task_logger.info("recheck_skipped_failed")
-            return "failed"
+            marked_started = _mark_recheck_started(db, monitored.id, started_at, logger_bound=task_logger)
+            if not marked_started:
+                task_logger.info("recheck_already_running")
+                return "already_running"
 
-        if not _mark_recheck_started(db, monitored.id, started_at, logger_bound=task_logger):
-            task_logger.info("recheck_already_running")
-            return "already_running"
-        
-        previous_last_checked = monitored.last_checked
-        next_check_at = _compute_next_check_at(monitored, started_at)
+            finalize_last_checked = monitored.last_checked
+            finalize_next_check_at = _compute_next_check_at(monitored, started_at)
 
-        try:
-            monitor_payload = build_monitored_payload(monitored, user_id=monitored.user_id)
-            monitor_outcome = _collect_inline(
-                monitor_payload,
-                product_id=monitored.id,
-                kind="monitored",
-                logger_bound=task_logger,
-            )
-            RECHECK_MONITORED_RESULT_TOTAL.labels(result=monitor_outcome.status).inc()
-            task_logger.info(
-                "monitor_collect_result",
-                status=monitor_outcome.status,
-                reason=monitor_outcome.reason,
-            )
-
-            if monitor_outcome.status not in {"success", "not_modified"}:
-                _finalize_recheck_state(
-                    db,
-                    monitored.id,
-                    last_checked=previous_last_checked,
-                    next_check_at=next_check_at,
+            try:
+                monitor_payload = build_monitored_payload(monitored, user_id=monitored.user_id)
+                monitor_outcome = _collect_inline(
+                    monitor_payload,
+                    product_id=monitored.id,
+                    kind="monitored",
+                    logger_bound=task_logger,
                 )
-                task_logger.warning("recheck_aborted", reason=monitor_outcome.reason)
-                return monitor_outcome.status
-
-            competitors = get_competitors_by_monitored_id(db, monitored.id)
-            competitor_outcomes: list[CollectionOutcome] = []
-
-            for competitor in competitors:
-                competitor_payload = build_competitor_payload(competitor, user_id=monitored.user_id)
-                outcome = _collect_inline(
-                    competitor_payload,
-                    product_id=competitor.id,
-                    kind="competitor",
-                    logger_bound=task_logger.bind(competitor_id=str(competitor.id)),
-                )
-                competitor_outcomes.append(outcome)
-                RECHECK_COMPETITOR_RESULT_TOTAL.labels(result=outcome.status).inc()
+                RECHECK_MONITORED_RESULT_TOTAL.labels(result=monitor_outcome.status).inc()
                 task_logger.info(
-                    "competitor_collect_result",
-                    status=outcome.status,
-                    reason=outcome.reason,
-                    competitor_id=str(competitor.id),
+                    "monitor_collect_result",
+                    status=monitor_outcome.status,
+                    reason=monitor_outcome.reason,
                 )
 
-            should_compare = (
-                previous_last_checked is None
-                or monitor_outcome.has_new_data
-                or any(outcome.has_new_data for outcome in competitor_outcomes)
-            )
+                if monitor_outcome.status not in {"success", "not_modified"}:
+                    task_logger.warning("recheck_aborted", reason=monitor_outcome.reason)
+                    return monitor_outcome.status
 
-            if should_compare:
-                run_price_comparison(db, monitored.id)
+                competitors = get_competitors_by_monitored_id(db, monitored.id)
+                competitor_outcomes: list[CollectionOutcome] = []
 
-            finished_at = datetime.now(timezone.utc)
-            _finalize_recheck_state(
-                db,
-                monitored.id,
-                last_checked=finished_at,
-                next_check_at=_compute_next_check_at(monitored, finished_at),
-            )
-            task_logger.info(
-                "recheck_finished",
-                duration_ms=int((finished_at - started_at).total_seconds() * 1000),
-                competitors=len(competitors),
-                comparison_triggered=should_compare,
-            )
-            return "completed"
-        
-        except SoftTimeLimitExceeded:
-            _finalize_recheck_state(
-                db,
-                monitored.id,
-                last_checked=previous_last_checked,
-                next_check_at=next_check_at,
-            )
-            task_logger.warning(
-                "recheck_timeout",
-                timeout_seconds=settings.RECHECK_TIMEOUT_SECONDS,
-            )
-            return "timeout"
-        
-        except Exception:
-            _finalize_recheck_state(
-                db,
-                monitored.id,
-                last_checked=previous_last_checked,
-                next_check_at=next_check_at,
-            )
-            task_logger.exception("recheck_failed")
-            raise
-        finally:
-            SCRAPING_LATENCY_SECONDS.labels(source="monitor_orchestrator").observe(
-                (datetime.now(timezone.utc) - started_at).total_seconds()
-            )
+                for competitor in competitors:
+                    competitor_payload = build_competitor_payload(competitor, user_id=monitored.user_id)
+                    outcome = _collect_inline(
+                        competitor_payload,
+                        product_id=competitor.id,
+                        kind="competitor",
+                        logger_bound=task_logger.bind(competitor_id=str(competitor.id)),
+                    )
+                    competitor_outcomes.append(outcome)
+                    RECHECK_COMPETITOR_RESULT_TOTAL.labels(result=outcome.status).inc()
+                    task_logger.info(
+                        "competitor_collect_result",
+                        status=outcome.status,
+                        reason=outcome.reason,
+                        competitor_id=str(competitor.id),
+                    )
+
+                should_compare = (
+                    finalize_last_checked is None
+                    or monitor_outcome.has_new_data
+                    or any(outcome.has_new_data for outcome in competitor_outcomes)
+                )
+
+                if should_compare:
+                    run_price_comparison(db, monitored.id)
+
+                finished_at = datetime.now(timezone.utc)
+                finalize_last_checked = finished_at
+                finalize_next_check_at = _compute_next_check_at(monitored, finished_at)
+                task_logger.info(
+                    "recheck_finished",
+                    duration_ms=int((finished_at - started_at).total_seconds() * 1000),
+                    competitors=len(competitors),
+                    comparison_triggered=should_compare,
+                )
+                return "completed"
+
+            except SoftTimeLimitExceeded:
+                task_logger.warning(
+                    "recheck_timeout",
+                    timeout_seconds=settings.RECHECK_TIMEOUT_SECONDS,
+                )
+                return "timeout"
+
+            except Exception:
+                task_logger.exception("recheck_failed")
+                raise
+
+            finally:
+                if marked_started:
+                    _finalize_recheck_state(
+                        db,
+                        monitored.id,
+                        last_checked=finalize_last_checked,
+                        next_check_at=finalize_next_check_at,
+                    )
+    finally:
+        SCRAPING_LATENCY_SECONDS.labels(source="monitor_orchestrator").observe(
+            (datetime.now(timezone.utc) - started_at).total_seconds()
+        )        
 
 
 @celery_app.task(

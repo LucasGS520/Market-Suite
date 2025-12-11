@@ -162,6 +162,17 @@ RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL = Counter(
     ["reason"],
 )
 
+RECHECK_NEXT_CHECK_MISSING_TOTAL = Counter(
+    "recheck_next_check_missing_total",
+    "Contagem absoluta de monitorados sem next_check_at definido",
+)
+
+RECHECK_FINALIZE_FAILED_TOTAL = Counter(
+    "recheck_finalize_failed_total",
+    "Falhas ao limpar estado de rechecagem e recalcular next_check_at",
+    ["reason"],
+)
+
 SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
     "scraper_cache_lookups_total",
     "Total de consultas ao cache básico do scraper por resultado",
@@ -302,4 +313,6 @@ __all__ = [
     "RECHECK_COMPETITOR_RESULT_TOTAL",
     "RECHECK_ENQUEUED_TOTAL",
     "RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL",
+    "RECHECK_NEXT_CHECK_MISSING_TOTAL",
+    "RECHECK_FINALIZE_FAILED_TOTAL",
 ]

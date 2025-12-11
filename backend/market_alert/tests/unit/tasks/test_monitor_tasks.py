@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
@@ -7,7 +7,7 @@ from backend.market_alert.tasks import monitor_recheck_tasks
 
 
 class DummySession:
-    """Contexto de sessão fictício para isolar efeitos colaterais."""
+    """Permite contar chamadas de métricas em testes sem prometheus real."""
     def __enter__(self):
         return self
 
@@ -21,8 +21,8 @@ class DummyMetric:
         self.calls: list[dict] = []
 
     def labels(self, **kwargs):
-        self.calls.append(kwargs)
-        return self 
+        self.calls.append({"labels": kwargs})
+        return self
     
     def inc(self, value: int = 1):
         self.calls.append({"inc": value})
@@ -41,6 +41,7 @@ class DummyMonitored:
         self.status = None
         self.last_checked = datetime(2024, 1, 1, tzinfo=timezone.utc)
         self.check_interval = 10
+        self.checking_in_progress = False
 
 class DummyCompetitor:
     """ Estrutura mínima para simular concorrentes associados """
@@ -50,22 +51,27 @@ class DummyCompetitor:
         self.monitored_product_id = monitored_id
         self.product_url = "http://concorrente"
 
-def _install_metric_mocks(monkeypatch):
+def _install_metric_mocks(monkeypatch: pytest.MonkeyPatch):
     monitored_metric = DummyMetric()
     competitor_metric = DummyMetric()
-    histogram_metric = DummyMetric() 
+    histogram_metric = DummyMetric()
+    finalize_metric = DummyMetric()
 
     monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_MONITORED_RESULT_TOTAL", monitored_metric)
     monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_COMPETITOR_RESULT_TOTAL", competitor_metric)
     monkeypatch.setattr(monitor_recheck_tasks, "SCRAPING_LATENCY_SECONDS", histogram_metric)
+    monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_FINALIZE_FAILED_TOTAL", finalize_metric)
 
-    return monitored_metric, competitor_metric, histogram_metric
+    return monitored_metric, competitor_metric, histogram_metric, finalize_metric
 
-def test_recheck_monitored_product_aborts_on_monitor_error(monkeypatch):
+def _changed_result():
+    return type("Result", (), {"price_changed": True, "availability_changed": False})()
+
+def test_recheck_monitored_product_aborts_on_monitor_error(monkeypatch: pytest.MonkeyPatch):
     """Falhas no monitorado encerram o fluxo e liberam a flag corretamente."""
     monitored_id = UUID("123e4567-e89b-12d3-a456-426655440000")
     monitored = DummyMonitored(monitored_id, monitored_id)
-    finalize_calls = {}
+    finalize_calls: dict[str, datetime] = {}
 
     _install_metric_mocks(monkeypatch)
 
@@ -73,17 +79,34 @@ def test_recheck_monitored_product_aborts_on_monitor_error(monkeypatch):
     monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: False)
     monkeypatch.setattr(monitor_recheck_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
     monkeypatch.setattr(monitor_recheck_tasks, "get_competitors_by_monitored_id", lambda db, mid: [])
-    monkeypatch.setattr(monitor_recheck_tasks, "_mark_recheck_started", lambda *a, **k: True)
     monkeypatch.setattr(
         monitor_recheck_tasks,
-        "_collect_monitored_single",
-        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(status="error", reason="boom", product_id=monitored_id),
+        "_compute_next_check_at",
+        lambda m, ref: ref + timedelta(seconds=10),
     )
-    monkeypatch.setattr(monitor_recheck_tasks, "run_price_comparison", lambda *a, **k: finalize_calls.setdefault("comparison", True))
+
+    def fake_mark(*_a, **_k):
+        monitored.checking_in_progress = True
+        return True
+
+    monkeypatch.setattr(monitor_recheck_tasks, "_mark_recheck_started", fake_mark)
+    monkeypatch.setattr(
+        monitor_recheck_tasks,
+        "_collect_inline",
+        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(
+            status="error", reason="boom", product_id=monitored_id
+        ),
+    )
+    monkeypatch.setattr(
+        monitor_recheck_tasks,
+        "run_price_comparison",
+        lambda *a, **k: finalize_calls.setdefault("comparison", True),
+    )
 
     def fake_finalize(db, product_id, *, last_checked, next_check_at):
         finalize_calls["last_checked"] = last_checked
         finalize_calls["next_check_at"] = next_check_at
+        monitored.checking_in_progress = False
 
     monkeypatch.setattr(monitor_recheck_tasks, "_finalize_recheck_state", fake_finalize)
 
@@ -91,48 +114,127 @@ def test_recheck_monitored_product_aborts_on_monitor_error(monkeypatch):
 
     assert result == "error"
     assert finalize_calls["last_checked"] == monitored.last_checked
+    assert monitored.checking_in_progress is False
     assert "comparison" not in finalize_calls
 
-def test_recheck_monitored_product_runs_comparison_on_changes(monkeypatch):
-    """Alterações em monitorado ou concorrente acionam comparação inline."""
+def test_recheck_sets_and_clears_checking_flag_on_success_and_failure(monkeypatch: pytest.MonkeyPatch):
+    """Rechecagem deve limpar a flag tanto em sucesso quanto ao abortar."""
 
     monitored_id = UUID("123e4567-e89b-12d3-a456-426655440010")
-    competitor_id = UUID("123e4567-e89b-12d3-a456-426655440011")
+    monitored = DummyMonitored(monitored_id, monitored_id)
+    finalize_calls: list[tuple[datetime | None, datetime]] = []
+    comparison_calls: dict[str, bool] = {}
+
+    _install_metric_mocks(monkeypatch)
+    monkeypatch.setattr(monitor_recheck_tasks, "SessionLocal", lambda: DummySession())
+    monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(monitor_recheck_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
+    monkeypatch.setattr(monitor_recheck_tasks, "get_competitors_by_monitored_id", lambda db, mid: [])
+    monkeypatch.setattr(
+        monitor_recheck_tasks,
+        "_compute_next_check_at",
+        lambda m, ref: ref + timedelta(seconds=5),
+    )
+
+    def fake_mark(*_a, **_k):
+        monitored.checking_in_progress = True
+        return True
+
+    monkeypatch.setattr(monitor_recheck_tasks, "_mark_recheck_started", fake_mark)
+    monkeypatch.setattr(
+        monitor_recheck_tasks,
+        "_collect_inline",
+        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(
+            status="success", product_id=monitored_id, result=_changed_result()
+        ),
+    )
+    monkeypatch.setattr(
+        monitor_recheck_tasks,
+        "run_price_comparison",
+        lambda *a, **k: comparison_calls.setdefault("called", True),
+    )
+
+    def fake_finalize(db, product_id, *, last_checked, next_check_at):
+        finalize_calls.append((last_checked, next_check_at))
+        monitored.last_checked = last_checked
+        monitored.checking_in_progress = False
+
+    monkeypatch.setattr(monitor_recheck_tasks, "_finalize_recheck_state", fake_finalize)
+
+    success_result = monitor_recheck_tasks.recheck_monitored_product.run(str(monitored_id))
+
+    assert success_result == "completed"
+    assert finalize_calls, "finalização deve ocorrer após sucesso"
+    last_checked, next_check = finalize_calls[-1]
+    assert last_checked is not None and last_checked.tzinfo == timezone.utc
+    assert next_check == last_checked + timedelta(seconds=5)
+    assert monitored.checking_in_progress is False
+    assert comparison_calls["called"] is True
+
+    #Força nova execução com falha para garantir limpeza da flag
+    monitored.checking_in_progress = False
+
+    monkeypatch.setattr(
+        monitor_recheck_tasks,
+        "_collect_inline",
+        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(
+            status="error", reason="boom", product_id=monitored_id
+        ),
+    )
+    finalize_calls.clear()
+
+    failure_result = monitor_recheck_tasks.recheck_monitored_product.run(str(monitored_id))
+
+    assert failure_result == "error"
+    assert finalize_calls[0][0] == monitored.last_checked
+    assert monitored.checking_in_progress is False
+
+
+def test_recheck_monitored_product_runs_comparison_on_changes(monkeypatch: pytest.MonkeyPatch):
+    """Alterações detectadas em concorrentes acionam a comparação inline."""
+
+    monitored_id = UUID("123e4567-e89b-12d3-a456-426655440020")
+    competitor_id = UUID("123e4567-e89b-12d3-a456-426655440021")
     monitored = DummyMonitored(monitored_id, monitored_id)
     competitor = DummyCompetitor(competitor_id, monitored_id)
+    comparison_calls: dict[str, bool] = {}
 
-    _, _, _ = _install_metric_mocks(monkeypatch)
-
+    _install_metric_mocks(monkeypatch)
     monkeypatch.setattr(monitor_recheck_tasks, "SessionLocal", lambda: DummySession())
     monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: False)
     monkeypatch.setattr(monitor_recheck_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
     monkeypatch.setattr(monitor_recheck_tasks, "get_competitors_by_monitored_id", lambda db, mid: [competitor])
+    monkeypatch.setattr(
+        monitor_recheck_tasks,
+        "_compute_next_check_at",
+        lambda m, ref: ref + timedelta(seconds=5),
+    )
     monkeypatch.setattr(monitor_recheck_tasks, "_mark_recheck_started", lambda *a, **k: True)
 
-    monkeypatch.setattr(
-        monitor_recheck_tasks,
-        "_collect_monitored_single",
-        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(status="success_new", product_id=monitored_id),
-    )
-    monkeypatch.setattr(
-        monitor_recheck_tasks,
-        "_collect_competitor_single",
-        lambda *a, **k: monitor_recheck_tasks.CollectionOutcome(status="success_no_change", product_id=competitor_id),
-    )
+    def fake_collect(payload, *, product_id, kind, logger_bound):
+        if kind == "monitored":
+            return monitor_recheck_tasks.CollectionOutcome(status="not_modified", product_id=product_id)
+        return monitor_recheck_tasks.CollectionOutcome(
+            status="success", product_id=product_id, result=_changed_result()
+        )
 
-    comparison_calls = {}
-    monkeypatch.setattr(monitor_recheck_tasks, "run_price_comparison", lambda *a, **k: comparison_calls.setdefault("called", True))
+    monkeypatch.setattr(monitor_recheck_tasks, "_collect_inline", fake_collect)
     monkeypatch.setattr(monitor_recheck_tasks, "_finalize_recheck_state", lambda *a, **k: None)
+    monkeypatch.setattr(
+        monitor_recheck_tasks,
+        "run_price_comparison",
+        lambda *a, **k: comparison_calls.setdefault("called", True),
+    )
 
     result = monitor_recheck_tasks.recheck_monitored_product.run(str(monitored_id))
 
     assert result == "completed"
     assert comparison_calls["called"] is True
 
-def test_enqueue_due_monitored_respects_suspension(monkeypatch):
+def test_enqueue_due_monitored_respects_suspension(monkeypatch: pytest.MonkeyPatch):
     """Agendador deve ignorar execução quando suspensão global está ativa."""
 
-    _, _, histogram = _install_metric_mocks(monkeypatch)
+    _, _, histogram, _ = _install_metric_mocks(monkeypatch)
     monkeypatch.setattr(monitor_recheck_tasks, "SessionLocal", lambda: DummySession())
     monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: True)
     monkeypatch.setattr(monitor_recheck_tasks, "schedule_due_monitored", lambda db: 5)
