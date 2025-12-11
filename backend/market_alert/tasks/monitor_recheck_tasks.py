@@ -31,7 +31,7 @@ from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.models.models_products import MonitoredProduct
-from market_alert.orchestrator.collector_service import (
+from market_alert.orchestrator.collector_service_orchestrator import (
     build_competitor_payload,
     build_monitored_payload,
     schedule_due_monitored,
