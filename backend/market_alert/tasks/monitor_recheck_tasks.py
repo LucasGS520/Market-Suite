@@ -96,10 +96,8 @@ def _mark_recheck_started(db: SessionLocal, monitored_id: UUID, started_at: date
                 )
             )
         if not updated:
-            db.rollback()
             return False
     except Exception:
-        db.rollback()
         logger_bound.warning("recheck_mark_failed")
         return False
     logger_bound.info("recheck_started", monitored_id=str(monitored_id), started_at=started_at.isoformat())

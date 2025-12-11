@@ -167,7 +167,7 @@ def collect_product(
     
     reason: str | None = None
     result: ScrapeResult | None = None
-    lock_acquired = False
+    lock_token: str | None = None
 
     try:
         if payload is None or lock_target is None or url is None:
@@ -178,9 +178,9 @@ def collect_product(
             task_logger.warning("scraping_suspended", kind=kind, product_id=str(lock_target))
         else:
             if use_lock:
-                lock_acquired = acquire_product_lock(lock_target, ttl_seconds=lock_ttl_seconds)
-                lock_status = "acquired" if lock_acquired else "skipped"
-                if lock_acquired:
+                lock_token = acquire_product_lock(lock_target, ttl_seconds=lock_ttl_seconds)
+                lock_status = "acquired" if lock_token else "skipped"
+                if lock_token:
                     COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
                 else:
                     reason = "lock_skipped"
@@ -230,8 +230,8 @@ def collect_product(
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
         outcome = _record_metrics(kind, result, lock_status=lock_status, reason=reason)
-        if use_lock and lock_acquired:
-            release_product_lock(lock_target)
+        if use_lock and lock_token:
+            release_product_lock(lock_target, lock_token)
         SCRAPER_IN_FLIGHT.dec()
         duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
         task_logger.info(

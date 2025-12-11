@@ -1,50 +1,42 @@
-import asyncio
 import time
+from uuid import uuid4
 from types import SimpleNamespace
 
 from backend.market_alert.tasks import monitor_recheck_tasks
 
 
-def test_parse_monitored_batch_benchmark(benchmark, monkeypatch):
-    #Cria objetos simples simulando produtos a serem processados
-    batch = [SimpleNamespace(id=i, product_url=f"http://exemplo.com/{i}") for i in range(3)]
+def test_collect_inline_benchmark(benchmark, monkeypatch):
+    """Garante que a coleta inline permanece leve com o dispatcher atual."""
 
-    async def fake_parse(url: str, product_type: str, **k):
-        #Simula atraso de rede para testar concorrência
-        await asyncio.sleep(0.1)
-        return {"current_price": 10.0, "thumbnail": None, "free_shipping": False}
+    def fake_collect_product(payload, **_kwargs):
+        time.sleep(0.05)
+        return "success", SimpleNamespace(price_changed=True, availability_changed=False)
 
-    #Substitui o cliente real por uma versão simulada
-    monkeypatch.setattr(monitor_recheck_tasks, "scraper_client", SimpleNamespace(parse=fake_parse))
+    monkeypatch.setattr(monitor_recheck_tasks, "collect_product", fake_collect_product)
 
-    def run():
-        start = time.perf_counter()
-        asyncio.run(monitor_recheck_tasks._parse_monitored_batch(batch))
-        return time.perf_counter() - start
-
-    tempo_execucao = benchmark(run)
-    #Se as tarefas rodarem em paralelo, o tempo deve ser inferior à soma sequencial
-    assert tempo_execucao < 0.25
-
-def test_parse_competitor_batch_benchmark(benchmark, monkeypatch):
-    """ Verifica processamento paralelo para lotes de concorrentes """
-
-    #Cria objetos simples simulando concorrentes a serem processados
-    batch = [SimpleNamespace(id=i, product_url=f"http://exemplo.com/{i}") for i in range(3)]
-
-    async def fake_parse(url: str, product_type: str, **k):
-        #Simula atraso de rede para testar concorrência
-        await asyncio.sleep(0.1)
-        return {"current_price": 10.0, "thumbnail": None, "free_shipping": False}
-
-    #Substitui o cliente real por uma versão simulada
-    monkeypatch.setattr(monitor_recheck_tasks, "scraper_client", SimpleNamespace(parse=fake_parse))
+    payload = {"monitored_id": str(uuid4()), "url": "http://exemplo.com/produto"}
 
     def run():
         start = time.perf_counter()
-        asyncio.run(monitor_recheck_tasks._parse_competitor_batch(batch))
-        return time.perf_counter() - start
+        outcome = monitor_recheck_tasks._collect_inline(
+            payload,
+            product_id=uuid4(),
+            kind="monitored",
+            logger_bound=None,
+        )
+        return time.perf_counter() - start, outcome
 
-    tempo_execucao = benchmark(run)
-    #Se as tarefas rodarem em paralelo, o tempo deve ser inferior à soma sequencial
-    assert tempo_execucao < 0.25
+    tempo_execucao, outcome = benchmark(run)
+    assert tempo_execucao < 0.1
+    assert outcome.status == "success"
+    assert outcome.price_changed is True
+
+def test_compute_next_check_at_benchmark(benchmark):
+    """Valida cálculo rápido de próxima janela de rechecagem."""
+
+    monitored = SimpleNamespace(check_interval=30)
+    reference = monitor_recheck_tasks.datetime.now(monitor_recheck_tasks.timezone.utc)
+
+    tempo_execucao = benchmark(lambda: monitor_recheck_tasks._compute_next_check_at(monitored, reference))
+
+    assert tempo_execucao == reference + monitor_recheck_tasks.timedelta(seconds=30)

@@ -100,10 +100,14 @@ def test_collect_product_mapeia_excecoes_inesperadas(monkeypatch: pytest.MonkeyP
     monitored_id = uuid4()
 
     monkeypatch.setattr(collector_product_task, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(collector_product_task, "acquire_product_lock", lambda *_a, **_k: True)
+    monkeypatch.setattr(collector_product_task, "acquire_product_lock", lambda *_a, **_k: "token")
 
-    released: list[UUID] = []
-    monkeypatch.setattr(collector_product_task, "release_product_lock", lambda target: released.append(target))
+    released: list[tuple[UUID, str]] = []
+    monkeypatch.setattr(
+        collector_product_task,
+        "release_product_lock",
+        lambda target, token: released.append((target, token)),
+    )
 
     def _boom(*_a, **_k):
         raise RuntimeError("boom")
@@ -117,5 +121,5 @@ def test_collect_product_mapeia_excecoes_inesperadas(monkeypatch: pytest.MonkeyP
 
     assert outcome == "error"
     assert result is None
-    assert released == [monitored_id]
+    assert released == [(monitored_id, "token")]
     
