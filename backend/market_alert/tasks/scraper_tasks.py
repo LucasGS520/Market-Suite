@@ -30,7 +30,7 @@ def _merge_competitor_payload(
         merged["user_id"] = legacy_kwargs["owner_id"]
     return merged
 
-@celery_app.task(name="collect_competitor_task", queue="scraping")
+@celery_app.task(bind=True, name="collect_competitor_task", queue="scraping")
 def collect_competitor_task(
     self,
     payload: Mapping[str, Any] | None = None,
@@ -38,8 +38,21 @@ def collect_competitor_task(
     url: str | None = None,
     **legacy_kwargs,
 ):
-    """Redireciona coletas de concorrentes para a task centralizada."""
+    """ Redireciona coletas de concorrentes para a task centralizada 
+    
+    Optamos por enfileirar a task real para preservar headers, roteamento e
+    cadeia de callbacks do Celery, evitando executar a lógica principal
+    inline via ``run``.
+    """
     normalized = _merge_competitor_payload(payload, monitored_product_id, url, **legacy_kwargs)
-    return collect_product_task.run(payload=normalized)
+    delivery_info = getattr(self.request, "delivery_info", {}) or {}
+    queue = delivery_info.get("routing_key") or delivery_info.get("queue") or "scraping"
+
+    return collect_product_task.apply_async(
+        kwargs={"payload": normalized},
+        queue=queue,
+        headers=getattr(self.request, "headers", None),
+    )
+
 
 __all__ = ["collect_product_task", "collect_competitor_task"]

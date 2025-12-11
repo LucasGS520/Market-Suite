@@ -74,35 +74,24 @@ def test_collect_product_task_accepts_missing_name(monkeypatch):
     assert chamado["payload"].name_identification is None
 
 def test_collect_competitor_task_send_request_and_persist(monkeypatch):
-    """ Confere a delegação ao serviço de scraping de concorrentes """
-    chamado = {}
+    """Confere a delegação para a task central com payload completo."""
 
-    def fake_service(db, user_id, url, payload):
-        chamado["url"] = url
-        chamado["user_id"] = str(user_id)
-        chamado["monitored_id"] = str(payload.monitored_product_id)
-        return {"status": "success", "competitor_id": "abc"}
-    
-    dispatched: dict[str, object] = {}
+    captured = {}
 
-    def fake_dispatch(monitored_id, **kwargs):
-        dispatched["monitored_id"] = str(monitored_id)
-        dispatched["kwargs"] = kwargs
+    def fake_apply_async(*_, **kwargs):
+        captured.update(kwargs)
+        return "delegated"
 
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.scrape_competitor_product", fake_service)
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks.SessionLocal", lambda: DummySession())
-    monkeypatch.setattr(
-        "market_alert.tasks.scraper_tasks.get_monitored_product_by_id",
-        lambda db, pid: SimpleNamespace(user_id=VALID_UUID, last_checked=datetime.now(timezone.utc)),
+    collect_competitor_task.request = SimpleNamespace(delivery_info={"routing_key": "scraping"})
+    monkeypatch.setattr(collect_product_task, "apply_async", fake_apply_async)
+
+    result = collect_competitor_task.apply(
+        kwargs={"payload": {"competitor_id": VALID_UUID, "url": "http://concorrente"}}
     )
-    monkeypatch.setattr("market_alert.tasks.scraper_tasks._dispatch_comparison_task", fake_dispatch)
-    collect_competitor_task.run(VALID_UUID, "http://concorrente")
-
-    assert chamado["url"] == "http://concorrente"
-    assert chamado["monitored_id"] == VALID_UUID
-    assert dispatched["monitored_id"] == VALID_UUID
-    assert dispatched["kwargs"]["price_changed"] is True
-    assert dispatched["kwargs"]["availability_changed"] is False
+    
+    assert result.get() == "delegated"
+    assert captured["kwargs"]["payload"]["competitor_id"] == VALID_UUID
+    assert captured["queue"] == "scraping"
 
 def test_result_helpers_accept_result_and_mapping():
     """Garante compatibilidade com ``ScrapeResult`` e dicionários legados."""
