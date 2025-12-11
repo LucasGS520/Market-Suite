@@ -21,7 +21,6 @@ from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_user import get_user_by_id
 from market_alert.models.models_alerts import NotificationLog
 from market_alert.notifications.manager import NotificationManager
-from market_alert.services.services_notifications import dispatch_price_alerts
 from market_alert.notifications.channels import EmailChannel, SMSChannel, PushChannel, WhatsAppChannel, SlackChannel
 from market_alert.enums.enums_alerts import ChannelType
 from market_alert.core.config_alert import settings
@@ -102,20 +101,12 @@ def send_alert_task(self, notification_log_id: str) -> None:
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10, name="send_notification_task", rate_limit=settings.ALERT_RATE_LIMIT, queue="monitor")
 def send_notification_task(self, monitored_id: str, alerts: list) -> None:
     """ Envia notificações de preço para o produto monitorado informado """
-    #Sessão para acesso ao banco de dados
-    db: Session = SessionLocal()
-    try:
-        monitored = get_monitored_product_by_id(db, UUID(monitored_id))
-        if not monitored:
-            raise ValueError(f"Monitored product {monitored_id} not found")
-
-        #Dispara as notificações para todos os canais configurados
-        dispatch_price_alerts(db, monitored, alerts)
-
-    except Exception as exc:
-        raise self.retry(exc=exc)
-    finally:
-        db.close()
+    logger.info(
+        "notifications_disabled_temporarily",
+        monitored_id=monitored_id,
+        alerts_count=len(alerts) if alerts else 0,
+    )
+    return None
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=10, name="dispatch_price_alert_task", rate_limit=settings.ALERT_RATE_LIMIT, queue="monitor")
 def dispatch_price_alert_task(self, monitored_id: str, alert: dict) -> None:

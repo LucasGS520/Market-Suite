@@ -13,9 +13,12 @@ from typing import Tuple, List, Dict, Any, Optional
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import structlog
 import time
+import json
 
 from shared.metrics.metrics_price_comparison import (
+    MALFORMED_COMPARISON_PAYLOADS_TOTAL,
     PRICE_COMPARISON_DURATION_SECONDS,
+    PRICE_COMPARISON_FAILURES_TOTAL,
     PRICE_COMPARISONS_TOTAL,
 )
 
@@ -329,7 +332,7 @@ def _calculate_competitiveness_status(
     return CompetitivenessStatus.URGENT.value
 
 def _build_summary_from_result(
-    payload: Dict[str, Any],
+    payload: Dict[str, Any] | None,
     *,
     timestamp: Any,
     comparison_id: UUID | None,
@@ -341,7 +344,17 @@ def _build_summary_from_result(
     mínimos, ranking e ajuste potencial sejam persistidos sempre que
     o endpoint de comparação for chamado.
     """
-    payload_dict = payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        logger.warning(
+            "comparison_payload_invalid_type",
+            expected="dict",
+            received_type=type(payload).__name__,
+            comparison_id=str(comparison_id) if comparison_id else None,
+        )
+        MALFORMED_COMPARISON_PAYLOADS_TOTAL.labels(stage="build_summary").inc()
+        payload_dict: dict[str, Any] = {}
+    else:
+        payload_dict = payload
 
     detailed_summary = _compute_summary_from_payload(
         payload_dict,
@@ -358,7 +371,7 @@ def _build_summary_from_result(
     )
 
 def _compute_summary_from_payload(
-    payload: Dict[str, Any],
+    payload: Dict[str, Any] | None,
     *,
     timestamp: Any,
     comparison_id: UUID | None,
@@ -381,77 +394,100 @@ def _compute_summary_from_payload(
     if comparison_id is not None:
         summary["comparison_id"] = str(comparison_id)
 
-    discrepancies_raw = payload.get("discrepancies") or []
-    summary["discrepancies"] = (
-        discrepancies_raw if isinstance(discrepancies_raw, list) else []
-    )
+    if not isinstance(payload, dict):
+        MALFORMED_COMPARISON_PAYLOADS_TOTAL.labels(stage="compute_summary").inc()
+        logger.warning(
+            "comparison_payload_invalid",
+            comparison_id=str(comparison_id) if comparison_id else None,
+        )
+        return summary
 
-    alerts_raw = payload.get("alerts") or []
-    summary["alerts"] = alerts_raw if isinstance(alerts_raw, list) else []
+    try:
+        discrepancies_raw = payload.get("discrepancies") or []
+        summary["discrepancies"] = (
+            discrepancies_raw if isinstance(discrepancies_raw, list) else []
+        )
+        alerts_raw = payload.get("alerts") or []
+        summary["alerts"] = alerts_raw if isinstance(alerts_raw, list) else []
+        monitored_price = _to_decimal(payload.get("monitored_price"))
 
-    monitored_price = _to_decimal(payload.get("monitored_price"))
+        if monitored_price is not None:
+            summary["monitored_price"] = monitored_price
+        competitor_prices: list[Decimal] = []
 
-    if monitored_price is not None:
-        summary["monitored_price"] = monitored_price
+        def _append_price(value: Any) -> None:
+            price = _to_decimal(value)
+            if price is not None and price not in competitor_prices:
+                competitor_prices.append(price)
 
-    competitor_prices: list[Decimal] = []
+        for item in summary["discrepancies"]:
+            if isinstance(item, dict):
+                _append_price(item.get("price"))
 
-    def _append_price(value: Any) -> None:
-        price = _to_decimal(value)
-        if price is not None and price not in competitor_prices:
-            competitor_prices.append(price)
+        lowest_raw = payload.get("lowest_competitor") or {}
+        highest_raw = payload.get("highest_competitor") or {}
+        lowest_price = _to_decimal(lowest_raw.get("price"))
+        highest_price = _to_decimal(highest_raw.get("price"))
 
-    for item in summary["discrepancies"]:
-        if isinstance(item, dict):
-            _append_price(item.get("price"))
+        _append_price(lowest_price)
+        _append_price(highest_price)
 
-    lowest_price = _to_decimal(payload.get("lowest_competitor", {}).get("price"))
-    highest_price = _to_decimal(payload.get("highest_competitor", {}).get("price"))
+        summary["competitors_with_price_count"] = len(competitor_prices)
 
-    _append_price(lowest_price)
-    _append_price(highest_price)
+        if competitor_prices:
+            competitors_min = min(competitor_prices)
+            competitors_max = max(competitor_prices)
+            competitors_mean = (
+                sum(competitor_prices) / len(competitor_prices)
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    summary["competitors_with_price_count"] = len(competitor_prices)
+            summary["competitors_min"] = competitors_min
+            summary["competitors_max"] = competitors_max
+            summary["competitors_mean"] = competitors_mean
 
-    if competitor_prices:
-        competitors_min = min(competitor_prices)
-        competitors_max = max(competitor_prices)
-        competitors_mean = (
-            sum(competitor_prices) / len(competitor_prices)
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if (
+            monitored_price is not None
+            and summary.get("competitors_min") is not None
+            and monitored_price > summary.get("competitors_min")
+        ):
+            summary["potential_adjustment"] = (
+                monitored_price - summary.get("competitors_min")
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-        summary["competitors_min"] = competitors_min
-        summary["competitors_max"] = competitors_max
-        summary["competitors_mean"] = competitors_mean
+        if monitored_price is not None and competitor_prices:
+            cheaper_count = sum(1 for price in competitor_prices if price < monitored_price)
+            summary["position_rank"] = cheaper_count + 1
 
-    if (
-        monitored_price is not None
-        and summary.get("competitors_min") is not None
-        and monitored_price > summary.get("competitors_min")
-    ):
-        summary["potential_adjustment"] = (
-            monitored_price - summary.get("competitors_min")
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        status_reference = summary.get("competitors_min")
+        status = _calculate_competitiveness_status(monitored_price, status_reference)
+        if status is not None:
+            summary["competitiveness_status"] = status
 
-    if monitored_price is not None and competitor_prices:
-        cheaper_count = sum(1 for price in competitor_prices if price < monitored_price)
-        summary["position_rank"] = cheaper_count + 1
+        summary["comparison_insights"] = _build_comparison_insights(
+            monitored_price=monitored_price,
+            competitors_min=summary.get("competitors_min"),
+            competitors_count=competitors_count,
+            position_rank=summary.get("position_rank"),
+            potential_adjustment=summary.get("potential_adjustment"),
+            competitiveness_status=summary.get("competitiveness_status"),
+        )
+        return summary
 
-    status_reference = summary.get("competitors_min")
-    status = _calculate_competitiveness_status(monitored_price, status_reference)
-    if status is not None:
-        summary["competitiveness_status"] = status
-
-    summary["comparison_insights"] = _build_comparison_insights(
-        monitored_price=monitored_price,
-        competitors_min=summary.get("competitors_min"),
-        competitors_count=competitors_count,
-        position_rank=summary.get("position_rank"),
-        potential_adjustment=summary.get("potential_adjustment"),
-        competitiveness_status=summary.get("competitiveness_status"),
-    )
-
-    return summary
+    except (AttributeError, TypeError, ValueError) as exc:
+        price_preview = None
+        try:
+            price_preview = json.dumps(payload)[:300]
+        except Exception:
+            price_preview = str(payload)[:300]
+        PRICE_COMPARISON_FAILURES_TOTAL.labels(stage="compute_summary").inc()
+        MALFORMED_COMPARISON_PAYLOADS_TOTAL.labels(stage="compute_summary").inc()
+        logger.warning(
+            "comparison_summary_failed",
+            error=str(exc),
+            comparison_id=str(comparison_id) if comparison_id else None,
+            payload_preview=price_preview,
+        )
+        return summary
 
 def _calculate_percentage_delta(
     monitored_price: Optional[Decimal], reference_price: Optional[Decimal]

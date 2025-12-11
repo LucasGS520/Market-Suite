@@ -27,6 +27,8 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_NO_DATA_TOTAL,
     COLLECTOR_SUCCESS_NEW_DATA_TOTAL,
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL,
+    COLLECT_LOCK_SKIPPED_TOTAL,
+    COLLECT_SUCCESS_TOTAL,
     SCRAPER_IN_FLIGHT,
 )
 from shared.utils.redis_client import is_scraping_suspended
@@ -94,6 +96,7 @@ def _record_metrics(
     """
     if lock_status == "skipped":
         COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
+        COLLECT_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
     
@@ -123,6 +126,7 @@ def _record_metrics(
 
     if result.status == "success":
         COLLECTOR_SUCCESS_NEW_DATA_TOTAL.labels(kind=kind).inc()
+        COLLECT_SUCCESS_TOTAL.labels(kind=kind).inc()
         return "success"
 
     COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
@@ -161,6 +165,7 @@ def collect_product(
     task_logger = logger_bound or logger
 
     kind, monitored_id, competitor_id, url = _validate_payload(payload)
+    trace_id = payload.get("trace_id") if payload else None
     lock_target = competitor_id or monitored_id
 
     lock_status = "not_used"
@@ -188,6 +193,7 @@ def collect_product(
                         "collect_skipped_lock",
                         kind=kind,
                         product_id=str(lock_target),
+                        trace_id=trace_id,
                         note="retornando no_result para manter contrato minimalista",
                     )
 
@@ -243,6 +249,7 @@ def collect_product(
             lock_status=lock_status,
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
+            trace_id=trace_id,
         )
         if dispatch_comparison:
             _dispatch_comparison(monitored_id, result)

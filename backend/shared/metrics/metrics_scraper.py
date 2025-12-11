@@ -119,6 +119,18 @@ COLLECTOR_LOCK_SKIPPED_TOTAL = Counter(
     ["kind"],
 )
 
+COLLECT_LOCK_SKIPPED_TOTAL = Counter(
+    "collect_lock_skipped_total",
+    "Coletas ignoradas por lock ativo na entrada da tarefa",
+    ["kind"],
+)
+
+COLLECT_SUCCESS_TOTAL = Counter(
+    "collect_success_total",
+    "Coletas concluídas com sucesso e dados utilizáveis",
+    ["kind"],
+)
+
 #Métricas específicas do ciclo de rechecagem
 RECHECK_DISPATCH_TOTAL = Counter(
     "recheck_dispatch_total",
@@ -136,6 +148,18 @@ RECHECK_COMPETITOR_RESULT_TOTAL = Counter(
     "recheck_competitor_result_total",
     "Resultados das coletas individuais de concorrentes no orquestrador",
     ["result"],
+)
+
+RECHECK_ENQUEUED_TOTAL = Counter(
+    "recheck_enqueued_total",
+    "Monitorados enviados para rechecagem pelo scheduler",
+    ["status"],
+)
+
+RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL = Counter(
+    "recheck_skipped_no_next_check_total",
+    "Monitorados ignorados por ausência de next_check_at",
+    ["reason"],
 )
 
 SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
@@ -271,7 +295,11 @@ __all__ = [
     "COLLECTOR_ERROR_TOTAL",
     "COLLECTOR_LOCK_ACQUIRED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_TOTAL",
+    "COLLECT_LOCK_SKIPPED_TOTAL",
+    "COLLECT_SUCCESS_TOTAL",
     "RECHECK_DISPATCH_TOTAL",
     "RECHECK_MONITORED_RESULT_TOTAL",
     "RECHECK_COMPETITOR_RESULT_TOTAL",
+    "RECHECK_ENQUEUED_TOTAL",
+    "RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL",
 ]

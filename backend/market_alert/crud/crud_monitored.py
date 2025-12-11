@@ -25,6 +25,7 @@ from market_alert.enums.enums_alerts import AlertType
 from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
 from market_alert.crud import crud_alert_rules
 from market_alert.crud import crud_price_history
+from market_alert.core.config_alert import settings
 
 
 def _derive_name_from_url(product_url: str) -> str:
@@ -188,6 +189,7 @@ def create_pending_monitored_product(
         free_shipping=False,
         status=MonitoredStatus.pending,
         last_checked=None,
+        next_check_at=datetime.now(timezone.utc) + timedelta(seconds=settings.DEFAULT_NEXT_CHECK_SECONDS),
     )
     db.add(pending)
 
@@ -201,17 +203,6 @@ def create_pending_monitored_product(
         raise
     db.refresh(pending)
 
-    from market_alert.orchestrator.collector_service_orchestrator import enqueue_monitored_collection
-    try:
-        enqueue_monitored_collection(pending, user_id=user_id)
-    except Exception:
-        #Evita falhas de enfileiramento quebrarem a criação do monitorado
-        pass
-
-    if pending.last_checked is not None:
-        pending.last_checked = None
-        db.commit()
-        db.refresh(pending)
     return pending
 
 def create_or_update_monitored_product_scraped(

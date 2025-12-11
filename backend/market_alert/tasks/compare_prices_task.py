@@ -20,7 +20,6 @@ from shared.infra.redis_pubsub import publish_message
 
 from market_alert.core.celery_app import celery_app
 from market_alert.services.services_comparison import run_price_comparison
-from market_alert.tasks.alert_tasks import send_notification_task
 
 
 logger = structlog.get_logger("compare_prices")
@@ -73,7 +72,11 @@ def compare_prices_task(self, monitored_id: str) -> None:
             )
 
             if alerts:
-                send_notification_task.delay(monitored_id, alerts)
+                task_logger.info(
+                    "notifications_temporarily_disabled",
+                    alerts_count=len(alerts),
+                    monitored_id=mask_identifier(monitored_id),
+                )
 
         except Exception as exc:
             #Log estruturado para acompanhar falhas e motivos antes de propagar
