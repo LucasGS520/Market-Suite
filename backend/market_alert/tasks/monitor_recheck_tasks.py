@@ -92,24 +92,26 @@ def _mark_recheck_started(
     (``error``) para permitir decisões posteriores no orquestrador.
     """
     try:
-        with db.begin():
-            updated = (
-                db.query(MonitoredProduct)
-                .filter(
-                    MonitoredProduct.id == monitored_id,
-                    MonitoredProduct.checking_in_progress.is_(False),
-                )
-                .update(
-                    {
-                        "checking_in_progress": True,
-                        "checking_started_at": started_at,
-                    },
-                    synchronize_session=False,
-                )
+        #Sessão já está em uso por consultas anteriores; evita transação aninhada.
+        updated = (
+            db.query(MonitoredProduct)
+            .filter(
+                MonitoredProduct.id == monitored_id,
+                MonitoredProduct.checking_in_progress.is_(False),
             )
+            .update(
+                {
+                    "checking_in_progress": True,
+                    "checking_started_at": started_at,
+                },
+                synchronize_session=False,
+            )
+        )
+        db.commit()
         if not updated:
             return "conflict"
     except Exception:
+        db.rollback()
         logger_bound.exception(
             "recheck_mark_failed",
             monitored_id=str(monitored_id),
