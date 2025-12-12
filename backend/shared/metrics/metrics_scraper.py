@@ -156,6 +156,12 @@ RECHECK_ENQUEUED_TOTAL = Counter(
     ["status"],
 )
 
+RECHECK_MARK_FAILED_TOTAL = Counter(
+    "recheck_mark_failed_total",
+    "Falhas ao marcar monitorado como em rechecagem",
+    ["reason"],
+)
+
 RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL = Counter(
     "recheck_skipped_no_next_check_total",
     "Monitorados ignorados por ausência de next_check_at",

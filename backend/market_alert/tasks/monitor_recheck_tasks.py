@@ -20,6 +20,7 @@ from shared.infra.db import SessionLocal
 from shared.metrics.metrics_scraper import (
     RECHECK_COMPETITOR_RESULT_TOTAL,
     RECHECK_FINALIZE_FAILED_TOTAL,
+    RECHECK_MARK_FAILED_TOTAL,
     RECHECK_MONITORED_RESULT_TOTAL,
     SCRAPING_LATENCY_SECONDS,
 )
@@ -78,8 +79,18 @@ def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime) -> 
         interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
     return reference + timedelta(seconds=interval_seconds)
 
-def _mark_recheck_started(db: SessionLocal, monitored_id: UUID, started_at: datetime, *, logger_bound) -> bool:
-    """ Marca o monitorado como em rechecagem de forma transacional """
+def _mark_recheck_started(
+    db: SessionLocal,
+    monitored_id: UUID,
+    started_at: datetime,
+    *,
+    logger_bound,
+) -> str:
+    """Marca o monitorado como em rechecagem e retorna o status da operação.
+
+    A rotina diferencia corrida legítima (``conflict``) de falha inesperada
+    (``error``) para permitir decisões posteriores no orquestrador.
+    """
     try:
         with db.begin():
             updated = (
@@ -97,12 +108,18 @@ def _mark_recheck_started(db: SessionLocal, monitored_id: UUID, started_at: date
                 )
             )
         if not updated:
-            return False
+            return "conflict"
     except Exception:
-        logger_bound.warning("recheck_mark_failed")
-        return False
-    logger_bound.info("recheck_started", monitored_id=str(monitored_id), started_at=started_at.isoformat())
-    return True
+        logger_bound.exception(
+            "recheck_mark_failed",
+            monitored_id=str(monitored_id),
+            started_at=started_at.isoformat(),
+        )
+        return "error"
+    logger_bound.info(
+        "recheck_started", monitored_id=str(monitored_id), started_at=started_at.isoformat()
+    )
+    return "started"
 
 def _finalize_recheck_state(
     db: SessionLocal,
@@ -192,10 +209,20 @@ def recheck_monitored_product(self, monitored_id: str) -> None:
                 task_logger.info("recheck_skipped_failed")
                 return "failed"
 
-            marked_started = _mark_recheck_started(db, monitored.id, started_at, logger_bound=task_logger)
-            if not marked_started:
+            mark_status = _mark_recheck_started(
+                db, monitored.id, started_at, logger_bound=task_logger
+            )
+            if mark_status == "conflict":
                 task_logger.info("recheck_already_running")
                 return "already_running"
+            if mark_status == "error":
+                task_logger.warning(
+                    "recheck_mark_failed",
+                    monitored_id=str(monitored.id),
+                    started_at=started_at.isoformat(),
+                )
+                RECHECK_MARK_FAILED_TOTAL.labels(reason="mark_error").inc()
+                return "mark_failed"
 
             finalize_last_checked = monitored.last_checked
             finalize_next_check_at = _compute_next_check_at(monitored, started_at)
@@ -271,7 +298,7 @@ def recheck_monitored_product(self, monitored_id: str) -> None:
                 raise
 
             finally:
-                if marked_started:
+                if mark_status == "started":
                     _finalize_recheck_state(
                         db,
                         monitored.id,

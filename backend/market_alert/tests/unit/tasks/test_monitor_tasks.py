@@ -56,13 +56,16 @@ def _install_metric_mocks(monkeypatch: pytest.MonkeyPatch):
     competitor_metric = DummyMetric()
     histogram_metric = DummyMetric()
     finalize_metric = DummyMetric()
+    mark_metric = DummyMetric()
+
 
     monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_MONITORED_RESULT_TOTAL", monitored_metric)
     monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_COMPETITOR_RESULT_TOTAL", competitor_metric)
     monkeypatch.setattr(monitor_recheck_tasks, "SCRAPING_LATENCY_SECONDS", histogram_metric)
     monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_FINALIZE_FAILED_TOTAL", finalize_metric)
+    monkeypatch.setattr(monitor_recheck_tasks, "RECHECK_MARK_FAILED_TOTAL", mark_metric)
 
-    return monitored_metric, competitor_metric, histogram_metric, finalize_metric
+    return monitored_metric, competitor_metric, histogram_metric, finalize_metric, mark_metric
 
 def _changed_result():
     return type("Result", (), {"price_changed": True, "availability_changed": False})()
@@ -87,7 +90,7 @@ def test_recheck_monitored_product_aborts_on_monitor_error(monkeypatch: pytest.M
 
     def fake_mark(*_a, **_k):
         monitored.checking_in_progress = True
-        return True
+        return "started"
 
     monkeypatch.setattr(monitor_recheck_tasks, "_mark_recheck_started", fake_mark)
     monkeypatch.setattr(
@@ -117,6 +120,52 @@ def test_recheck_monitored_product_aborts_on_monitor_error(monkeypatch: pytest.M
     assert monitored.checking_in_progress is False
     assert "comparison" not in finalize_calls
 
+def test_recheck_mark_failure_is_reported(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+    """Falha ao marcar rechecagem deve registrar e impedir coleta subsequente."""
+
+    monitored_id = UUID("123e4567-e89b-12d3-a456-426655440099")
+    monitored = DummyMonitored(monitored_id, monitored_id)
+
+    _, _, _, _, mark_metric = _install_metric_mocks(monkeypatch)
+    monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(monitor_recheck_tasks, "get_monitored_product_by_id", lambda db, mid: monitored)
+    monkeypatch.setattr(monitor_recheck_tasks, "get_competitors_by_monitored_id", lambda db, mid: [])
+    monkeypatch.setattr(monitor_recheck_tasks, "_compute_next_check_at", lambda m, ref: ref + timedelta(seconds=10))
+
+    class FailingSession:
+        """Simula erro de atualização transacional ao marcar rechecagem."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def begin(self):
+            class _Ctx:
+                def __enter__(self_inner):
+                    raise RuntimeError("db_failure")
+
+                def __exit__(self_inner, exc_type, exc, tb):
+                    return False
+
+            return _Ctx()
+
+    monkeypatch.setattr(monitor_recheck_tasks, "SessionLocal", lambda: FailingSession())
+
+    def fail_collect(*_a, **_k):
+        raise AssertionError("coleta não deve ser chamada")
+
+    monkeypatch.setattr(monitor_recheck_tasks, "_collect_inline", fail_collect)
+
+    caplog.set_level("WARNING")
+
+    result = monitor_recheck_tasks.recheck_monitored_product.run(str(monitored_id))
+
+    assert result == "mark_failed"
+    assert any("recheck_mark_failed" in rec.message for rec in caplog.records)
+    assert mark_metric.calls, "métrica de falha deve ser incrementada"
+
 def test_recheck_sets_and_clears_checking_flag_on_success_and_failure(monkeypatch: pytest.MonkeyPatch):
     """Rechecagem deve limpar a flag tanto em sucesso quanto ao abortar."""
 
@@ -138,7 +187,7 @@ def test_recheck_sets_and_clears_checking_flag_on_success_and_failure(monkeypatc
 
     def fake_mark(*_a, **_k):
         monitored.checking_in_progress = True
-        return True
+        return "started"
 
     monkeypatch.setattr(monitor_recheck_tasks, "_mark_recheck_started", fake_mark)
     monkeypatch.setattr(
@@ -234,7 +283,7 @@ def test_recheck_monitored_product_runs_comparison_on_changes(monkeypatch: pytes
 def test_enqueue_due_monitored_respects_suspension(monkeypatch: pytest.MonkeyPatch):
     """Agendador deve ignorar execução quando suspensão global está ativa."""
 
-    _, _, histogram, _ = _install_metric_mocks(monkeypatch)
+    _, _, histogram, _, _ = _install_metric_mocks(monkeypatch)
     monkeypatch.setattr(monitor_recheck_tasks, "SessionLocal", lambda: DummySession())
     monkeypatch.setattr(monitor_recheck_tasks, "is_scraping_suspended", lambda: True)
     monkeypatch.setattr(monitor_recheck_tasks, "schedule_due_monitored", lambda db: 5)
