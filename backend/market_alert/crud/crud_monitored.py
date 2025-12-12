@@ -33,6 +33,18 @@ def _compute_initial_next_check() -> datetime:
     #Centraliza o cálculo para manter consistência entre fluxos de criação
     return datetime.now(timezone.utc) + timedelta(seconds=settings.DEFAULT_NEXT_CHECK_SECONDS)
 
+def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime) -> datetime:
+    """ Calcula o próximo agendamento de rechecagem respeitando configuração dinâmica.
+    
+    A rotina consulta o campo `check_interval` do produto quando disponível e
+    aplica `RECHECK_INTERVAL_DEFAULT` como fallback seguro para manter
+    consistência com o scheduler.
+    """
+    interval_seconds = getattr(monitored, "check_interval", None)
+    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
+        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
+    return reference + timedelta(seconds=interval_seconds)
+
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
     parsed = urlparse(product_url)
@@ -255,6 +267,7 @@ def create_or_update_monitored_product_scraped(
         existing.last_scraped_at = last_checked
         existing.status = MonitoredStatus.active
         existing.normalized_url = normalized_url
+        existing.next_check_at = _compute_next_check_at(existing, last_checked)
         db.commit()
         db.refresh(existing)
 

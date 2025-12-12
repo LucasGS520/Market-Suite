@@ -113,102 +113,11 @@ def enqueue_competitors_for_monitored(db: Session, monitored_id: UUID) -> None:
     for competitor in competitors:
         enqueue_competitor_collection(competitor)
 
-def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
-    """ Varre monitorados e agenda rechecagens somente quando elegíveis.
-
-    A rotina respeita ``next_check_at`` e ignora itens com ``checking_in_progress``
-    a menos que já tenham estourado o tempo máximo configurado em
-    ``RECHECK_TIMEOUT_SECONDS``. Apenas monitorados com ``next_check_at`` definido
-    e menor ou igual ao horário de referência são enfileirados, registrando
-    contadores e logs para itens sem janela programada.
-    """
-    from market_alert.tasks.monitor_recheck_tasks import recheck_monitored_product
-
-    reference = now or _now()
-    timeout_limit = reference - timedelta(seconds=settings.RECHECK_TIMEOUT_SECONDS)
-    dispatched = 0
-
-    timed_out = (
-        db.query(MonitoredProduct)
-        .filter(
-            MonitoredProduct.monitoring_type == MonitoringType.scraping,
-            MonitoredProduct.checking_in_progress.is_(True),
-            MonitoredProduct.checking_started_at < timeout_limit,
-        )
-        .all()
-    )
-    for monitored in timed_out:
-        monitored.checking_in_progress = False
-        monitored.checking_started_at = None
-        monitored.next_check_at = reference
-        db.commit()
-        logger.warning(
-            "recheck_timeout_released",
-            monitored_id=str(monitored.id),
-            started_at=str(monitored.checking_started_at)
-            if monitored.checking_started_at
-            else None,
-        )
-
-    missing_next = (
-        db.query(MonitoredProduct)
-        .filter(
-            MonitoredProduct.monitoring_type == MonitoringType.scraping,
-            MonitoredProduct.next_check_at.is_(None),
-        )
-        .count()
-    )
-    if missing_next:
-        RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL.labels(reason="missing_next_check_at").inc(
-            missing_next
-        )
-        RECHECK_NEXT_CHECK_MISSING_TOTAL.inc(missing_next)
-        logger.info(
-            "recheck_skip_missing_next_check_at",
-            count=missing_next,
-            batch_limit=settings.RECHECK_ENQUEUE_BATCH_SIZE,
-        )
-
-    due_candidates = (
-        db.query(MonitoredProduct)
-        .filter(
-            MonitoredProduct.monitoring_type == MonitoringType.scraping,
-            MonitoredProduct.status != MonitoredStatus.failed,
-            MonitoredProduct.checking_in_progress.is_(False),
-            MonitoredProduct.next_check_at.isnot(None),
-            MonitoredProduct.next_check_at <= reference,
-        )
-        .order_by(MonitoredProduct.next_check_at)
-        .limit(settings.RECHECK_ENQUEUE_BATCH_SIZE)
-        .all()
-    )
-
-    if len(due_candidates) == settings.RECHECK_ENQUEUE_BATCH_SIZE:
-        logger.info(
-            "recheck_batch_limit_reached",
-            limit=settings.RECHECK_ENQUEUE_BATCH_SIZE,
-            reference_time=reference.isoformat(),
-        )
-
-    for monitored in due_candidates:
-        jitter = random.uniform(0, settings.RECHECK_ENQUEUE_JITTER_SECONDS)
-        enqueue_kwargs = {
-            "args": [str(monitored.id)],
-            "queue": "monitor",
-            "countdown": jitter,
-        }
-        recheck_monitored_product.apply_async(**enqueue_kwargs)
-        RECHECK_DISPATCH_TOTAL.labels(status="dispatched").inc()
-        RECHECK_ENQUEUED_TOTAL.labels(status="due").inc()
-        dispatched += 1
-    return dispatched
-
 
 __all__ = [
     "enqueue_collect",
     "enqueue_monitored_collection",
     "enqueue_competitor_collection",
     "enqueue_competitors_for_monitored",
-    "schedule_due_monitored",
     "monitored_needs_recheck",
 ]
