@@ -1,60 +1,24 @@
 """ Orquestração e enfileiramento de coletas de produtos.
 
-Este módulo concentra helpers que padronizam a criação de payloads para a
-``collect_product_task`` e a varredura periódica de monitorados. A proposta
-é manter rotas e services finos, delegando aqui toda a coordenação de filas
-(e o balanceamento entre monitorados e concorrentes) em uma única camada.
-Locks Redis são aplicados apenas pela própria task de collector, usando TTL
-configurável via ``PRODUCT_LOCK_TTL_SECONDS``; o fluxo de rechecagem usa
-somente a flag `checking_in_progress` para exclusão mútua.
+O módulo centraliza helpers para construir payloads consistentes e enfileirar
+coletas na ``collect_product_task``. O mesmo fluxo atende rechecagens e
+coletas manuais, garantindo que o controle de concorrência ocorra somente via
+lock Redis aplicado pelo collector.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-import random
 from uuid import UUID
 
 import structlog
 from sqlalchemy.orm import Session
 
-from shared.metrics.metrics_scraper import (
-    RECHECK_DISPATCH_TOTAL,
-    RECHECK_ENQUEUED_TOTAL,
-    RECHECK_NEXT_CHECK_MISSING_TOTAL,
-    RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL,
-)
-
 from market_alert.core.config_alert import settings
 
-from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 
 
 logger = structlog.get_logger("collector_service")
-
-def _now() -> datetime:
-    """ Retorna timestamp em UTC sem microssegundos para cálculos previsíveis """
-    return datetime.now(timezone.utc).replace(microsecond=0)
-
-def _default_interval_seconds(monitored: MonitoredProduct) -> int:
-    """ Determina o intervalo mínimo entre coletas usando o atributo dinamicamente.
-
-    Quando o modelo não possuir campo específico, utiliza o valor configurado
-    em ``ADAPTIVE_RECHECK_BASE_INTERVAL`` como fallback seguro.
-    """
-    dynamic_interval = getattr(monitored, "check_interval", None)
-    if isinstance(dynamic_interval, int) and dynamic_interval > 0:
-        return dynamic_interval
-    return int(settings.ADAPTIVE_RECHECK_BASE_INTERVAL)
-
-def monitored_needs_recheck(monitored: MonitoredProduct, *, now: datetime | None = None) -> bool:
-    """ Aplica janela mínima entre checagens para evitar reprocessamento agressivo """
-    reference = monitored.last_checked or monitored.updated_at or monitored.created_at
-    if reference is None:
-        return True
-    current_time = now or _now()
-    return current_time - reference >= timedelta(seconds=_default_interval_seconds(monitored))
 
 def build_monitored_payload(monitored: MonitoredProduct, *, user_id: UUID) -> dict[str, str]:
     """ Constrói payload padrão para coletas de monitorados """
@@ -113,102 +77,10 @@ def enqueue_competitors_for_monitored(db: Session, monitored_id: UUID) -> None:
     for competitor in competitors:
         enqueue_competitor_collection(competitor)
 
-def schedule_due_monitored(db: Session, *, now: datetime | None = None) -> int:
-    """ Varre monitorados e agenda rechecagens somente quando elegíveis.
-
-    A rotina respeita ``next_check_at`` e ignora itens com ``checking_in_progress``
-    a menos que já tenham estourado o tempo máximo configurado em
-    ``RECHECK_TIMEOUT_SECONDS``. Apenas monitorados com ``next_check_at`` definido
-    e menor ou igual ao horário de referência são enfileirados, registrando
-    contadores e logs para itens sem janela programada.
-    """
-    from market_alert.tasks.monitor_recheck_tasks import recheck_monitored_product
-
-    reference = now or _now()
-    timeout_limit = reference - timedelta(seconds=settings.RECHECK_TIMEOUT_SECONDS)
-    dispatched = 0
-
-    timed_out = (
-        db.query(MonitoredProduct)
-        .filter(
-            MonitoredProduct.monitoring_type == MonitoringType.scraping,
-            MonitoredProduct.checking_in_progress.is_(True),
-            MonitoredProduct.checking_started_at < timeout_limit,
-        )
-        .all()
-    )
-    for monitored in timed_out:
-        monitored.checking_in_progress = False
-        monitored.checking_started_at = None
-        monitored.next_check_at = reference
-        db.commit()
-        logger.warning(
-            "recheck_timeout_released",
-            monitored_id=str(monitored.id),
-            started_at=str(monitored.checking_started_at)
-            if monitored.checking_started_at
-            else None,
-        )
-
-    missing_next = (
-        db.query(MonitoredProduct)
-        .filter(
-            MonitoredProduct.monitoring_type == MonitoringType.scraping,
-            MonitoredProduct.next_check_at.is_(None),
-        )
-        .count()
-    )
-    if missing_next:
-        RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL.labels(reason="missing_next_check_at").inc(
-            missing_next
-        )
-        RECHECK_NEXT_CHECK_MISSING_TOTAL.inc(missing_next)
-        logger.info(
-            "recheck_skip_missing_next_check_at",
-            count=missing_next,
-            batch_limit=settings.RECHECK_ENQUEUE_BATCH_SIZE,
-        )
-
-    due_candidates = (
-        db.query(MonitoredProduct)
-        .filter(
-            MonitoredProduct.monitoring_type == MonitoringType.scraping,
-            MonitoredProduct.status != MonitoredStatus.failed,
-            MonitoredProduct.checking_in_progress.is_(False),
-            MonitoredProduct.next_check_at.isnot(None),
-            MonitoredProduct.next_check_at <= reference,
-        )
-        .order_by(MonitoredProduct.next_check_at)
-        .limit(settings.RECHECK_ENQUEUE_BATCH_SIZE)
-        .all()
-    )
-
-    if len(due_candidates) == settings.RECHECK_ENQUEUE_BATCH_SIZE:
-        logger.info(
-            "recheck_batch_limit_reached",
-            limit=settings.RECHECK_ENQUEUE_BATCH_SIZE,
-            reference_time=reference.isoformat(),
-        )
-
-    for monitored in due_candidates:
-        jitter = random.uniform(0, settings.RECHECK_ENQUEUE_JITTER_SECONDS)
-        enqueue_kwargs = {
-            "args": [str(monitored.id)],
-            "queue": "monitor",
-            "countdown": jitter,
-        }
-        recheck_monitored_product.apply_async(**enqueue_kwargs)
-        RECHECK_DISPATCH_TOTAL.labels(status="dispatched").inc()
-        RECHECK_ENQUEUED_TOTAL.labels(status="due").inc()
-        dispatched += 1
-    return dispatched
-
 
 __all__ = [
     "enqueue_collect",
     "enqueue_monitored_collection",
     "enqueue_competitor_collection",
     "enqueue_competitors_for_monitored",
-    "schedule_due_monitored",
-    "monitored_needs_recheck",
 ]

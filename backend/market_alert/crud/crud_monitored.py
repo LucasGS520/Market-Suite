@@ -28,10 +28,19 @@ from market_alert.crud import crud_price_history
 from market_alert.core.config_alert import settings
 
 
-def _compute_initial_next_check() -> datetime:
-    """ Calcula o primeiro agendamento padrão para novos monitorados """
-    #Centraliza o cálculo para manter consistência entre fluxos de criação
-    return datetime.now(timezone.utc) + timedelta(seconds=settings.DEFAULT_NEXT_CHECK_SECONDS)
+def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
+    """ Calcula o próximo agendamento respeitando configuração dinâmica do item.
+
+    A função usa o atributo opcional ``check_interval`` quando presente e,
+    caso o valor seja inválido ou ausente, aplica ``RECHECK_INTERVAL_DEFAULT``
+    como fallback. O cálculo sempre considera timezone UTC para garantir
+    previsibilidade entre workers e Beat.
+    """
+    base_time = reference or datetime.now(timezone.utc)
+    interval_seconds = getattr(monitored, "check_interval", None)
+    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
+        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
+    return base_time + timedelta(seconds=interval_seconds)
 
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
@@ -194,7 +203,7 @@ def create_pending_monitored_product(
         free_shipping=False,
         status=MonitoredStatus.pending,
         last_checked=None,
-        next_check_at=_compute_initial_next_check(),
+        next_check_at=_compute_next_check_at(product_data, reference=datetime.now(timezone.utc)),
     )
     db.add(pending)
 
@@ -253,6 +262,7 @@ def create_or_update_monitored_product_scraped(
         existing.last_modified = last_modified or existing.last_modified
         existing.last_checked = last_checked
         existing.last_scraped_at = last_checked
+        existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
         existing.status = MonitoredStatus.active
         existing.normalized_url = normalized_url
         db.commit()
@@ -284,7 +294,7 @@ def create_or_update_monitored_product_scraped(
         status=MonitoredStatus.active,
         last_checked=last_checked,
         last_scraped_at=last_checked,
-        next_check_at=_compute_initial_next_check(),
+        next_check_at=_compute_next_check_at(product_data, reference=last_checked),
         currency=currency or scraped_info.currency,
         etag=etag,
         last_modified=last_modified,

@@ -2,8 +2,8 @@
 
 O módulo atua como adaptador fino entre a fila de coleta e os serviços de
 scraping, garantindo que cada execução processe apenas um monitorado ou
-concorrente. A responsabilidade de orquestração e comparação permanece nas
-tasks de monitoramento, reduzindo duplicidade e facilitando observabilidade.
+concorrente. Rechecagens e coletas manuais compartilham este mesmo fluxo e
+apenas o lock Redis aplicado aqui é utilizado para exclusão mútua.
 """
 from __future__ import annotations
 
@@ -84,15 +84,11 @@ def _record_metrics(
 ) -> str:
     """ Atualiza métricas por desfecho e retorna rótulo normalizado.
 
-    O parâmetro ``lock_status`` admite ``acquired`` (lock aplicado),
-    ``skipped`` (não adquirido) ou ``not_used`` (monitoramento com flag
-    ``checking_in_progress``). Dessa forma mantemos contadores
-    consistentes sem forçar métricas de lock quando o controle de
-    concorrência for feito apenas via banco de dados. A normalização
-    garante que mesmo cenários de lock não adquirido reportem ``no_result``
-    para manter o contrato mínimo esperado pelo orquestrador. O campo
-    ``reason`` preserva o motivo interno para logs, mas sempre retorna um
-    status contratual.
+    O parâmetro ``lock_status`` admite ``acquired`` (lock aplicado) ou
+    ``skipped`` (não adquirido). A normalização garante que mesmo cenários
+    sem lock reportem ``no_result`` para manter o contrato esperado pelo
+    orquestrador. O campo ``reason`` preserva o motivo interno para logs,
+    mas sempre retorna um status contratual.
     """
     if lock_status == "skipped":
         COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
@@ -153,11 +149,8 @@ def collect_product(
     """ Executa coleta de produto de forma reutilizável para tasks e orquestradores.
 
     A função aplica validação de payload, coordena lock distribuído quando
-    ``use_lock`` estiver habilitado e registra métricas consistentes. Quando
-    utilizada pelo monitorador, ``use_lock`` deve permanecer ``False`` para
-    que a exclusão mútua seja controlada apenas pela flag
-    ``checking_in_progress``. O TTL do lock segue
-    ``PRODUCT_LOCK_TTL_SECONDS`` ou o valor informado em
+    ``use_lock`` estiver habilitado e registra métricas consistentes. O TTL
+    do lock segue ``PRODUCT_LOCK_TTL_SECONDS`` ou o valor informado em
     ``lock_ttl_seconds``.
     """
     SCRAPER_IN_FLIGHT.inc()

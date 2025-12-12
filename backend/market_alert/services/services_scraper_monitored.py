@@ -16,6 +16,7 @@ from shared.utils.url_validation import normalize_product_url
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import (
     create_or_update_monitored_product_scraped,
+    _compute_next_check_at,
     get_monitored_product_by_user_and_url,
 )
 from market_alert.enums.enums_products import MonitoredStatus
@@ -66,6 +67,7 @@ def _handle_response(
                 product.last_checked = last_checked
                 product.last_scraped_at = last_checked
                 product.status = MonitoredStatus.active
+                product.next_check_at = _compute_next_check_at(product, reference=last_checked)
                 db.commit()
         return ScrapeResult(status="not_modified", product_id=str(existing_id) if existing_id else None, http_status=304)
     

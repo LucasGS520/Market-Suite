@@ -52,10 +52,8 @@ class MonitoredProduct(Base):
     #Controle de status - Rechecagens usados pelo agendador
     status = Column(PgEnum(MonitoredStatus, name="monitored_status_enum"), nullable=False, default=MonitoredStatus.active)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    checking_in_progress = Column(Boolean, nullable=False, default=False, server_default="false")
-    checking_started_at = Column(DateTime(timezone=True), nullable=True)
-    next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
     last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

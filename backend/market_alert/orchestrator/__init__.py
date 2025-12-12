@@ -7,8 +7,6 @@ from market_alert.orchestrator.collector_service_orchestrator import (
     enqueue_competitor_collection,
     enqueue_competitors_for_monitored,
     enqueue_monitored_collection,
-    monitored_needs_recheck,
-    schedule_due_monitored,
 )
 
 __all__ = [
@@ -18,6 +16,4 @@ __all__ = [
     "enqueue_competitor_collection",
     "enqueue_competitors_for_monitored",
     "enqueue_monitored_collection",
-    "monitored_needs_recheck",
-    "schedule_due_monitored",
 ]

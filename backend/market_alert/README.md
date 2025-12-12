@@ -47,8 +47,7 @@ market_alert/
 | `GET` | `/notifications` | Lista histórico e status de notificações geradas. |
 | `GET` | `/metrics` | Exibe métricas Prometheus da API. |
 | `Celery` | `tasks.collector_product_task.collect_product_task` | Consome fila `scraping` e processa uma URL por vez (monitorado ou concorrente), respeitando lock Redis e retornando `ScrapeResult` padronizado; quando o lock não é adquirido retorna `no_result` e registra métrica de `lock_skipped`. |
-| `Celery` | `tasks.monitor_recheck_tasks.recheck_monitored_product` | Orquestra rechecagem de um monitorado: marca `checking_in_progress`, dispara collector do monitorado e concorrentes e executa comparação inline. |
-| `Celery` | `tasks.monitor_recheck_tasks.enqueue_due_monitored` | Beat que apenas decide e agenda `recheck_monitored_product` conforme janelas de rechecagem. |
+| `Celery` | `tasks.recheck_scheduler_task.schedule_rechecks` | Beat que identifica `next_check_at` vencido, recalcula o próximo horário e enfileira a `collect_product_task` diretamente com jitter leve. |
 | `Celery` | `tasks.compare_prices_task.compare_prices_task` | Idempotente e leve; recalcula comparação e `competitiveness_status` quando acionado. |
 | `Celery` | `tasks.alert_tasks.dispatch_price_alert_task` | Enfileira alertas quando regras de preço são acionadas. |
 
@@ -66,8 +65,7 @@ market_alert/
 - **Filas padrão:** `celery`, `scraping`, `monitor` (configuráveis via `.env.market_alert`).
 - **Tasks de destaque:**
   - `tasks.collector_product_task.collect_product_task`
-  - `tasks.monitor_recheck_tasks.recheck_monitored_product`
-  - `tasks.monitor_recheck_tasks.enqueue_due_monitored`
+  - `tasks.recheck_scheduler_task.schedule_rechecks`
   - `tasks.compare_prices_task.compare_prices_task`
   - `tasks.alert_tasks.dispatch_price_alert_task`
   - `tasks.metrics_tasks.collect_celery_metrics`, `cleanup_cache`
@@ -103,7 +101,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 - `core/celery_app.py` – configura worker, beat e registradores de métricas.
 - `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
 - `services/comparison_service.py` – orquestra cálculos de comparação e dispara regras.
-- `tasks/monitor_recheck_tasks.py` – concentra tasks de coleta de monitorados e concorrentes.
+- `tasks/recheck_scheduler_task.py` – beat responsável por enfileirar rechecagens usando o mesmo collector.
 - `tasks/alert_tasks.py` – envia notificações e aplica cooldowns.
 - `tasks/metrics_tasks.py` – publica métricas periódicas da fila e recursos.
 - `tasks/compare_prices_task.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.
@@ -116,7 +114,7 @@ REDIS_URL=redis://:senha@redis:6379/0
 REDIS_PASSWORD=senha
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/1
-CELERY_TASK_ROUTES={"tasks.monitor_recheck_tasks.*": {"queue": "scraping"}}
+CELERY_TASK_ROUTES={"tasks.recheck_scheduler_task.*": {"queue": "monitor"}}
 
 SCRAPER_SERVICE_URL=http://market_scraper:8010
 SCRAPER_CONNECT_TIMEOUT=5.0
@@ -148,8 +146,8 @@ SCRAPER_SERVICE_URL=url_servico_scraping
 
 ## Orquestração de coletas e rechecagens
 - **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result` com métrica de `lock_skipped` incrementada.
-- **Rechecagem centralizada:** `market_alert.tasks.monitor_recheck_tasks.recheck_monitored_product` é a entrada única para rechecagem. Marca `checking_in_progress`/`checking_started_at` de forma atômica, coleta o monitorado e cada concorrente reutilizando o collector sem lock Redis e executa comparação inline antes de limpar a flag, evitando duplicidade de persistência.
-- **Agendamento via Beat:** `market_alert.tasks.monitor_recheck_tasks.enqueue_due_monitored` apenas identifica monitorados elegíveis e agenda `recheck_monitored_product` respeitando intervalos dinâmicos. O Beat não aciona scraping diretamente.
+- **Rechecagem centralizada:** rechecagens usam a mesma `collect_product_task` aplicada a coletas manuais, com lock Redis e TTL automático como único mecanismo de exclusão mútua.
+- **Agendamento via Beat:** `market_alert.tasks.recheck_scheduler_task.schedule_rechecks` identifica `next_check_at` vencido, recalcula o próximo horário com `_compute_next_check_at` e enfileira diretamente o collector com jitter, evitando flags ou comparações inline.
 - **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
 
 ## Segurança e Observabilidade

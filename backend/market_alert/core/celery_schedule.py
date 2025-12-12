@@ -17,7 +17,7 @@ TASK_MODULES = [
     "market_alert.tasks.metrics_tasks",
     "market_alert.tasks.compare_prices_task",
     "market_alert.tasks.alert_tasks",
-    "market_alert.tasks.monitor_recheck_tasks",
+    "market_alert.tasks.recheck_scheduler_task",
 ]
 
 #Exchanges separados para scraping e monitoramento
@@ -36,11 +36,7 @@ TASK_ROUTES = {
         "queue": "scraping",
         "routing_key": "scraping",
     },
-    "market_alert.tasks.monitor_recheck_tasks.enqueue_due_monitored": {
-        "queue": "monitor",
-        "routing_key": "monitor",
-    },
-    "market_alert.tasks.monitor_recheck_tasks.recheck_monitored_product": {
+    "market_alert.tasks.recheck_scheduler_task.schedule_rechecks": {
         "queue": "monitor",
         "routing_key": "monitor",
     },
@@ -72,7 +68,7 @@ BEAT_SCHEDULE = {
         crontab(minute="*/1"),
     ),
     "recheck-scraping-every-5min": _schedule_entry(
-        "market_alert.tasks.monitor_recheck_tasks.enqueue_due_monitored",
+        "market_alert.tasks.recheck_scheduler_task.schedule_rechecks",
         crontab(minute="*/5"),
         queue="monitor",
         routing_key="monitor",
