@@ -190,6 +190,7 @@ def create_pending_monitored_product(
         product_url=normalized_url,
     )
 
+    reference_time = datetime.now(timezone.utc)
     #Substituímos o nome derivado da URL apenas após o scraping devolver informação confiável
     pending = MonitoredProduct(
         user_id=user_id,
@@ -203,8 +204,11 @@ def create_pending_monitored_product(
         free_shipping=False,
         status=MonitoredStatus.pending,
         last_checked=None,
-        next_check_at=_compute_next_check_at(product_data, reference=datetime.now(timezone.utc)),
+        next_check_at=None,
     )
+
+    #Calcula o próximo agendamento após istanciar o objeto para reutilizar referências e evitar uso de variáveis inexistentes
+    pending.next_check_at = _compute_next_check_at(pending, reference=reference_time)
     db.add(pending)
 
     try:
