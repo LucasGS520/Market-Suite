@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
+import structlog
 
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
@@ -27,6 +28,29 @@ from market_alert.crud import crud_alert_rules
 from market_alert.crud import crud_price_history
 from market_alert.core.config_alert import settings
 
+
+logger = structlog.get_logger("crud_monitored")
+
+def _to_decimal(value: Decimal | float | int | str | None) -> Decimal | None:
+    """ Converte valores diversos para `Decimal` preservando `None`
+    
+    A normalização evita comparações inconsistentes quando preço chega como
+    string ou float após coleta do scraper
+    """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    
+def _different_price(previous_price: Decimal | float | int | str | None, current_price: Decimal | float | int | str | None) -> bool:
+    """ Compara preços convertendo para `Decimal` para evitar falsos negativos """
+    previous = _to_decimal(previous_price)
+    current = _to_decimal(current_price)
+    return previous != current
 
 def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
     """ Calcula o próximo agendamento respeitando configuração dinâmica do item.
@@ -254,6 +278,7 @@ def create_or_update_monitored_product_scraped(
     )
 
     if existing:
+        #Atualiza somente campos relevantes
         if product_data.name_identification and existing.name_identification != product_data.name_identification:
             existing.name_identification = product_data.name_identification
         elif _should_replace_with_scraped(existing.name_identification, fallback_name, scraped_name):
@@ -264,6 +289,9 @@ def create_or_update_monitored_product_scraped(
         previous_price = existing.current_price
         previous_status = existing.status
         existing.current_price = scraped_info.current_price
+        price_changed = _different_price(previous_price, scraped_info.current_price)
+        
+        #Atualiza thumbnail, frete, moeda, etag, timestamps e status
         existing.thumbnail = scraped_info.thumbnail
         existing.free_shipping = scraped_info.free_shipping
         existing.currency = currency or scraped_info.currency or existing.currency
@@ -274,10 +302,19 @@ def create_or_update_monitored_product_scraped(
         existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
         existing.status = MonitoredStatus.active
         existing.normalized_url = normalized_url
-        db.commit()
-        db.refresh(existing)
+        
+        price_history_needed = price_changed and scraped_info.current_price is not None
 
-        if scraped_info.current_price is not None:
+        logger.info(
+            "updated_monitored_product_scraped",
+            product_id=str(existing.id),
+            previous_price=str(previous_price) if previous_price is not None else None,
+            new_price=str(scraped_info.current_price) if scraped_info.current_price is not None else None,
+            price_history_will_be_created=price_history_needed,
+        )
+
+        #Persistimos histórico antes do refresh para alinhar commit único à alteração de preço
+        if price_history_needed:
             crud_price_history.create_for_monitored(
                 db,
                 existing.id,
@@ -285,8 +322,20 @@ def create_or_update_monitored_product_scraped(
                 currency or scraped_info.currency or existing.currency,
                 last_checked,
             )
-        existing._price_changed = previous_price != scraped_info.current_price
+        else:
+            db.commit()
+
+        db.refresh(existing)
+        existing._price_changed = price_changed
         existing._availability_changed = previous_status != MonitoredStatus.active
+        
+        logger.info(
+            "updated_monitored",
+            product_id=str(existing.id),
+            price_changed=existing._price_changed,
+            availability_changed=existing._availability_changed,
+            last_checked=last_checked.isoformat(),
+        )
         return existing
 
     #Se não existir, cria o registro
@@ -303,11 +352,12 @@ def create_or_update_monitored_product_scraped(
         status=MonitoredStatus.active,
         last_checked=last_checked,
         last_scraped_at=last_checked,
-        next_check_at=_compute_next_check_at(product_data, reference=last_checked),
+        next_check_at=None,
         currency=currency or scraped_info.currency,
         etag=etag,
         last_modified=last_modified,
     )
+    new.next_check_at = _compute_next_check_at(new, reference=last_checked)
     db.add(new)
     db.commit()
     db.refresh(new)

@@ -91,6 +91,13 @@ def scrape_competitor_product(
             existing.last_checked = now
             existing.last_scraped_at = now
             db.commit()
+            logger.info(
+                "competitor_not_modified",
+                product_id=str(existing.id),
+                normalized_url=normalized_url,
+                last_checked=now.isoformat(),
+            )
+
         return ScrapeResult(
             status="not_modified",
             product_id=str(existing.id) if existing else None,

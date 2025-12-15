@@ -69,6 +69,13 @@ def _handle_response(
                 product.status = MonitoredStatus.active
                 product.next_check_at = _compute_next_check_at(product, reference=last_checked)
                 db.commit()
+                logger.info(
+                    "monitored_not_modified",
+                    product_id=str(product.id),
+                    normalized_url=lookup_url,
+                    last_checked=last_checked.isoformat(),
+                )
+
         return ScrapeResult(status="not_modified", product_id=str(existing_id) if existing_id else None, http_status=304)
     
     if status_code == 422 and fetch_result.error_code == "no_result":

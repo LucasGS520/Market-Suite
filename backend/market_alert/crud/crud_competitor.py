@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from uuid import UUID
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import List, Sequence
 from urllib.parse import unquote, urlparse
 
+import structlog
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,7 +20,26 @@ from market_alert.models.models_products import CompetitorProduct, MonitoredProd
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
 
+
+logger = structlog.get_logger("crud_competitor")
+
+def _to_decimal(value: Decimal | float | int | str | None) -> Decimal | None:
+    """ Converte valor para `Decimal` preservando `None` e falhas de parsing """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
     
+def _different_price(previous_price: Decimal | float | int | str | None, current_price: Decimal | float | int | str | None) -> bool:
+    """ Normaliza para `Decimal` antes de comparar e evitar falsos negativos """
+    previous = _to_decimal(previous_price)
+    current = _to_decimal(current_price)
+    return previous != current
+
 def get_competitor_by_monitored_and_url(
     db: Session,
     monitored_product_id: UUID,
@@ -162,6 +183,7 @@ def create_or_update_competitor_product_scraped(
         previous_status = existing.status
         existing.old_price = existing.current_price
         existing.current_price = scraped_info.current_price
+        price_changed = _different_price(previous_price, scraped_info.current_price)
         
         #Atualiza thumbnail, frete, moeda, etag, timestamps e status
         existing.thumbnail = scraped_info.thumbnail
@@ -180,10 +202,18 @@ def create_or_update_competitor_product_scraped(
             if sanitized_name:
                 existing.name_competitor = sanitized_name
         
-        db.commit()
-        db.refresh(existing)
+        price_history_needed = price_changed and scraped_info.current_price is not None
 
-        if scraped_info.current_price is not None:
+        logger.info(
+            "update_competitor_product_scraped",
+            product_id=str(existing.id),
+            previous_price=str(previous_price) if previous_price is not None else None,
+            new_price=str(scraped_info.current_price) if scraped_info.current_price is not None else None,
+            price_history_will_be_created=price_history_needed,
+        )
+
+        #Salvamos histórico junto ao commit do produto apenas quando houver alteração real
+        if price_history_needed:
             crud_price_history.create_for_competitor(
                 db,
                 existing.id,
@@ -191,8 +221,20 @@ def create_or_update_competitor_product_scraped(
                 currency or scraped_info.currency or existing.currency,
                 last_checked,
             )
-        existing._price_changed = previous_price != scraped_info.current_price
+        else:
+            db.commit()
+
+        db.refresh(existing)
+        existing._price_changed = price_changed
         existing._availability_changed = previous_status != ProductStatus.available
+
+        logger.info(
+            "updated_competitor",
+            product_id=str(existing.id),
+            price_changed=existing._price_changed,
+            availability_changed=existing._availability_changed,
+            last_checked=last_checked.isoformat(),
+        )
         return existing
 
     #Caso não exista, cria um registro
