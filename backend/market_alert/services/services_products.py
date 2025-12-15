@@ -105,6 +105,7 @@ def build_monitored_response(
         availability=availability,
         last_status=monitored.status.value,
         last_scraped_at=monitored.last_scraped_at,
+        next_check_at=monitored.next_check_at,
         thumbnail=monitored.thumbnail,
         competitiveness_status=competitiveness_status,
         comparison_summary=comparison_summary,

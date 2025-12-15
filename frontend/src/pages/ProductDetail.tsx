@@ -256,6 +256,8 @@ const ProductDetail: React.FC = () => {
   const highlightedAlerts = summaryAlerts.slice(0, 3);
   const monitoredSince = product.created_at;
   const monitoringPaused = product.is_paused ?? false;
+  // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
+  const lastCollectedAt = product.last_scraped_at || product.collected_at;
 
   return (
     <Layout>
@@ -667,7 +669,7 @@ const ProductDetail: React.FC = () => {
                     <Typography variant="body2" color="text.secondary">
                       Última coleta
                     </Typography>
-                    <Typography variant="body1">{renderDateTime(product.last_scraped_at)}</Typography>
+                    <Typography variant="body1">{renderDateTime(lastCollectedAt)}</Typography>
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">

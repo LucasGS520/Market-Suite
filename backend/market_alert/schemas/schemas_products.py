@@ -52,6 +52,7 @@ class MonitoredProductResponse(ProductResponse):
     source: Literal["monitored"] = "monitored"
     thumbnail: str | None = Field(None, description="Miniatura mais recente identificada pelo fluxo de scraping")
     last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")
+    next_check_at: datetime | None = Field(None, description="Próximo horário previsto para rechecagem do produto")
     competitiveness_status: CompetitivenessStatus | None = Field(None,description="Classificação de competitividade calculada a partir das comparações")
     is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
     created_at: datetime | None = Field(None, description="Momento de criação do monitoramento (timestamp do cadastro)")

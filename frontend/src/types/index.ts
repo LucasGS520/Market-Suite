@@ -33,6 +33,7 @@ export interface MonitoredProduct {
   display_name?: string; // Nome original armazenado no backend
   name: string; // Nome do produto
   url: string; // URL do produto
+  collected_at: string; // Momento mais recente de coleta consolidado pelo backend
   current_price: MonetaryValue; // Preço atual do produto
   currency?: string; // Código da moeda
   thumbnail?: string; // URL da imagem em miniatura
