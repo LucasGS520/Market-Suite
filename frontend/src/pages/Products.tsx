@@ -48,6 +48,7 @@ import {
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
+import { formatRelativeTime } from '../utils/date';
 import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types';
 import TruncatedText from '../utils/TruncatedText';
 
@@ -187,6 +188,14 @@ const Products: React.FC = () => {
 
   const renderPrice = (value: string | number | null) => {
     return formatCurrency(value, { fallbackLabel: 'Coletando preço...' });
+  };
+
+  const renderTimestamp = (value?: string) => {
+    if (!value) {
+      return '—';
+    }
+
+    return formatRelativeTime(value);
   };
 
   const getDifferenceValue = (product: MonitoredProduct) => {
@@ -430,6 +439,25 @@ const Products: React.FC = () => {
                               </Box>
                             </Grid>
                           </Grid>
+
+                          <Grid container spacing={2} sx={{ mt: 1 }}>
+                            <Grid item xs={12} sm={6}>
+                              <Typography variant="body2" color="text.secondary">
+                                Última coleta
+                              </Typography>
+                              <Typography variant="body2">
+                                {renderTimestamp(product.last_scraped_at || product.created_at)}
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                              <Typography variant="body2" color="text.secondary">
+                                Próxima checagem
+                              </Typography>
+                              <Typography variant="body2">
+                                {renderTimestamp(product.next_check_at)}
+                              </Typography>
+                            </Grid>
+                          </Grid>
                           
                           {/* Rodapé do cartão com ações */}
                           <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
@@ -494,18 +522,20 @@ const Products: React.FC = () => {
           // Modo Tabela - exibe produtos em linhas
           <TableContainer component={Paper} elevation={2}>
             <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Produto</TableCell>
-                  <TableCell align="right">Meu Preço</TableCell>
-                  <TableCell align="right">Menor Concorrente</TableCell>
-                  <TableCell align="right">Diferença</TableCell>
-                  <TableCell align="center">Concorrentes</TableCell>
-                  <TableCell align="center">Ranking</TableCell>
-                  <TableCell align="center">Status</TableCell>
-                  <TableCell align="center">Ações</TableCell>
-                </TableRow>
-              </TableHead>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Produto</TableCell>
+                      <TableCell align="right">Meu Preço</TableCell>
+                      <TableCell align="right">Menor Concorrente</TableCell>
+                      <TableCell align="right">Diferença</TableCell>
+                      <TableCell align="center">Concorrentes</TableCell>
+                      <TableCell align="center">Ranking</TableCell>
+                      <TableCell align="center">Última coleta</TableCell>
+                      <TableCell align="center">Próxima checagem</TableCell>
+                      <TableCell align="center">Status</TableCell>
+                      <TableCell align="center">Ações</TableCell>
+                    </TableRow>
+                  </TableHead>
               <TableBody>
                 {data.items.map((product) => {
                   const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
@@ -570,6 +600,10 @@ const Products: React.FC = () => {
                       </TableCell>
                       <TableCell align="center">{competitorsCount}</TableCell>
                       <TableCell align="center">{rankingLabel}</TableCell>
+                      <TableCell align="center">
+                        {renderTimestamp(product.last_scraped_at || product.created_at)}
+                      </TableCell>
+                      <TableCell align="center">{renderTimestamp(product.next_check_at)}</TableCell>
                       <TableCell align="center">
                         <Chip
                           label={getStatusLabel(product.competitiveness_status)}

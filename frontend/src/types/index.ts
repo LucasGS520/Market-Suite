@@ -33,12 +33,12 @@ export interface MonitoredProduct {
   display_name?: string; // Nome original armazenado no backend
   name: string; // Nome do produto
   url: string; // URL do produto
-  collected_at: string; // Momento mais recente de coleta consolidado pelo backend
   current_price: MonetaryValue; // Preço atual do produto
   currency?: string; // Código da moeda
   thumbnail?: string; // URL da imagem em miniatura
   is_featured: boolean; // Indica se o produto é destacado
   last_scraped_at?: string; // Timestamp do último scraping
+  next_check_at?: string; // Próximo horário programado para uma nova coleta
   created_at?: string; // Data de criação do monitoramento
   last_price_change_at?: string; // Última mudança de preço registrada
   alerts_sent?: number | null; // Total de alertas enviados relacionados ao produto
