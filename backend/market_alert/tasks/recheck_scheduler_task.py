@@ -98,6 +98,8 @@ def schedule_rechecks(
     """
     bound_logger = logger_bound or logger
     reference = now or _now()
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
     enqueue_fn = enqueue_callable or enqueue_collect
 
     if is_scraping_suspended():

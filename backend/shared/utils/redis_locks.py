@@ -1,15 +1,16 @@
 """ Utilidades simples de lock distribuído via Redis.
 
 As funções abaixo implementam um lock leve baseado em chaves com TTL
-para impedir execuções paralelas da mesma unidade lógica. O objetivo
-é evitar contendas durante coletas e outras tasks críticas sem
-introduzir dependências extras além do Redis já disponível. O TTL
-adota ``PRODUCT_LOCK_TTL_SECONDS`` quando definido no ambiente para
-permitir tunning operacional sem alterar código.
+para impedir execuções paralelas da mesma unidade lógica. O valor do
+lock registra o identificador do dono, permitindo auditoria em logs e
+liberação segura apenas pelo proprietário. O TTL adota
+``PRODUCT_LOCK_TTL_SECONDS`` quando definido no ambiente para permitir
+ajuste operacional sem alterar código.
 """
 from __future__ import annotations
 
 import os
+import socket
 from typing import Final
 from uuid import UUID, uuid4
 
@@ -22,7 +23,8 @@ from shared.utils.redis_client import get_redis_client
 logger = structlog.get_logger(__name__)
 _ENV_NAMESPACE: Final = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip()
 _LOCK_PREFIX: Final = f"lock:{_ENV_NAMESPACE}:" if _ENV_NAMESPACE else "lock:"
-_DEFAULT_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "30"))
+_DEFAULT_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "60"))
+_MIN_SAFE_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "45"))
 
 _RELEASE_SCRIPT: Final = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -38,45 +40,57 @@ def _lock_key(product_id: UUID | str) -> str:
     return f"{_LOCK_PREFIX}product:{product_id}"
 
 
-def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = None) -> str | None:
-    """ Tenta adquirir um lock exclusivo para o produto e retorna o token.
+def _resolve_owner_id() -> str:
+    """ Gera identificador curto do dono do lock para rastreamento """
+    hostname = socket.gethostname()
+    pid = os.getpid()
+    return f"{hostname}:{pid}:{uuid4().hex[:8]}"
 
-    O valor armazenado na chave é um token único que identifica o dono do
-    lock. Dessa forma, a liberação só ocorre quando o mesmo token é
-    informado, evitando que processos atrasados removam locks recém
-    adquiridos por outros workers. Quando o Redis não estiver disponível,
-    consideramos a aquisição como malsucedida para manter a previsibilidade.
+def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = None) -> tuple[bool, str | None]:
+    """ Tenta adquirir um lock exclusivo para o produto e retorna estado e dono.
+
+    O valor armazenado na chave é um identificador curto do proprietário. A
+    liberação só ocorre quando o mesmo identificador é informado, evitando que
+    processos atrasados removam locks recém-adquiridos por outros workers.
+    Quando o Redis não estiver disponível, consideramos a aquisição como
+    malsucedida para manter a previsibilidade.
     """
     client = get_redis_client()
     if client is None:
         logger.warning("product_lock_unavailable", product_id=str(product_id))
-        return None
+        return False, None
 
     effective_ttl = ttl_seconds or _DEFAULT_TTL_SECONDS
-    token = str(uuid4())
+    owner_id = _resolve_owner_id()
     try:
-        acquired = client.set(_lock_key(product_id), token, ex=effective_ttl, nx=True)
+        acquired = client.set(
+            _lock_key(product_id),
+            owner_id,
+            px=int(effective_ttl * 1000),
+            nx=True,
+        )
         if acquired:
             metrics_redis.REDIS_LOCK_ACQUIRED_TOTAL.labels(resource="product").inc()
-            return token
+            return True, owner_id
         
+        existing_owner = client.get(_lock_key(product_id))
         metrics_redis.REDIS_LOCK_SKIPPED_TOTAL.labels(resource="product").inc()
-        return None
+        return False, existing_owner.decode("utf-8") if existing_owner else None
     
     except Exception:
         logger.exception("product_lock_failed", product_id=str(product_id))
-        return None
+        return False, None
     
-def release_product_lock(product_id: UUID | str, token: str | None) -> bool:
-    """ Remove o lock do produto validando o token informado
+def release_product_lock(product_id: UUID | str, owner_id: str | None) -> bool:
+    """ Remove o lock do produto validando o dono informado.
 
     A liberação é feita via script Lua que confirma se o token gravado na
     chave é o mesmo recebido. Caso o lock já tenha expirado ou sido
     adquirido por outro worker, a função apenas registra a inconsistência
     sem apagar a chave, preservando a segurança do lock distribuído.
     """
-    if token is None:
-        logger.warning("product_lock_release_skipped", product_id=str(product_id), reason="missing_token")
+    if owner_id is None:
+        logger.warning("product_lock_release_skipped", product_id=str(product_id), reason="missing_owner")
         return False
 
     client = get_redis_client()
@@ -84,7 +98,7 @@ def release_product_lock(product_id: UUID | str, token: str | None) -> bool:
         return False
 
     try:
-        released = client.eval(_RELEASE_SCRIPT, 1, _lock_key(product_id), token)
+        released = client.eval(_RELEASE_SCRIPT, 1, _lock_key(product_id), owner_id)
         if released:
             return True
 
@@ -97,3 +111,6 @@ def release_product_lock(product_id: UUID | str, token: str | None) -> bool:
         logger.warning("product_lock_release_failed", product_id=str(product_id), reason="exception")
         return False
     
+def get_product_lock_defaults() -> tuple[int, int]:
+    """ Retorna TTL padrão configurado e margem mínima recomendada """
+    return _DEFAULT_TTL_SECONDS, _MIN_SAFE_TTL_SECONDS

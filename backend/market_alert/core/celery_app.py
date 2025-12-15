@@ -108,7 +108,7 @@ if CeleryInstrumentor:
     CeleryInstrumentor().instrument()
 
 def _force_import_task_modules() -> None:
-    """ Garante importação explícita dos módulos de tasks registrados 
+    """ Garante importação explícita dos módulos de tasks registrados
     
     Celery carrega os módulos listados em ``include`` quando inicializado
     via CLI. Em execuções fora do worker (ex.: testes ou inicialização da
@@ -124,6 +124,25 @@ def _force_import_task_modules() -> None:
 
 
 _force_import_task_modules()
+
+def _warn_lock_ttl_configuration() -> None:
+    """ Avalia se o TTL do lock de produto está abaixo do recomendado """
+    configured_ttl = settings.PRODUCT_LOCK_TTL_SECONDS
+    min_safe = settings.PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS
+    if configured_ttl < min_safe:
+        logger.warning(
+            "product_lock_ttl_low",
+            configured_ttl=configured_ttl,
+            min_safe_seconds=min_safe,
+        )
+    else:
+        logger.info(
+            "product_lock_ttl_configured",
+            configured_ttl=configured_ttl,
+            min_safe_seconds=min_safe,
+        )
+
+_warn_lock_ttl_configuration()
 
 @worker_ready.connect
 def _start_prometheus_server(**kwargs):

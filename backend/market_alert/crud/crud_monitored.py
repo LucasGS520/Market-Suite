@@ -37,6 +37,8 @@ def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime | No
     previsibilidade entre workers e Beat.
     """
     base_time = reference or datetime.now(timezone.utc)
+    if base_time.tzinfo is None:
+        base_time = base_time.replace(tzinfo=timezone.utc)
     interval_seconds = getattr(monitored, "check_interval", None)
     if not isinstance(interval_seconds, int) or interval_seconds <= 0:
         interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
@@ -238,6 +240,9 @@ def create_or_update_monitored_product_scraped(
     """ Cria ou atualiza um produto monitorado a partir de dados de scraping """
     normalized_url = normalize_product_url_for_storage(product_data.product_url)
     #A URL chega validada pela API e é preservada para manter unicidade baseada na entrada do usuário
+
+    if last_checked.tzinfo is None:
+        last_checked = last_checked.replace(tzinfo=timezone.utc)
 
     #Verifica se o produto já existe para o usuário
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)

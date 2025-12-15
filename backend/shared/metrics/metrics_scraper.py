@@ -125,10 +125,23 @@ COLLECT_LOCK_SKIPPED_TOTAL = Counter(
     ["kind"],
 )
 
+COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL = Counter(
+    "collector_lock_skipped_owner_total",
+    "Execuções ignoradas por lock pré-existente detalhando dono do lock",
+    ["kind", "owner"],
+)
+
 COLLECT_SUCCESS_TOTAL = Counter(
     "collect_success_total",
     "Coletas concluídas com sucesso e dados utilizáveis",
     ["kind"],
+)
+
+COLLECTOR_DURATION_MS = Histogram(
+    "collector_duration_ms",
+    "Duração da coleta por produto (milissegundos)",
+    ["kind", "outcome"],
+    buckets=[25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
 )
 
 #Métricas específicas do ciclo de rechecagem
@@ -312,8 +325,10 @@ __all__ = [
     "COLLECTOR_ERROR_TOTAL",
     "COLLECTOR_LOCK_ACQUIRED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_TOTAL",
+    "COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL",
     "COLLECT_LOCK_SKIPPED_TOTAL",
     "COLLECT_SUCCESS_TOTAL",
+    "COLLECTOR_DURATION_MS",
     "RECHECK_DISPATCH_TOTAL",
     "RECHECK_MONITORED_RESULT_TOTAL",
     "RECHECK_COMPETITOR_RESULT_TOTAL",

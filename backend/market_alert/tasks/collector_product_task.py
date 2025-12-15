@@ -7,6 +7,7 @@ apenas o lock Redis aplicado aqui é utilizado para exclusão mútua.
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Mapping
 from uuid import UUID
@@ -24,9 +25,11 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_ERROR_TOTAL,
     COLLECTOR_LOCK_ACQUIRED_TOTAL,
     COLLECTOR_LOCK_SKIPPED_TOTAL,
+    COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL,
     COLLECTOR_NO_DATA_TOTAL,
     COLLECTOR_SUCCESS_NEW_DATA_TOTAL,
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL,
+    COLLECTOR_DURATION_MS,
     COLLECT_LOCK_SKIPPED_TOTAL,
     COLLECT_SUCCESS_TOTAL,
     SCRAPER_IN_FLIGHT,
@@ -81,6 +84,7 @@ def _record_metrics(
     *,
     lock_status: str,
     reason: str | None,
+    lock_owner: str | None,
 ) -> str:
     """ Atualiza métricas por desfecho e retorna rótulo normalizado.
 
@@ -93,6 +97,7 @@ def _record_metrics(
     if lock_status == "skipped":
         COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
         COLLECT_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
+        COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL.labels(kind=kind, owner=lock_owner or "unknown").inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
     
@@ -154,7 +159,8 @@ def collect_product(
     ``lock_ttl_seconds``.
     """
     SCRAPER_IN_FLIGHT.inc()
-    started_at = datetime.now(timezone.utc)
+    #Mede latência com relógio monotônico para evitar valores negativos
+    started_perf = time.perf_counter()
     task_logger = logger_bound or logger
 
     kind, monitored_id, competitor_id, url = _validate_payload(payload)
@@ -165,7 +171,7 @@ def collect_product(
     
     reason: str | None = None
     result: ScrapeResult | None = None
-    lock_token: str | None = None
+    lock_owner: str | None = None
 
     try:
         if payload is None or lock_target is None or url is None:
@@ -176,9 +182,10 @@ def collect_product(
             task_logger.warning("scraping_suspended", kind=kind, product_id=str(lock_target))
         else:
             if use_lock:
-                lock_token = acquire_product_lock(lock_target, ttl_seconds=lock_ttl_seconds)
-                lock_status = "acquired" if lock_token else "skipped"
-                if lock_token:
+                lock_acquired, resolved_owner = acquire_product_lock(lock_target, ttl_seconds=lock_ttl_seconds)
+                lock_owner = resolved_owner
+                lock_status = "acquired" if lock_acquired else "skipped"
+                if lock_acquired:
                     COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
                 else:
                     reason = "lock_skipped"
@@ -187,6 +194,7 @@ def collect_product(
                         kind=kind,
                         product_id=str(lock_target),
                         trace_id=trace_id,
+                        lock_owner=lock_owner,
                         note="retornando no_result para manter contrato minimalista",
                     )
 
@@ -228,11 +236,18 @@ def collect_product(
         reason = "unexpected_error"
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
-        outcome = _record_metrics(kind, result, lock_status=lock_status, reason=reason)
-        if use_lock and lock_token:
-            release_product_lock(lock_target, lock_token)
+        duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        outcome = _record_metrics(
+            kind,
+            result,
+            lock_status=lock_status,
+            reason=reason,
+            lock_owner=lock_owner,
+        )
+        if use_lock and lock_status == "acquired":
+            release_product_lock(lock_target, lock_owner)
         SCRAPER_IN_FLIGHT.dec()
-        duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
+        COLLECTOR_DURATION_MS.labels(kind=kind, outcome=outcome).observe(duration_ms)
         task_logger.info(
             "collect_product_finished",
             kind=kind,

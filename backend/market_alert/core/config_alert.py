@@ -67,6 +67,10 @@ class Settings(ConfigBase):
     RECHECK_ENQUEUE_JITTER_SECONDS: int = int(
         os.getenv("RECHECK_ENQUEUE_JITTER_SECONDS", "5")
     ) #Jitter aleatório para dispersar rechecagens simultâneas
+    PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "60")) #TTL padrão para lock de produto
+    PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS: int = int(
+        os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "45")
+    ) #Margem mínima recomendada para evitar expiração prematura do lock
 
     #URL base do serviço externo de scraping
     SCRAPER_SERVICE_URL: str = os.getenv(

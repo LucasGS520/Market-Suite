@@ -3,6 +3,7 @@
 from uuid import UUID, uuid4
 
 import pytest
+from uuid import UUID, uuid4
 
 from backend.market_alert.tasks import collector_product_task
 
@@ -36,6 +37,21 @@ class DummyGauge:
         self.dec_calls += 1
 
 
+class DummyHistogram:
+    """Histograma simples que registra observações."""
+
+    def __init__(self) -> None:
+        self.labels_calls: list[dict[str, str]] = []
+        self.observe_calls: list[float] = []
+
+    def labels(self, **kwargs):
+        self.labels_calls.append(kwargs)
+        return self
+
+    def observe(self, value: float) -> None:
+        self.observe_calls.append(value)
+
+
 class DummySession:
     """Contexto de sessão neutro para evitar acesso ao banco."""
 
@@ -56,7 +72,9 @@ def _patch_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     success_no_change_counter = DummyCounter()
     lock_acquired_counter = DummyCounter()
     lock_skipped_counter = DummyCounter()
+    lock_skipped_owner_counter = DummyCounter()
     in_flight_gauge = DummyGauge()
+    duration_histogram = DummyHistogram()
 
     monkeypatch.setattr(collector_product_task, "COLLECTOR_ERROR_TOTAL", error_counter)
     monkeypatch.setattr(collector_product_task, "COLLECTOR_NO_DATA_TOTAL", no_data_counter)
@@ -64,6 +82,8 @@ def _patch_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(collector_product_task, "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL", success_no_change_counter)
     monkeypatch.setattr(collector_product_task, "COLLECTOR_LOCK_ACQUIRED_TOTAL", lock_acquired_counter)
     monkeypatch.setattr(collector_product_task, "COLLECTOR_LOCK_SKIPPED_TOTAL", lock_skipped_counter)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL", lock_skipped_owner_counter)
+    monkeypatch.setattr(collector_product_task, "COLLECTOR_DURATION_MS", duration_histogram)
     monkeypatch.setattr(collector_product_task, "SCRAPER_IN_FLIGHT", in_flight_gauge)
 
     monkeypatch.setattr(collector_product_task, "SessionLocal", lambda: DummySession())
@@ -100,7 +120,7 @@ def test_collect_product_mapeia_excecoes_inesperadas(monkeypatch: pytest.MonkeyP
     monitored_id = uuid4()
 
     monkeypatch.setattr(collector_product_task, "is_scraping_suspended", lambda: False)
-    monkeypatch.setattr(collector_product_task, "acquire_product_lock", lambda *_a, **_k: "token")
+    monkeypatch.setattr(collector_product_task, "acquire_product_lock", lambda *_a, **_k: (True, "token"))
 
     released: list[tuple[UUID, str]] = []
     monkeypatch.setattr(
