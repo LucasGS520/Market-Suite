@@ -2,9 +2,11 @@
 
 import pytest
 import time
+from backend.shared.utils import redis_locks as redis_locks_module
 
 #FakeRedis universal para testes unitários
 class FakeRedis:
+    """Simula cliente Redis com comandos mínimos usados pelos utilitários."""
     def __init__(self):
         self.data = {}
         self.scripts = {}
@@ -14,10 +16,18 @@ class FakeRedis:
         self.scripts[sha] = source
         return sha
 
-    def set(self, key, value, ex=None):
+    def set(self, key, value, ex=None, px=None, nx=False):
+        """Armazena valor respeitando flags de não sobreposição e TTL."""
+
+        if nx and key in self.data:
+            return False
+        
         self.data[key] = value
-        if ex:
-            self.data[f"ttl:{key}"] = ex
+        ttl_value = ex if ex is not None else (px / 1000 if px is not None else None)
+        if ttl_value is not None:
+            self.data[f"ttl:{key}"] = ttl_value
+
+        return True
 
     def get(self, key):
         return self.data.get(key)
@@ -55,12 +65,24 @@ class FakeRedis:
         if redis_key in self.data:
             del self.data[redis_key]
 
+    def eval(self, script, num_keys, redis_key, expected_value):
+        """Reproduz script de liberação de lock validando o dono informado."""
+
+        stored_value = self.data.get(redis_key)
+        if stored_value == expected_value:
+            self.data.pop(redis_key, None)
+            return 1
+
+        return 0
+
 @pytest.fixture(autouse=True)
 def patch_redis_client(monkeypatch):
     fake_redis = FakeRedis()
 
     #Redireciona as chamadas de obtenção do cliente Redis para a versão fake
     monkeypatch.setattr("shared.utils.redis_client.get_redis_client", lambda: fake_redis)
+    monkeypatch.setattr("shared.utils.redis_locks.get_redis_client", lambda: fake_redis, raising=False)
+    monkeypatch.setattr(redis_locks_module, "get_redis_client", lambda: fake_redis, raising=False)
 
     return fake_redis
 

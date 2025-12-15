@@ -75,7 +75,13 @@ def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = No
         
         existing_owner = client.get(_lock_key(product_id))
         metrics_redis.REDIS_LOCK_SKIPPED_TOTAL.labels(resource="product").inc()
-        return False, existing_owner.decode("utf-8") if existing_owner else None
+        if existing_owner is None:
+            return False, None
+
+        if isinstance(existing_owner, bytes):
+            return False, existing_owner.decode("utf-8")
+
+        return False, str(existing_owner)
     
     except Exception:
         logger.exception("product_lock_failed", product_id=str(product_id))
