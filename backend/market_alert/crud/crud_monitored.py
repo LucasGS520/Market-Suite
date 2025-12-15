@@ -278,6 +278,8 @@ def create_or_update_monitored_product_scraped(
     )
 
     if existing:
+        resolved_price = _to_decimal(scraped_info.current_price)
+
         #Atualiza somente campos relevantes
         if product_data.name_identification and existing.name_identification != product_data.name_identification:
             existing.name_identification = product_data.name_identification
@@ -288,42 +290,44 @@ def create_or_update_monitored_product_scraped(
             existing.name_identification = resolved_name
         previous_price = existing.current_price
         previous_status = existing.status
-        existing.current_price = scraped_info.current_price
-        price_changed = _different_price(previous_price, scraped_info.current_price)
-        
-        #Atualiza thumbnail, frete, moeda, etag, timestamps e status
-        existing.thumbnail = scraped_info.thumbnail
-        existing.free_shipping = scraped_info.free_shipping
-        existing.currency = currency or scraped_info.currency or existing.currency
-        existing.etag = etag or existing.etag
-        existing.last_modified = last_modified or existing.last_modified
-        existing.last_checked = last_checked
-        existing.last_scraped_at = last_checked
-        existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
-        existing.status = MonitoredStatus.active
-        existing.normalized_url = normalized_url
-        
-        price_history_needed = price_changed and scraped_info.current_price is not None
+        price_changed = _different_price(previous_price, resolved_price)
+        resolved_price = currency or scraped_info.currency or existing.currency
 
-        logger.info(
-            "updated_monitored_product_scraped",
-            product_id=str(existing.id),
-            previous_price=str(previous_price) if previous_price is not None else None,
-            new_price=str(scraped_info.current_price) if scraped_info.current_price is not None else None,
-            price_history_will_be_created=price_history_needed,
-        )
+        #Executa commit único garantindo atomicidade com o histórico
+        with db.begin():
+            existing.current_price = resolved_price
 
-        #Persistimos histórico antes do refresh para alinhar commit único à alteração de preço
-        if price_history_needed:
-            crud_price_history.create_for_monitored(
-                db,
-                existing.id,
-                scraped_info.current_price,
-                currency or scraped_info.currency or existing.currency,
-                last_checked,
+            #Atualiza thumbnail, frete, moeda, etag, timestamps e status
+            existing.thumbnail = scraped_info.thumbnail
+            existing.free_shipping = scraped_info.free_shipping
+            existing.currency = resolved_currency
+            existing.etag = etag or existing.etag
+            existing.last_modified = last_modified or existing.last_modified
+            existing.last_checked = last_checked
+            existing.last_scraped_at = last_checked
+            existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
+            existing.status = MonitoredStatus.active
+            existing.normalized_url = normalized_url
+
+            price_history_needed = price_changed and resolved_price is not None
+
+            logger.info(
+                "updated_monitored_product_scraped",
+                product_id=str(existing.id),
+                previous_price=str(previous_price) if previous_price is not None else None,
+                new_price=str(resolved_price) if resolved_price is not None else None,
+                price_history_will_be_created=price_history_needed,
             )
-        else:
-            db.commit()
+
+            #Persistimos histórico antes do refresh para alinhar commit único à alteração de preço
+            if price_history_needed:
+                crud_price_history.create_for_monitored(
+                    db,
+                    existing.id,
+                    resolved_price,
+                    resolved_currency,
+                    last_checked,
+                )
 
         db.refresh(existing)
         existing._price_changed = price_changed
@@ -339,13 +343,17 @@ def create_or_update_monitored_product_scraped(
         return existing
 
     #Se não existir, cria o registro
+    resolved_price = _to_decimal(scraped_info.current_price)
+    resolved_currency = currency or scraped_info.currency
+
+
     new = MonitoredProduct(
         user_id=user_id,
         name_identification=resolved_name,
         search_query=None,
         product_url=normalized_url,
         normalized_url=normalized_url,
-        current_price=scraped_info.current_price,
+        current_price=resolved_price,
         thumbnail=scraped_info.thumbnail,
         free_shipping=scraped_info.free_shipping,
         monitoring_type=MonitoringType.scraping,
@@ -353,23 +361,26 @@ def create_or_update_monitored_product_scraped(
         last_checked=last_checked,
         last_scraped_at=last_checked,
         next_check_at=None,
-        currency=currency or scraped_info.currency,
+        currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
     )
     new.next_check_at = _compute_next_check_at(new, reference=last_checked)
-    db.add(new)
-    db.commit()
-    db.refresh(new)
+    
+    #Mantemos histórico e produto no mesmo commit para evitar divergências
+    with db.begin():
+        db.add(new)
+        db.flush()
+        if resolved_price is not None:
+            crud_price_history.create_for_monitored(
+                db,
+                new.id,
+                resolved_price,
+                resolved_currency,
+                last_checked,
+            )
 
-    if scraped_info.current_price is not None:
-        crud_price_history.create_for_monitored(
-            db,
-            new.id,
-            scraped_info.current_price,
-            currency or scraped_info.currency,
-            last_checked,
-        )
+    db.refresh(new)
 
     new._price_changed = True
     new._availability_changed = True

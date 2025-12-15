@@ -178,51 +178,55 @@ def create_or_update_competitor_product_scraped(
     )
 
     if existing:
+        resolved_price = _to_decimal(scraped_info.current_price)
+        
         #Atualiza somente campos relevantes
         previous_price = existing.current_price
         previous_status = existing.status
         existing.old_price = existing.current_price
-        existing.current_price = scraped_info.current_price
-        price_changed = _different_price(previous_price, scraped_info.current_price)
-        
-        #Atualiza thumbnail, frete, moeda, etag, timestamps e status
-        existing.thumbnail = scraped_info.thumbnail
-        existing.free_shipping = scraped_info.free_shipping
-        existing.currency = currency or scraped_info.currency or existing.currency
-        existing.etag = etag or existing.etag
-        existing.last_modified = last_modified or existing.last_modified
-        existing.last_checked = last_checked
-        existing.last_scraped_at = last_checked
-        existing.status = ProductStatus.available
-        existing.product_url = normalized_url
-        
-        #Sanitiza e persiste somente se tivermos um nome útil retornado pelo scraper.
-        if getattr(scraped_info, "name", None):
-            sanitized_name = sanitize_text(scraped_info.name)
-            if sanitized_name:
-                existing.name_competitor = sanitized_name
-        
-        price_history_needed = price_changed and scraped_info.current_price is not None
+        price_changed = _different_price(previous_price, resolved_price)
+        resolved_currency = currency or scraped_info.currency or existing.currency
 
-        logger.info(
-            "update_competitor_product_scraped",
-            product_id=str(existing.id),
-            previous_price=str(previous_price) if previous_price is not None else None,
-            new_price=str(scraped_info.current_price) if scraped_info.current_price is not None else None,
-            price_history_will_be_created=price_history_needed,
-        )
+        #Agrupamos persistência do produto e do histórico para garantir atomicidade
+        with db.begin():
+            existing.current_price = resolved_price
 
-        #Salvamos histórico junto ao commit do produto apenas quando houver alteração real
-        if price_history_needed:
-            crud_price_history.create_for_competitor(
-                db,
-                existing.id,
-                scraped_info.current_price,
-                currency or scraped_info.currency or existing.currency,
-                last_checked,
+            #Atualiza thumbnail, frete, moeda, etag, timestamps e status
+            existing.thumbnail = scraped_info.thumbnail
+            existing.free_shipping = scraped_info.free_shipping
+            existing.currency = resolved_currency
+            existing.etag = etag or existing.etag
+            existing.last_modified = last_modified or existing.last_modified
+            existing.last_checked = last_checked
+            existing.last_scraped_at = last_checked
+            existing.status = ProductStatus.available
+            existing.product_url = normalized_url
+
+            #Sanitiza e persiste somente se tivermos um nome útil retornado pelo scraper.
+            if getattr(scraped_info, "name", None):
+                sanitized_name = sanitize_text(scraped_info.name)
+                if sanitized_name:
+                    existing.name_competitor = sanitized_name
+
+            price_history_needed = price_changed and resolved_price is not None
+
+            logger.info(
+                "update_competitor_product_scraped",
+                product_id=str(existing.id),
+                previous_price=str(previous_price) if previous_price is not None else None,
+                new_price=str(resolved_price) if resolved_price is not None else None,
+                price_history_will_be_created=price_history_needed,
             )
-        else:
-            db.commit()
+
+            #Salvamos histórico junto ao commit do produto apenas quando houver alteração real
+            if price_history_needed:
+                crud_price_history.create_for_competitor(
+                    db,
+                    existing.id,
+                    resolved_price,
+                    resolved_currency,
+                    last_checked,
+                )
 
         db.refresh(existing)
         existing._price_changed = price_changed
@@ -238,12 +242,15 @@ def create_or_update_competitor_product_scraped(
         return existing
 
     #Caso não exista, cria um registro
+    resolved_price = _to_decimal(scraped_info.current_price)
+    resolved_currency = currency or scraped_info.currency
+
     new = CompetitorProduct(
         monitored_product_id=product_data.monitored_product_id,
         name_competitor=scraped_info.name,
         product_url=normalized_url,
-        current_price=scraped_info.current_price,
-        old_price=scraped_info.old_price,
+        current_price=resolved_price,
+        old_price=_to_decimal(scraped_info.old_price),
         free_shipping=scraped_info.free_shipping,
         seller=scraped_info.seller,
         seller_rating=scraped_info.seller_rating,
@@ -251,21 +258,23 @@ def create_or_update_competitor_product_scraped(
         status=ProductStatus.available,
         last_checked=last_checked,
         last_scraped_at=last_checked,
-        currency=currency or scraped_info.currency,
+        currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
         )
-    db.add(new)
-    db.commit()
+    with db.begin():
+        db.add(new)
+        db.flush()
+        if resolved_price is not None:
+            crud_price_history.create_for_competitor(
+                db,
+                new.id,
+                resolved_price,
+                resolved_currency,
+                last_checked,
+            )
+
     db.refresh(new)
-    if scraped_info.current_price is not None:
-        crud_price_history.create_for_competitor(
-            db,
-            new.id,
-            scraped_info.current_price,
-            currency or scraped_info.currency,
-            last_checked,
-        )
     new._price_changed = True
     new._availability_changed = True
     return new

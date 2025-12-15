@@ -43,11 +43,14 @@ def create_for_monitored(
     price: Decimal,
     currency: str | None,
     checked_at: datetime,
+    *,
+    commit: bool = False,
 ) -> PriceHistory:
-    """ Registra histórico para produto monitorado mantendo carimbo de coleta
+    """ Registra histórico para monitorados sem abrir transações extras.
 
-    A função é idempotente para preços repetidos próximos, retornando o último
-    registro quando não há alteração para evitar ruído no histórico.
+    Mantemos a idempotência para preços estáveis e, por padrão, apenas
+    ``flush`` das alterações para permitir controle transacional pelo caller.
+    Quando ``commit`` é ``True`` a confirmação é realizada aqui.
     """
     existing = _last_entry_for_product(db, monitored_product_id=monitored_product_id)
     if existing and _is_duplicate_price(existing, price, currency=currency):
@@ -60,8 +63,11 @@ def create_for_monitored(
         checked_at=checked_at,
     )
     db.add(entry)
-    db.commit()
-    db.refresh(entry)
+    if commit:
+        db.commit()
+        db.refresh(entry)
+    else:
+        db.flush()
     return entry
 
 def create_for_competitor(
@@ -70,11 +76,14 @@ def create_for_competitor(
     price: Decimal,
     currency: str | None,
     checked_at: datetime,
+    *,
+    commit: bool = False,
 ) -> PriceHistory:
-    """ Registra histórico para concorrente permitindo rastrear variações.
+    """ Registra histórico para concorrentes em sincronia com o caller.
 
-    Assim como nos monitorados, evita duplicação quando não há mudança de preço
-    entre coletas próximas.
+    O comportamento de idempotência é mantido; a confirmação da transação fica
+    a critério de quem chamou para que produto e histórico sejam persistidos
+    juntos quando necessário.
     """
     existing = _last_entry_for_product(db, competitor_product_id=competitor_product_id)
     if existing and _is_duplicate_price(existing, price, currency=currency):
@@ -87,6 +96,9 @@ def create_for_competitor(
         checked_at=checked_at,
     )
     db.add(entry)
-    db.commit()
-    db.refresh(entry)
+    if commit:
+        db.commit()
+        db.refresh(entry)
+    else:
+        db.flush()
     return entry
