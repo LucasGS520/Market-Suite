@@ -42,7 +42,7 @@ import {
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency } from '../utils/currency';
-import { formatDateOnly, formatRelativeTime } from '../utils/date';
+import { formatDateOnly, formatDateTime, formatRelativeTime } from '../utils/date';
 import TruncatedText from '../utils/TruncatedText';
 
 /**
@@ -234,16 +234,7 @@ const ProductDetail: React.FC = () => {
   };
 
   const renderDateTime = (value?: string | null) => {
-    if (!value) {
-      return '—';
-    }
-
-    const parsedDate = new Date(value);
-    if (Number.isNaN(parsedDate.getTime())) {
-      return '—';
-    }
-
-    return parsedDate.toLocaleString('pt-BR');
+    return formatDateTime(value);
   };
 
   const resolveAlertLabel = (alert: Record<string, unknown>) => {
@@ -257,7 +248,8 @@ const ProductDetail: React.FC = () => {
   const monitoredSince = product.created_at;
   const monitoringPaused = product.is_paused ?? false;
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
-  const lastCollectedAt = product.last_scraped_at || product.created_at;
+  const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
+  const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
 
   return (
     <Layout>
@@ -676,7 +668,7 @@ const ProductDetail: React.FC = () => {
                       Última mudança de preço
                     </Typography>
                     <Typography variant="body1">
-                      {formatRelativeTime(product.last_price_change_at)}
+                      {formatRelativeTime(lastPriceChangeAt)}
                     </Typography>
                   </Box>
                   <Box display="flex" justifyContent="space-between">

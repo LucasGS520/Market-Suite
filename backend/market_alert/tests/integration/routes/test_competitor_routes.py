@@ -309,7 +309,7 @@ def test_list_competitors_returns_paginated_items(
         "url",
         "current_price",
         "currency",
-        "collected_at",
+        "last_scraped_at",
         "source",
         "availability",
         "last_status",

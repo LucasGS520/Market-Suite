@@ -63,7 +63,13 @@ class Settings(ConfigBase):
     ) #Tempo máximo para manter uma rechecagem ativa antes de liberar
     RECHECK_ENQUEUE_BATCH_SIZE: int = int(
         os.getenv("RECHECK_ENQUEUE_BATCH_SIZE", "50")
-    ) #Quantidade máxima de rechecagens enfileiradas por ciclo do Beat
+    ) #Quantidade máxima de itens enfileirados por ciclo de rechecagem
+    RECHECK_ENQUEUE_STAGGER_SECONDS: float = float(
+        os.getenv(
+            "RECHECK_ENQUEUE_STAGGER_SECONDS",
+            os.getenv("ONBOARDING_ENQUEUE_STAGGER_SECONDS", "0.5"),
+        )
+    ) #Atraso base reutilizado para diluir enfileiramento de rechecagens
     RECHECK_ENQUEUE_JITTER_SECONDS: int = int(
         os.getenv("RECHECK_ENQUEUE_JITTER_SECONDS", "5")
     ) #Jitter aleatório para dispersar rechecagens simultâneas

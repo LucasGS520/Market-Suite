@@ -126,53 +126,33 @@ def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_ur
     )
 
 def get_last_price_change_for_monitored(db: Session, monitored_product_id: UUID) -> datetime | None:
-    """ Retorna o momento da última alteração de preço do monitorado
-    
-    A consulta busca a última leitura conhecida e identifica quando o preço
-    passou a assumir o valor atual, ifnorando repetição de registros com o
-    mesmo valor para evitar leituras falsas positivas.
+    """ Retorna a última mudança de preço considerando monitorado e concorrentes
+
+    A criação de ``PriceHistory`` é condicionada a alterações reais de preço
+    tanto do item monitorado quanto dos concorrentes. Assim, ao buscar o
+    ``checked_at`` mais recente entre esses registros, obtemos o último evento
+    efetivo de alteração de preço no ecossistema do produto, evitando leituras
+    duplicadas.
     """
-    latest_entry = (
-        db.query(PriceHistory)
-        .filter(PriceHistory.monitored_product_id == monitored_product_id)
-        .order_by(PriceHistory.checked_at.desc())
-        .limit(1)
-        .first()
+    competitor_subquery = (
+        db.query(CompetitorProduct.id)
+        .filter(CompetitorProduct.monitored_product_id == monitored_product_id)
+        .subquery()
     )
-    if latest_entry is None:
-        return None
-    
-    previous_different = (
-        db.query(PriceHistory.checked_at)
+    latest_change = (
+        db.query(func.max(PriceHistory.checked_at))
         .filter(
-            PriceHistory.monitored_product_id == monitored_product_id,
-            PriceHistory.price != latest_entry.price,
-            PriceHistory.checked_at < latest_entry.checked_at,
-        )
-        .order_by(PriceHistory.checked_at.desc())
-        .first()
-    )
-    resolved_change_at = latest_entry.checked_at
-
-    if previous_different:
-        first_current_value = (
-            db.query(PriceHistory.checked_at)
-            .filter(
+            or_(
                 PriceHistory.monitored_product_id == monitored_product_id,
-                PriceHistory.price == latest_entry.price,
-                PriceHistory.checked_at > previous_different[0],
+                PriceHistory.competitor_product_id.in_(competitor_subquery),
             )
-            .order_by(PriceHistory.checked_at.asc())
-            .limit(1)
-            .first()
         )
+        .scalar()
+    )
 
-        if first_current_value:
-            resolved_change_at = first_current_value[0]
-
-    if resolved_change_at and resolved_change_at.tzinfo is None:
-        resolved_change_at = resolved_change_at.replace(tzinfo=timezone.utc)
-    return resolved_change_at
+    if latest_change and latest_change.tzinfo is None:
+        return latest_change.replace(tzinfo=timezone.utc)
+    return latest_change
 
 def count_notifications_for_monitored_product(
     db: Session,
@@ -267,6 +247,8 @@ def create_or_update_monitored_product_scraped(
 
     if last_checked.tzinfo is None:
         last_checked = last_checked.replace(tzinfo=timezone.utc)
+    else:
+        last_checked = last_checked.astimezone(timezone.utc)
 
     #Verifica se o produto já existe para o usuário
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
@@ -291,10 +273,10 @@ def create_or_update_monitored_product_scraped(
         previous_price = existing.current_price
         previous_status = existing.status
         price_changed = _different_price(previous_price, resolved_price)
-        resolved_price = currency or scraped_info.currency or existing.currency
+        resolved_currency = currency or scraped_info.currency or existing.currency
 
         #Executa commit único garantindo atomicidade com o histórico
-        with db.begin():
+        try:
             existing.current_price = resolved_price
 
             #Atualiza thumbnail, frete, moeda, etag, timestamps e status
@@ -328,6 +310,12 @@ def create_or_update_monitored_product_scraped(
                     resolved_currency,
                     last_checked,
                 )
+
+            db.commit()
+        except Exception:
+            #Rollback evita manter sessão suja em falhas de gravação e previne transações aninhadas
+            db.rollback()
+            raise
 
         db.refresh(existing)
         existing._price_changed = price_changed
@@ -367,8 +355,7 @@ def create_or_update_monitored_product_scraped(
     )
     new.next_check_at = _compute_next_check_at(new, reference=last_checked)
     
-    #Mantemos histórico e produto no mesmo commit para evitar divergências
-    with db.begin():
+    try:
         db.add(new)
         db.flush()
         if resolved_price is not None:
@@ -379,6 +366,11 @@ def create_or_update_monitored_product_scraped(
                 resolved_currency,
                 last_checked,
             )
+        db.commit()
+    except Exception:
+        #Rollback mantém atomicidade entre produto e histórico quando ocorrer falha
+        db.rollback()
+        raise
 
     db.refresh(new)
 
@@ -661,8 +653,8 @@ def mark_monitored_product_failed(
         return None
     
     product.status = MonitoredStatus.failed
+    # Falhas não representam dados novos — registre apenas a checagem.
     product.last_checked = touched_at or datetime.now(timezone.utc)
-    product.last_scraped_at = product.last_checked
     db.commit()
     db.refresh(product)
     return product

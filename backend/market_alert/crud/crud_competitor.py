@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import List, Sequence
 from urllib.parse import unquote, urlparse
@@ -170,6 +170,11 @@ def create_or_update_competitor_product_scraped(
         except ValueError:
             normalized_url = str(product_data.product_url).strip()
 
+    if last_checked.tzinfo is None:
+        last_checked = last_checked.replace(tzinfo=timezone.utc)
+    else:
+        last_checked = last_checked.astimezone(timezone.utc)
+
     #Verifica se já existe um concorrente com o mesmo monitorado e URL canônica
     existing = get_competitor_by_monitored_and_url(
         db,
@@ -187,8 +192,7 @@ def create_or_update_competitor_product_scraped(
         price_changed = _different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
 
-        #Agrupamos persistência do produto e do histórico para garantir atomicidade
-        with db.begin():
+        try:
             existing.current_price = resolved_price
 
             #Atualiza thumbnail, frete, moeda, etag, timestamps e status
@@ -228,6 +232,12 @@ def create_or_update_competitor_product_scraped(
                     last_checked,
                 )
 
+            db.commit()
+        except Exception:
+            #Rollback evita sessões sujas quando o chamador controla a transação externamente
+            db.rollback()
+            raise
+
         db.refresh(existing)
         existing._price_changed = price_changed
         existing._availability_changed = previous_status != ProductStatus.available
@@ -262,7 +272,7 @@ def create_or_update_competitor_product_scraped(
         etag=etag,
         last_modified=last_modified,
         )
-    with db.begin():
+    try:
         db.add(new)
         db.flush()
         if resolved_price is not None:
@@ -273,6 +283,11 @@ def create_or_update_competitor_product_scraped(
                 resolved_currency,
                 last_checked,
             )
+        db.commit()
+    except Exception:
+        #Rollback mantém atomicidade entre criação do concorrente e histórico de preços
+        db.rollback()
+        raise
 
     db.refresh(new)
     new._price_changed = True
@@ -312,12 +327,18 @@ def get_competitors_by_monitored_id(
     *,
     include_paused: bool = False,
 ) -> List[CompetitorProduct]:
-    """ Lista todos os produtos concorrentes associados a um produto monitorado pelo ID """
+    """ Lista concorrentes associados respeitando filtros de pausa e disponibilidade"""
     query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
     )
     if not include_paused:
-        query = query.filter(CompetitorProduct.is_paused.is_(False))
+        #Evita enfileirar ou listar concorrentes pausados ou já indisponíveis
+        query = query.filter(
+            CompetitorProduct.is_paused.is_(False),
+            CompetitorProduct.status.in_(
+                [ProductStatus.available, ProductStatus.pending]
+            ),
+        )
     return query.all()
 
 def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) -> List[CompetitorProduct]:

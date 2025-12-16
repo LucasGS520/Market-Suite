@@ -1,11 +1,22 @@
 /**
  * Utilitários de data para formatações amigáveis na interface.
  */
+
+const parseIsoAsUtc = (iso?: string | null): Date | null => {
+  if (!iso) return null;
+  const trimmed = iso.trim();
+  if (!trimmed) return null;
+
+  // Assume UTC quando o backend não envia offset explícito para preservar coerência
+  const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(trimmed) ? trimmed : `${trimmed}Z`;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
 export const formatRelativeTime = (iso?: string | null): string => {
   // Retorna marcador padrão quando não há valor ou data inválida
-  if (!iso) return '—';
-  const targetDate = new Date(iso);
-  if (Number.isNaN(targetDate.getTime())) return '—';
+  const targetDate = parseIsoAsUtc(iso);
+  if (!targetDate) return '—';
 
   const now = new Date();
   const diffSeconds = Math.round((targetDate.getTime() - now.getTime()) / 1000);
@@ -52,9 +63,17 @@ export const formatRelativeTime = (iso?: string | null): string => {
  */
 export const formatDateOnly = (iso?: string | null): string => {
   // Garante retorno amigável em caso de ausência ou erro de parsing
-  if (!iso) return '—';
-  const parsedDate = new Date(iso);
-  if (Number.isNaN(parsedDate.getTime())) return '—';
+  const parsedDate = parseIsoAsUtc(iso);
+  if (!parsedDate) return '—';
 
   return parsedDate.toLocaleDateString('pt-BR');
 };
+
+export const formatDateTime = (iso?: string | null): string => {
+  const parsedDate = parseIsoAsUtc(iso);
+  if (!parsedDate) return '—';
+
+  return parsedDate.toLocaleString('pt-BR');
+};
+
+export const parseUtcDate = parseIsoAsUtc;

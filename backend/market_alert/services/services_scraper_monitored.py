@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared import metrics
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
 from shared.utils.url_validation import normalize_product_url
 
@@ -64,11 +65,23 @@ def _handle_response(
                 lookup_url,
             )
             if product:
+                # Marca apenas como checada — 304 indica "não modificado", portanto não devemos 
+                # atualizar `last_scraped_at` que representa dados novos/atualizados.
                 product.last_checked = last_checked
-                product.last_scraped_at = last_checked
                 product.status = MonitoredStatus.active
                 product.next_check_at = _compute_next_check_at(product, reference=last_checked)
                 db.commit()
+                try:
+                    #Garante rechecagem assíncrona dos concorrentes sem bloquear a resposta
+                    from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+
+                    enqueue_competitors_for_monitored(db, monitored_id=product.id)
+                except Exception:
+                    logger.exception(
+                        "enqueue_competitors_failed",
+                        monitored_id=str(product.id),
+                    )
+                    metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
                 logger.info(
                     "monitored_not_modified",
                     product_id=str(product.id),
@@ -107,7 +120,6 @@ def _handle_response(
         thumbnail=sanitized_thumbnail,
         free_shipping=bool(metadata.get("free_shipping", False)),
         currency=sanitized_currency,
-        collected_at=last_checked,
         availability=bool(availability) if availability is not None else None,
     )
 
@@ -125,6 +137,15 @@ def _handle_response(
 
     price_changed = bool(getattr(product, "_price_changed", True))
     availability_changed = bool(getattr(product, "_availability_changed", True))
+
+    try:
+        #Reenfileira concorrentes vinculados após atualizar o monitorado
+        from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+
+        enqueue_competitors_for_monitored(db, monitored_id=product.id)
+    except Exception:
+        logger.exception("enqueue_competitors_failed", monitored_id=str(product.id))
+        metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
 
     return ScrapeResult(
         status="success",

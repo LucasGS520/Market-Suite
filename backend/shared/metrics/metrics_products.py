@@ -7,4 +7,10 @@ PENDING_COMPETITOR_CREATED_TOTAL = Counter(
     "Total de concorrentes criados com status pendente aguardando scraping",
 )
 
-__all__ = ["PENDING_COMPETITOR_CREATED_TOTAL"]
+PRICE_HISTORY_CREATED_TOTAL = Counter(
+    "price_history_created_total",
+    "Total de registros de histórico de preço persistidos por tipo de dono",
+    labelnames=["owner"],
+)
+
+__all__ = ["PENDING_COMPETITOR_CREATED_TOTAL", "PRICE_HISTORY_CREATED_TOTAL"]

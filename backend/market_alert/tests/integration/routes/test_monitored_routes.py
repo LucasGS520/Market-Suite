@@ -12,6 +12,8 @@ from market_alert.models.models_price_history import PriceHistory
 from market_alert.models.models_alerts import AlertRule, NotificationLog
 from market_alert.tasks import scraper_tasks
 from shared.utils.url_validation import normalize_product_url_for_storage
+from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from market_alert.crud import crud_monitored
 
 
 def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session, test_user, prepare_test_database):
@@ -432,4 +434,42 @@ def test_get_monitored_product_expoe_metricas_derivadas(client, db_session, test
     payload_change = datetime.fromisoformat(payload["last_price_change_at"].replace("Z", "+00:00"))
     assert payload_change == expected_change_at
     assert payload["alerts_sent"] == 1
+    
+def test_monitored_detail_reflete_checked_at_do_scraping(client, db_session, test_user, prepare_test_database):
+    """Garante que o histórico use o timestamp do scraper em UTC e retorne ao frontend."""
+
+    captured_checked_at = datetime(2024, 5, 10, 15, 30)
+    monitored_payload = MonitoredProductCreateScraping(
+        name_identification="Console Teste",
+        product_url="https://example.com/produto-utc",
+    )
+    scraped_info = MonitoredScrapedInfo(
+        name="Console Teste",
+        product_url=monitored_payload.product_url,
+        current_price=Decimal("2999.99"),
+        thumbnail=None,
+        free_shipping=False,
+        currency="BRL",
+    )
+
+    product = crud_monitored.create_or_update_monitored_product_scraped(
+        db_session,
+        test_user.id,
+        monitored_payload,
+        scraped_info,
+        captured_checked_at,
+        currency="BRL",
+    )
+
+    response = client.get(f"/monitored/{product.id}")
+    assert response.status_code == 200
+
+    payload = response.json()
+    last_change = datetime.fromisoformat(payload["last_price_change_at"])  # Já vem em UTC
+    last_checked = datetime.fromisoformat(payload["last_checked"].replace("Z", "+00:00"))
+    last_scraped = datetime.fromisoformat(payload["last_scraped_at"].replace("Z", "+00:00"))
+
+    assert last_change == captured_checked_at.replace(tzinfo=timezone.utc)
+    assert last_checked == captured_checked_at.replace(tzinfo=timezone.utc)
+    assert last_scraped == captured_checked_at.replace(tzinfo=timezone.utc)
     
