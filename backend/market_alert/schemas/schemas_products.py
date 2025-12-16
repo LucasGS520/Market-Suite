@@ -55,10 +55,15 @@ class MonitoredProductResponse(ProductResponse):
     last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")
     next_check_at: datetime | None = Field(None, description="Próximo horário previsto para rechecagem do produto")
     last_price_change_at: datetime | None = Field(None, description="Última vez em que o preço monitorado mudou")
+    last_price_change_global_at: datetime | None = Field(
+        None,
+        description=("Última mudança de preço considerando histórico do monitorado e de todos os concorrentes vinculados"),
+    )
     competitiveness_status: CompetitivenessStatus | None = Field(None, description="Classificação de competitividade calculada a partir das comparações")
     is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
     alerts_sent: int | None = Field(None, description="Quantidade de notificações enviadas para o monitorado")
-    comparison_summary: PriceComparisonSummaryResponse | None = Field(default=None,
+    comparison_summary: PriceComparisonSummaryResponse | None = Field(
+        default=None,
         description=("Último resumo consolidado de comparação de preços com métricas normalizadas para exibição imediata no frontend."),
     )
 

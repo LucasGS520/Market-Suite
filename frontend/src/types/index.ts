@@ -41,6 +41,7 @@ export interface MonitoredProduct {
   last_scraped_at?: string; // Timestamp do último scraping
   created_at?: string; // Data de criação do monitoramento
   last_price_change_at?: string; // Última mudança de preço registrada
+  last_price_change_global_at?: string; // Última mudança global considerando monitorado e concorrentes
   alerts_sent?: number | null; // Total de alertas enviados relacionados ao produto
   availability?: boolean; // Disponibilidade do produto
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade

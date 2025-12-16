@@ -162,6 +162,7 @@ def get_monitored_product(
         summary=summary,
         allow_missing_price=True,
         last_price_change_at=last_price_change_at,
+        global_last_price_change_at=last_price_change_at,
         alerts_sent=alerts_sent,
     )
 

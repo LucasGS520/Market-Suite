@@ -126,53 +126,33 @@ def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_ur
     )
 
 def get_last_price_change_for_monitored(db: Session, monitored_product_id: UUID) -> datetime | None:
-    """ Retorna o momento da última alteração de preço do monitorado
-    
-    A consulta busca a última leitura conhecida e identifica quando o preço
-    passou a assumir o valor atual, ifnorando repetição de registros com o
-    mesmo valor para evitar leituras falsas positivas.
+    """ Retorna a última mudança de preço considerando monitorado e concorrentes
+
+    A criação de ``PriceHistory`` é condicionada a alterações reais de preço
+    tanto do item monitorado quanto dos concorrentes. Assim, ao buscar o
+    ``checked_at`` mais recente entre esses registros, obtemos o último evento
+    efetivo de alteração de preço no ecossistema do produto, evitando leituras
+    duplicadas.
     """
-    latest_entry = (
-        db.query(PriceHistory)
-        .filter(PriceHistory.monitored_product_id == monitored_product_id)
-        .order_by(PriceHistory.checked_at.desc())
-        .limit(1)
-        .first()
+    competitor_subquery = (
+        db.query(CompetitorProduct.id)
+        .filter(CompetitorProduct.monitored_product_id == monitored_product_id)
+        .subquery()
     )
-    if latest_entry is None:
-        return None
-    
-    previous_different = (
-        db.query(PriceHistory.checked_at)
+    latest_change = (
+        db.query(func.max(PriceHistory.checked_at))
         .filter(
-            PriceHistory.monitored_product_id == monitored_product_id,
-            PriceHistory.price != latest_entry.price,
-            PriceHistory.checked_at < latest_entry.checked_at,
-        )
-        .order_by(PriceHistory.checked_at.desc())
-        .first()
-    )
-    resolved_change_at = latest_entry.checked_at
-
-    if previous_different:
-        first_current_value = (
-            db.query(PriceHistory.checked_at)
-            .filter(
+            or_(
                 PriceHistory.monitored_product_id == monitored_product_id,
-                PriceHistory.price == latest_entry.price,
-                PriceHistory.checked_at > previous_different[0],
+                PriceHistory.competitor_product_id.in_(competitor_subquery),
             )
-            .order_by(PriceHistory.checked_at.asc())
-            .limit(1)
-            .first()
         )
+        .scalar()
+    )
 
-        if first_current_value:
-            resolved_change_at = first_current_value[0]
-
-    if resolved_change_at and resolved_change_at.tzinfo is None:
-        resolved_change_at = resolved_change_at.replace(tzinfo=timezone.utc)
-    return resolved_change_at
+    if latest_change and latest_change.tzinfo is None:
+        return latest_change.replace(tzinfo=timezone.utc)
+    return latest_change
 
 def count_notifications_for_monitored_product(
     db: Session,
