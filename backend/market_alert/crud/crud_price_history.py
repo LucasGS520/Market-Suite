@@ -4,14 +4,24 @@ Os helpers evitam duplicidade de registros quando o preço permanece estável
 entre coletas próximas, reduzindo ruído em comparações e relatórios. 
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from market_alert.models.models_price_history import PriceHistory
+from shared.metrics.metrics_products import PRICE_HISTORY_CREATED_TOTAL
+import structlog
 
+
+logger = structlog.get_logger("crud_price_history")
+
+def _normalize_checked_at(checked_at: datetime) -> datetime:
+    """ Garante que o timestamp do histórico esteja em UTC e com tzinfo """
+    if checked_at.tzinfo is None:
+        return checked_at.replace(tzinfo=timezone.utc)
+    return checked_at.astimezone(timezone.utc)
 
 def _last_entry_for_product(
     db: Session,
@@ -52,6 +62,8 @@ def create_for_monitored(
     ``flush`` das alterações para permitir controle transacional pelo caller.
     Quando ``commit`` é ``True`` a confirmação é realizada aqui.
     """
+    normalized_checked_at = _normalize_checked_at(checked_at)
+
     existing = _last_entry_for_product(db, monitored_product_id=monitored_product_id)
     if existing and _is_duplicate_price(existing, price, currency=currency):
         return existing
@@ -60,7 +72,7 @@ def create_for_monitored(
         monitored_product_id=monitored_product_id,
         price=price,
         currency=currency,
-        checked_at=checked_at,
+        checked_at=normalized_checked_at,
     )
     db.add(entry)
     if commit:
@@ -68,6 +80,16 @@ def create_for_monitored(
         db.refresh(entry)
     else:
         db.flush()
+
+    PRICE_HISTORY_CREATED_TOTAL.labels(owner="monitored").inc()
+    logger.info(
+        "price_history_created",
+        owner_type="monitored",
+        monitored_product_id=str(monitored_product_id),
+        price=str(price),
+        currency=currency,
+        checked_at=normalized_checked_at.isoformat(),
+    )
     return entry
 
 def create_for_competitor(
@@ -85,6 +107,8 @@ def create_for_competitor(
     a critério de quem chamou para que produto e histórico sejam persistidos
     juntos quando necessário.
     """
+    normalized_checked_at = _normalize_checked_at(checked_at)
+
     existing = _last_entry_for_product(db, competitor_product_id=competitor_product_id)
     if existing and _is_duplicate_price(existing, price, currency=currency):
         return existing
@@ -93,7 +117,7 @@ def create_for_competitor(
         competitor_product_id=competitor_product_id,
         price=price,
         currency=currency,
-        checked_at=checked_at,
+        checked_at=normalized_checked_at,
     )
     db.add(entry)
     if commit:
@@ -101,4 +125,14 @@ def create_for_competitor(
         db.refresh(entry)
     else:
         db.flush()
+
+    PRICE_HISTORY_CREATED_TOTAL.labels(owner="competitor").inc()
+    logger.info(
+        "price_history_created",
+        owner_type="competitor",
+        competitor_product_id=str(competitor_product_id),
+        price=str(price),
+        currency=currency,
+        checked_at=normalized_checked_at.isoformat(),
+    )
     return entry

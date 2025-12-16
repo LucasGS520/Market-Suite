@@ -24,6 +24,7 @@ class ProductResponse(BaseModel):
     source: Literal["monitored", "competitor"]
     availability: bool | None = Field(None, description="Disponibilidade reportada pelo fluxo de coleta")
     last_status: str | None = Field(None, description="Status mais recente conhecido do fluxo de coleta")
+    last_checked: datetime | None = Field(None, description="Momento da última checagem conhecida do produto")
 
 # ----- RETORNOS DE CADASTRO -----
 class MonitoredScrapeCreationResponse(BaseModel):

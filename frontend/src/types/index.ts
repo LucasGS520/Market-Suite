@@ -37,6 +37,7 @@ export interface MonitoredProduct {
   currency?: string; // Código da moeda
   thumbnail?: string; // URL da imagem em miniatura
   is_featured: boolean; // Indica se o produto é destacado
+  last_checked?: string; // Timestamp da última checagem do produto
   last_scraped_at?: string; // Timestamp do último scraping
   created_at?: string; // Data de criação do monitoramento
   last_price_change_at?: string; // Última mudança de preço registrada
@@ -65,6 +66,7 @@ export interface CompetitorProduct {
   availability?: boolean; // Disponibilidade do concorrente (opcional)
   is_paused: boolean; // Indica se a monitoria desse concorrente está pausada
   last_status?: string; // Último status textual registrado (opcional)
+  last_checked?: string; // Timestamp da última checagem desse concorrente (pode diferir do scraping)
   last_scraped_at?: string; // Timestamp do último scraping desse concorrente (opcional)
 }
 

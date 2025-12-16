@@ -267,6 +267,8 @@ def create_or_update_monitored_product_scraped(
 
     if last_checked.tzinfo is None:
         last_checked = last_checked.replace(tzinfo=timezone.utc)
+    else:
+        last_checked = last_checked.astimezone(timezone.utc)
 
     #Verifica se o produto já existe para o usuário
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)

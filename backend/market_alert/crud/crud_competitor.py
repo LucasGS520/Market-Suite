@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import List, Sequence
 from urllib.parse import unquote, urlparse
@@ -169,6 +169,11 @@ def create_or_update_competitor_product_scraped(
             normalized_url = canonicalize_product_url(str(product_data.product_url))
         except ValueError:
             normalized_url = str(product_data.product_url).strip()
+
+    if last_checked.tzinfo is None:
+        last_checked = last_checked.replace(tzinfo=timezone.utc)
+    else:
+        last_checked = last_checked.astimezone(timezone.utc)
 
     #Verifica se já existe um concorrente com o mesmo monitorado e URL canônica
     existing = get_competitor_by_monitored_and_url(

@@ -257,7 +257,7 @@ const ProductDetail: React.FC = () => {
   const monitoredSince = product.created_at;
   const monitoringPaused = product.is_paused ?? false;
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
-  const lastCollectedAt = product.last_scraped_at || product.created_at;
+  const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
 
   return (
     <Layout>

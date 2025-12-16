@@ -7,7 +7,7 @@ de fallback ou mensagens de erro inconsistentes pelas rotas.
 """
 
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -24,6 +24,14 @@ from market_alert.schemas.schemas_products import (
 )
 from shared.utils import sanitize_text
 
+
+def _normalize_timestamp(value: datetime | None) -> datetime | None:
+    """ Normaliza timestamp para UTC preservando valores nulos """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 def _ensure_price(
     value: Decimal | None,
@@ -103,10 +111,11 @@ def build_monitored_response(
         source="monitored",
         availability=availability,
         last_status=monitored.status.value,
+        last_checked=_normalize_timestamp(monitored.last_checked),
         thumbnail=monitored.thumbnail,
-        created_at=monitored.created_at,
-        last_scraped_at=monitored.last_scraped_at,
-        next_check_at=monitored.next_check_at,
+        created_at=_normalize_timestamp(monitored.created_at),
+        last_scraped_at=_normalize_timestamp(monitored.last_scraped_at),
+        next_check_at=_normalize_timestamp(monitored.next_check_at),
         last_price_change_at=last_price_change_at,
         competitiveness_status=competitiveness_status,
         is_featured=monitored.is_featured,
@@ -150,7 +159,8 @@ def build_competitor_response(
         url=competitor.product_url,
         current_price=current_price,
         currency=competitor.currency,
-        last_scraped_at=(competitor.last_scraped_at or competitor.last_checked or competitor.created_at),
+        last_scraped_at=_normalize_timestamp(competitor.last_scraped_at or competitor.last_checked or competitor.created_at),
+        last_checked=_normalize_timestamp(competitor.last_checked),
         source=source,
         availability=availability,
         last_status=competitor.status.value,
