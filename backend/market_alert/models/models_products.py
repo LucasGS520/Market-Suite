@@ -78,15 +78,6 @@ class MonitoredProduct(Base):
         """ Nome preparado para exibição em contratos simplificados """
         return self.name_identification
     
-    @property
-    def collected_at(self) -> datetime:
-        """ Seleciona o timestamp mais recente conhecido para a coleta """
-        return (
-            self.last_scraped_at
-            or self.last_checked
-            or self.updated_at
-            or self.created_at
-        )
 
 # ---------- PRODUTO CONCORRENTE ----------
 class CompetitorProduct(Base):
@@ -145,13 +136,3 @@ class CompetitorProduct(Base):
     def display_name(self) -> str:
         """ Nome preparado para exibição em contratos simplificados """
         return self.name_competitor
-    
-    @property
-    def collected_at(self) -> datetime:
-        """ Seleciona o timestamp mais recente conhecido para a coleta """
-        return (
-            self.last_scraped_at
-            or self.last_checked
-            or self.updated_at
-            or self.created_at
-        )

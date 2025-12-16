@@ -65,8 +65,9 @@ def _handle_response(
                 lookup_url,
             )
             if product:
+                # Marca apenas como checada — 304 indica "não modificado", portanto não devemos 
+                # atualizar `last_scraped_at` que representa dados novos/atualizados.
                 product.last_checked = last_checked
-                product.last_scraped_at = last_checked
                 product.status = MonitoredStatus.active
                 product.next_check_at = _compute_next_check_at(product, reference=last_checked)
                 db.commit()
@@ -119,7 +120,6 @@ def _handle_response(
         thumbnail=sanitized_thumbnail,
         free_shipping=bool(metadata.get("free_shipping", False)),
         currency=sanitized_currency,
-        collected_at=last_checked,
         availability=bool(availability) if availability is not None else None,
     )
 

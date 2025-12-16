@@ -42,10 +42,6 @@ class ProductCore(BaseModel):
         None,
         description="Moeda associada ao preço, preferencialmente código ISO.",
     )
-    collected_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Timestamp da coleta, usado para rastrear atualizações.",
-    )
     source: Literal["monitored", "competitor"] = Field(
         ..., description="Origem do produto dentro do domínio"
     )

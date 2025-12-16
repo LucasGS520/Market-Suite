@@ -150,7 +150,7 @@ def build_competitor_response(
         url=competitor.product_url,
         current_price=current_price,
         currency=competitor.currency,
-        collected_at=competitor.collected_at,
+        last_scraped_at=(competitor.last_scraped_at or competitor.last_checked or competitor.created_at),
         source=source,
         availability=availability,
         last_status=competitor.status.value,

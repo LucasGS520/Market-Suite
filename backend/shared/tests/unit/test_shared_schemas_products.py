@@ -22,7 +22,7 @@ def test_monitored_scraped_info_defaults():
     assert data.thumbnail is None
     assert data.free_shipping is False
     assert data.source == "monitored"
-    assert data.collected_at is not None
+    # `collected_at` removed — freshness is tracked via model timestamps (`last_scraped_at`/`last_checked`).
 
 def test_competitor_scraped_info_defaults():
     data = CompetitorScrapedInfo(

@@ -47,7 +47,6 @@ class CompetitorScrapeCreationResponse(BaseModel):
 # ----- PRODUTO MONITORADO -----
 class MonitoredProductResponse(ProductResponse):
     """ Contrato simplificado de um produto monitorado """
-    collected_at: datetime | None = Field(None, exclude=True, description="Campo técnico omitido do contrato enxuto")
     owner_id: UUID = Field(..., description="Identificador do responsável pelo monitoramento")
     source: Literal["monitored"] = "monitored"
     thumbnail: str | None = Field(None, description="Miniatura mais recente identificada pelo fluxo de scraping")
@@ -77,6 +76,7 @@ class PaginatedMonitoredProductsResponse(BaseModel):
 # ----- PRODUTO CONCORRENTE -----
 class CompetitorProductResponse(ProductResponse):
     """ Contrato simplificado de um produto concorrente """
+    last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o concorrente")
     monitored_product_id: UUID = Field(
         ..., description="Vínculo obrigatório com o produto monitorado"
     )

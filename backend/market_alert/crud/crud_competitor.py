@@ -187,8 +187,7 @@ def create_or_update_competitor_product_scraped(
         price_changed = _different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
 
-        #Agrupamos persistência do produto e do histórico para garantir atomicidade
-        with db.begin():
+        try:
             existing.current_price = resolved_price
 
             #Atualiza thumbnail, frete, moeda, etag, timestamps e status
@@ -228,6 +227,12 @@ def create_or_update_competitor_product_scraped(
                     last_checked,
                 )
 
+            db.commit()
+        except Exception:
+            #Rollback evita sessões sujas quando o chamador controla a transação externamente
+            db.rollback()
+            raise
+
         db.refresh(existing)
         existing._price_changed = price_changed
         existing._availability_changed = previous_status != ProductStatus.available
@@ -262,7 +267,7 @@ def create_or_update_competitor_product_scraped(
         etag=etag,
         last_modified=last_modified,
         )
-    with db.begin():
+    try:
         db.add(new)
         db.flush()
         if resolved_price is not None:
@@ -273,6 +278,11 @@ def create_or_update_competitor_product_scraped(
                 resolved_currency,
                 last_checked,
             )
+        db.commit()
+    except Exception:
+        #Rollback mantém atomicidade entre criação do concorrente e histórico de preços
+        db.rollback()
+        raise
 
     db.refresh(new)
     new._price_changed = True

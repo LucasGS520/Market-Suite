@@ -95,6 +95,13 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 - **Criar via scraping**: endpoints `/monitored/scrape` e `/competitors/scrape` retornam 202 com representação mínima do recurso (`id`, `url`, `created_at`) e enfileiram coleta na fila `scraping`.
 - **Destaques**: `/monitored/featured` devolve até 3 monitorados com `is_featured=true`, ordenados pelo critério definido em `routes_monitored`.
 
+**Semântica de timestamps de scraping**
+- **`last_checked`**: registra quando o sistema tentou/processou uma checagem do produto (qualquer tentativa, sucesso ou não). Usado pelo agendador e para decisões operacionais como `SCRAPER_FORCE_REFRESH_TTL_SECONDS`.
+- **`last_scraped_at`**: registra o momento em que dados novos/atualizados foram efetivamente obtidos do `market_scraper` (ou seja, quando um fetch retornou payload que representa conteúdo atualizado). Não deve ser atualizado em retornos `304 Not Modified`.
+- **`checked_at`** (em `PriceHistory`): carimbo de tempo da observação/medição de preço — usado para séries históricas e determinação do instante da mudança de preço.
+
+Observação: a implementação foi ajustada para que respostas `304 Not Modified` atualizem apenas `last_checked` (indicador de atividade), preservando `last_scraped_at` como sinal de frescor dos dados brutos.
+
 ## Principais Componentes do Serviço
 - `main.py` – instancia a aplicação FastAPI, middlewares, limiter e rotas.
 - `core/config_alert.py` – carrega variáveis de ambiente e aplica defaults.

@@ -291,10 +291,10 @@ def create_or_update_monitored_product_scraped(
         previous_price = existing.current_price
         previous_status = existing.status
         price_changed = _different_price(previous_price, resolved_price)
-        resolved_price = currency or scraped_info.currency or existing.currency
+        resolved_currency = currency or scraped_info.currency or existing.currency
 
         #Executa commit único garantindo atomicidade com o histórico
-        with db.begin():
+        try:
             existing.current_price = resolved_price
 
             #Atualiza thumbnail, frete, moeda, etag, timestamps e status
@@ -328,6 +328,12 @@ def create_or_update_monitored_product_scraped(
                     resolved_currency,
                     last_checked,
                 )
+
+            db.commit()
+        except Exception:
+            #Rollback evita manter sessão suja em falhas de gravação e previne transações aninhadas
+            db.rollback()
+            raise
 
         db.refresh(existing)
         existing._price_changed = price_changed
@@ -367,8 +373,7 @@ def create_or_update_monitored_product_scraped(
     )
     new.next_check_at = _compute_next_check_at(new, reference=last_checked)
     
-    #Mantemos histórico e produto no mesmo commit para evitar divergências
-    with db.begin():
+    try:
         db.add(new)
         db.flush()
         if resolved_price is not None:
@@ -379,6 +384,11 @@ def create_or_update_monitored_product_scraped(
                 resolved_currency,
                 last_checked,
             )
+        db.commit()
+    except Exception:
+        #Rollback mantém atomicidade entre produto e histórico quando ocorrer falha
+        db.rollback()
+        raise
 
     db.refresh(new)
 
@@ -661,8 +671,8 @@ def mark_monitored_product_failed(
         return None
     
     product.status = MonitoredStatus.failed
+    # Falhas não representam dados novos — registre apenas a checagem.
     product.last_checked = touched_at or datetime.now(timezone.utc)
-    product.last_scraped_at = product.last_checked
     db.commit()
     db.refresh(product)
     return product
