@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared import metrics
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
 from shared.utils.url_validation import normalize_product_url
 
@@ -69,6 +70,17 @@ def _handle_response(
                 product.status = MonitoredStatus.active
                 product.next_check_at = _compute_next_check_at(product, reference=last_checked)
                 db.commit()
+                try:
+                    #Garante rechecagem assíncrona dos concorrentes sem bloquear a resposta
+                    from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+
+                    enqueue_competitors_for_monitored(db, monitored_id=product.id)
+                except Exception:
+                    logger.exception(
+                        "enqueue_competitors_failed",
+                        monitored_id=str(product.id),
+                    )
+                    metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
                 logger.info(
                     "monitored_not_modified",
                     product_id=str(product.id),
@@ -125,6 +137,15 @@ def _handle_response(
 
     price_changed = bool(getattr(product, "_price_changed", True))
     availability_changed = bool(getattr(product, "_availability_changed", True))
+
+    try:
+        #Reenfileira concorrentes vinculados após atualizar o monitorado
+        from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+
+        enqueue_competitors_for_monitored(db, monitored_id=product.id)
+    except Exception:
+        logger.exception("enqueue_competitors_failed", monitored_id=str(product.id))
+        metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
 
     return ScrapeResult(
         status="success",

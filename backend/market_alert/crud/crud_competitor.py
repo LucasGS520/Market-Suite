@@ -312,12 +312,18 @@ def get_competitors_by_monitored_id(
     *,
     include_paused: bool = False,
 ) -> List[CompetitorProduct]:
-    """ Lista todos os produtos concorrentes associados a um produto monitorado pelo ID """
+    """ Lista concorrentes associados respeitando filtros de pausa e disponibilidade"""
     query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
     )
     if not include_paused:
-        query = query.filter(CompetitorProduct.is_paused.is_(False))
+        #Evita enfileirar ou listar concorrentes pausados ou já indisponíveis
+        query = query.filter(
+            CompetitorProduct.is_paused.is_(False),
+            CompetitorProduct.status.in_(
+                [ProductStatus.available, ProductStatus.pending]
+            ),
+        )
     return query.all()
 
 def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) -> List[CompetitorProduct]:
