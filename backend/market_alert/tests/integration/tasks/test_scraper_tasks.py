@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.market_alert.scraper.scraper_client import ScraperClientError
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.exceptions import ScraperError
-from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.tasks.scraper_tasks import collect_competitor_task, collect_product_task
 
 
@@ -52,6 +52,7 @@ def _isolate_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
 def _patch_task_attr(monkeypatch: pytest.MonkeyPatch, name: str, value) -> None:
     """Atualiza um atributo nos módulos de tasks real e de compatibilidade"""
     monkeypatch.setattr(f"market_alert.tasks.scraper_tasks.{name}", value, raising=False)
+    monkeypatch.setattr(f"market_alert.tasks.collector_product_task.{name}", value, raising=False)
 
 def test_collect_product_tasks_with_invalid_payload():
     """ Quando o payload é inválido (Pydantic), a task encerra sem exceção """
@@ -112,55 +113,66 @@ def test_collect_product_task_generic_exception_creates_error(monkeypatch):
     assert captured["args"][1] == "https://ml.com/x"
 
 
-def test_collect_competitor_task_invalid_payload():
-    """ Quando o payload é invalido, a task deve encerrar sem exceção """
-    result = collect_competitor_task.run(
-        "not-a-uuid",
-        "https://mercadolivre.com.br/comp",
+def test_collect_competitor_task_invalid_payload(monkeypatch):
+    """ Quando o payload é invalido, a task apenas delega a coleta. """
+
+    captured = {}
+
+    def fake_apply_async(*_, **kwargs):
+        captured.update(kwargs)
+        return "delegated"
+
+    collect_competitor_task.request = SimpleNamespace(delivery_info={})
+    monkeypatch.setattr(collect_product_task, "apply_async", fake_apply_async)
+
+    result = collect_competitor_task.apply(
+        kwargs={"monitored_product_id": "not-a-uuid", "url": "https://mercadolivre.com.br/comp"}
     )
-    assert result is None
 
-def test_collect_competitor_task_scraping_http_exception(monkeypatch):
-    """ Erro HTTP no serviço externo deve ser propagado como ScraperError """
+    assert result.get() == "delegated"
+    assert captured["kwargs"]["payload"]["url"] == "https://mercadolivre.com.br/comp"
+    assert captured["queue"] == "scraping"
 
-    def fake_service(*a, **k):
-        raise ScraperClientError("erro", status_code=500)
+def test_collect_competitor_task_preserva_headers(monkeypatch):
+    """ Headers e fila são encaminhados para a task centralizada """
+
+    captured = {}
+
+    def fake_apply_async(*_, **kwargs):
+        captured.update(kwargs)
+        return "delegated"
     
-    def fake_retry(*_, **kwargs):
-        raise RuntimeError(f"retry:{kwargs.get('countdown')}")
+    collect_competitor_task.request = SimpleNamespace(
+        delivery_info={"routing_key": "scraping"}, headers={"x-request-id": "abc"}
+    )
+    monkeypatch.setattr(collect_product_task, "apply_async", fake_apply_async)
 
-    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
-    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
-    monkeypatch.setattr(collect_competitor_task, "retry", fake_retry)
+    result = collect_competitor_task.apply(
+        kwargs={"payload": {"competitor_id": VALID_UUID, "url": "https://mercadolivre.com.br/comp"}}
+    )
+    
+    assert result.get() == "delegated"
+    assert captured["headers"] == {"x-request-id": "abc"}
+    assert captured["queue"] == "scraping"
 
-    with pytest.raises(RuntimeError) as exc:
-        collect_competitor_task.run(
-            VALID_UUID,
-            "https://mercadolivre.com.br/comp",
-        )
-    assert "retry" in str(exc.value)
+def test_collect_competitor_task_normaliza_usuario(monkeypatch):
+    """owner_id legado deve ser propagado como user_id para a task alvo."""
 
-def test_collect_competitor_task_http_5xx_retorna_retry(monkeypatch):
-    """Erro 5xx deve acionar retry progressivo."""
+    captured = {}
 
-    def fake_service(*a, **k):
-        raise ScraperClientError("erro", status_code=500)
+    def fake_apply_async(*_, **kwargs):
+        captured.update(kwargs)
+        return "delegated"
 
-    def fake_retry(*_, **kwargs):
-        raise RuntimeError(f"retry:{kwargs.get('countdown')}")
+    collect_competitor_task.request = SimpleNamespace(delivery_info={})
+    monkeypatch.setattr(collect_product_task, "apply_async", fake_apply_async)
 
-    _patch_task_attr(monkeypatch, "scrape_monitored_product", fake_service)
-    monkeypatch.setattr(collect_product_task, "retry", fake_retry)
-    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", lambda *a, **k: None)
+    result = collect_competitor_task.apply(
+        kwargs={"monitored_product_id": VALID_UUID, "url": "https://mercadolivre.com.br/abc", "owner_id": VALID_UUID}
+    )
 
-    with pytest.raises(RuntimeError) as exc:
-        collect_product_task.run(
-            "https://mercadolivre.com.br/abc",
-            VALID_UUID,
-            "Produto",
-        )
-
-    assert "retry" in str(exc.value)
+    assert result.get() == "delegated"
+    assert captured["kwargs"]["payload"]["user_id"] == VALID_UUID
 
 
 def test_collect_product_task_processa_sucesso(monkeypatch):
@@ -294,105 +306,80 @@ def test_collect_product_task_no_result_sem_id_nao_registra(monkeypatch):
     assert calls == []
 
 def test_collect_competitor_task_not_modified(monkeypatch):
-    """Resposta 304 deve evitar reprocessamento de comparação."""
+    """Resposta 304 deve ainda manter o payload intacto ao delegar."""
 
     captured = {}
 
-    def fake_service(*a, **k):
-        return ScrapeResult(status="not_modified", product_id=VALID_UUID, price_changed=False)
+    def fake_apply_async(*_, **kwargs):
+        captured.update(kwargs)
+        return "delegated"
 
-    def fake_dispatch(*args, **kwargs):
-        captured["called"] = True
+    collect_competitor_task.request = SimpleNamespace(delivery_info={})
+    monkeypatch.setattr(collect_product_task, "apply_async", fake_apply_async)
 
-    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
-    _patch_task_attr(
-        monkeypatch,
-        "get_monitored_product_by_id",
-        lambda db, pid: SimpleNamespace(user_id=VALID_UUID, last_checked=None),
-    )
-    _patch_task_attr(monkeypatch, "_dispatch_comparison_task", fake_dispatch)
+    payload = {"competitor_id": VALID_UUID, "url": "https://mercadolivre.com.br/comp", "last_checked": None}
+    result = collect_competitor_task.apply(kwargs={"payload": payload})
 
-    assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None
-    assert "called" not in captured
+    assert result.get() == "delegated"
+    assert captured["kwargs"]["payload"]["last_checked"] is None
 
 def test_collect_competitor_task_availability_change(monkeypatch):
-    """Mudança de disponibilidade do concorrente deve disparar comparação."""
+    """Delegação deve preencher monitored_id ausente quando informado via kwargs."""
 
     captured = {}
 
-    def fake_service(*a, **k):
-        return ScrapeResult(
-            status="success",
-            product_id=VALID_UUID,
-            price_changed=False,
-            availability_changed=True,
-        )
+    def fake_apply_async(*_, **kwargs):
+        captured.update(kwargs)
+        return "delegated"
 
-    def fake_dispatch(monitored_id, **kwargs):
-        captured["called_with"] = str(monitored_id)
-        captured["kwargs"] = kwargs
+    collect_competitor_task.request = SimpleNamespace(delivery_info={"queue": "scraping"})
+    monkeypatch.setattr(collect_product_task, "apply_async", fake_apply_async)
 
-    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
-    _patch_task_attr(
-        monkeypatch,
-        "get_monitored_product_by_id",
-        lambda db, pid: SimpleNamespace(user_id=VALID_UUID, last_checked=None),
+    result = collect_competitor_task.apply(
+        kwargs={"monitored_product_id": VALID_UUID, "url": "https://mercadolivre.com.br/comp"}
     )
-    _patch_task_attr(monkeypatch, "_dispatch_comparison_task", fake_dispatch)
 
-    assert collect_competitor_task.run(VALID_UUID, "https://mercadolivre.com.br/comp") is None
-    assert captured["called_with"] == VALID_UUID
-    assert captured["kwargs"]["availability_changed"] is True
+    assert result.get() == "delegated"
+    assert captured["kwargs"]["payload"]["monitored_id"] == VALID_UUID
+    assert captured["queue"] == "scraping"
 
-def test_collect_competitor_task_no_result_dispara_retry(monkeypatch):
-    """Resposta ``no_result`` deve reagendar nova tentativa."""
 
-    def fake_service(*a, **k):
-        return ScrapeResult(status="no_result", product_id=VALID_UUID)
+def test_collect_competitor_task_respeita_routing_key(monkeypatch):
+    """Fila de roteamento atual deve ser reaplicada na tarefa delegada."""
 
     captured = {}
 
-    def fake_retry(*_, **kwargs):
-        captured["countdown"] = kwargs.get("countdown")
-        raise collect_competitor_task.MaxRetriesExceededError()
+    def fake_apply_async(*_, **kwargs):
+        captured.update(kwargs)
+        return "delegated"
 
-    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
-    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", lambda *a, **k: None)
-    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
-    monkeypatch.setattr(collect_competitor_task, "retry", fake_retry)
+    collect_competitor_task.request = SimpleNamespace(delivery_info={"routing_key": "custom"})
+    monkeypatch.setattr(collect_product_task, "apply_async", fake_apply_async)
 
-    collect_competitor_task.run(
-        VALID_UUID,
-        "https://mercadolivre.com.br/comp",
+    result = collect_competitor_task.apply(
+        kwargs={"payload": {"competitor_id": VALID_UUID, "url": "https://mercadolivre.com.br/comp"}}
     )
 
-    assert captured["countdown"] is not None
+    assert result.get() == "delegated"
+    assert captured["queue"] == "custom"
 
 
-def test_collect_competitor_task_no_result_registra_um_erro(monkeypatch):
-    """Task de concorrente registra apenas um erro por execução."""
+def test_collect_competitor_task_marca_kind(monkeypatch):
+    """O payload final mantém o marcador de origem do concorrente."""
 
-    def fake_service(*a, **k):
-        return ScrapeResult(status="no_result", product_id=VALID_UUID)
+    captured = {}
 
-    calls = []
+    def fake_apply_async(*_, **kwargs):
+        captured.update(kwargs)
+        return "delegated"
 
-    def fake_retry(*_, **__):
-        raise collect_competitor_task.MaxRetriesExceededError()
+    collect_competitor_task.request = SimpleNamespace(delivery_info={})
+    monkeypatch.setattr(collect_product_task, "apply_async", fake_apply_async)
 
-    def fake_create(db, product_id, url, message, error_type):
-        calls.append((str(product_id), url, message, error_type))
-
-    _patch_task_attr(monkeypatch, "scrape_competitor_product", fake_service)
-    _patch_task_attr(monkeypatch, "crud_errors.create_scraping_error", fake_create)
-    _patch_task_attr(monkeypatch, "get_monitored_product_by_id", lambda db, pid: SimpleNamespace(user_id=VALID_UUID))
-    monkeypatch.setattr(collect_competitor_task, "retry", fake_retry)
-
-    collect_competitor_task.run(
-        VALID_UUID,
-        "https://mercadolivre.com.br/comp",
+    result = collect_competitor_task.apply(
+        kwargs={"monitored_product_id": VALID_UUID, "url": "https://mercadolivre.com.br/comp"}
     )
 
-    assert len(calls) == 1
-    assert calls[0][0] == VALID_UUID
+    assert result.get() == "delegated"
+    assert captured["kwargs"]["payload"].get("kind") == "competitor"
     

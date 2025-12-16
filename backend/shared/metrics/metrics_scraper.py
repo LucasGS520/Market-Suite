@@ -82,6 +82,116 @@ SCRAPER_HEAD_FAILURES_TOTAL = Counter(
     "Total de falhas de scraping registradas",
 )
 
+#Contadores específicos do orquestrador de coleta
+COLLECTOR_SUCCESS_NEW_DATA_TOTAL = Counter(
+    "collector_success_new_data_total",
+    "Coletas concluídas com novos dados persistidos",
+    ["kind"],
+)
+
+COLLECTOR_SUCCESS_NO_CHANGE_TOTAL = Counter(
+    "collector_success_no_change_total",
+    "Coletas concluídas sem alterações detectadas",
+    ["kind"],
+)
+
+COLLECTOR_NO_DATA_TOTAL = Counter(
+    "collector_no_data_total",
+    "Coletas que não retornaram dados utilizáveis",
+    ["kind"],
+)
+
+COLLECTOR_ERROR_TOTAL = Counter(
+    "collector_error_total",
+    "Falhas do coletor ao tentar obter dados",
+    ["kind"],
+)
+
+COLLECTOR_LOCK_ACQUIRED_TOTAL = Counter(
+    "collector_lock_acquired_total",
+    "Locks adquiridos pelo coletor para evitar paralelismo",
+    ["kind"],
+)
+
+COLLECTOR_LOCK_SKIPPED_TOTAL = Counter(
+    "collector_lock_skipped_total",
+    "Execuções ignoradas por lock pré-existente",
+    ["kind"],
+)
+
+COLLECT_LOCK_SKIPPED_TOTAL = Counter(
+    "collect_lock_skipped_total",
+    "Coletas ignoradas por lock ativo na entrada da tarefa",
+    ["kind"],
+)
+
+COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL = Counter(
+    "collector_lock_skipped_owner_total",
+    "Execuções ignoradas por lock pré-existente detalhando dono do lock",
+    ["kind", "owner"],
+)
+
+COLLECT_SUCCESS_TOTAL = Counter(
+    "collect_success_total",
+    "Coletas concluídas com sucesso e dados utilizáveis",
+    ["kind"],
+)
+
+COLLECTOR_DURATION_MS = Histogram(
+    "collector_duration_ms",
+    "Duração da coleta por produto (milissegundos)",
+    ["kind", "outcome"],
+    buckets=[25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
+)
+
+#Métricas específicas do ciclo de rechecagem
+RECHECK_DISPATCH_TOTAL = Counter(
+    "recheck_dispatch_total",
+    "Total de monitorados avaliados para rechecagem",
+    ["status"],
+)
+
+RECHECK_MONITORED_RESULT_TOTAL = Counter(
+    "recheck_monitored_result_total",
+    "Resultados da coleta do produto monitorado no orquestrador",
+    ["result"],
+)
+
+RECHECK_COMPETITOR_RESULT_TOTAL = Counter(
+    "recheck_competitor_result_total",
+    "Resultados das coletas individuais de concorrentes no orquestrador",
+    ["result"],
+)
+
+RECHECK_ENQUEUED_TOTAL = Counter(
+    "recheck_enqueued_total",
+    "Monitorados enviados para rechecagem pelo scheduler",
+    ["status"],
+)
+
+RECHECK_MARK_FAILED_TOTAL = Counter(
+    "recheck_mark_failed_total",
+    "Falhas ao marcar monitorado como em rechecagem",
+    ["reason"],
+)
+
+RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL = Counter(
+    "recheck_skipped_no_next_check_total",
+    "Monitorados ignorados por ausência de next_check_at",
+    ["reason"],
+)
+
+RECHECK_NEXT_CHECK_MISSING_TOTAL = Counter(
+    "recheck_next_check_missing_total",
+    "Contagem absoluta de monitorados sem next_check_at definido",
+)
+
+RECHECK_FINALIZE_FAILED_TOTAL = Counter(
+    "recheck_finalize_failed_total",
+    "Falhas ao limpar estado de rechecagem e recalcular next_check_at",
+    ["reason"],
+)
+
 SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
     "scraper_cache_lookups_total",
     "Total de consultas ao cache básico do scraper por resultado",
@@ -209,4 +319,21 @@ __all__ = [
     "SCRAPER_STEP_INVALID_TOTAL",
     "SCRAPER_VALIDATION_REJECT_TOTAL",
     "SCRAPER_NO_RESULT_TOTAL",
+    "COLLECTOR_SUCCESS_NEW_DATA_TOTAL",
+    "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL",
+    "COLLECTOR_NO_DATA_TOTAL",
+    "COLLECTOR_ERROR_TOTAL",
+    "COLLECTOR_LOCK_ACQUIRED_TOTAL",
+    "COLLECTOR_LOCK_SKIPPED_TOTAL",
+    "COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL",
+    "COLLECT_LOCK_SKIPPED_TOTAL",
+    "COLLECT_SUCCESS_TOTAL",
+    "COLLECTOR_DURATION_MS",
+    "RECHECK_DISPATCH_TOTAL",
+    "RECHECK_MONITORED_RESULT_TOTAL",
+    "RECHECK_COMPETITOR_RESULT_TOTAL",
+    "RECHECK_ENQUEUED_TOTAL",
+    "RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL",
+    "RECHECK_NEXT_CHECK_MISSING_TOTAL",
+    "RECHECK_FINALIZE_FAILED_TOTAL",
 ]

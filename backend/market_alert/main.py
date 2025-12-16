@@ -106,9 +106,13 @@ DEV_ALLOWED_ORIGINS = [
     #URL do servidor Vite em modo desenvolvimento
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    # IP da máquina que serve o frontend na rede local (ex.: seu servidor)
+    "http://192.168.15.150:5173",
     #URL do servidor Express utilizado no build de produção local
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    # Frontend servido a partir do IP (possível variação de porta)
+    "http://192.168.15.150:3000",
 ]
 
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:

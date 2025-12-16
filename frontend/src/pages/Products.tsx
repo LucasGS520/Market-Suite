@@ -5,7 +5,7 @@
  * adicionar produtos monitorados pelo usuário.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -35,6 +35,7 @@ import {
   DialogActions,
   ToggleButton,
   ToggleButtonGroup,
+  Divider,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import {
@@ -42,9 +43,13 @@ import {
   ViewList as ViewListIcon,
   ViewModule as ViewModuleIcon,
   TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
+import { formatCurrency } from '../utils/currency';
+import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types';
+import TruncatedText from '../utils/TruncatedText';
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -62,22 +67,51 @@ const Products: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'table'>('list'); // modo de exibição
   const [searchQuery, setSearchQuery] = useState(''); // texto de busca
   const [statusFilter, setStatusFilter] = useState(''); // filtro por status de competitividade
-  const [page] = useState(1); // página atual (para paginação)
+  const [page, setPage] = useState(1); // página atual para paginação em modo lista
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto
+  const [newCompetitorUrl, setNewCompetitorUrl] = useState(''); // URL opcional do concorrente inicial
+  const [creationFeedback, setCreationFeedback] = useState<string | null>(null); // mensagem pós-criação
+  const [creationError, setCreationError] = useState<string | null>(null); // erro ao criar produto
 
   // Query para buscar produtos monitorados. A chave depende de pagina, busca e filtro.
   const { data, isLoading, error } = useQuery({
-    queryKey: ['monitoredProducts', page, searchQuery, statusFilter],
+    queryKey: ['monitoredProducts', searchQuery, statusFilter],
     queryFn: () =>
       productsService.getMonitoredProducts({
-        page,
-        per_page: viewMode === 'list' ? 5 : 100,
         query: searchQuery || undefined,
         status: statusFilter || undefined,
       }),
   });
+
+  // Ajusta paginação client-side quando filtros ou modo de visualização mudam
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, statusFilter, viewMode]);
+
+  const listPageSize = 5;
+  const paginatedItems = useMemo(() => {
+    if (!data?.items || viewMode !== 'list') return data?.items ?? [];
+    const offset = (page - 1) * listPageSize;
+    return data.items.slice(offset, offset + listPageSize);
+  }, [data?.items, page, viewMode]);
+
+  const totalPages = useMemo(() => {
+    if (!data?.items || viewMode !== 'list') return 1;
+    return Math.max(1, Math.ceil(data.items.length / listPageSize));
+  }, [data?.items, viewMode]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const handlePageSelect = (newPage: number) => {
+    const boundedPage = Math.min(Math.max(newPage, 1), totalPages);
+    setPage(boundedPage);
+  };
 
   // Mutation para criação de produto monitorado.
   const createProductMutation = useMutation({
@@ -89,7 +123,15 @@ const Products: React.FC = () => {
       setOpenAddDialog(false);
       setNewProductUrl('');
       setNewProductName('');
+      setNewCompetitorUrl('');
+      setCreationError(null);
+      // Feedback explícito para sinalizar que o backend ainda processará o scraping
+      setCreationFeedback('Produto criado e scraping em andamento. Lista atualizada automaticamente.');
     },
+    onError: () => {
+      // Mantém mensagem amigável para orientar ajuste de URL ou reautenticação
+      setCreationError('Não foi possível criar o produto. Verifique a URL e tente novamente.');
+    }
   });
 
   /**
@@ -98,10 +140,18 @@ const Products: React.FC = () => {
    */
   const handleAddProduct = () => {
     if (!newProductUrl) return;
-    createProductMutation.mutate({
-      url: newProductUrl,
-      name: newProductName || undefined,
-    });
+    const payload: MonitoredProductCreateScraping = {
+      product_url: newProductUrl,
+      name_identification: newProductName || undefined,
+    };
+
+    if (newCompetitorUrl) {
+      payload.initial_competitor = {
+        product_url: newCompetitorUrl,
+      };
+    }
+
+    createProductMutation.mutate(payload);
   };
 
   /**
@@ -114,13 +164,60 @@ const Products: React.FC = () => {
         return 'success';
       case 'atencao':
         return 'warning';
-      case 'nao_competitivo':
-        return 'warning';
       case 'urgente':
         return 'error';
       default:
         return 'default';
     }
+  };
+
+  /**
+   * Formata o preço exibindo rótulo de coleta quando ainda não há valor disponível.
+   */
+  const parseToNumber = (value: string | number | null | undefined) => {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const numericValue =
+      typeof value === 'string' ? Number.parseFloat(value.replace(',', '.')) : Number(value);
+
+    return Number.isFinite(numericValue) ? numericValue : null;
+  };
+
+  const renderPrice = (value: string | number | null) => {
+    return formatCurrency(value, { fallbackLabel: 'Coletando preço...' });
+  };
+
+  const getDifferenceValue = (product: MonitoredProduct) => {
+    const potentialAdjustment = product.comparison_summary?.potential_adjustment;
+    if (potentialAdjustment !== null && potentialAdjustment !== undefined) {
+      const adjustmentValue = parseToNumber(potentialAdjustment);
+      if (adjustmentValue !== null) {
+        return adjustmentValue;
+      }
+    }
+
+    const monitoredPrice = parseToNumber(product.current_price);
+    const lowestCompetitorPrice = parseToNumber(product.comparison_summary?.competitors_min);
+
+    if (monitoredPrice !== null && lowestCompetitorPrice !== null) {
+      return monitoredPrice - lowestCompetitorPrice;
+    }
+
+    return null;
+  };
+
+  const getRankingLabel = (product: MonitoredProduct) => {
+    const positionRank = product.comparison_summary?.position_rank;
+    const competitorsCount = product.comparison_summary?.competitors_count ?? 0;
+
+    if (positionRank === null || positionRank === undefined) {
+      return 'Ranking —';
+    }
+
+    const totalSellers = competitorsCount + 1; // inclui o produto monitorado
+    return `Ranking #${positionRank} de ${totalSellers}`;
   };
 
   /**
@@ -132,8 +229,6 @@ const Products: React.FC = () => {
         return 'Competitivo';
       case 'atencao':
         return 'Atenção';
-      case 'nao_competitivo':
-        return 'Não Competitivo';
       case 'urgente':
         return 'Urgente';
       default:
@@ -160,12 +255,12 @@ const Products: React.FC = () => {
           startIcon={<AddIcon />}
           onClick={() => setOpenAddDialog(true)}
         >
-          Adicionar Produto
+          Adicionar Seu Produto
         </Button>
 
         <TextField
           size="small"
-          placeholder="Buscar produtos..."
+          placeholder="Buscar Produtos..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           sx={{ minWidth: 200 }}
@@ -181,7 +276,6 @@ const Products: React.FC = () => {
             <MenuItem value="">Todos</MenuItem>
             <MenuItem value="competitivo">Competitivo</MenuItem>
             <MenuItem value="atencao">Atenção</MenuItem>
-            <MenuItem value="nao_competitivo">Não Competitivo</MenuItem>
             <MenuItem value="urgente">Urgente</MenuItem>
           </Select>
         </FormControl>
@@ -205,6 +299,18 @@ const Products: React.FC = () => {
         </ToggleButtonGroup>
       </Box>
 
+      {/* Feedback para criação de produto */}
+      {creationFeedback && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {creationFeedback}
+        </Alert>
+      )}
+      {creationError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {creationError}
+        </Alert>
+      )}
+
       {/* Conteúdo */}
       {isLoading ? (
         // Estado de carregamento
@@ -218,89 +324,171 @@ const Products: React.FC = () => {
         viewMode === 'list' ? (
           // Modo Lista - exibe cartões por produto
           <Grid container spacing={3}>
-            {data.items.map((product) => (
-              <Grid item xs={12} key={product.id}>
-                <Card elevation={2}>
-                  <CardContent>
-                    <Box display="flex" gap={2}>
-                      {product.thumbnail && (
-                        <Box
-                          component="img"
-                          src={product.thumbnail}
-                          alt={product.name}
-                          sx={{
-                            width: 100,
-                            height: 100,
-                            objectFit: 'cover',
-                            borderRadius: 1,
-                          }}
-                        />
-                      )}
-                      <Box flex={1}>
-                        <Box display="flex" justifyContent="space-between" alignItems="start">
-                          <Box>
-                            <Typography variant="h6">{product.name}</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              Origem: {new URL(product.url).hostname}
-                            </Typography>
-                          </Box>
-                          <Chip
-                            label={getStatusLabel(product.competitiveness_status)}
-                            color={getStatusColor(product.competitiveness_status)}
-                            size="small"
+            {paginatedItems.map((product) => {
+              const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
+              const differenceValue = getDifferenceValue(product);
+              const differenceLabel = formatCurrency(differenceValue);
+
+              const monitoredPriceNum = parseToNumber(product.current_price);
+              const lowestPriceNum = parseToNumber(product.comparison_summary?.competitors_min);
+
+              // cor do menor concorrente: verde quando concorrente maior (sou mais barato),
+              // vermelho quando concorrente menor (sou mais caro), preto quando igual/indisponível
+              let lowestColor = 'text.primary';
+              if (lowestPriceNum !== null && monitoredPriceNum !== null) {
+                if (lowestPriceNum > monitoredPriceNum) lowestColor = 'success.main';
+                else if (lowestPriceNum < monitoredPriceNum) lowestColor = 'error.main';
+                else lowestColor = 'text.primary';
+              }
+
+              // ícone e cor da diferença: >0 -> seta pra cima (vermelha), <0 -> seta pra baixo (verde), 0/null -> neutro
+              let diffIconComponent = <TrendingUpIcon color="primary" />;
+              let diffTextColor = 'text.primary';
+              if (differenceValue !== null) {
+                if (differenceValue > 0) {
+                  diffIconComponent = <TrendingUpIcon color="error" />;
+                  diffTextColor = 'error.main';
+                } else if (differenceValue < 0) {
+                  diffIconComponent = <TrendingDownIcon color="success" />;
+                  diffTextColor = 'success.main';
+                } else {
+                  diffIconComponent = <TrendingUpIcon color="primary" />;
+                  diffTextColor = 'text.primary';
+                }
+              }
+
+              const rankingLabel = `${getRankingLabel(product)} | ${product.comparison_summary?.competitors_count ?? 0} Concorrentes`;
+
+              return (
+                <Grid item xs={12} key={product.id}>
+                  <Card elevation={2}>
+                    <CardContent>
+                      <Box display="flex" gap={2}>
+                        {product.thumbnail && (
+                          <Box
+                            component="img"
+                            src={product.thumbnail}
+                            alt={product.name}
+                            sx={{
+                              width: 100,
+                              height: 100,
+                              objectFit: 'cover',
+                              borderRadius: 1,
+                            }}
                           />
-                        </Box>
-
-                        {/* Informações de preço resumidas */}
-                        <Grid container spacing={2} sx={{ mt: 2 }}>
-                          <Grid item xs={4}>
-                            <Typography variant="body2" color="text.secondary">
-                              MEU PREÇO
-                            </Typography>
-                            <Typography variant="h5" color="primary">
-                              R$ {parseFloat(product.current_price).toFixed(2)}
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={4}>
-                            <Typography variant="body2" color="text.secondary">
-                              MENOR CONCORRENTE
-                            </Typography>
-                            <Typography variant="h5" color="success.main">
-                              R$ 0,00
-                            </Typography>
-                          </Grid>
-                          <Grid item xs={4}>
-                            <Typography variant="body2" color="text.secondary">
-                              DIFERENÇA
-                            </Typography>
-                            <Box display="flex" alignItems="center" gap={0.5}>
-                              <TrendingUpIcon color="error" />
-                              <Typography variant="h5" color="error">
-                                R$ 0,00
-                              </Typography>
+                        )}
+                        <Box flex={1}>
+                          <Box display="flex" justifyContent="space-between" alignItems="start">
+                            <Box>
+                              <TruncatedText
+                                text={product.name}
+                                variant="h6"
+                                lines={2}
+                                maxWidth={420}
+                              />
+                              <TruncatedText
+                                text={`Origem: ${new URL(product.url).hostname}`}
+                                variant="body2"
+                                color="text.secondary"
+                                maxWidth={420}
+                              />
                             </Box>
-                          </Grid>
-                        </Grid>
+                            <Chip
+                              label={getStatusLabel(product.competitiveness_status)}
+                              color={getStatusColor(product.competitiveness_status)}
+                              size="small"
+                            />
+                          </Box>
 
-                        {/* Rodapé do cartão com ações */}
-                        <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
-                          <Typography variant="body2" color="text.secondary">
-                            Ranking #1 de 1 | 0 concorrentes
-                          </Typography>
-                          <Button
-                            variant="contained"
-                            size="small"
-                            onClick={() => navigate(`/product/${product.id}`)}
-                          >
-                            Ver Detalhes
-                          </Button>
+                          {/* Informações de preço resumidas */}
+                          <Grid container spacing={2} sx={{ mt: 2 }}>
+                            <Grid item xs={4}>
+                              <Typography variant="body2" color="text.secondary">
+                                MEU PREÇO
+                              </Typography>
+                              <Typography variant="h5" color="primary">
+                                {renderPrice(product.current_price)}
+                              </Typography>
+                            </Grid>
+                            <Grid item xs={4}>
+                              <Typography variant="body2" color="text.secondary">
+                                MENOR CONCORRENTE
+                              </Typography>
+                                <Typography variant="h5" sx={{ color: lowestColor }}>
+                                  {lowestCompetitorLabel}
+                                </Typography>
+                            </Grid>
+                            <Grid item xs={4}>
+                              <Typography variant="body2" color="text.secondary">
+                                DIFERENÇA
+                              </Typography>
+                              <Box display="flex" alignItems="center" gap={0.5}>
+                                {diffIconComponent}
+                                <Typography variant="h5" sx={{ color: diffTextColor }}>
+                                  {differenceLabel}
+                                </Typography>
+                              </Box>
+                            </Grid>
+                          </Grid>
+                          
+                          {/* Rodapé do cartão com ações */}
+                          <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
+                            <Typography variant="body2" color="text.secondary">
+                              {rankingLabel}
+                            </Typography>
+                            <Box display="flex" gap={1}>
+                              <Button
+                                variant="outlined"
+                                color="secondary"
+                                size="small"
+                                component="a"
+                                href={product.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Ver Anúncio
+                              </Button>
+                              <Button
+                                variant="contained"
+                                size="small"
+                                onClick={() => navigate(`/product/${product.id}`)}
+                              >
+                                Ver Detalhes
+                              </Button>
+                            </Box>
+                          </Box>
                         </Box>
                       </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
+            {data.items.length > listPageSize && (
+              <Grid item xs={12}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
+                  <Button
+                    variant="outlined"
+                    disabled={page <= 1}
+                    onClick={() => handlePageSelect(page - 1)}
+                  >
+                    Anterior
+                  </Button>
+
+                  <Typography variant="body2" color="text.secondary">
+                    Página {page} de {totalPages}
+                  </Typography>
+
+                  <Button
+                    variant="outlined"
+                    disabled={page >= totalPages}
+                    onClick={() => handlePageSelect(page + 1)}
+                  >
+                    Próxima
+                  </Button>
+                </Box>
               </Grid>
-            ))}
+            )}
           </Grid>
         ) : (
           // Modo Tabela - exibe produtos em linhas
@@ -319,48 +507,101 @@ const Products: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.items.map((product) => (
-                  <TableRow key={product.id} hover>
-                    <TableCell>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        {product.thumbnail && (
-                          <Box
-                            component="img"
-                            src={product.thumbnail}
-                            alt={product.name}
-                            sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
-                          />
-                        )}
-                        <Typography variant="body2">{product.name}</Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell align="right">
-                      R$ {parseFloat(product.current_price).toFixed(2)}
-                    </TableCell>
-                    <TableCell align="right">R$ 0,00</TableCell>
-                    <TableCell align="right">
-                      <Typography color="error">R$ 0,00</Typography>
-                    </TableCell>
-                    <TableCell align="center">0</TableCell>
-                    <TableCell align="center">#1 de 1</TableCell>
-                    <TableCell align="center">
-                      <Chip
-                        label={getStatusLabel(product.competitiveness_status)}
-                        color={getStatusColor(product.competitiveness_status)}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell align="center">
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => navigate(`/product/${product.id}`)}
-                      >
-                        Ver
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {data.items.map((product) => {
+                  const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
+                  const differenceValue = getDifferenceValue(product);
+                  const differenceLabel = formatCurrency(differenceValue);
+
+                  const monitoredPriceNum = parseToNumber(product.current_price);
+                  const lowestPriceNum = parseToNumber(product.comparison_summary?.competitors_min);
+
+                  let lowestColor = 'text.primary';
+                  if (lowestPriceNum !== null && monitoredPriceNum !== null) {
+                    if (lowestPriceNum > monitoredPriceNum) lowestColor = 'success.main';
+                    else if (lowestPriceNum < monitoredPriceNum) lowestColor = 'error.main';
+                  }
+
+                  const competitorsCount = product.comparison_summary?.competitors_count ?? 0;
+                  const rankingLabel = getRankingLabel(product);
+                  const isCheaperOrEqual = differenceValue !== null ? differenceValue <= 0 : null;
+
+                  return (
+                    <TableRow key={product.id} hover>
+                      <TableCell sx={{ maxWidth: 360, width: 360 }}>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          {product.thumbnail && (
+                            <Box
+                              component="img"
+                              src={product.thumbnail}
+                              alt={product.name}
+                              sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
+                            />
+                          )}
+                          <Box sx={{ maxWidth: 300, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                            <TruncatedText text={product.name} variant="body2" lines={2} maxWidth={300} />
+                            <TruncatedText
+                              text={new URL(product.url).hostname}
+                              variant="caption"
+                              color="text.secondary"
+                              maxWidth={300}
+                            />
+                          </Box>
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">
+                        {renderPrice(product.current_price)}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography sx={{ color: lowestColor }}>{lowestCompetitorLabel}</Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Typography
+                          sx={{
+                            color:
+                              isCheaperOrEqual === null
+                                ? 'text.primary'
+                                : isCheaperOrEqual
+                                  ? 'success.main'
+                                  : 'error.main',
+                          }}
+                        >
+                          {differenceLabel}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">{competitorsCount}</TableCell>
+                      <TableCell align="center">{rankingLabel}</TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          label={getStatusLabel(product.competitiveness_status)}
+                          color={getStatusColor(product.competitiveness_status)}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Box display="flex" justifyContent="center" gap={1}>
+                          <Button
+                            variant="outlined"
+                            color="secondary"
+                            size="small"
+                            component="a"
+                            href={product.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Ver Anúncio
+                          </Button>
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={() => navigate(`/product/${product.id}`)}
+                          >
+                            Ver Detalhes
+                          </Button>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>
@@ -377,6 +618,15 @@ const Products: React.FC = () => {
         <DialogTitle>Adicionar Produto Monitorado</DialogTitle>
         <DialogContent>
           <TextField
+            margin="dense"
+            label="Nome de Identificação"
+            type="text"
+            fullWidth
+            value={newProductName}
+            onChange={(e) => setNewProductName(e.target.value)}
+            placeholder="Ex: Monitor Gamer 27''"
+          />
+          <TextField
             autoFocus
             margin="dense"
             label="URL do Produto"
@@ -387,21 +637,24 @@ const Products: React.FC = () => {
             onChange={(e) => setNewProductUrl(e.target.value)}
             placeholder="https://exemplo.com/produto"
           />
+          <Divider sx={{ my: 2 }} />
           <TextField
             margin="dense"
-            label="Nome de Identificação (opcional)"
-            type="text"
+            label="Adicionar Concorrente (opcional)"
+            type="url"
             fullWidth
-            value={newProductName}
-            onChange={(e) => setNewProductName(e.target.value)}
-            placeholder="Ex: Monitor Gamer 27''"
+            value={newCompetitorUrl}
+            onChange={(e) => setNewCompetitorUrl(e.target.value)}
+            placeholder="https://exemplo.com/concorrente"
           />
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            O produto será processado de forma assíncrona. Aguarde alguns instantes para que apareça na lista.
+            O produto será processado de forma assíncrona. Caso informe um concorrente, ele será criado junto ao monitorado.
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenAddDialog(false)}>Cancelar</Button>
+          <Button onClick={() => setOpenAddDialog(false)} color="secondary">
+            Cancelar
+          </Button>
           <Button
             onClick={handleAddProduct}
             variant="contained"

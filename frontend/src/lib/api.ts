@@ -7,15 +7,42 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
  * - Adiciona interceptor de response para tratar 401 (tentar renovar token via /auth/refresh).
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ??
+  (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8000` : 'http://localhost:8000');
+
+// Ajuste resiliente: se a base configurada apontar para localhost, mas o usuário
+// está acessando o frontend por outro host (ex: 192.168.15.150), substituir
+// automaticamente o hostname para evitar que o browser tente se conectar ao
+// `localhost` da máquina remota.
+let RESOLVED_API_BASE = API_BASE_URL;
+if (typeof location !== 'undefined') {
+  try {
+    const parsed = new URL(API_BASE_URL);
+    const isLocalHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    const clientHostIsRemote = location.hostname && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+    if (isLocalHost && clientHostIsRemote) {
+      parsed.hostname = location.hostname;
+      RESOLVED_API_BASE = parsed.toString().replace(/\/$/, '');
+    }
+  } catch {
+    // se não for uma URL válida, manter o valor original
+  }
+}
 
 // Cliente HTTP Axios configurado com baseURL e cabeçalho padrão
 export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: RESOLVED_API_BASE,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// Em dev, logar a baseURL utilizada para facilitar diagnóstico remoto
+if (import.meta.env.DEV) {
+  // eslint-disable-next-line no-console
+  console.debug('[api] API_BASE_URL =', API_BASE_URL, '=> RESOLVED_API_BASE =', RESOLVED_API_BASE);
+}
 
 /**
  * Função utilitária para limpar tokens e redirecionar o usuário para a tela de login.
@@ -74,7 +101,7 @@ apiClient.interceptors.response.use(
         }
 
         // Tentar renovar o token no endpoint de refresh
-        const response = await axios.post<RefreshResponse>(`${API_BASE_URL}/auth/refresh`, {
+        const response = await axios.post<RefreshResponse>(`${RESOLVED_API_BASE}/auth/refresh`, {
           refresh_token: refreshToken,
         });
 

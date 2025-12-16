@@ -8,18 +8,19 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
+from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryResponse
 
 
 class ProductResponse(BaseModel):
-    """Visão simplificada do produto exposta pela API pública."""
+    """ Visão simplificada do produto exposta pela API pública """
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    display_name: str | None = Field(None, description="Nome original cadastrado/coletado sem ajustes de fallback")
     name: str = Field(..., description="Nome preparado para exibição")
     url: HttpUrl = Field(..., description="Endereço canônico do produto")
-    current_price: Decimal = Field(..., description="Preço obrigatório para exibição")
+    current_price: Decimal | None = Field(None, description="Preço para exibição quando disponível")
     currency: Optional[str] = Field(None, description="Moeda do preço informado")
-    collected_at: datetime = Field(..., description="Momento da última coleta bem-sucedida")
     source: Literal["monitored", "competitor"]
     availability: bool | None = Field(None, description="Disponibilidade reportada pelo fluxo de coleta")
     last_status: str | None = Field(None, description="Status mais recente conhecido do fluxo de coleta")
@@ -35,7 +36,7 @@ class MonitoredScrapeCreationResponse(BaseModel):
     message: str = Field(..., description="Resumo amigável do agendamento")
 
 class CompetitorScrapeCreationResponse(BaseModel):
-    """Retorno mínimo ao agendar scraping de um concorrente."""
+    """ Retorno mínimo ao agendar scraping de um concorrente """
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID = Field(..., description="Identificador do concorrente pendente")
@@ -46,12 +47,21 @@ class CompetitorScrapeCreationResponse(BaseModel):
 # ----- PRODUTO MONITORADO -----
 class MonitoredProductResponse(ProductResponse):
     """ Contrato simplificado de um produto monitorado """
+    collected_at: datetime | None = Field(None, exclude=True, description="Campo técnico omitido do contrato enxuto")
     owner_id: UUID = Field(..., description="Identificador do responsável pelo monitoramento")
     source: Literal["monitored"] = "monitored"
     thumbnail: str | None = Field(None, description="Miniatura mais recente identificada pelo fluxo de scraping")
+    created_at: datetime | None = Field(None, description="Momento de criação do monitoramento (timestamp do cadastro)")
     last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")
-    competitiveness_status: CompetitivenessStatus | None = Field(None,description="Classificação de competitividade calculada a partir das comparações")
+    next_check_at: datetime | None = Field(None, description="Próximo horário previsto para rechecagem do produto")
+    last_price_change_at: datetime | None = Field(None, description="Última vez em que o preço monitorado mudou")
+    competitiveness_status: CompetitivenessStatus | None = Field(None, description="Classificação de competitividade calculada a partir das comparações")
     is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
+    alerts_sent: int | None = Field(None, description="Quantidade de notificações enviadas para o monitorado")
+    comparison_summary: PriceComparisonSummaryResponse | None = Field(default=None,
+        description=("Último resumo consolidado de comparação de preços com métricas normalizadas para exibição imediata no frontend."),
+    )
+
 
 class PaginationMeta(BaseModel):
     """ Metadados padronizados para paginação de listagens."""
@@ -74,18 +84,6 @@ class CompetitorProductResponse(ProductResponse):
     is_paused: bool = Field(False, description="Indica se o monitoramento do concorrente está pausado")
 
 class PaginatedCompetitorResponse(BaseModel):
-    """Envelope padronizado para retornar concorrentes paginados com metadados """
+    """ Envelope padronizado para retornar concorrentes paginados com metadados """
     items: list[CompetitorProductResponse]
     meta: PaginationMeta
-
-class BulkCompetitorActionRequest(BaseModel):
-    """ Entrada de ações em massa sobre concorrentes específicos """
-    monitored_product_id: UUID
-    competitor_ids: list[UUID] = Field(..., min_length=1)
-
-
-class BulkCompetitorActionResult(BaseModel):
-    """ Resultado das ações em massa executadas para concorrentes """
-    processed_ids: list[UUID]
-    skipped_ids: list[UUID]
-    total_processed: int

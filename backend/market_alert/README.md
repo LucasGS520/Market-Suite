@@ -12,8 +12,7 @@ API FastAPI responsável por autenticação, gestão e monitoramento, comparaç�
 - **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
 - **Registrar métricas e logs estruturados** para Prometheus e Loki.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
-- **Regras Comparação** deve ser realizado automaticamente, sem haver possibilidade de ser realizada manualmente, ou forçar comparação, seguir um padrão para quando houver comparações entre os produtos.
-- **Simplificar alertas** priorizando apenas mudanças de preço e disponibilidade, sem thresholds dinâmicos ou idempotência distribuída (regra de alerta padronizada pelo sistema, sem possibilidade de criação de regras, alterações, etc).
+- **Regras de comparação e alertas**: comparações permanecem automáticas após coletas, priorizando mudanças de preço e disponibilidade sem thresholds dinâmicos ou idempotência distribuída. Fluxos manuais apenas disparam tasks já idempotentes (ex.: `compare_prices_task`).
 
 ## Estrutura do Diretório
 ```text
@@ -36,10 +35,10 @@ market_alert/
 |--------|--------------|-----------|
 | `POST` | `/auth` | Autenticação via formulário e emissão de JWT. |
 | `POST` | `/auth/refresh` | Renova token de acesso ativo. |
-| `GET` | `/monitored` | Lista monitorados paginados usando envelope `{ items, meta }` com filtros `page`, `per_page`, `query` e `status`. |
-| `GET` | `/monitored/{id}` | Retorna detalhes do monitorado com `owner_id`, `thumbnail`, `current_price` (`Decimal` serializado) e `last_scraped_at`. |
+| `GET` | `/monitored` | Lista monitorados usando envelope `{ items, meta }` com filtros `page`, `per_page`, `query` e `status`. O parâmetro `per_page` é opcional e, quando omitido, retorna todos os itens dentro do limite defensivo aplicado pela API.  |
+| `GET` | `/monitored/{id}` | Retorna detalhes do monitorado com `owner_id`, `thumbnail`, `current_price` (`Decimal` serializado), datas derivadas (`created_at`, `last_price_change_at`) além do contador `alerts_sent`. |
 | `GET` | `/monitored/featured` | Retorna até 3 monitorados em destaque respeitando `is_featured` e ordenação configurada. |
-| `POST` | `/monitored/scrape` | Valida duplicidade por usuário + URL, cria recurso mínimo (`id`, `url`, `created_at`) e agenda coleta na fila `scraping`. |
+| `POST` | `/monitored/scrape` | Valida duplicidade por usuário + URL, cria recurso mínimo (`id`, `url`, `created_at`) e agenda coleta na fila `scraping`, aceitando `initial_competitor` para disparo imediato do concorrente. |
 | `POST` | `/monitored` | Cria produto monitorado associado ao usuário autenticado (fluxo alternativo ao scrape imediato). |
 | `GET` | `/comparisons/{monitored_id}` | Lista comparações paginadas (`items` + `meta`) para o monitorado informado. |
 | `GET` | `/comparisons/{monitored_id}/summary` | Consolida métricas de comparação; `Decimal` enviado como número apenas no resumo (encoder existente). |
@@ -47,9 +46,9 @@ market_alert/
 | `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo e agenda coleta na fila `scraping`. |
 | `GET` | `/notifications` | Lista histórico e status de notificações geradas. |
 | `GET` | `/metrics` | Exibe métricas Prometheus da API. |
-| `Celery` | `tasks.monitor_tasks.collect_product_task` | Consome fila `scraping` para coletar dados do monitorado (payload mínimo e idempotente). |
-| `Celery` | `tasks.monitor_tasks.collect_competitor_task` | Coleta concorrentes vinculados, recalcula comparações e grava `PriceHistory`. |
-| `Celery` | `tasks.compare_prices_tasks.compare_prices_task` | Recalcula comparação e `competitiveness_status` após coletas. |
+| `Celery` | `tasks.collector_product_task.collect_product_task` | Consome fila `scraping` e processa uma URL por vez (monitorado ou concorrente), respeitando lock Redis e retornando `ScrapeResult` padronizado; quando o lock não é adquirido retorna `no_result` e registra métrica de `lock_skipped`. |
+| `Celery` | `tasks.recheck_scheduler_task.schedule_rechecks` | Beat que identifica `next_check_at` vencido, recalcula o próximo horário e enfileira a `collect_product_task` diretamente com jitter leve. |
+| `Celery` | `tasks.compare_prices_task.compare_prices_task` | Idempotente e leve; recalcula comparação e `competitiveness_status` quando acionado. |
 | `Celery` | `tasks.alert_tasks.dispatch_price_alert_task` | Enfileira alertas quando regras de preço são acionadas. |
 
 ### Integração com os Serviços
@@ -65,12 +64,11 @@ market_alert/
 - **Arquivo principal:** `core/celery_app.py`.
 - **Filas padrão:** `celery`, `scraping`, `monitor` (configuráveis via `.env.market_alert`).
 - **Tasks de destaque:**
-  - `tasks.monitor_tasks.collect_product_task`
-  - `tasks.monitor_tasks.collect_competitor_task`
-  - `tasks.compare_prices_tasks.compare_prices_task`
+  - `tasks.collector_product_task.collect_product_task`
+  - `tasks.recheck_scheduler_task.schedule_rechecks`
+  - `tasks.compare_prices_task.compare_prices_task`
   - `tasks.alert_tasks.dispatch_price_alert_task`
   - `tasks.metrics_tasks.collect_celery_metrics`, `cleanup_cache`
-  - `tasks.monitor_tasks.recheck_monitored_products`, `recheck_competitor_products`
 - **Beat com métricas:** `beat_with_metrics.py` executa agendamentos e expõe `/metrics` em porta dedicada (`8001`).
 
 ### Scraping e resiliência
@@ -87,11 +85,12 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 | Banco de dados | `DATABASE_URL` |
 | Autenticação | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` |
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
+| Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
 | Comunicação e alertas | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_SMS_FROM`, `TWILIO_WHATSAPP_FROM`, `FCM_SERVER_KEY` |
 
 ### Padrões de contratos
-- **Paginação**: todas as rotas de listagem utilizam envelope `{ items: [], meta: { total, page, per_page } }` com paginação base 1.
+- **Paginação**: todas as rotas de listagem utilizam envelope `{ items: [], meta: { total, page, per_page } }` com paginação base 1. Quando `per_page` não é enviado em `/monitored`, a API retorna todos os registros disponíveis preservando um teto de segurança.
 - **Campos monetários**: valores `Decimal` são serializados como string (`"1099.90"`) por padrão. O resumo de comparação mantém encoder que envia números (`1099.9`) e deve ser tratado pelo frontend.
 - **Criar via scraping**: endpoints `/monitored/scrape` e `/competitors/scrape` retornam 202 com representação mínima do recurso (`id`, `url`, `created_at`) e enfileiram coleta na fila `scraping`.
 - **Destaques**: `/monitored/featured` devolve até 3 monitorados com `is_featured=true`, ordenados pelo critério definido em `routes_monitored`.
@@ -102,10 +101,10 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 - `core/celery_app.py` – configura worker, beat e registradores de métricas.
 - `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
 - `services/comparison_service.py` – orquestra cálculos de comparação e dispara regras.
-- `tasks/monitor_tasks.py` – concentra tasks de coleta de monitorados e concorrentes.
+- `tasks/recheck_scheduler_task.py` – beat responsável por enfileirar rechecagens usando o mesmo collector.
 - `tasks/alert_tasks.py` – envia notificações e aplica cooldowns.
 - `tasks/metrics_tasks.py` – publica métricas periódicas da fila e recursos.
-- `tasks/compare_prices_tasks.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.
+- `tasks/compare_prices_task.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.
 
 Exemplo mínimo de `.env.market_alert`:
 ```env
@@ -115,7 +114,7 @@ REDIS_URL=redis://:senha@redis:6379/0
 REDIS_PASSWORD=senha
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/1
-CELERY_TASK_ROUTES={"tasks.monitor_tasks.*": {"queue": "scraping"}}
+CELERY_TASK_ROUTES={"tasks.recheck_scheduler_task.*": {"queue": "monitor"}}
 
 SCRAPER_SERVICE_URL=http://market_scraper:8010
 SCRAPER_CONNECT_TIMEOUT=5.0
@@ -144,6 +143,12 @@ ADAPTIVE_RECHECK_BASE_INTERVAL=7200
 SCRAPER_SERVICE_URL=url_servico_scraping
 
 ```
+
+## Orquestração de coletas e rechecagens
+- **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result` com métrica de `lock_skipped` incrementada.
+- **Rechecagem centralizada:** rechecagens usam a mesma `collect_product_task` aplicada a coletas manuais, com lock Redis e TTL automático como único mecanismo de exclusão mútua.
+- **Agendamento via Beat:** `market_alert.tasks.recheck_scheduler_task.schedule_rechecks` identifica `next_check_at` vencido, recalcula o próximo horário com `_compute_next_check_at` e enfileira diretamente o collector com jitter, evitando flags ou comparações inline.
+- **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
 
 ## Segurança e Observabilidade
 - **Segurança:**

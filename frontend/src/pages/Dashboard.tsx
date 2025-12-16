@@ -28,6 +28,7 @@ import {
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
+import TruncatedText from '../utils/TruncatedText';
 
 /**
  * Tipagens locais para maior clareza e manutenção.
@@ -45,8 +46,8 @@ interface FeaturedProduct {
   name: string;
   url?: string;
   thumbnail?: string;
-  current_price: string | number;
-  competitiveness_status?: 'competitivo' | 'atencao' | 'nao_competitivo' | 'urgente' | string;
+  current_price: string | number | null;
+  competitiveness_status?: 'competitivo' | 'atencao' | 'urgente' | string;
 }
 
 /**
@@ -135,13 +136,28 @@ const Dashboard: React.FC = () => {
         return 'success';
       case 'atencao':
         return 'warning';
-      case 'nao_competitivo':
-        return 'warning';
       case 'urgente':
         return 'error';
       default:
         return 'default';
     }
+  };
+
+  /**
+   * Formata preços exibindo rótulo quando ainda não há valor disponível
+   */
+  const renderPrice = (value: string | number | null) => {
+    if (value === null) {
+      return 'Em processamento';
+    }
+    // Normaliza entradas do backend que podem ser string (ex: "5699.05") ou número já parseado. 
+    // Remove quaisquer caracteres não numéricos (ex: 'R$ ', pontos de milhar ou espaços) antes de converter.
+    const cleaned = typeof value === 'string' ? value.replace(/[^0-9.,-]/g, '').replace(',', '.') : String(value);
+    const num = Number(cleaned);
+    if (!Number.isFinite(num)) return 'Em processamento';
+
+    // Formata para pt-BR com símbolo de moeda BRL
+    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
   /**
@@ -156,8 +172,6 @@ const Dashboard: React.FC = () => {
         return 'Competitivo';
       case 'atencao':
         return 'Atenção';
-      case 'nao_competitivo':
-        return 'Não Competitivo';
       case 'urgente':
         return 'Urgente';
       default:
@@ -240,12 +254,8 @@ const Dashboard: React.FC = () => {
                       />
                     )}
                     <Box flex={1}>
-                      <Typography variant="h6" noWrap>
-                        {product.name}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        {product.url}
-                      </Typography>
+                      <TruncatedText text={product.name} variant="h6" lines={2} maxWidth="100%" tooltip={false} />
+                      <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
                       <Box display="flex" alignItems="center" gap={1} mt={1}>
                         {/* Chip indicando status de competitividade */}
                         <Chip
@@ -256,7 +266,7 @@ const Dashboard: React.FC = () => {
                         {/* Exibição de preço com formatação mínima.
                             Usamos parseFloat por segurança caso a API retorne string. */}
                         <Typography variant="h6" color="primary">
-                          R$ {parseFloat(String(product.current_price || 0)).toFixed(2)}
+                          {renderPrice(product.current_price)}
                         </Typography>
                       </Box>
                     </Box>
@@ -289,6 +299,7 @@ const Dashboard: React.FC = () => {
       <Box sx={{ mt: 4, textAlign: 'center' }}>
         <Button
           variant="outlined"
+          color="secondary"
           size="large"
           onClick={() => navigate('/products')}
         >

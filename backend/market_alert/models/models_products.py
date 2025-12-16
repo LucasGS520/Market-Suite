@@ -49,10 +49,11 @@ class MonitoredProduct(Base):
     last_modified = Column(DateTime(timezone=True), nullable=True)
     last_scrape_signature = Column(String, nullable=True)
 
-    #Controle de status
+    #Controle de status - Rechecagens usados pelo agendador
     status = Column(PgEnum(MonitoredStatus, name="monitored_status_enum"), nullable=False, default=MonitoredStatus.active)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -106,7 +107,7 @@ class CompetitorProduct(Base):
     name_competitor = Column("name", String, nullable=False)
     product_url = Column(Text, nullable=False)
 
-    current_price = Column(Numeric(10,2), nullable=False)
+    current_price = Column(Numeric(10,2), nullable=True)
     old_price = Column(Numeric(10,2), nullable=True)
     free_shipping = Column(Boolean, default=False)
     seller = Column(String, nullable=True)

@@ -8,6 +8,18 @@ PRICE_COMPARISONS_TOTAL = Counter(
     ["status"],
 )
 
+MALFORMED_COMPARISON_PAYLOADS_TOTAL = Counter(
+    "comparison_malformed_payloads_total",
+    "Quantidade de payloads de comparação inválidos ou incompletos",
+    ["stage"],
+)
+
+PRICE_COMPARISON_FAILURES_TOTAL = Counter(
+    "comparison_failures_total",
+    "Falhas ao calcular resumo de comparação de preços",
+    ["stage"],
+)
+
 PRICE_COMPARISON_DURATION_SECONDS = Histogram(
     "price_comparison_duration_seconds",
     "Tempo de execução da comparação de preços (segundos)",
@@ -22,6 +34,8 @@ PRICE_COMPARISON_TASK_LATENCY_SECONDS = Histogram(
 
 __all__ = [
     "PRICE_COMPARISONS_TOTAL",
+    "MALFORMED_COMPARISON_PAYLOADS_TOTAL",
+    "PRICE_COMPARISON_FAILURES_TOTAL",
     "PRICE_COMPARISON_DURATION_SECONDS",
     "PRICE_COMPARISON_TASK_LATENCY_SECONDS",
 ]

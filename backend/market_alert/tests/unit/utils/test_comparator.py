@@ -1,7 +1,7 @@
 from decimal import Decimal
 from types import SimpleNamespace
 
-from market_alert.utils.comparator import compare_prices, calculate_discrepancies
+from backend.market_alert.utils.price_comparator import compare_prices, calculate_discrepancies
 from market_alert.enums.enums_products import ProductStatus
 
 def test_compare_prices_no_competitors():

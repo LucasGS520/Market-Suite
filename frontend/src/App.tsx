@@ -44,10 +44,12 @@ const theme = createTheme({
   palette: {
     mode: 'light',
     primary: {
-      main: '#1976d2',
+      main: '#fb8c00', // Laranja - cor primária do sistema
+      contrastText: '#ffffff',
     },
     secondary: {
-      main: '#dc004e',
+      main: '#fdd835', // Amarelo - cor secundária do sistema
+      contrastText: '#000000',
     },
     success: {
       main: '#2e7d32',

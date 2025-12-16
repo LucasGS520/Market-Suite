@@ -31,7 +31,8 @@ class PriceComparisonResponse(BaseModel):
 
 class PriceComparisonSummaryResponse(BaseModel):
     """ Resumo consolidado da última comparação executada para um produto monitorado """
-    model_config = ConfigDict()
+    #Garante que valores monetários sejam seralizados como números JSON, evitando strings no frontend.
+    model_config = ConfigDict(json_encoders={Decimal: float})
     monitored_product_id: UUID
     comparison_id: Optional[UUID] = None
     last_comparison_at: Optional[datetime] = None
@@ -64,7 +65,7 @@ class PriceComparisonSummaryResponse(BaseModel):
         default=None,
         description=(
             "Status calculado a partir da diferença percentual para o menor preço "
-            "disponível: competitivo, nao competitivo, atencao ou urgente."
+            "disponível: competitivo, atencao ou urgente."
         ),
     )
     discrepancies: List[Dict[str, Any]] = Field(default_factory=list)

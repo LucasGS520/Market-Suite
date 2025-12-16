@@ -20,21 +20,32 @@ export interface TokenPair {
 }
 
 /**
+ * Valor monetário aceito pelas respostas: número, string ou nulo.
+ */
+export type MonetaryValue = number | string | null;
+
+/**
  * Produto monitorado pelo usuário no Market-Suite.
  */
 export interface MonitoredProduct {
   id: string; // Identificador do produto monitorado
   owner_id: string; // ID do usuário que monitora o produto
+  display_name?: string; // Nome original armazenado no backend
   name: string; // Nome do produto
   url: string; // URL do produto
-  current_price: string; // Preço atual do produto
+  current_price: MonetaryValue; // Preço atual do produto
   currency?: string; // Código da moeda
   thumbnail?: string; // URL da imagem em miniatura
   is_featured: boolean; // Indica se o produto é destacado
   last_scraped_at?: string; // Timestamp do último scraping
+  created_at?: string; // Data de criação do monitoramento
+  last_price_change_at?: string; // Última mudança de preço registrada
+  alerts_sent?: number | null; // Total de alertas enviados relacionados ao produto
   availability?: boolean; // Disponibilidade do produto
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
   last_status?: string; // Último status registrado
+  comparison_summary?: PriceComparisonSummary; // Resumo consolidado de comparação para renderização imediata
+  is_paused?: boolean; // Indica se o monitoramento do produto está pausado
 }
 
 /**
@@ -43,9 +54,12 @@ export interface MonitoredProduct {
 export interface CompetitorProduct {
   id: string; // Identificador do produto concorrente
   monitored_id: string; // ID do produto monitorado ao qual este pertence
+  monitored_product_id?: string; // Alias opcional usado pelo backend
   name: string; // Nome do produto concorrente
+  display_name?: string; // Nome bruto retornado pelo backend quando disponível
+  title?: string; //Nome bruto retornado pelo scraper quando disponível
   url: string; // URL do produto concorrente
-  current_price: string; // Preço atual do concorrente (string para preservar formato)
+  current_price: MonetaryValue; // Preço atual do concorrente (string para preservar formato)
   currency?: string; // Código da moeda (opcional)
   thumbnail?: string; // URL da imagem em miniatura (opcional)
   availability?: boolean; // Disponibilidade do concorrente (opcional)
@@ -68,22 +82,23 @@ export interface PriceComparison {
  * Resumo agregado de uma comparação de preços, usado em dashboards/visões rápidas.
  */
 export interface PriceComparisonSummary {
-  monitored_id: string; // ID do produto monitorado
+  monitored_id?: string; // ID do produto monitorado
+  monitored_product_id?: string; // Alias opcional retornado pelo backend
   comparison_id?: string; // ID da comparação associada
   last_comparison_at?: string; // Última vez que houve uma comparação
   computed_at?: string; // Quando esse resumo foi computado
-  monitored_price: number; // Preço do produto monitorado
-  competitors_count: number; // Quantidade total de concorrentes considerados
-  competitors_with_price_count: number; // Quantidade de concorrentes com preço disponível
-  competitors_mean?: number; // Média dos preços dos concorrentes
-  competitors_min?: number; // Menor preço entre concorrentes
-  competitors_max?: number; // Maior preço entre concorrentes
-  position_rank?: number; // Posição/ranking do monitorado
-  potential_adjustment?: number; // Ajuste de preço sugerido
+  monitored_price?: MonetaryValue; // Preço do produto monitorado
+  competitors_count?: number; // Quantidade total de concorrentes considerados
+  competitors_with_price_count?: number; // Quantidade de concorrentes com preço disponível
+  competitors_mean?: MonetaryValue; // Média dos preços dos concorrentes
+  competitors_min?: MonetaryValue; // Menor preço entre concorrentes
+  competitors_max?: MonetaryValue; // Maior preço entre concorrentes
+  position_rank?: number | null; // Posição/ranking do monitorado
+  potential_adjustment?: MonetaryValue; // Ajuste de preço sugerido
   comparison_insights?: string; // Insights textuais adicionais
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
-  discrepancies: Array<Record<string, unknown>>; // Lista de discrepâncias detectadas
-  alerts: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
+  discrepancies?: Array<Record<string, unknown>>; // Lista de discrepâncias detectadas
+  alerts?: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
 }
 
 /**
@@ -139,18 +154,25 @@ export interface PaginatedResponse<T> {
 /**
  * Tipos possíveis para o status de competitividade.
  * - competitivo: posição confortável/competitiva
- * - atencao: requer atenção
- * - nao_competitivo: não competitivo
+ * - atencao: requer atenção (inclui diferenças pequenas previamente tratadas como 'não competitivo')
  * - urgente: ação urgente recomendada
  */
-export type CompetitivenessStatus = 'competitivo' | 'atencao' | 'nao_competitivo' | 'urgente';
+export type CompetitivenessStatus = 'competitivo' | 'atencao' | 'urgente';
 
 /**
  * Payload usado para criar um scraping ao cadastrar um produto monitorado.
  */
 export interface MonitoredProductCreateScraping {
-  url: string; // URL do produto a ser raspado
-  name?: string; // Nome opcional para melhor identificação
+  name_identification?: string; // Nome opcional para identificar o item no painel
+  product_url: string; // URL do produto a ser raspado (contrato do backend)
+  initial_competitor?: InitialCompetitorPayload; // Concorrente inicial opcional enviado junto à criação
+}
+
+/**
+ * Payload opcional usado para criar um concorrente inicial junto ao monitorado
+ */
+export interface InitialCompetitorPayload {
+  product_url: string; // URL do concorrente
 }
 
 /**
@@ -158,8 +180,8 @@ export interface MonitoredProductCreateScraping {
  */
 export interface CompetitorProductCreateScraping {
   monitored_product_id: string; // ID do produto monitorado pai
-  url: string; // URL do concorrente a ser raspado
-  name?: string; // Nome opcional do concorrente
+  product_url: string; // URL do concorrente a ser raspado (contrato do backend)
+  name?: string; // Nome opcional informado pelo usuário para identificação
 }
 
 /**
@@ -176,12 +198,4 @@ export interface ScrapeCreationResponse {
  */
 export interface ApiErrorResponse {
   detail?: string; // Mensagem detalhada de erro retornada pela API
-}
-
-/**
- * Resposta padrão para ações em lote em concorrentes.
- */
-export interface BulkActionResponse {
-  message?: string; // Mensagem amigável retornada pelo backend
-  updated_ids?: string[]; // IDs afetados pela ação solicitada
 }

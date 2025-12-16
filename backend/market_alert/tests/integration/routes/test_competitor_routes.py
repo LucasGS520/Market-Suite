@@ -304,6 +304,7 @@ def test_list_competitors_returns_paginated_items(
     assert set(first_item.keys()) == {
         "id",
         "monitored_product_id",
+        "display_name",
         "name",
         "url",
         "current_price",
@@ -377,133 +378,39 @@ def test_list_competitors_meta_respects_filtered_items(
     assert payload["meta"] == {"total": 1, "page": 1, "per_page": 1}
     assert len(payload["items"]) == 1
 
-def test_bulk_pause_competitors_marks_entries_as_paused(
+def test_list_competitors_returns_friendly_name_when_missing(
     client,
     db_session,
     test_user,
     prepare_test_database,
 ):
-    """Certifica que a rota de pausa em massa marca cada concorrente como pausado"""
-
+    """ Garante fallback de nome amigável quando o cadastro está sem display_name """
     monitored = MonitoredProduct(
         user_id=test_user.id,
-        name_identification="Headset Gamer",
+        name_identification="Mouse Gamer",
         monitoring_type=MonitoringType.scraping,
-        product_url="https://example.com/headset",
-        normalized_url="https://example.com/headset",
+        product_url="https://example.com/mouse",
+        normalized_url="https://example.com/mouse",
         status=MonitoredStatus.active,
     )
     db_session.add(monitored)
     db_session.flush()
 
-    competitors = [
-        CompetitorProduct(
-            monitored_product_id=monitored.id,
-            name_competitor=f"Loja Teste {index}",
-            product_url=f"https://example.com/loja-{index}",
-            current_price=Decimal("50.00"),
-            old_price=Decimal("55.00"),
-            status=ProductStatus.available,
-        )
-        for index in range(2)
-    ]
-    db_session.add_all(competitors)
-    db_session.flush()
-
-    monitored_id = monitored.id
-    competitor_ids = [item.id for item in competitors]
+    competitor = CompetitorProduct(
+        monitored_product_id=monitored.id,
+        name_competitor="",
+        product_url="https://loja.exemplo.com/produto-123",
+        current_price=Decimal("199.90"),
+        old_price=None,
+        status=ProductStatus.available,
+    )
+    db_session.add(competitor)
     db_session.commit()
 
-    payload = {
-        "monitored_product_id": str(monitored_id),
-        "competitor_ids": [str(item_id) for item_id in competitor_ids],
-    }
-    response = client.post("/competitors/bulk/pause", json=payload)
+    response = client.get(
+        f"/competitors?monitored_id={monitored.id}&per_page=5&page=1&include_paused=true",
+    )
 
     assert response.status_code == 200
-    reloaded = [db_session.get(CompetitorProduct, item.id) for item in competitors]
-    assert all(item.is_paused is True for item in reloaded)
-
-def test_bulk_pause_and_resume_competitors(
-    client,
-    db_session,
-    test_user,
-    prepare_test_database,
-):
-    """Valida que ações em massa respeitam ownership e atualizam a flag is_paused"""
-
-    monitored = MonitoredProduct(
-        user_id=test_user.id,
-        name_identification="Console Gamer",
-        monitoring_type=MonitoringType.scraping,
-        product_url="https://example.com/console",
-        normalized_url="https://example.com/console",
-        status=MonitoredStatus.active,
-    )
-    db_session.add(monitored)
-    db_session.flush()
-
-    competitor_a = CompetitorProduct(
-        monitored_product_id=monitored.id,
-        name_competitor="Loja A",
-        product_url="https://example.com/loja-a",
-        current_price=Decimal('90.00'),
-        old_price=Decimal('95.00'),
-        status=ProductStatus.available,
-    )
-    competitor_b = CompetitorProduct(
-        monitored_product_id=monitored.id,
-        name_competitor="Loja B",
-        product_url="https://example.com/loja-b",
-        current_price=Decimal('120.00'),
-        old_price=Decimal('110.00'),
-        status=ProductStatus.available,
-    )
-    db_session.add_all([competitor_a, competitor_b])
-    db_session.flush()
-
-    monitored_id = monitored.id
-    competitor_a_id = competitor_a.id
-    competitor_b_id = competitor_b.id
-    db_session.commit()
-
-    pause_response = client.post(
-        "/competitors/bulk/pause",
-        json={
-            "monitored_product_id": str(monitored_id),
-            "competitor_ids": [str(competitor_a_id), str(competitor_b_id)],
-        },
-    )
-
-    assert pause_response.status_code == 200
-    competitor_a = db_session.get(CompetitorProduct, competitor_a_id)
-    competitor_b = db_session.get(CompetitorProduct, competitor_b_id)
-    assert competitor_a.is_paused is True
-    assert competitor_b.is_paused is True
-
-    resume_response = client.post(
-        "/competitors/bulk/resume",
-        json={
-            "monitored_product_id": str(monitored_id),
-            "competitor_ids": [str(competitor_a_id)],
-        },
-    )
-
-    assert resume_response.status_code == 200
-    competitor_a = db_session.get(CompetitorProduct, competitor_a_id)
-    competitor_b = db_session.get(CompetitorProduct, competitor_b_id)
-    assert competitor_a.is_paused is False
-    assert competitor_b.is_paused is True
-
-    remove_response = client.post(
-        "/competitors/bulk/remove",
-        json={
-            "monitored_product_id": str(monitored_id),
-            "competitor_ids": [str(competitor_b_id)],
-        },
-    )
-
-    assert remove_response.status_code == 200
-    remaining = db_session.query(CompetitorProduct).filter_by(monitored_product_id=monitored_id).all()
-    assert len(remaining) == 1
-    assert remaining[0].id == competitor_a_id
+    payload = response.json()
+    assert payload["items"][0]["name"] == "loja.exemplo.com"

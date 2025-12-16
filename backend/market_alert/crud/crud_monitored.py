@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
+import structlog
 
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
@@ -18,14 +19,54 @@ from shared.utils.url_validation import normalize_product_url_for_storage
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_price_history import PriceHistory
-from market_alert.models.models_alerts import AlertRule
+from market_alert.models.models_alerts import AlertRule, NotificationLog
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.enums.enums_alerts import AlertType
 from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
 from market_alert.crud import crud_alert_rules
 from market_alert.crud import crud_price_history
+from market_alert.core.config_alert import settings
 
+
+logger = structlog.get_logger("crud_monitored")
+
+def _to_decimal(value: Decimal | float | int | str | None) -> Decimal | None:
+    """ Converte valores diversos para `Decimal` preservando `None`
+    
+    A normalização evita comparações inconsistentes quando preço chega como
+    string ou float após coleta do scraper
+    """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    
+def _different_price(previous_price: Decimal | float | int | str | None, current_price: Decimal | float | int | str | None) -> bool:
+    """ Compara preços convertendo para `Decimal` para evitar falsos negativos """
+    previous = _to_decimal(previous_price)
+    current = _to_decimal(current_price)
+    return previous != current
+
+def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
+    """ Calcula o próximo agendamento respeitando configuração dinâmica do item.
+
+    A função usa o atributo opcional ``check_interval`` quando presente e,
+    caso o valor seja inválido ou ausente, aplica ``RECHECK_INTERVAL_DEFAULT``
+    como fallback. O cálculo sempre considera timezone UTC para garantir
+    previsibilidade entre workers e Beat.
+    """
+    base_time = reference or datetime.now(timezone.utc)
+    if base_time.tzinfo is None:
+        base_time = base_time.replace(tzinfo=timezone.utc)
+    interval_seconds = getattr(monitored, "check_interval", None)
+    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
+        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
+    return base_time + timedelta(seconds=interval_seconds)
 
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
@@ -84,6 +125,72 @@ def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_ur
         .first()
     )
 
+def get_last_price_change_for_monitored(db: Session, monitored_product_id: UUID) -> datetime | None:
+    """ Retorna o momento da última alteração de preço do monitorado
+    
+    A consulta busca a última leitura conhecida e identifica quando o preço
+    passou a assumir o valor atual, ifnorando repetição de registros com o
+    mesmo valor para evitar leituras falsas positivas.
+    """
+    latest_entry = (
+        db.query(PriceHistory)
+        .filter(PriceHistory.monitored_product_id == monitored_product_id)
+        .order_by(PriceHistory.checked_at.desc())
+        .limit(1)
+        .first()
+    )
+    if latest_entry is None:
+        return None
+    
+    previous_different = (
+        db.query(PriceHistory.checked_at)
+        .filter(
+            PriceHistory.monitored_product_id == monitored_product_id,
+            PriceHistory.price != latest_entry.price,
+            PriceHistory.checked_at < latest_entry.checked_at,
+        )
+        .order_by(PriceHistory.checked_at.desc())
+        .first()
+    )
+    resolved_change_at = latest_entry.checked_at
+
+    if previous_different:
+        first_current_value = (
+            db.query(PriceHistory.checked_at)
+            .filter(
+                PriceHistory.monitored_product_id == monitored_product_id,
+                PriceHistory.price == latest_entry.price,
+                PriceHistory.checked_at > previous_different[0],
+            )
+            .order_by(PriceHistory.checked_at.asc())
+            .limit(1)
+            .first()
+        )
+
+        if first_current_value:
+            resolved_change_at = first_current_value[0]
+
+    if resolved_change_at and resolved_change_at.tzinfo is None:
+        resolved_change_at = resolved_change_at.replace(tzinfo=timezone.utc)
+    return resolved_change_at
+
+def count_notifications_for_monitored_product(
+    db: Session,
+    user_id: UUID,
+    monitored_product_id: UUID
+) -> int:
+    """Conta notificações enviadas para regras vinculadas ao monitorado."""
+    result = (
+        db.query(func.count(NotificationLog.id))
+        .join(AlertRule, NotificationLog.alert_rule_id == AlertRule.id)
+        .filter(
+            NotificationLog.user_id == user_id,
+            AlertRule.monitored_product_id == monitored_product_id,
+        )
+        .scalar()
+    )
+    return int(result or 0)
+
 def create_pending_monitored_product(
     db: Session,
     user_id: UUID,
@@ -109,6 +216,7 @@ def create_pending_monitored_product(
         product_url=normalized_url,
     )
 
+    reference_time = datetime.now(timezone.utc)
     #Substituímos o nome derivado da URL apenas após o scraping devolver informação confiável
     pending = MonitoredProduct(
         user_id=user_id,
@@ -122,7 +230,11 @@ def create_pending_monitored_product(
         free_shipping=False,
         status=MonitoredStatus.pending,
         last_checked=None,
+        next_check_at=None,
     )
+
+    #Calcula o próximo agendamento após istanciar o objeto para reutilizar referências e evitar uso de variáveis inexistentes
+    pending.next_check_at = _compute_next_check_at(pending, reference=reference_time)
     db.add(pending)
 
     try:
@@ -135,10 +247,6 @@ def create_pending_monitored_product(
         raise
     db.refresh(pending)
 
-    if pending.last_checked is not None:
-        pending.last_checked = None
-        db.commit()
-        db.refresh(pending)
     return pending
 
 def create_or_update_monitored_product_scraped(
@@ -157,6 +265,9 @@ def create_or_update_monitored_product_scraped(
     normalized_url = normalize_product_url_for_storage(product_data.product_url)
     #A URL chega validada pela API e é preservada para manter unicidade baseada na entrada do usuário
 
+    if last_checked.tzinfo is None:
+        last_checked = last_checked.replace(tzinfo=timezone.utc)
+
     #Verifica se o produto já existe para o usuário
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
 
@@ -167,6 +278,9 @@ def create_or_update_monitored_product_scraped(
     )
 
     if existing:
+        resolved_price = _to_decimal(scraped_info.current_price)
+
+        #Atualiza somente campos relevantes
         if product_data.name_identification and existing.name_identification != product_data.name_identification:
             existing.name_identification = product_data.name_identification
         elif _should_replace_with_scraped(existing.name_identification, fallback_name, scraped_name):
@@ -176,61 +290,97 @@ def create_or_update_monitored_product_scraped(
             existing.name_identification = resolved_name
         previous_price = existing.current_price
         previous_status = existing.status
-        existing.current_price = scraped_info.current_price
-        existing.thumbnail = scraped_info.thumbnail
-        existing.free_shipping = scraped_info.free_shipping
-        existing.currency = currency or scraped_info.currency or existing.currency
-        existing.etag = etag or existing.etag
-        existing.last_modified = last_modified or existing.last_modified
-        existing.last_checked = last_checked
-        existing.last_scraped_at = last_checked
-        existing.status = MonitoredStatus.active
-        existing.normalized_url = normalized_url
-        db.commit()
-        db.refresh(existing)
+        price_changed = _different_price(previous_price, resolved_price)
+        resolved_price = currency or scraped_info.currency or existing.currency
 
-        if scraped_info.current_price is not None:
-            crud_price_history.create_for_monitored(
-                db,
-                existing.id,
-                scraped_info.current_price,
-                currency or scraped_info.currency or existing.currency,
-                last_checked,
+        #Executa commit único garantindo atomicidade com o histórico
+        with db.begin():
+            existing.current_price = resolved_price
+
+            #Atualiza thumbnail, frete, moeda, etag, timestamps e status
+            existing.thumbnail = scraped_info.thumbnail
+            existing.free_shipping = scraped_info.free_shipping
+            existing.currency = resolved_currency
+            existing.etag = etag or existing.etag
+            existing.last_modified = last_modified or existing.last_modified
+            existing.last_checked = last_checked
+            existing.last_scraped_at = last_checked
+            existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
+            existing.status = MonitoredStatus.active
+            existing.normalized_url = normalized_url
+
+            price_history_needed = price_changed and resolved_price is not None
+
+            logger.info(
+                "updated_monitored_product_scraped",
+                product_id=str(existing.id),
+                previous_price=str(previous_price) if previous_price is not None else None,
+                new_price=str(resolved_price) if resolved_price is not None else None,
+                price_history_will_be_created=price_history_needed,
             )
-        existing._price_changed = previous_price != scraped_info.current_price
+
+            #Persistimos histórico antes do refresh para alinhar commit único à alteração de preço
+            if price_history_needed:
+                crud_price_history.create_for_monitored(
+                    db,
+                    existing.id,
+                    resolved_price,
+                    resolved_currency,
+                    last_checked,
+                )
+
+        db.refresh(existing)
+        existing._price_changed = price_changed
         existing._availability_changed = previous_status != MonitoredStatus.active
+        
+        logger.info(
+            "updated_monitored",
+            product_id=str(existing.id),
+            price_changed=existing._price_changed,
+            availability_changed=existing._availability_changed,
+            last_checked=last_checked.isoformat(),
+        )
         return existing
 
     #Se não existir, cria o registro
+    resolved_price = _to_decimal(scraped_info.current_price)
+    resolved_currency = currency or scraped_info.currency
+
+
     new = MonitoredProduct(
         user_id=user_id,
         name_identification=resolved_name,
         search_query=None,
         product_url=normalized_url,
         normalized_url=normalized_url,
-        current_price=scraped_info.current_price,
+        current_price=resolved_price,
         thumbnail=scraped_info.thumbnail,
         free_shipping=scraped_info.free_shipping,
         monitoring_type=MonitoringType.scraping,
         status=MonitoredStatus.active,
         last_checked=last_checked,
         last_scraped_at=last_checked,
-        currency=currency or scraped_info.currency,
+        next_check_at=None,
+        currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
     )
-    db.add(new)
-    db.commit()
-    db.refresh(new)
+    new.next_check_at = _compute_next_check_at(new, reference=last_checked)
+    
+    #Mantemos histórico e produto no mesmo commit para evitar divergências
+    with db.begin():
+        db.add(new)
+        db.flush()
+        if resolved_price is not None:
+            crud_price_history.create_for_monitored(
+                db,
+                new.id,
+                resolved_price,
+                resolved_currency,
+                last_checked,
+            )
 
-    if scraped_info.current_price is not None:
-        crud_price_history.create_for_monitored(
-            db,
-            new.id,
-            scraped_info.current_price,
-            currency or scraped_info.currency,
-            last_checked,
-        )
+    db.refresh(new)
 
     new._price_changed = True
     new._availability_changed = True
@@ -282,13 +432,20 @@ def get_all_monitored_products(
     monitoring_type: Optional[MonitoringType] = None,
     *,
     page: int = 1,
-    per_page: int = 50,
+    per_page: int | None = None,
     query: str | None = None,
     status: CompetitivenessStatus | None = None,
-) -> tuple[list[tuple[MonitoredProduct, int]], int]:
-    """ Lista produtos monitorados com filtros avançados e contagem de concorrentes """
+) -> tuple[list[tuple[MonitoredProduct, int]], int, int]:
+    """ Lista produtos monitorados com filtros avançados e contagem de concorrentes.
+
+    Aceita `per_page=None` para retornar todos os itens disponíveis, mantendo um teto
+    defensivo quando o parâmetro é enviado e preservando ordenação determinística
+    para evitar variações entre chamadas paginadas.
+    """
     normalized_page = max(page, 1)
-    normalized_per_page = max(per_page, 1)
+    max_per_page = 200
+    apply_pagination = per_page is not None
+    normalized_per_page = None if per_page is None else min(max(per_page, 1), max_per_page)
 
     base_query = db.query(MonitoredProduct).filter(
         MonitoredProduct.user_id == user_id,
@@ -324,18 +481,21 @@ def get_all_monitored_products(
 
     total = base_query.count()
     if total == 0:
-        return [], 0
+        return [], 0, 0
 
-    offset = (normalized_page - 1) * normalized_per_page
-    products = (
-        base_query.order_by(MonitoredProduct.created_at.desc())
-        .offset(offset)
-        .limit(normalized_per_page)
-        .all()
+    ordered_query = base_query.order_by(
+        MonitoredProduct.created_at.desc(),
+        MonitoredProduct.id.desc(),
     )
+    if apply_pagination and normalized_per_page:
+        offset = (normalized_page - 1) * normalized_per_page
+        ordered_query = ordered_query.offset(offset).limit(normalized_per_page)
+
+    products = ordered_query.all()
 
     if not products:
-        return [], total
+        resolved_per_page = normalized_per_page if apply_pagination and normalized_per_page else 0
+        return [], total, resolved_per_page
     product_ids = [product.id for product in products]
 
     competitor_rows = (
@@ -352,7 +512,8 @@ def get_all_monitored_products(
     }
 
     items = [(product, competitors_map.get(product.id, 0)) for product in products]
-    return items, total
+    resolved_per_page = normalized_per_page if apply_pagination and normalized_per_page else len(items)
+    return items, total, resolved_per_page
 
 def get_featured_monitored_products(
     db: Session,

@@ -115,10 +115,23 @@ class ErrorResponse(BaseModel):
         description="Identificador correlacionado com os logs estruturados",
     )
 
+ScrapeResultStatus = Literal["success", "not_modified", "no_result", "error"]
+
 @dataclass(slots=True)
 class ScrapeResult:
-    """ Resultado canônico utlizado pelas rotinas do ``market_alert`` """
-    status: str
+    """ Resultado canônico utlizado pelas rotinas do ``market_alert``
+
+    As tasks de coleta e rechecagem usam este contrato para evitar
+    divergências entre monitorados e concorrentes. O campo ``status``
+    segue os valores padronizados consumidos pelo collector:
+
+    - ``success``: scraping realizado com dados válidos, podendo indicar
+      mudança de preço ou disponibilidade.
+    - ``not_modified``: o scraper retornou 304/ETag sem alterações.
+    - ``no_result``: não houve dados confiáveis (ex.: anúncio inexistente).
+    - ``error``: falha controlada mapeada pelo cliente ou serviço chamador.
+    """
+    status: ScrapeResultStatus
     product_id: str | None = None
     price_changed: bool = False
     availability_changed: bool = False

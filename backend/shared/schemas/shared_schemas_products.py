@@ -60,6 +60,26 @@ class ProductCore(BaseModel):
 
 
 # ----- PRODUTO MONITORADO -----
+class InitialCompetitorCreateScraping(BaseModel):
+    """ Dados mínimos do concorrente enviados junto ao monitorado inicial """
+
+    name: str | None = Field(
+        default=None,
+        description="Nome opcional exibido durante a criação do concorrente",
+    )
+    product_url: HttpUrl = Field(
+        ..., description="URL do concorrente que deve ser coletado após o monitorado",
+    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_optional_name(cls, value: str | None) -> str | None:
+        """ Evita persistir rótulos vazios vindos do frontend """
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        return value
+
 class MonitoredProductCreateScraping(BaseModel):
     """ Esquema compartilhado para criação de produto monitorado via scraping """
     
@@ -71,6 +91,10 @@ class MonitoredProductCreateScraping(BaseModel):
     product_url: HttpUrl = Field(
         ..., description="link do produto que deseja monitorar"
     )
+    initial_competitor: InitialCompetitorCreateScraping | None = Field(
+        default=None,
+        description="Concorrente opcional enviado no mesmo fluxo do monitorado",
+    )
 
     @field_validator("name_identification", mode="before")
     @classmethod
@@ -81,7 +105,12 @@ class MonitoredProductCreateScraping(BaseModel):
         return value
 
 class MonitoredScrapedInfo(ProductCore):
-    """ Informações de scraping unificadas para produto monitorado """
+    """ Informações de scraping unificadas para produto monitorado
+
+    Estrutura alinhada ao contrato de :class:`~shared.schemas.shared_schemas_scraper.ScrapeResult`,
+    garantindo que collectors e rechecagens usem a mesma forma de armazenar
+    dados retornados pelo scraper.
+    """
     
     source: Literal["monitored"] = Field(
         "monitored",
@@ -99,15 +128,33 @@ class MonitoredScrapedInfo(ProductCore):
 class CompetitorProductCreateScraping(BaseModel):
     """ Esquema compartilhado para a criação de produto concorrente via scraping """
 
+    model_config = ConfigDict(extra="ignore")
     monitored_product_id: UUID = Field(
         ..., description="ID do produto monitorado ao qual este concorrente pertence"
     )
     product_url: HttpUrl = Field(
         ..., description="URL do produto concorrente para scraping"
     )
+    name: str | None = Field(
+        default=None, description="Nome opcional informado pelo usuário para identificar concorrente"
+    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_optional_name(cls, value: str | None) -> str | None:
+        """ Converte strings vazias em ``None`` para evitar rótulos inúteis """
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
 
 class CompetitorScrapedInfo(ProductCore):
-    """Informações de scraping unificadas para produto concorrente."""
+    """ Informações de scraping unificadas para produto concorrente.
+
+    Mantém compatibilidade com o contrato consumido pelo collector e evita
+    divergências entre monitorados e concorrentes na persistência do
+    scraping.
+    """
 
     source: Literal["competitor"] = Field(
         "competitor",

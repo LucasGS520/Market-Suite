@@ -7,7 +7,10 @@ from sqlalchemy.orm import Session
 import structlog
 from uuid import UUID
 
-from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
+from backend.shared.schemas.shared_schemas_products import (
+    MonitoredProductCreateScraping,
+    CompetitorProductCreateScraping,
+)
 from shared.utils.url_validation import normalize_and_validate_product_url
 
 from market_alert.core.config_alert import settings
@@ -18,6 +21,8 @@ from market_alert.crud.crud_monitored import (
     get_featured_monitored_products,
     get_monitored_product_by_id,
     delete_monitored_product,
+    get_last_price_change_for_monitored,
+    count_notifications_for_monitored_product,
 )
 from market_alert.crud.crud_comparison import (
     get_latest_summaries_for_products,
@@ -32,7 +37,8 @@ from market_alert.schemas.schemas_products import (
 )
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
-from market_alert.tasks.scraper_tasks import collect_product_task
+from market_alert.services.services_competitors import create_competitor_scrape_request
+from market_alert.orchestrator.collector_service_orchestrator import enqueue_monitored_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 
 
@@ -43,7 +49,7 @@ def list_monitored_products(
     db: Session,
     user_id: UUID,
     page: int,
-    per_page: int,
+    per_page: int | None,
     query: str | None = None,
     status: CompetitivenessStatus | None = None,
 ) -> PaginatedMonitoredProductsResponse:
@@ -52,7 +58,7 @@ def list_monitored_products(
     A função mantém a lógica de obtenção de resumos mais recentes e montagem
     do DTO de monitorados, filtrando itens sem preço para preservar o contrato.
     """
-    products_with_count, total = get_all_monitored_products(
+    products_with_count, total, resolved_per_page = get_all_monitored_products(
         db,
         user_id,
         page=page,
@@ -60,6 +66,9 @@ def list_monitored_products(
         query=query,
         status=status,
     )
+
+    #Protege paginação client-side quando o frontend optar por trazer todos os itens
+    resolved_page = page if per_page is not None else 1
 
     product_ids = [product.id for product, _ in products_with_count]
     summaries_map = get_latest_summaries_for_products(db, product_ids)
@@ -84,7 +93,11 @@ def list_monitored_products(
 
     return PaginatedMonitoredProductsResponse(
         items=response_payload,
-        meta=PaginationMeta(total=total, page=page, per_page=per_page),
+        meta=PaginationMeta(
+            total=total,
+            page=resolved_page,
+            per_page=resolved_per_page,
+        ),
     )
 
 
@@ -139,7 +152,18 @@ def get_monitored_product(
         )
 
     summary = get_latest_summary(db, product_id)
-    return build_monitored_response(product, summary=summary)
+    last_price_change_at = get_last_price_change_for_monitored(db, product_id)
+    alerts_sent = count_notifications_for_monitored_product(
+        db, user_id=user_id, monitored_product_id=product_id
+    )
+
+    return build_monitored_response(
+        product,
+        summary=summary,
+        allow_missing_price=True,
+        last_price_change_at=last_price_change_at,
+        alerts_sent=alerts_sent,
+    )
 
 
 def delete_monitored_product_entry(
@@ -158,7 +182,7 @@ def delete_monitored_product_entry(
         )
 
     summary = get_latest_summary(db, product_id)
-    response_payload = build_monitored_response(product, summary=summary)
+    response_payload = build_monitored_response(product, summary=summary, allow_missing_price=True)
     _ = delete_monitored_product(db, product_id)
     return response_payload
 
@@ -169,11 +193,11 @@ def schedule_monitored_scrape(
     product_data: MonitoredProductCreateScraping,
     request: Request | None = None,
 ) -> MonitoredScrapeCreationResponse:
-    """ Valida e agenda scraping de produto monitorado em fluxo único
+    """ Valida e agenda scraping de produto monitorado e concorrente inicial
     
     O serviço centraliza logs e validações para reduzir duplicação entre rotas,
     garantindo verificação de URL, duplicidade e rate-limit antes de agendar a
-    coleta assíncrona.
+    coleta assíncrona do monitorado e, quando enviado, do concorrente inicial.
     """
     log_context: dict[str, str | None] = {
         "user_id": str(user.id),
@@ -251,12 +275,29 @@ def schedule_monitored_scrape(
         product_url=normalized_url,
     )
 
-    collect_product_task.delay(
-        url=normalized_url,
-        user_id=str(user.id),
-        name_identification=pending.name_identification,
-        monitored_id=str(pending.id),
-    )
+    #Agendamento via Celery garante processamento assíncrono do scraping
+    enqueue_monitored_collection(pending, user_id=user.id)
+
+    if product_data.initial_competitor:
+        competitor_payload = CompetitorProductCreateScraping(
+            monitored_product_id=pending.id,
+            product_url=product_data.initial_competitor.product_url,
+            name=product_data.initial_competitor.name,
+        )
+        competitor_context = {
+            "path": request.url.path if request else None,
+            "method": request.method if request else None,
+            "origin": "monitored_onboarding",
+        }
+
+        create_competitor_scrape_request(
+            db=db,
+            user=user,
+            product_data=competitor_payload,
+            request_context={
+                key: value for key, value in competitor_context.items() if value is not None
+            },
+        )
 
     logger.info(
         "monitored_scrape_scheduled", monitored_id=str(pending.id), url=normalized_url

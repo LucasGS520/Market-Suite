@@ -16,6 +16,7 @@ from shared.utils.url_validation import normalize_product_url
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import (
     create_or_update_monitored_product_scraped,
+    _compute_next_check_at,
     get_monitored_product_by_user_and_url,
 )
 from market_alert.enums.enums_products import MonitoredStatus
@@ -42,7 +43,13 @@ def _handle_response(
     last_checked: datetime,
     request_url: str,
 ) -> ScrapeResult:
-    """ Processa reposta recebida atualizando banco e gerando histórico """
+    """ Processa reposta do scraper e retorna ``ScrapeResult`` padronizado
+
+    O collector espera sempre um dos status suportados em
+    :class:`ScrapeResult`. Este método converte códigos HTTP e payloads do
+    scraper no contrato consumido pelas tasks, preservando `http_status`,
+    `price_changed` e `availability_changed`. 
+    """
     status_code = fetch_result.status_code
     if status_code == 304:
         if existing_id:
@@ -60,7 +67,15 @@ def _handle_response(
                 product.last_checked = last_checked
                 product.last_scraped_at = last_checked
                 product.status = MonitoredStatus.active
+                product.next_check_at = _compute_next_check_at(product, reference=last_checked)
                 db.commit()
+                logger.info(
+                    "monitored_not_modified",
+                    product_id=str(product.id),
+                    normalized_url=lookup_url,
+                    last_checked=last_checked.isoformat(),
+                )
+
         return ScrapeResult(status="not_modified", product_id=str(existing_id) if existing_id else None, http_status=304)
     
     if status_code == 422 and fetch_result.error_code == "no_result":
@@ -125,7 +140,13 @@ def scrape_monitored_product(
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
 ) -> ScrapeResult:
-    """ Executa scraping para produto monitorado de forma síncrona """
+    """ Executa scraping para produto monitorado de forma síncrona
+
+    Retorna sempre um :class:`ScrapeResult` com status dentro do contrato
+    compartilhado (`success`, `not_modified`, `no_result`, `error`). A URL
+    é normalizada antes do fetch e o ETag/Last-Modified existente é reaproveitado
+    para permitir retornos `not_modified` consistentes.
+    """
     try:
         normalized_url = normalize_product_url(str(url))
     except ValueError:

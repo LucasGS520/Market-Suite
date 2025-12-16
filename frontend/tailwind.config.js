@@ -14,15 +14,34 @@ export default {
   // Utilize `extend` para adicionar ou sobrescrever valores mantendo o padrão do Tailwind.
   theme: {
     extend: {
-      // Exemplo:
-      // colors: {
-      //   brand: {
-      //     50: '#f5fbff',
-      //     500: '#1e90ff',
-      //   },
-      // },
-      //
-      // Adicione customizações específicas do design system aqui.
+      // Paleta customizada para o design system:
+      colors: {
+        primary: {
+          50: '#fff6ed',
+          100: '#ffe8cc',
+          200: '#ffd0a1',
+          300: '#ffb776',
+          400: '#ff9e3a',
+          500: '#fb8c00', // cor primária (laranja)
+          600: '#ef6c00',
+          700: '#e65100',
+          800: '#c43f00',
+          900: '#9b2b00',
+        },
+        secondary: {
+          50: '#fffdea',
+          100: '#fff8cc',
+          200: '#fff1a8',
+          300: '#ffea84',
+          400: '#ffe65a',
+          500: '#fdd835', // cor secundária (amarelo)
+          600: '#f6cf2b',
+          700: '#f0c022',
+          800: '#e0a800',
+          900: '#b38200',
+        },
+      },
+      // Adicione outras customizações específicas do design system aqui.
     },
   },
 

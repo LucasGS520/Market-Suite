@@ -22,7 +22,7 @@ def calculate_discrepancies(
     min_price: Decimal,
     tolerance: Decimal,
 ) -> Dict[str, Any]:
-    """Calcula discrepâncias básicas para um concorrente.
+    """ Calcula discrepâncias básicas para um concorrente.
 
     Mantém somente deltas essenciais para exibir no dashboard, evitando
     metadados históricos e variações complexas.

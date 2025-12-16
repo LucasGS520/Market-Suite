@@ -51,6 +51,27 @@ class Settings(ConfigBase):
         os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200")
     ) #Base de reagendamento
 
+    #Controles operacionais de rechecagem
+    RECHECK_INTERVAL_DEFAULT: int = int(
+        os.getenv("RECHECK_INTERVAL_DEFAULT", str(5 * 60))
+    ) #Intervalo padrão entre rechecagens em segundos
+    DEFAULT_NEXT_CHECK_SECONDS: int = int(
+        os.getenv("DEFAULT_NEXT_CHECK_SECONDS", str(5 * 60))
+    ) #Intervalo aplicado no onboarding quando não houver cálculo específico
+    RECHECK_TIMEOUT_SECONDS: int = int(
+        os.getenv("RECHECK_TIMEOUT_SECONDS", "120")
+    ) #Tempo máximo para manter uma rechecagem ativa antes de liberar
+    RECHECK_ENQUEUE_BATCH_SIZE: int = int(
+        os.getenv("RECHECK_ENQUEUE_BATCH_SIZE", "50")
+    ) #Quantidade máxima de rechecagens enfileiradas por ciclo do Beat
+    RECHECK_ENQUEUE_JITTER_SECONDS: int = int(
+        os.getenv("RECHECK_ENQUEUE_JITTER_SECONDS", "5")
+    ) #Jitter aleatório para dispersar rechecagens simultâneas
+    PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "60")) #TTL padrão para lock de produto
+    PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS: int = int(
+        os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "45")
+    ) #Margem mínima recomendada para evitar expiração prematura do lock
+
     #URL base do serviço externo de scraping
     SCRAPER_SERVICE_URL: str = os.getenv(
         "SCRAPER_SERVICE_URL", "http://market_scraper:8000"
@@ -124,6 +145,9 @@ class Settings(ConfigBase):
     COMPARISON_STORE_RAW_RESULT: bool = os.getenv(
         "COMPARISON_STORE_RAW_RESULT", "0"
     ).lower() in {"1", "true", "yes", "on"} #Habilita persistência do payload completo para depuração
+    ONBOARDING_ENQUEUE_STAGGER_SECONDS: float = float(
+        os.getenv("ONBOARDING_ENQUEUE_STAGGER_SECONDS", "0.5")
+    ) #Atraso leve para diluir enfileiramento inicial
 
 #Instância única de settings para a aplicação
 settings = Settings()

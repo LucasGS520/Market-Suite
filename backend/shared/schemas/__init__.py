@@ -4,6 +4,7 @@ from .shared_schemas_products import (
     ProductCore,
     MonitoredProductCreateScraping,
     MonitoredScrapedInfo,
+    InitialCompetitorCreateScraping,
     CompetitorProductCreateScraping,
     CompetitorScrapedInfo,
 )
@@ -18,6 +19,7 @@ from .shared_schemas_scraper import (
 __all__ = [
     "MonitoredProductCreateScraping",
     "MonitoredScrapedInfo",
+    "InitialCompetitorCreateScraping",
     "CompetitorProductCreateScraping",
     "CompetitorScrapedInfo",
     "ProductCore",

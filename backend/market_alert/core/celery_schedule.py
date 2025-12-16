@@ -1,10 +1,8 @@
-""" Centraliza filas, roteamento e agendamentos do Celery.
+""" Catálogo de filas, rotas e agendamentos do worker Celery.
 
-Este módulo mantém em um único lugar as filas e os horários
-configurados para o worker e o beat. Dessa forma evitamos
-inconsistências entre definições dispersas (como `celery_app.py`
-e arquivos de estado do beat), facilitando inspeções e ajustes
-de cadência.
+Centralizamos as declarações para evitar divergências entre arquivos de
+configuração e garantir que novas tasks fiquem visíveis para operação.
+Qualquer fila ou agendamento deve ser registrado aqui.
 """
 
 from __future__ import annotations
@@ -15,11 +13,11 @@ from kombu import Exchange, Queue
 
 #Módulos de tasks carregados pelo worker
 TASK_MODULES = [
-    "market_alert.tasks.scraper_tasks",
-    "market_alert.tasks.monitor_tasks",
+    "market_alert.tasks.collector_product_task",
     "market_alert.tasks.metrics_tasks",
-    "market_alert.tasks.compare_prices_tasks",
+    "market_alert.tasks.compare_prices_task",
     "market_alert.tasks.alert_tasks",
+    "market_alert.tasks.recheck_scheduler_task",
 ]
 
 #Exchanges separados para scraping e monitoramento
@@ -34,19 +32,11 @@ TASK_QUEUES = (
 
 #Roteamento explícito para manter cada domínio em sua fila
 TASK_ROUTES = {
-    "market_alert.tasks.scraper_tasks.collect_product_task": {
+    "market_alert.tasks.collector_product_task.collect_product_task": {
         "queue": "scraping",
         "routing_key": "scraping",
     },
-    "market_alert.tasks.scraper_tasks.collect_competitor_task": {
-        "queue": "scraping",
-        "routing_key": "scraping",
-    },
-    "market_alert.tasks.monitor_tasks.recheck_monitored_products": {
-        "queue": "monitor",
-        "routing_key": "monitor",
-    },
-    "market_alert.tasks.monitor_tasks.recheck_competitor_products": {
+    "market_alert.tasks.recheck_scheduler_task.schedule_rechecks": {
         "queue": "monitor",
         "routing_key": "monitor",
     },
@@ -78,12 +68,10 @@ BEAT_SCHEDULE = {
         crontab(minute="*/1"),
     ),
     "recheck-scraping-every-5min": _schedule_entry(
-        "market_alert.tasks.monitor_tasks.recheck_monitored_products",
+        "market_alert.tasks.recheck_scheduler_task.schedule_rechecks",
         crontab(minute="*/5"),
-    ),
-    "recheck-all-competitors-every-8min": _schedule_entry(
-        "market_alert.tasks.monitor_tasks.recheck_competitor_products",
-        crontab(minute="*/8"),
+        queue="monitor",
+        routing_key="monitor",
     ),
     "cleanup-cache-daily": _schedule_entry(
         "market_alert.tasks.metrics_tasks.cleanup_cache",

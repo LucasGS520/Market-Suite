@@ -18,8 +18,29 @@ REDIS_CONNECTION_ERRORS_TOTAL = Counter(
     "Total de falhas ao tentar conectar ao Redis",
 )
 
+REDIS_LOCK_ACQUIRED_TOTAL = Counter(
+    "redis_lock_acquired_total",
+    "Quantidade de locks adquiridos com sucesso",
+    ["resource"],
+)
+
+REDIS_LOCK_SKIPPED_TOTAL = Counter(
+    "redis_lock_skipped_total",
+    "Tentativas de lock ignoradas por já existir",
+    ["resource"],
+)
+
+REDIS_LOCK_RELEASE_FAILED_TOTAL = Counter(
+    "redis_lock_release_failed_total",
+    "Falhas ao liberar locks distribuídos no Redis",
+    ["resource"],
+)
+
 __all__ = [
     "REDIS_QUEUE_MESSAGES",
     "REDIS_MEMORY_USAGE_BYTES",
     "REDIS_CONNECTION_ERRORS_TOTAL",
+    "REDIS_LOCK_ACQUIRED_TOTAL",
+    "REDIS_LOCK_SKIPPED_TOTAL",
+    "REDIS_LOCK_RELEASE_FAILED_TOTAL",
 ]

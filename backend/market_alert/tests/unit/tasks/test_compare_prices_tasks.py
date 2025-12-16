@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from market_alert.tasks import compare_prices_tasks
+from backend.market_alert.tasks import compare_prices_task
 
 
 VALID_UUID = "123e4567-e89b-12d3-a456-426655440000"
@@ -45,18 +45,18 @@ def test_compare_prices_task_continues_without_redis(monkeypatch):
 
     dummy_logger = DummyLogger()
 
-    monkeypatch.setattr(compare_prices_tasks, "logger", dummy_logger, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "SessionLocal", lambda: DummySession(), raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "run_price_comparison", fake_run_price_comparison, raising=False)
+    monkeypatch.setattr(compare_prices_task, "logger", dummy_logger, raising=False)
+    monkeypatch.setattr(compare_prices_task, "SessionLocal", lambda: DummySession(), raising=False)
+    monkeypatch.setattr(compare_prices_task, "run_price_comparison", fake_run_price_comparison, raising=False)
     monkeypatch.setattr(
-        compare_prices_tasks,
+        compare_prices_task,
         "send_notification_task",
         SimpleNamespace(delay=lambda *args, **kwargs: None),
         raising=False,
     )
-    monkeypatch.setattr(compare_prices_tasks, "publish_message", lambda *args, **kwargs: True, raising=False)
+    monkeypatch.setattr(compare_prices_task, "publish_message", lambda *args, **kwargs: True, raising=False)
 
-    compare_prices_tasks.compare_prices_task.run(VALID_UUID)
+    compare_prices_task.compare_prices_task.run(VALID_UUID)
 
     assert dummy_logger.warning_called is False
     
@@ -70,18 +70,18 @@ def test_compare_prices_task_always_runs(monkeypatch):
         run_called = True
         return {"lowest_competitor": {}, "highest_competitor": {}}, []
 
-    monkeypatch.setattr(compare_prices_tasks, "logger", DummyLogger(), raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "SessionLocal", lambda: DummySession(), raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "run_price_comparison", fake_run, raising=False)
+    monkeypatch.setattr(compare_prices_task, "logger", DummyLogger(), raising=False)
+    monkeypatch.setattr(compare_prices_task, "SessionLocal", lambda: DummySession(), raising=False)
+    monkeypatch.setattr(compare_prices_task, "run_price_comparison", fake_run, raising=False)
     monkeypatch.setattr(
-        compare_prices_tasks,
+        compare_prices_task,
         "send_notification_task",
         SimpleNamespace(delay=lambda *args, **kwargs: None),
         raising=False,
     )
-    monkeypatch.setattr(compare_prices_tasks, "publish_message", lambda *a, **k: True, raising=False)
+    monkeypatch.setattr(compare_prices_task, "publish_message", lambda *a, **k: True, raising=False)
 
-    compare_prices_tasks.compare_prices_task.run(VALID_UUID)
+    compare_prices_task.compare_prices_task.run(VALID_UUID)
 
     assert run_called is True
 
@@ -108,17 +108,17 @@ def test_compare_prices_task_publishes_realtime_event(monkeypatch):
         events["payload"] = payload
         return True
 
-    monkeypatch.setattr(compare_prices_tasks, "SessionLocal", lambda: DummySession(), raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "run_price_comparison", fake_run_price_comparison, raising=False)
-    monkeypatch.setattr(compare_prices_tasks, "publish_message", fake_publish, raising=False)
+    monkeypatch.setattr(compare_prices_task, "SessionLocal", lambda: DummySession(), raising=False)
+    monkeypatch.setattr(compare_prices_task, "run_price_comparison", fake_run_price_comparison, raising=False)
+    monkeypatch.setattr(compare_prices_task, "publish_message", fake_publish, raising=False)
     monkeypatch.setattr(
-        compare_prices_tasks,
+        compare_prices_task,
         "send_notification_task",
         SimpleNamespace(delay=lambda *args, **kwargs: None),
         raising=False,
     )
 
-    compare_prices_tasks.compare_prices_task.run(VALID_UUID)
+    compare_prices_task.compare_prices_task.run(VALID_UUID)
 
     assert events["channel"] == "notifications"
     assert events["payload"]["type"] == "comparison.created"

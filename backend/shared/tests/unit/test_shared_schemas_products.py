@@ -5,7 +5,13 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo, CompetitorProductCreateScraping, CompetitorScrapedInfo
+from backend.shared.schemas.shared_schemas_products import (
+    InitialCompetitorCreateScraping,
+    MonitoredProductCreateScraping,
+    MonitoredScrapedInfo,
+    CompetitorProductCreateScraping,
+    CompetitorScrapedInfo,
+)
 
 def test_monitored_scraped_info_defaults():
     data = MonitoredScrapedInfo(
@@ -51,6 +57,19 @@ def test_monitored_product_blank_name_becomes_none():
     )
     assert data.name_identification is None
 
+def test_monitored_product_accepts_initial_competitor():
+    competitor = InitialCompetitorCreateScraping(
+        product_url="https://example.com/concorrente",
+        name=" Loja teste ",
+    )
+    data = MonitoredProductCreateScraping(
+        product_url="https://example.com/produto",
+        initial_competitor=competitor,
+    )
+
+    assert data.initial_competitor is not None
+    assert data.initial_competitor.name == "Loja teste"
+
 def test_monitored_product_invalid_url():
     with pytest.raises(ValidationError) as exc:
         MonitoredProductCreateScraping(
@@ -68,3 +87,34 @@ def test_competitor_product_invalid_url():
             product_url="url-invalida",
         )
     assert "url" in str(exc.value).lower()
+
+def test_competitor_product_optional_name():
+    from uuid import uuid4
+
+    payload = CompetitorProductCreateScraping(
+        monitored_product_id=uuid4(),
+        product_url="https://example.com/produto",
+        name=" Concorrente Teste ",
+    )
+
+    assert payload.name == "Concorrente Teste"
+
+
+def test_competitor_product_blank_name_becomes_none():
+    from uuid import uuid4
+
+    payload = CompetitorProductCreateScraping(
+        monitored_product_id=uuid4(),
+        product_url="https://example.com/produto",
+        name="   ",
+    )
+
+    assert payload.name is None
+
+def test_initial_competitor_blank_name_becomes_none():
+    payload = InitialCompetitorCreateScraping(
+        product_url="https://example.com/concorrente",
+        name="   ",
+    )
+
+    assert payload.name is None

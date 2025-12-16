@@ -8,7 +8,6 @@ import {
   CompetitorProductCreateScraping,
   ScrapeCreationResponse,
   DashboardStats,
-  BulkActionResponse,
 } from '../types';
 
 /**
@@ -33,14 +32,11 @@ export const productsService = {
   },
 
   /**
-   * Lista produtos monitorados com paginação e filtros
-   * - page: número da página (padrão no backend)
-   * - per_page: itens por página
-   * - query: texto de busca
-   * - status: filtro por status do monitoramento
+   * Lista produtos monitorados com filtros opcionais e paginação sob demanda.
    *
-   * @param {Object} params Parâmetros de paginação e filtro
-   * @returns {Promise<PaginatedResponse<MonitoredProduct>>} Resposta paginada de produtos monitorados
+   * A função apenas envia parâmetros definidos, permitindo que o frontend
+   * assuma paginação client-side quando necessário sem forçar `per_page` ou
+   * `page` por padrão.
    */
   async getMonitoredProducts(params?: {
     page?: number;
@@ -48,9 +44,15 @@ export const productsService = {
     query?: string;
     status?: string;
   }): Promise<PaginatedResponse<MonitoredProduct>> {
+    const sanitizedParams = params
+      ? Object.fromEntries(
+          Object.entries(params).filter(([, value]) => value !== undefined && value !== null)
+        )
+      : undefined;
+
     const response = await apiClient.get<PaginatedResponse<MonitoredProduct>>(
       '/monitored',
-      { params }
+      { params: sanitizedParams }
     );
     return response.data;
   },
@@ -116,7 +118,31 @@ export const productsService = {
       '/competitors',
       { params }
     );
-    return response.data;
+    const normalizedItems = (response.data.items || []).map((competitor) => {
+      const fallbackName = (() => {
+        try {
+          return new URL(competitor.url).hostname;
+        } catch {
+          return 'Concorrente';
+        }
+      })();
+
+      const displayName = competitor.display_name || competitor.name || competitor.title || fallbackName;
+
+      return {
+        ...competitor,
+        display_name: competitor.display_name || competitor.name || competitor.title,
+        name: displayName,
+        current_price: competitor.current_price ?? null,
+        monitored_id: competitor.monitored_id || competitor.monitored_product_id || params.monitored_id,
+        monitored_product_id: competitor.monitored_product_id || competitor.monitored_id || params.monitored_id,
+      };
+    });
+
+    return {
+      ...response.data,
+      items: normalizedItems,
+    };
   },
 
   /**
@@ -134,58 +160,6 @@ export const productsService = {
   },
 
   /**
-   * Remove concorrentes de um produto monitorado
-   * Remove todos os concorrentes associados ao ID do produto monitorado.
-   */
-  async deleteCompetitors(
-    monitoredProductId: string
-  ): Promise<CompetitorProduct[]> {
-    const response = await apiClient.delete<CompetitorProduct[]>(
-      `/competitors/${monitoredProductId}`
-    );
-    return response.data;
-  },
-
-  /**
-   * Pausa concorrentes em massa
-   * Envia uma requisição para pausar múltiplos concorrentes.
-   */
-  async pauseCompetitors(
-    competitorIds: string[]
-  ): Promise<BulkActionResponse> {
-    const response = await apiClient.post('/competitors/bulk/pause', {
-      competitor_ids: competitorIds,
-    });
-    return response.data;
-  },
-
-  /**
-   * Retoma concorrentes em massa
-   * Reverte a ação de pausa para os concorrentes informados.
-   */
-  async resumeCompetitors(
-    competitorIds: string[]
-  ): Promise<BulkActionResponse> {
-    const response = await apiClient.post('/competitors/bulk/resume', {
-      competitor_ids: competitorIds,
-    });
-    return response.data;
-  },
-
-  /**
-   * Remove concorrentes em massa
-   * Aciona o endpoint que exclui vários concorrentes de uma só vez.
-   */
-  async removeCompetitors(
-    competitorIds: string[]
-  ): Promise<BulkActionResponse> {
-    const response = await apiClient.post('/competitors/bulk/remove', {
-      competitor_ids: competitorIds,
-    });
-    return response.data;
-  },
-
-  /**
    * Obtém resumo de comparação de preços
    * Retorna um resumo das comparações de preços para um produto monitorado específico,
    * usado em relatórios e widgets de comparação.
@@ -196,6 +170,22 @@ export const productsService = {
     const response = await apiClient.get<PriceComparisonSummary>(
       `/comparisons/${monitoredId}/summary`
     );
-    return response.data;
+    const summary = response.data || {};
+
+    return {
+      ...summary,
+      monitored_id: summary.monitored_id || summary.monitored_product_id || monitoredId,
+      monitored_product_id: summary.monitored_product_id || summary.monitored_id || monitoredId,
+      competitors_count: summary.competitors_count ?? 0,
+      competitors_with_price_count: summary.competitors_with_price_count ?? 0,
+      competitors_mean: summary.competitors_mean ?? null,
+      competitors_min: summary.competitors_min ?? null,
+      competitors_max: summary.competitors_max ?? null,
+      monitored_price: summary.monitored_price ?? null,
+      potential_adjustment: summary.potential_adjustment ?? null,
+      position_rank: summary.position_rank ?? null,
+      discrepancies: summary.discrepancies || [],
+      alerts: summary.alerts || [],
+    };
   },
 };
