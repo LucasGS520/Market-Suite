@@ -47,7 +47,7 @@ import {
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
-import { formatCurrency } from '../utils/currency';
+import { formatCurrency, normalizePriceInput } from '../utils/currency';
 import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types';
 import TruncatedText from '../utils/TruncatedText';
 
@@ -175,18 +175,26 @@ const Products: React.FC = () => {
    * Formata o preço exibindo rótulo de coleta quando ainda não há valor disponível.
    */
   const parseToNumber = (value: string | number | null | undefined) => {
-    if (value === null || value === undefined) {
-      return null;
-    }
-
-    const numericValue =
-      typeof value === 'string' ? Number.parseFloat(value.replace(',', '.')) : Number(value);
-
-    return Number.isFinite(numericValue) ? numericValue : null;
+    return normalizePriceInput(value);
   };
 
-  const renderPrice = (value: string | number | null) => {
-    return formatCurrency(value, { fallbackLabel: 'Coletando preço...' });
+  /**
+   * Mostra preço ou rótulo de indisponibilidade preservando o último status.
+   */
+  const renderAvailability = (value: string | number | null, lastStatus?: string) => {
+    const parsed = normalizePriceInput(value);
+    if (parsed === null) {
+      return (
+        <Box display="flex" alignItems="center" gap={1}>
+          <Typography variant="body1" color="text.secondary">
+            Indisponível / Pausado
+          </Typography>
+          {lastStatus && <Chip label={lastStatus} size="small" color="default" />}
+        </Box>
+      );
+    }
+
+    return <>{formatCurrency(parsed)}</>;
   };
 
   const getDifferenceValue = (product: MonitoredProduct) => {
@@ -327,7 +335,10 @@ const Products: React.FC = () => {
             {paginatedItems.map((product) => {
               const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
               const differenceValue = getDifferenceValue(product);
-              const differenceLabel = formatCurrency(differenceValue);
+              const differenceLabel = formatCurrency(differenceValue, {
+                allowZero: true,
+                fallbackLabel: '—',
+              });
 
               const monitoredPriceNum = parseToNumber(product.current_price);
               const lowestPriceNum = parseToNumber(product.comparison_summary?.competitors_min);
@@ -357,7 +368,11 @@ const Products: React.FC = () => {
                 }
               }
 
-              const rankingLabel = `${getRankingLabel(product)} | ${product.comparison_summary?.competitors_count ?? 0} Concorrentes`;
+              const activeCompetitors =
+                product.comparison_summary?.competitors_with_price_count ??
+                product.comparison_summary?.competitors_count ??
+                0;
+              const rankingLabel = `${getRankingLabel(product)} | ${activeCompetitors} Concorrentes`;
 
               return (
                 <Grid item xs={12} key={product.id}>
@@ -407,7 +422,7 @@ const Products: React.FC = () => {
                                 MEU PREÇO
                               </Typography>
                               <Typography variant="h5" color="primary">
-                                {renderPrice(product.current_price)}
+                                {renderAvailability(product.current_price, product.last_status)}
                               </Typography>
                             </Grid>
                             <Grid item xs={4}>
@@ -510,7 +525,10 @@ const Products: React.FC = () => {
                 {data.items.map((product) => {
                   const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
                   const differenceValue = getDifferenceValue(product);
-                  const differenceLabel = formatCurrency(differenceValue);
+                  const differenceLabel = formatCurrency(differenceValue, {
+                    allowZero: true,
+                    fallbackLabel: '—',
+                  });
 
                   const monitoredPriceNum = parseToNumber(product.current_price);
                   const lowestPriceNum = parseToNumber(product.comparison_summary?.competitors_min);
@@ -521,7 +539,10 @@ const Products: React.FC = () => {
                     else if (lowestPriceNum < monitoredPriceNum) lowestColor = 'error.main';
                   }
 
-                  const competitorsCount = product.comparison_summary?.competitors_count ?? 0;
+                  const competitorsCount =
+                    product.comparison_summary?.competitors_with_price_count ??
+                    product.comparison_summary?.competitors_count ??
+                    0;
                   const rankingLabel = getRankingLabel(product);
                   const isCheaperOrEqual = differenceValue !== null ? differenceValue <= 0 : null;
 
@@ -549,7 +570,7 @@ const Products: React.FC = () => {
                         </Box>
                       </TableCell>
                       <TableCell align="right">
-                        {renderPrice(product.current_price)}
+                        {renderAvailability(product.current_price, product.last_status)}
                       </TableCell>
                       <TableCell align="right">
                         <Typography sx={{ color: lowestColor }}>{lowestCompetitorLabel}</Typography>

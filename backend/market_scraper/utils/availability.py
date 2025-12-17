@@ -8,6 +8,7 @@ da suíte.
 """
 
 from __future__ import annotations
+import re
 from typing import Callable, Iterable, Tuple
 import structlog
 from shared.metrics.metrics_scraper import SCRAPER_AVAILABILITY_HEURISTICS_TOTAL
@@ -69,6 +70,20 @@ def _detect_generic(html: str) -> DetectorResult | None:
         return False, "unavailable", "generic_unavailable"
     return None
 
+def _detect_metadata_flags(html: str) -> DetectorResult | None:
+    """ Verifica metadados padronizados de disponibilidade (schema/og) """
+    #Observa padrões comuns em JSON-LD ou microdata sem parsing pesado
+    if re.search(r"availability\"?\s*[:=]\s*\"?(?:outofstock|soldout)\"?", html):
+        return False, "unavailable", "metadata_out_of_stock"
+
+    if "og:availability" in html:
+        if re.search(r"og:availability\"?\s+content=\"?out of stock\"?", html):
+            return False, "unavailable", "metadata_og_out_of_stock"
+        if re.search(r"og:availability\"?\s+content=\"?discontinued\"?", html):
+            return False, "removed", "metadata_og_discontinued"
+
+    return None
+
 _DETECTORS: tuple[tuple[str, DetectorCallable], ...] = (
     ("mercadolivre.com.br", _detect_meli),
     ("mercadolivre.com", _detect_meli),
@@ -109,6 +124,12 @@ def detect_availability(
 
     normalized_html = html.lower()
     normalized_domain = (domain or "").lower()
+
+    metadata = _detect_metadata_flags(normalized_html)
+    if metadata:
+        availability, last_status, reason = metadata
+        _register_heuristic(reason, domain=domain)
+        return availability, last_status
 
     for suffix, detector in _DETECTORS:
         if normalized_domain.endswith(suffix):

@@ -41,7 +41,7 @@ import {
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
-import { formatCurrency } from '../utils/currency';
+import { formatCurrency, normalizePriceInput } from '../utils/currency';
 import { formatDateOnly, formatDateTime, formatRelativeTime } from '../utils/date';
 import TruncatedText from '../utils/TruncatedText';
 
@@ -197,23 +197,29 @@ const ProductDetail: React.FC = () => {
   /**
    * Formata o preço exibindo estado de coleta quando ainda não existe valor salvo
    */
-  const renderPrice = (value: string | number | null) => {
-    if (value === null) {
+  /**
+   * Renderiza preço do monitorado ou concorrente com fallback de indisponibilidade.
+   */
+  const renderPrice = (value: string | number | null, lastStatus?: string) => {
+    const normalized = normalizePriceInput(value);
+
+    if (normalized === null) {
       return (
         <Box display="flex" alignItems="center" gap={1}>
           <CircularProgress size={18} />
           <Typography variant="body2" color="text.secondary">
-            Scraping em andamento
+            Indisponível
           </Typography>
+          {lastStatus && <Chip label={lastStatus} size="small" color="default" />}
         </Box>
       );
     }
 
-    return formatCurrency(value);
+    return formatCurrency(normalized);
   };
 
   const renderSummaryCurrency = (value?: string | number | null) => {
-    if (value === null || value === undefined) {
+    if (value === null || value === undefined || normalizePriceInput(value) === null) {
       return '—';
     }
 
@@ -323,7 +329,7 @@ const ProductDetail: React.FC = () => {
                           Preço Atual
                         </Typography>
                         <Typography variant="h4" color="primary">
-                          {renderPrice(product.current_price)}
+                          {renderPrice(product.current_price, product.last_status)}
                         </Typography>
                       </Grid>
                       <Grid item xs={12} sm={4}>
@@ -512,7 +518,9 @@ const ProductDetail: React.FC = () => {
                                   </Box>
                                 </Box>
                               </TableCell>
-                              <TableCell align="right">{renderPrice(competitor.current_price)}</TableCell>
+                              <TableCell align="right">
+                                {renderPrice(competitor.current_price, competitor.last_status)}
+                              </TableCell>
                               <TableCell align="center">
                                 <Chip
                                   label={competitor.availability ? 'Disponível' : 'Indisponível'}

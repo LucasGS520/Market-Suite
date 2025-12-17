@@ -29,6 +29,7 @@ import {
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import TruncatedText from '../utils/TruncatedText';
+import { formatCurrency, normalizePriceInput } from '../utils/currency';
 
 /**
  * Tipagens locais para maior clareza e manutenção.
@@ -47,6 +48,7 @@ interface FeaturedProduct {
   url?: string;
   thumbnail?: string;
   current_price: string | number | null;
+  last_status?: string;
   competitiveness_status?: 'competitivo' | 'atencao' | 'urgente' | string;
 }
 
@@ -146,18 +148,23 @@ const Dashboard: React.FC = () => {
   /**
    * Formata preços exibindo rótulo quando ainda não há valor disponível
    */
-  const renderPrice = (value: string | number | null) => {
-    if (value === null) {
-      return 'Em processamento';
+  /**
+   * Exibe preço ou mensagem de indisponibilidade com badge opcional de status.
+   */
+  const renderPrice = (value: string | number | null, lastStatus?: string) => {
+    const normalized = normalizePriceInput(value);
+    if (normalized === null) {
+      return (
+        <Box display="flex" alignItems="center" gap={1}>
+          <Typography variant="body1" color="text.secondary">
+            Indisponível / Pausado
+          </Typography>
+          {lastStatus && <Chip label={lastStatus} size="small" color="default" />}
+        </Box>
+      );
     }
-    // Normaliza entradas do backend que podem ser string (ex: "5699.05") ou número já parseado. 
-    // Remove quaisquer caracteres não numéricos (ex: 'R$ ', pontos de milhar ou espaços) antes de converter.
-    const cleaned = typeof value === 'string' ? value.replace(/[^0-9.,-]/g, '').replace(',', '.') : String(value);
-    const num = Number(cleaned);
-    if (!Number.isFinite(num)) return 'Em processamento';
-
-    // Formata para pt-BR com símbolo de moeda BRL
-    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    
+    return formatCurrency(normalized);
   };
 
   /**
@@ -266,7 +273,7 @@ const Dashboard: React.FC = () => {
                         {/* Exibição de preço com formatação mínima.
                             Usamos parseFloat por segurança caso a API retorne string. */}
                         <Typography variant="h6" color="primary">
-                          {renderPrice(product.current_price)}
+                          {renderPrice(product.current_price, product.last_status)}
                         </Typography>
                       </Box>
                     </Box>
