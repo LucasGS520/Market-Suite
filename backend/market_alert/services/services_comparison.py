@@ -20,6 +20,7 @@ from shared.metrics.metrics_price_comparison import (
     PRICE_COMPARISON_DURATION_SECONDS,
     PRICE_COMPARISON_FAILURES_TOTAL,
     PRICE_COMPARISONS_TOTAL,
+    COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL,
 )
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
@@ -34,6 +35,7 @@ from market_alert.crud.crud_comparison import (
 )
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct
+from market_alert.enums.enums_products import ProductStatus
 from market_alert.models import User
 from market_alert.schemas.schemas_comparisons import (
     PaginatedPriceComparisonResponse,
@@ -150,12 +152,34 @@ def run_price_comparison(
         #Recupera concorrentes associados
         competitors = get_competitors_by_monitored_id(db, monitored_id)
         competitors = _deduplicate_competitors(competitors)
-        logger.info("comparison_started", monitored_id=str(monitored_id), competitors=len(competitors))
+        
+        available_competitors = [
+            competitor
+            for competitor in competitors
+            if competitor.current_price is not None
+            and getattr(competitor, "status", ProductStatus.available)
+            not in {ProductStatus.unavailable, ProductStatus.removed}
+        ]
+
+        filtered_out = len(competitors) - len(available_competitors)
+        if filtered_out:
+            logger.info(
+                "comparison_filtered_competitors", filtered=filtered_out, total=len(competitors)
+            )
+
+        if not available_competitors:
+            COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL.inc()
+
+        logger.info(
+            "comparison_started",
+            monitored_id=str(monitored_id),
+            competitors_count=len(available_competitors),
+        )
 
         tol = tolerance if tolerance is not None else Decimal(str(settings.PRICE_TOLERANCE))
 
         #Processa comparação e persiste resultado
-        raw_result = compare_prices(monitored, competitors, tol)
+        raw_result = compare_prices(monitored, available_competitors, tol)
         encoded_result = jsonable_encoder(raw_result)
         alerts = encoded_result.get("alerts", [])
 
@@ -177,9 +201,11 @@ def run_price_comparison(
             encoded_result,
             timestamp=comparison.timestamp,
             comparison_id=comparison.id,
-            competitors_count=len(competitors),
+            competitors_count=len(available_competitors),
         )
         encoded_summary = jsonable_encoder(summary_payload)
+        if not available_competitors:
+            encoded_summary["reason"] = encoded_summary.get("reason") or "no_available_competitors"
         upsert_price_comparison_summary(
             db,
             monitored.id,

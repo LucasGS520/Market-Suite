@@ -88,9 +88,9 @@ def scrape_competitor_product(
 
     if status_code == 304:
         if existing:
-            # 304 significa que os dados não mudaram — registre apenas a última checagem, 
-            # não atualize `last_scraped_at` que deve indicar dados novos/atualizados.
+            #Atualiza marcações de checagem para manter cadência mesmo sem alterações de conteúdo.
             existing.last_checked = now
+            existing.last_scraped_at = now
             db.commit()
             logger.info(
                 "competitor_not_modified",

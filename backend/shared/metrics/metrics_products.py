@@ -13,4 +13,14 @@ PRICE_HISTORY_CREATED_TOTAL = Counter(
     labelnames=["owner"],
 )
 
-__all__ = ["PENDING_COMPETITOR_CREATED_TOTAL", "PRICE_HISTORY_CREATED_TOTAL"]
+PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL = Counter(
+    "price_history_skipped_unavailable_total",
+    "Total de históricos ignorados por indisponibilidade ou ausência de preço",
+    labelnames=["owner"],
+)
+
+__all__ = [
+    "PENDING_COMPETITOR_CREATED_TOTAL",
+    "PRICE_HISTORY_CREATED_TOTAL",
+    "PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL",
+]

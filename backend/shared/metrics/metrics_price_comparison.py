@@ -32,10 +32,16 @@ PRICE_COMPARISON_TASK_LATENCY_SECONDS = Histogram(
     buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
 )
 
+COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL = Counter(
+    "comparisons_no_available_competitors_total",
+    "Comparações sem concorrentes com preço disponível",
+)
+
 __all__ = [
     "PRICE_COMPARISONS_TOTAL",
     "MALFORMED_COMPARISON_PAYLOADS_TOTAL",
     "PRICE_COMPARISON_FAILURES_TOTAL",
     "PRICE_COMPARISON_DURATION_SECONDS",
     "PRICE_COMPARISON_TASK_LATENCY_SECONDS",
+    "COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL",
 ]

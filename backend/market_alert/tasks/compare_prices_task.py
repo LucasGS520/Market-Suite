@@ -51,9 +51,9 @@ def compare_prices_task(self, monitored_id: str) -> None:
                     summary.get("competitors_with_price_count") == 0
                 )
                 if no_competitors:
-                    summary["reason"] = "sem_concorrentes_disponiveis"
+                    summary["reason"] = "no_available_competitors"
             if not summary:
-                summary = {"reason": "sem_concorrentes_disponiveis", "items": []}
+                summary = {"reason": "no_available_competitors", "items": []}
             result["summary"] = summary
 
 
