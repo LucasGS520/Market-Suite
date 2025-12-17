@@ -112,15 +112,28 @@ def _handle_response(
     sanitized_thumbnail = sanitize_media_url(metadata.get("thumbnail"))
     sanitized_currency = normalize_currency_code(metadata.get("currency"))
     availability = metadata.get("availability")
+    last_status = metadata.get("last_status")
+
+    availability_flag = bool(availability) if availability is not None else None
+    price_value = None
+    if payload.current_price is not None and availability_flag is not False:
+        price_value = ensure_price(payload, request_url)
+    elif availability_flag is False:
+        logger.info(
+            "monitored_unavailable_payload",
+            url=request_url,
+            last_status=last_status,
+        )
 
     scraped_info = MonitoredScrapedInfo(
         name=sanitized_name or sanitize_text(monitored_payload.name_identification) or request_url,
         product_url=request_url,
-        current_price=ensure_price(payload, request_url),
+        current_price=price_value,
         thumbnail=sanitized_thumbnail,
         free_shipping=bool(metadata.get("free_shipping", False)),
         currency=sanitized_currency,
-        availability=bool(availability) if availability is not None else None,
+        availability=availability_flag,
+        last_status=last_status,
     )
 
     product = create_or_update_monitored_product_scraped(

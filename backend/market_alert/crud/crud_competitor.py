@@ -189,6 +189,12 @@ def create_or_update_competitor_product_scraped(
         previous_price = existing.current_price
         previous_status = existing.status
         existing.old_price = existing.current_price
+        availability = scraped_info.availability
+        last_status = scraped_info.last_status or existing.last_status
+
+        if availability is False:
+            resolved_price = None
+
         price_changed = _different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
 
@@ -203,7 +209,9 @@ def create_or_update_competitor_product_scraped(
             existing.last_modified = last_modified or existing.last_modified
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
-            existing.status = ProductStatus.available
+            existing.status = ProductStatus.unavailable if availability is False else ProductStatus.available
+            existing.availability = availability
+            existing.last_status = last_status
             existing.product_url = normalized_url
 
             #Sanitiza e persiste somente se tivermos um nome útil retornado pelo scraper.
@@ -212,7 +220,7 @@ def create_or_update_competitor_product_scraped(
                 if sanitized_name:
                     existing.name_competitor = sanitized_name
 
-            price_history_needed = price_changed and resolved_price is not None
+            price_history_needed = price_changed and resolved_price is not None and availability is not False
 
             logger.info(
                 "update_competitor_product_scraped",
@@ -240,7 +248,7 @@ def create_or_update_competitor_product_scraped(
 
         db.refresh(existing)
         existing._price_changed = price_changed
-        existing._availability_changed = previous_status != ProductStatus.available
+        existing._availability_changed = previous_status != existing.status
 
         logger.info(
             "updated_competitor",
@@ -248,12 +256,19 @@ def create_or_update_competitor_product_scraped(
             price_changed=existing._price_changed,
             availability_changed=existing._availability_changed,
             last_checked=last_checked.isoformat(),
+            availability=existing.availability,
+            last_status=existing.last_status,
         )
         return existing
 
     #Caso não exista, cria um registro
     resolved_price = _to_decimal(scraped_info.current_price)
     resolved_currency = currency or scraped_info.currency
+    availability = scraped_info.availability,
+    last_status = scraped_info.last_status
+
+    if availability is False:
+        resolved_price = None
 
     new = CompetitorProduct(
         monitored_product_id=product_data.monitored_product_id,
@@ -265,17 +280,19 @@ def create_or_update_competitor_product_scraped(
         seller=scraped_info.seller,
         seller_rating=scraped_info.seller_rating,
         thumbnail=scraped_info.thumbnail,
-        status=ProductStatus.available,
+        status=ProductStatus.unavailable if availability is False else ProductStatus.available,
         last_checked=last_checked,
         last_scraped_at=last_checked,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
+        availability=availability,
+        last_status=last_status,
         )
     try:
         db.add(new)
         db.flush()
-        if resolved_price is not None:
+        if resolved_price is not None and availability is not False:
             crud_price_history.create_for_competitor(
                 db,
                 new.id,

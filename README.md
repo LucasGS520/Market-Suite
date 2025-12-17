@@ -46,6 +46,7 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 2. **Orquestração de tarefas**: operações que exigem processamento assíncrono geram tasks Celery (`collect_product_task`, `collect_competitor_task`, `compare_prices_task`) enfileiradas no Redis.
 3. **Coleta de dados**: tasks que demandam scraping invocam o `ScraperClient` (`backend/market_alert/services/scraper_client.py`), enviando `POST /scraper/parse` ao `market_scraper`.
 4. **Pipeline de scraping**: o `market_scraper` executa validação de URL, checagem de `robots.txt`, caching LRU com TTL e pipeline sequencial (`FetchHTML` → `DomainSpecificParser` → `JsonLdParser` → `HtmlMetadataParser` → `GenericFallbackParser`). Resultados são devolvidos como `ParserResponse`.
+   - O contrato do `ParserResponse` expõe sempre `price|currency` (admite `null`), `availability`/`last_status` e cabeçalhos (`etag`, `not_modified`) para sinalizar indisponibilidade sem gravar preços `0.00`.
 5. **Persistência e regras de negócio**: workers Celery consolidam dados no PostgreSQL (`backend/market_alert/repositories`), recalculam comparações, aplicam regras de alerta e armazenam histórico de coletas.
 6. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 

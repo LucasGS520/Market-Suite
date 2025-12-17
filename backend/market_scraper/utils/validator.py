@@ -18,6 +18,7 @@ import structlog
 from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.url_validation import normalize_product_url
 from shared.metrics.metrics_scraper import (
+    SCRAPER_AVAILABILITY_HEURISTICS_TOTAL,
     SCRAPER_STEP_INVALID_TOTAL,
     SCRAPER_VALIDATION_REJECT_TOTAL,
 )
@@ -160,33 +161,44 @@ class DataQualityValidator:
             return ValidationResult(payload=None, reason_code=reason_code, reason_message=reason_message)
         
         price_raw = payload.get("current_price")
-        try:
-            price_decimal = parse_price_str(price_raw, url)
-        except ValueError:
-            tolerant_price = self._try_tolerant_price(price_raw)
-            if tolerant_price is None:
-                #Registramos o problema e abortamos a etapa; fallback para próxima etapa
-                reason_code = "price_invalid"
-                reason_message = self._REASON_MESSAGES[reason_code]
-                self._register_invalid(
-                    step_name,
-                    domain,
-                    reason_code,
-                    reason_message,
-                    url,
-                    parser_name,
-                    dump_path,
-                )
-                return ValidationResult(payload=None, reason_code=reason_code, reason_message=reason_message)
-            price_decimal = tolerant_price
+        availability = payload.get("availability")
+        price_decimal = None
+        if availability is False:
+            SCRAPER_AVAILABILITY_HEURISTICS_TOTAL.labels(reason="unavailable_payload").inc()
+        else:
+            try:
+                price_decimal = parse_price_str(price_raw, url)
+            except ValueError:
+                tolerant_price = self._try_tolerant_price(price_raw)
+                if tolerant_price is None:
+                    #Registramos o problema e abortamos a etapa; fallback para próxima etapa
+                    reason_code = "price_invalid"
+                    reason_message = self._REASON_MESSAGES[reason_code]
+                    self._register_invalid(
+                        step_name,
+                        domain,
+                        reason_code,
+                        reason_message,
+                        url,
+                        parser_name,
+                        dump_path,
+                    )
+                    return ValidationResult(payload=None, reason_code=reason_code, reason_message=reason_message)
+                price_decimal = tolerant_price
+            if price_decimal is not None and price_decimal == 0:
+                SCRAPER_AVAILABILITY_HEURISTICS_TOTAL.labels(reason="zero_price_filtered").inc()
+                price_decimal = None
         
         normalized_url = _normalize_url(payload.get("url"), url)
         canonical_source = _extract_domain(normalized_url, source)
         normalized_payload = {
             "name": name,
-            "current_price": format_decimal_to_str(price_decimal),
+            "current_price": format_decimal_to_str(price_decimal) if price_decimal is not None else None,
             "url": normalized_url,
             "source": _normalize_source(payload.get("source"), canonical_source),
+            "availability": availability if isinstance(availability, bool) else None,
+            "last_status": payload.get("last_status"),
+            "currency": payload.get("currency"),
         }
         return ValidationResult(payload=normalized_payload)
     

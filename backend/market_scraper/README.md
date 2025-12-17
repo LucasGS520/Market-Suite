@@ -1,5 +1,5 @@
 # Market Scraper
-Serviço FastAPI responsável por transformar URLs de marketplaces em um `ParseResponse` enxuto (`name`, `current_price`, `url`, `source`, `payload opcional`). O foco atual é estabilidade com páginas HTML estáticas, sem renderização de JavaScript. O `market_alert` consome este serviço via HTTP e nunca replica regras de parsing.
+Serviço FastAPI responsável por transformar URLs de marketplaces em um `ParseResponse` enxuto (`name`, `price|currency`, `availability`, `last_status`, `url`, `source`, `payload opcional`, `etag/not_modified`). O foco atual é estabilidade com páginas HTML estáticas, sem renderização de JavaScript. O `market_alert` consome este serviço via HTTP e nunca replica regras de parsing.
 
 ## Relações e Referências
 - Visão arquitetural completa da suíte: [`../README.md`](../README.md)

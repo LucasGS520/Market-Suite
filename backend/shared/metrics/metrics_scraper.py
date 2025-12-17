@@ -59,6 +59,12 @@ SCRAPER_VALIDATION_REJECT_TOTAL = Counter(
     ["domain", "step", "reason"],
 )
 
+SCRAPER_AVAILABILITY_HEURISTICS_TOTAL = Counter(
+    "scraper_availability_heuristics_total",
+    "Total de vezes que heurísticas de disponibilidade foram aplicadas",
+    ["reason"],
+)
+
 SCRAPER_NO_RESULT_TOTAL = Counter(
     "scraper_no_result_total",
     "Execuções que não retornaram um payload válido ao final do pipeline",

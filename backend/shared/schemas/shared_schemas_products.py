@@ -2,10 +2,10 @@
 
 Os esquemas deste módulo foram simplificados para expor um contrato único
 entre API e scraper, garantindo previsibilidade mínima: identificador,
-URL, nome, preço (obrigatório), moeda, timestamp de coleta e fonte
-(monitorado ou concorrente). Demais campos são opcionais e servem apenas
-como anotações contextuais, evitando sobrecarga de parâmetros pouco
-utilizados.
+URL, nome, preço (quando disponível), moeda, disponibilidade, timestamp
+de coleta e fonte (monitorado ou concorrente). Demais campos são
+opcionais e servem apenas como anotações contextuais, evitando
+sobrecarga de parâmetros pouco utilizados.
 """
 
 from datetime import datetime, timezone
@@ -33,10 +33,10 @@ class ProductCore(BaseModel):
     name: str = Field(
         ..., description="Nome normalizado do produto, usado pelo frontend"
     )
-    current_price: Decimal = Field(
-        ...,
+    current_price: Decimal | None = Field(
+        None,
         alias="price",
-        description="Preço atual obrigatório para salvar e exibir o produto",
+        description="Preço atual opcional coletado pelo scraper",
     )
     currency: Optional[str] = Field(
         None,

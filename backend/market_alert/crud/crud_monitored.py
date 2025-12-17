@@ -261,6 +261,11 @@ def create_or_update_monitored_product_scraped(
 
     if existing:
         resolved_price = _to_decimal(scraped_info.current_price)
+        availability = scraped_info.availability
+        last_status = scraped_info.last_status or existing.last_status
+
+        if availability is False:
+            resolved_price = None
 
         #Atualiza somente campos relevantes
         if product_data.name_identification and existing.name_identification != product_data.name_identification:
@@ -288,10 +293,12 @@ def create_or_update_monitored_product_scraped(
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
             existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
-            existing.status = MonitoredStatus.active
+            existing.status = MonitoredStatus.inactive if availability is False else MonitoredStatus.active
+            existing.availability = availability
+            existing.last_status = last_status
             existing.normalized_url = normalized_url
 
-            price_history_needed = price_changed and resolved_price is not None
+            price_history_needed = price_changed and resolved_price is not None and availability is not False
 
             logger.info(
                 "updated_monitored_product_scraped",
@@ -319,7 +326,7 @@ def create_or_update_monitored_product_scraped(
 
         db.refresh(existing)
         existing._price_changed = price_changed
-        existing._availability_changed = previous_status != MonitoredStatus.active
+        existing._availability_changed = previous_status != existing.status
         
         logger.info(
             "updated_monitored",
@@ -327,13 +334,19 @@ def create_or_update_monitored_product_scraped(
             price_changed=existing._price_changed,
             availability_changed=existing._availability_changed,
             last_checked=last_checked.isoformat(),
+            availability=existing.availability,
+            last_status=existing.last_status,
         )
         return existing
 
     #Se não existir, cria o registro
     resolved_price = _to_decimal(scraped_info.current_price)
     resolved_currency = currency or scraped_info.currency
+    availability = scraped_info.availability
+    last_status = scraped_info.last_status
 
+    if availability is False:
+        resolved_price = None
 
     new = MonitoredProduct(
         user_id=user_id,
@@ -345,20 +358,22 @@ def create_or_update_monitored_product_scraped(
         thumbnail=scraped_info.thumbnail,
         free_shipping=scraped_info.free_shipping,
         monitoring_type=MonitoringType.scraping,
-        status=MonitoredStatus.active,
+        status=MonitoredStatus.inactive if availability is False else MonitoredStatus.active,
         last_checked=last_checked,
         last_scraped_at=last_checked,
         next_check_at=None,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
+        availability=availability,
+        last_status=last_status,
     )
     new.next_check_at = _compute_next_check_at(new, reference=last_checked)
     
     try:
         db.add(new)
         db.flush()
-        if resolved_price is not None:
+        if resolved_price is not None and availability is not False:
             crud_price_history.create_for_monitored(
                 db,
                 new.id,

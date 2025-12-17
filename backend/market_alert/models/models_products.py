@@ -40,6 +40,8 @@ class MonitoredProduct(Base):
     free_shipping = Column(Boolean, default=False)
     currency = Column(String(8), nullable=True)
     thumbnail = Column(Text, nullable=True)
+    availability = Column(Boolean, nullable=True, default=True, server_default="true")
+    last_status = Column(Text, nullable=True)
 
     #Flag indicando destaque manual exibido no dashboard
     is_featured = Column(Boolean, nullable=False, default=False, server_default="false")
@@ -105,6 +107,8 @@ class CompetitorProduct(Base):
     seller_rating = Column(Float, nullable=True)
     currency = Column(String(8), nullable=True)
     thumbnail = Column(String, nullable=True)
+    availability = Column(Boolean, nullable=True, default=True, server_default="true")
+    last_status = Column(Text, nullable=True)
 
     #Cache condicional
     etag = Column(String, nullable=True)

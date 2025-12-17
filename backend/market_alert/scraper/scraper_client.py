@@ -36,6 +36,7 @@ logger = structlog.get_logger(__name__)
 ALLOWED_SCRAPER_FIELDS = {
     "currency",
     "availability",
+    "last_status",
     "thumbnail",
     "free_shipping",
     "seller",
@@ -43,6 +44,7 @@ ALLOWED_SCRAPER_FIELDS = {
     "old_price",
     "etag",
     "last_modified",
+    "not_modified",
 }
 
 class ScraperClientError(Exception):
@@ -115,7 +117,12 @@ def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
     """
     extras = dict(response.payload or {})
     filtered_payload = {k: v for k, v in extras.items() if k in ALLOWED_SCRAPER_FIELDS}
-    return response.model_copy(update={"payload": filtered_payload or None})
+    sanitized = response.model_copy(update={"payload": filtered_payload or None})
+    if response.current_price is not None and sanitized.current_price is None:
+        logger.info(
+            "scraper_price_filtered", last_status=sanitized.last_status, note="preco_zero_convertido"
+        )
+    return sanitized
 
 rate_limiter = RateLimiter(
     get_redis_client,

@@ -126,18 +126,31 @@ def scrape_competitor_product(
     sanitized_currency = normalize_currency_code(metadata.get("currency"))
     sanitized_seller = sanitize_text(metadata.get("seller"))
     availability = metadata.get("availability")
+    last_status = metadata.get("last_status")
+
+    availability_flag = bool(availability) if availability is not None else None
+    price_value = None
+    if payload_model.current_price is not None and availability_flag is not False:
+        price_value = ensure_price(payload_model, normalized_url)
+    elif availability_flag is False:
+        logger.info(
+            "competitor_unavailable_payload",
+            url=normalized_url,
+            last_status=last_status,
+        )
 
     scraped_info = CompetitorScrapedInfo(
         name=ensure_name(payload_model, normalized_url),
         product_url=normalized_url,
-        current_price=ensure_price(payload_model, normalized_url),
+        current_price=price_value,
         old_price=to_decimal(metadata.get("old_price")),
         thumbnail=sanitized_thumbnail,
         free_shipping=bool(metadata.get("free_shipping", False)),
         seller=sanitized_seller,
         seller_rating=to_float(metadata.get("seller_rating")),
         currency=sanitized_currency,
-        availability=bool(availability) if availability is not None else None,
+        availability=availability_flag,
+        last_status=last_status,
     )
 
     competitor = create_or_update_competitor_product_scraped(

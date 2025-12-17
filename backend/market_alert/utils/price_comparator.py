@@ -78,8 +78,14 @@ def compare_prices(
             "alerts": []
         }
 
-    #Filtra concorrentes que possuem preço válido
-    valid_competitors = [c for c in competitors if c.current_price is not None]
+    #Filtra concorrentes disponíveis com preço válido
+    ignored_statuses = {ProductStatus.unavailable, ProductStatus.removed}
+    valid_competitors = [
+        c
+        for c in competitors
+        if c.current_price is not None
+        and getattr(c, "status", ProductStatus.available) not in ignored_statuses
+    ]
 
     #Se nenhum concorrente possui preço válido, retorna resultado vazio
     if not valid_competitors:

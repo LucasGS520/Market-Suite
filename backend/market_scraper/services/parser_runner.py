@@ -26,6 +26,9 @@ def _update_shared_payload(context: PipelineContext, payload: Mapping[str, str])
     #Centralizamos a sincronização do payload para manter o contrato controlado
     context.data["name"] = payload["name"]
     context.data["current_price"] = payload["current_price"]
+    context.data["currency"] = payload.get("currency")
+    context.data["availability"] = payload.get("availability")
+    context.data["last_status"] = payload.get("last_status")
     context.data["url"] = payload["url"]
     context.data["source"] = payload["source"]
     context.data["payload"] = dict(payload)
