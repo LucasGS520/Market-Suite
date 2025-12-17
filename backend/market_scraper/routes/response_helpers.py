@@ -93,7 +93,18 @@ def build_no_result_response(
 
 def _extract_additional_payload(data: dict[str, Any]) -> dict[str, Any] | None:
     """ Remove campos padrão preservando apenas metadados adicionais """
-    base_keys = {"name", "current_price", "url", "source", "marketplace"}
+    base_keys = {
+        "name",
+        "current_price",
+        "url",
+        "source",
+        "marketplace",
+        "currency",
+        "availability",
+        "last_status",
+        "etag",
+        "not_modified",
+    }
     extras = {key: value for key, value in data.items() if key not in base_keys and value is not None}
     return extras or None
 
@@ -103,12 +114,15 @@ def build_success_response(
     normalized_url: str,
     outcome: PipelineOutcome,
     request_logger: BoundLogger,
-    current_price: Decimal,
+    current_price: Decimal | None,
 ) -> ParserResponse:
     """ Cria ``ParserResponse`` garantindo consistência de logs """
     response = ParserResponse(
         name=payload.get("name", ""),
         current_price=current_price,
+        currency=payload.get("currency"),
+        availability=payload.get("availability"),
+        last_status=payload.get("last_status"),
         url=normalized_url,
         source=payload.get("source") or payload.get("marketplace") or outcome.context.source,
         payload=_extract_additional_payload(payload),

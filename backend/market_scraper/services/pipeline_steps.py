@@ -8,6 +8,9 @@ focado na orquestração das dependências entre etapas.
 
 from __future__ import annotations
 
+import httpx
+import structlog
+
 from market_scraper.core.config_scraper import settings
 from market_scraper.parsers import (
     parse_generic_html,
@@ -24,9 +27,12 @@ from market_scraper.services.synergic_pipeline import (
     PipelineStep,
     StepResult,
 )
+from market_scraper.utils.availability import detect_availability
 from market_scraper.utils import cache, robots, singleflight
 from market_scraper.utils.http_download import download_html, extract_domain
 
+
+logger = structlog.get_logger("scraper_pipeline_steps")
 
 class FetchHTMLStep(PipelineStep):
     """ Obtém o HTML bruto e o disponibiliza no contexto compartilhado 
@@ -58,7 +64,39 @@ class FetchHTMLStep(PipelineStep):
             return await download_html(context.url, timeout=timeout_value)
         
         #O singleflight também usa a mesma URL para coalescer chamadas simultâneas
-        html = await singleflight.coalesce(context.url, _download)
+        try:
+            html = await singleflight.coalesce(context.url, _download)
+            context.data["http_status"] = context.data.get("http_status") or 200
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            context.data["http_status"] = status_code
+            availability, last_status = detect_availability(
+                None,
+                status_code=status_code,
+                domain=context.source,
+            )
+            if availability is False:
+                logger.info(
+                    "html_fetch_unavailable",
+                    url=context.url,
+                    status_code=status_code,
+                    last_status=last_status,
+                )
+                context.set_html("")
+                context.data["availability"] = availability
+                context.data["last_status"] = last_status
+                return StepResult.success(
+                    payload={
+                        "name": None,
+                        "current_price": None,
+                        "url": context.url,
+                        "source": context.source,
+                        "availability": availability,
+                        "last_status": last_status,
+                    },
+                    message="Disponibilidade inferida por código HTTP",
+                )
+            raise
         context.set_html(html)
         #Armazenamos o HTML recém obtido para acelerar futuras requisições
         cache.set(context.url, html, settings.SCRAPER_CACHE_TTL_SECONDS)

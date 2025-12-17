@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from prometheus_client.parser import text_string_to_metric_families
@@ -83,6 +84,11 @@ def test_parse_returns_payload_from_json_ld(monkeypatch: pytest.MonkeyPatch) -> 
     assert body == {
         "name": "Kindle Paperwhite Signature Edition",
         "current_price": "799.00",
+        "currency": None,
+        "availability": None,
+        "last_status": None,
+        "etag": None,
+        "not_modified": False,
         "url": "https://www.amazon.com.br/dp/B08N36XNTT",
         "source": "www.amazon.com.br",
         "payload": None,
@@ -121,6 +127,11 @@ def test_parse_uses_html_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body == {
         "name": "Console Retro Game",
         "current_price": "549.90",
+        "currency": None,
+        "availability": None,
+        "last_status": None,
+        "etag": None,
+        "not_modified": False,
         "url": "https://produto.mercadolivre.com.br/MLB-123456789",
         "source": "produto.mercadolivre.com.br",
         "payload": None,
@@ -198,6 +209,44 @@ def test_parse_records_no_result_for_js_only_page(monkeypatch: pytest.MonkeyPatc
         {"domain": "www.magazineluiza.com.br", "result": "no_result"},
     )
     assert no_result_value is not None and no_result_value >= 1.0
+
+def test_parse_returns_unavailable_on_http_404(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Garante que o endpoint sinalize anúncio removido quando o host responde 404"""
+
+    client = TestClient(app)
+
+    async def fake_download(url: str, *, timeout: float) -> str:
+        request = httpx.Request("GET", url)
+        response = httpx.Response(status_code=404, request=request)
+        raise httpx.HTTPStatusError("not found", request=request, response=response)
+
+    monkeypatch.setattr(pipeline_steps, "download_html", fake_download)
+
+    async def _allow(*_: object, **__: object) -> bool:
+        return True
+
+    monkeypatch.setattr(pipeline_steps.robots, "is_allowed", _allow)
+
+    response = client.post(
+        "/scraper/parse",
+        json={"url": "https://www.amazon.com.br/dp/INVALID"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "name": None,
+        "current_price": None,
+        "currency": None,
+        "availability": False,
+        "last_status": "removed",
+        "etag": None,
+        "not_modified": False,
+        "url": "https://www.amazon.com.br/dp/INVALID",
+        "source": "www.amazon.com.br",
+        "payload": None,
+        "no_result": False,
+    }
 
 def test_parse_returns_not_modified_with_matching_etag(monkeypatch: pytest.MonkeyPatch) -> None:
     """Responde 304 quando o cliente envia ETag previamente emitido"""

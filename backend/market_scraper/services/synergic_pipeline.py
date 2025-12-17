@@ -53,13 +53,22 @@ class PipelineContext:
         self.html = html
 
     def build_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """ Normaliza o payload principal adicionando origem e URL canônica """
-        return {
-            "name": payload.get("name", ""),
-            "current_price": payload.get("current_price", ""),
-            "url": payload.get("url") or self.url,
-            "source": payload.get("source") or self.source,
-        }
+        """ Normaliza o payload principal adicionando origem e URL canônica
+
+        O método mantém os campos adicionais quando presentes para que
+        camadas superiores possam aplicar heurísticas de disponibilidade
+        ou propagar metadados úteis para rastreabilidade.
+        """
+        normalized = dict(payload)
+        normalized.setdefault("url", payload.get("url") or self.url)
+        normalized.setdefault("source", payload.get("source") or self.source)
+        normalized.setdefault("name", payload.get("name"))
+        normalized.setdefault("current_price", payload.get("current_price"))
+        normalized.setdefault("currency", payload.get("currency"))
+        normalized.setdefault("availability", payload.get("availability"))
+        normalized.setdefault("last_status", payload.get("last_status"))
+        normalized.setdefault("payload", payload.get("payload"))
+        return normalized
     
 @dataclass
 class StepResult:
