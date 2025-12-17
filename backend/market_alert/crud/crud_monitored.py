@@ -281,6 +281,14 @@ def create_or_update_monitored_product_scraped(
         resolved_currency = currency or scraped_info.currency or existing.currency
 
         #Executa commit único garantindo atomicidade com o histórico
+        logger.info(
+            "monitored_commit_preview",
+            product_id=str(existing.id),
+            availability=availability,
+            last_status=last_status,
+            resolved_price=str(resolved_price) if resolved_price is not None else None,
+            price_changed=price_changed,
+        )
         try:
             existing.current_price = resolved_price
 
@@ -477,7 +485,6 @@ def get_all_monitored_products(
 
     base_query = db.query(MonitoredProduct).filter(
         MonitoredProduct.user_id == user_id,
-        MonitoredProduct.current_price.isnot(None),
     )
     if monitoring_type:
         base_query = base_query.filter(MonitoredProduct.monitoring_type == monitoring_type)

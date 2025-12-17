@@ -38,7 +38,6 @@ from market_scraper.utils.conditional_payload import (
     should_return_not_modified,
     store_response,
 )
-from market_scraper.utils.availability import detect_availability
 from market_scraper.utils.http_utils import HostResolutionError, resolve_public_address
 from market_scraper.utils.price import parse_price_str
 
@@ -153,16 +152,6 @@ async def parse_endpoint(
     
     payload_data = outcome.payload
 
-    inferred_availability, inferred_status = detect_availability(
-        outcome.context.html,
-        status_code=outcome.context.data.get("http_status"),
-        domain=outcome.context.source,
-    )
-    if payload_data.get("availability") is None and inferred_availability is not None:
-        payload_data["availability"] = inferred_availability
-    if not payload_data.get("last_status") and inferred_status:
-        payload_data["last_status"] = inferred_status
-
     price_value = payload_data.get("current_price")
     price: Decimal | None = None
     if price_value is not None:
@@ -173,6 +162,14 @@ async def parse_endpoint(
             )
         except ValueError:
             price = None
+
+    request_logger.info(
+        "route_payload_ready",
+        url=sanitize_log_data(normalized_url),
+        availability=payload_data.get("availability"),
+        last_status=payload_data.get("last_status"),
+        has_price=price is not None,
+    )
     
     parse_response = build_success_response(
         payload_data,

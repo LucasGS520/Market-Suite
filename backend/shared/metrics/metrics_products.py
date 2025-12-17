@@ -19,8 +19,14 @@ PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL = Counter(
     labelnames=["owner"],
 )
 
+MONITORED_LISTED_WITHOUT_PRICE_TOTAL = Counter(
+    "monitored_listed_without_price_total",
+    "Listagens de monitorados entregues mesmo sem preço coletado",
+)
+
 __all__ = [
     "PENDING_COMPETITOR_CREATED_TOTAL",
     "PRICE_HISTORY_CREATED_TOTAL",
     "PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL",
+    "MONITORED_LISTED_WITHOUT_PRICE_TOTAL",
 ]

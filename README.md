@@ -41,6 +41,8 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 | **backend/market_scraper** | valida URLs, realiza download das páginas, executa pipeline de parsing multiestágio e devolve `ParserResponse` | [`backend/market_scraper/README.md`](backend/market_scraper/README.md) |
 | **backend/shared** | reúne contratos Pydantic, métricas, configuração, clientes externos e utilidades comuns | [`backend/shared/`](backend/shared/) |
 
+> Nota operacional: a inferência de disponibilidade agora antecede a validação do parser e preserva `last_status` informado pelo scraper. A listagem `GET /monitored/` também exibe itens sem preço coletado para sinalizar anúncios pausados ou indisponíveis.
+
 #### Fluxo interno do backend
 1. **Autenticação e entrada de requisições**: o `market_alert` recebe chamadas HTTP, autentica usuários via JWT e valida payloads com esquemas de `backend/shared/schemas`.
 2. **Orquestração de tarefas**: operações que exigem processamento assíncrono geram tasks Celery (`collect_product_task`, `collect_competitor_task`, `compare_prices_task`) enfileiradas no Redis.

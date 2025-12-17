@@ -88,6 +88,12 @@ SCRAPER_HEAD_FAILURES_TOTAL = Counter(
     "Total de falhas de scraping registradas",
 )
 
+SCRAPER_RESPONSE_SANITIZED_TOTAL = Counter(
+    "scraper_response_sanitized_total",
+    "Respostas ajustadas pelo cliente para remover campos extras ou preços inválidos",
+    ["reason"],
+)
+
 #Contadores específicos do orquestrador de coleta
 COLLECTOR_SUCCESS_NEW_DATA_TOTAL = Counter(
     "collector_success_new_data_total",

@@ -12,6 +12,7 @@ from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
 )
 from shared.utils.url_validation import normalize_and_validate_product_url
+from shared.metrics.metrics_products import MONITORED_LISTED_WITHOUT_PRICE_TOTAL
 
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import (
@@ -56,7 +57,8 @@ def list_monitored_products(
     """ Agrupa monitorados em resposta paginada com resumos calculados.
 
     A função mantém a lógica de obtenção de resumos mais recentes e montagem
-    do DTO de monitorados, filtrando itens sem preço para preservar o contrato.
+    do DTO de monitorados, expondo registros pendentes ou indisponíveis mesmo
+    sem preço coletado para informar o status ao usuário.
     """
     products_with_count, total, resolved_per_page = get_all_monitored_products(
         db,
@@ -75,21 +77,15 @@ def list_monitored_products(
 
     response_payload: list[MonitoredProductResponse] = []
     for product, _ in products_with_count:
-        try:
-            response_payload.append(
-                build_monitored_response(
-                    product, summary=summaries_map.get(product.id)
-                )
+        if product.current_price is None:
+            MONITORED_LISTED_WITHOUT_PRICE_TOTAL.inc()
+        response_payload.append(
+            build_monitored_response(
+                product,
+                summary=summaries_map.get(product.id),
+                allow_missing_price=True,
             )
-        except HTTPException as exc:
-            #Ignora registros sem preço para manter o contrato enxuto
-            logger.warning(
-                "monitored_without_price",
-                product_id=str(product.id),
-                status=product.status.value,
-                detail=str(exc.detail),
-            )
-            continue
+        )
 
     return PaginatedMonitoredProductsResponse(
         items=response_payload,

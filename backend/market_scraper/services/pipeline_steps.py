@@ -85,6 +85,8 @@ class FetchHTMLStep(PipelineStep):
                 context.set_html("")
                 context.data["availability"] = availability
                 context.data["last_status"] = last_status
+                context.data["availability_inferred"] = availability
+                context.data["last_status_inferred"] = last_status
                 return StepResult.success(
                     payload={
                         "name": None,

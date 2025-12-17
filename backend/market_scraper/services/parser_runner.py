@@ -14,6 +14,7 @@ import structlog
 from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.services.synergic_pipeline import PipelineContext
+from market_scraper.utils.availability import detect_availability
 from market_scraper.utils.validator import DataQualityValidator
 
 
@@ -32,6 +33,8 @@ def _update_shared_payload(context: PipelineContext, payload: Mapping[str, str])
     context.data["url"] = payload["url"]
     context.data["source"] = payload["source"]
     context.data["payload"] = dict(payload)
+    context.data.setdefault("availability_inferred", payload.get("availability"))
+    context.data.setdefault("last_status_inferred", payload.get("last_status"))
 
 def run_parser_with_validation(
     *,
@@ -60,6 +63,21 @@ def run_parser_with_validation(
     
     parser_name = getattr(parser, "__name__", parser.__class__.__name__)
     dump_path = context.data.get("dump_path")
+    inferred_availability, inferred_last_status = detect_availability(
+        html,
+        status_code=context.data.get("http_status"),
+        domain=context.source,
+    )
+    context.data["availability_inferred"] = inferred_availability
+    context.data["last_status_inferred"] = inferred_last_status
+    logger.info(
+        "availability_inferred_before_validation",
+        step=step_name,
+        domain=context.source,
+        availability=inferred_availability,
+        last_status=inferred_last_status,
+        url=sanitize_log_data(context.url),
+    )
     validated = _validator.validate(
         step_name=step_name,
         payload=raw_payload,
@@ -67,6 +85,8 @@ def run_parser_with_validation(
         source=context.source,
         parser_name=parser_name,
         dump_path=dump_path,
+        inferred_availability=inferred_availability,
+        inferred_last_status=inferred_last_status,
     )
     if not validated.is_valid:
         reason_entry = {

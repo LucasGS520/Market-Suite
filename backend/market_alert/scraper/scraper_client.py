@@ -24,7 +24,10 @@ from pydantic import ValidationError
 
 from backend.shared.schemas.shared_schemas_scraper import ParserRequest, ParserResponse
 from shared.utils.redis_client import get_redis_client
-from shared.metrics.metrics_scraper import SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL
+from shared.metrics.metrics_scraper import (
+    SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL,
+    SCRAPER_RESPONSE_SANITIZED_TOTAL,
+)
 
 from market_alert.core.config_alert import settings
 from market_alert.utils.circuit_breaker import CircuitBreaker
@@ -118,9 +121,16 @@ def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
     extras = dict(response.payload or {})
     filtered_payload = {k: v for k, v in extras.items() if k in ALLOWED_SCRAPER_FIELDS}
     sanitized = response.model_copy(update={"payload": filtered_payload or None})
-    if response.current_price is not None and sanitized.current_price is None:
+    removed_fields = sorted(set(extras.keys()) - set(filtered_payload.keys()))
+    price_filtered = response.current_price is not None and sanitized.current_price is None
+    if removed_fields or price_filtered:
+        reason = "price_filtered" if price_filtered else "payload_filtered"
+        SCRAPER_RESPONSE_SANITIZED_TOTAL.labels(reason=reason).inc()
         logger.info(
-            "scraper_price_filtered", last_status=sanitized.last_status, note="preco_zero_convertido"
+            "scraper_response_sanitized",
+            removed_fields=removed_fields,
+            last_status=sanitized.last_status,
+            price_filtered=price_filtered,
         )
     return sanitized
 

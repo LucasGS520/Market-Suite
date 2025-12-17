@@ -54,6 +54,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Segurança**: não exponha segredos. Utilize arquivos `.env` e helpers para acessar configurações.
 - **Compatibilidade local/Docker**: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos.
 - **Manutenção documental**: ao final de cada sprint ou mudança estrutural, sinalize ou execute atualizações necessárias em `README.md` e `AGENTS.md`.
+- **Scraper**: a inferência de disponibilidade ocorre antes do validador e deve propagar `last_status` em ordem de precedência (payload > inferência > validador). A rota `GET /monitored/` lista itens sem preço para indicar indisponibilidade.
 
 ## Interação entre serviços
 - Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/client/src/lib/api.ts`) injeta JWT no header `Authorization`.

@@ -49,6 +49,34 @@ def test_validator_normalizes_payload() -> None:
         "currency": None,
     }
 
+def test_validator_uses_inference_for_unavailable_payload() -> None:
+    """Garante que inferência de disponibilidade precede validações internas"""
+
+    validator = DataQualityValidator()
+    payload = {
+        "name": "",
+        "current_price": None,
+    }
+    result = validator.validate(
+        step_name="json_ld_parser",
+        payload=payload,
+        url="https://exemplo.com/produto",
+        source="exemplo.com",
+        inferred_availability=False,
+        inferred_last_status="paused",
+    )
+
+    assert result.is_valid
+    assert result.payload == {
+        "name": None,
+        "current_price": None,
+        "url": "https://exemplo.com/produto",
+        "source": "exemplo.com",
+        "availability": False,
+        "last_status": "paused",
+        "currency": None,
+    }
+
 def test_validator_replaces_non_domain_source() -> None:
     validator = DataQualityValidator()
     payload = {
@@ -73,6 +101,27 @@ def test_validator_replaces_non_domain_source() -> None:
         "last_status": None,
         "currency": None,
     }
+
+def test_validator_respects_explicit_last_status() -> None:
+    """Confere precedência de ``last_status`` vindo diretamente do parser"""
+
+    validator = DataQualityValidator()
+    payload = {
+        "name": "Produto",
+        "current_price": "0",
+        "last_status": "paused_manually",
+    }
+    result = validator.validate(
+        step_name="json_ld_parser",
+        payload=payload,
+        url="https://exemplo.com/produto",
+        source="exemplo.com",
+        inferred_last_status="inferred_status",
+    )
+
+    assert result.is_valid
+    assert result.payload is not None
+    assert result.payload["last_status"] == "paused_manually"
 
 def test_validator_uses_fallback_when_source_missing() -> None:
     """ Garante que payloads sem origem utilizem o fallback informado """
