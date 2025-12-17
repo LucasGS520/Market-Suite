@@ -181,7 +181,11 @@ const ProductDetail: React.FC = () => {
   /**
    * Retorna o rótulo legível em PT-BR para o status de competitividade.
    */
-  const getStatusLabel = (status?: string) => {
+  const getStatusLabel = (status?: string, availability?: boolean) => {
+    if (availability === false) {
+      return 'Inativo';
+    }
+
     switch (status) {
       case 'competitivo':
         return 'Competitivo';
@@ -190,40 +194,86 @@ const ProductDetail: React.FC = () => {
       case 'urgente':
         return 'Urgente';
       default:
-        return 'Sem Status';
+        return 'Sem status';
     }
   };
 
   /**
-   * Formata o preço exibindo estado de coleta quando ainda não existe valor salvo
+   * Define estado do item (monitorado ou concorrente) para guiar rótulos e cores.
    */
+  const resolveItemState = (
+    value: string | number | null,
+    availability?: boolean,
+    lastScrapedAt?: string | null,
+  ) => {
+    const normalized = normalizePriceInput(value);
+
+    if (availability === false) return 'inactive' as const;
+    if (availability === true && normalized === null && lastScrapedAt) return 'no_price' as const;
+    if (!lastScrapedAt && normalized === null) return 'collecting' as const;
+    return normalized !== null ? ('active' as const) : ('unknown' as const);
+  };
+
   /**
    * Renderiza preço do monitorado ou concorrente com fallback de indisponibilidade.
    */
-  const renderPrice = (value: string | number | null, lastStatus?: string) => {
+  const renderPrice = (
+    value: string | number | null,
+    availability?: boolean,
+    lastStatus?: string,
+    lastScrapedAt?: string | null,
+  ) => {
     const normalized = normalizePriceInput(value);
+    const state = resolveItemState(value, availability, lastScrapedAt);
 
-    if (normalized === null) {
+    if (state === 'inactive') {
       return (
-        <Box display="flex" alignItems="center" gap={1}>
-          <CircularProgress size={18} />
+        <Box display="flex" flexDirection="column" gap={0.5}>
           <Typography variant="body2" color="text.secondary">
-            Indisponível
+            Indisponível no site
           </Typography>
           {lastStatus && <Chip label={lastStatus} size="small" color="default" />}
+          {lastScrapedAt && (
+            <Typography variant="caption" color="text.secondary">
+              Última coleta: {formatDateTime(lastScrapedAt)}
+            </Typography>
+          )}
         </Box>
       );
     }
 
-    return formatCurrency(normalized);
+    if (state === 'no_price') {
+      return (
+        <Box display="flex" flexDirection="column" gap={0.25}>
+          <Typography variant="body2" color="text.secondary">
+            Sem preço identificado
+          </Typography>
+          {lastScrapedAt && (
+            <Typography variant="caption" color="text.secondary">
+              Coletado em {formatDateOnly(lastScrapedAt)}
+            </Typography>
+          )}
+        </Box>
+      );
+    }
+
+    if (state === 'collecting') {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Coletando dados...
+        </Typography>
+      );
+    }
+
+    return formatCurrency(normalized, { fallbackLabel: 'Sem preço' });  
   };
 
   const renderSummaryCurrency = (value?: string | number | null) => {
-    if (value === null || value === undefined || normalizePriceInput(value) === null) {
+    if (value === null || value === undefined || normalizePriceInput(value, { allowZero: true }) === null) {
       return '—';
     }
 
-    return formatCurrency(value, { fallbackLabel: '—' });
+    return formatCurrency(value, { fallbackLabel: '—', allowZero: true });
   };
 
   const resolveAdjustmentColor = (value?: string | number | null) => {
@@ -256,6 +306,7 @@ const ProductDetail: React.FC = () => {
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
   const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
+  const monitoredState = resolveItemState(product.current_price, product.availability, product.last_scraped_at);
 
   return (
     <Layout>
@@ -279,7 +330,14 @@ const ProductDetail: React.FC = () => {
           <Box display="flex" flexDirection="column" gap={3}>
             
             {/* Cartão com informações principais do produto */}
-            <Card elevation={2}>
+            <Card
+              elevation={monitoredState === 'inactive' ? 0 : 2}
+              sx={{
+                border: '1px solid',
+                borderColor: monitoredState === 'inactive' ? 'divider' : 'transparent',
+                backgroundColor: monitoredState === 'inactive' ? 'grey.50' : 'background.paper',
+              }}
+            >
               <CardContent>
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={3}>
@@ -318,8 +376,8 @@ const ProductDetail: React.FC = () => {
                         />
                       </Box>
                       <Chip
-                        label={getStatusLabel(product.competitiveness_status)}
-                        color={getStatusColor(product.competitiveness_status)}
+                        label={getStatusLabel(product.competitiveness_status, product.availability)}
+                        color={product.availability === false ? 'default' : getStatusColor(product.competitiveness_status)}
                       />
                     </Box>
 
@@ -329,7 +387,12 @@ const ProductDetail: React.FC = () => {
                           Preço Atual
                         </Typography>
                         <Typography variant="h4" color="primary">
-                          {renderPrice(product.current_price, product.last_status)}
+                          {renderPrice(
+                            product.current_price,
+                            product.availability,
+                            product.last_status,
+                            product.last_scraped_at,
+                          )}
                         </Typography>
                       </Grid>
                       <Grid item xs={12} sm={4}>
@@ -364,11 +427,25 @@ const ProductDetail: React.FC = () => {
                     Resumo de Comparação
                   </Typography>
                   <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Total de Concorrentes
                       </Typography>
-                      <Typography variant="h6">{summary.competitors_count}</Typography>
+                      <Typography variant="h6">{summary.competitors_count ?? 0}</Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={4}>
+                      <Typography variant="body2" color="text.secondary">
+                        Concorrentes com preço
+                      </Typography>
+                      <Typography variant="h6">{summary.competitors_with_price_count ?? 0}</Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6} md={4}>
+                      <Typography variant="body2" color="text.secondary">
+                        Seu preço (resumo)
+                      </Typography>
+                      <Typography variant="h6">
+                        {renderSummaryCurrency(summary?.monitored_price)}
+                      </Typography>
                     </Grid>
                     <Grid item xs={12} sm={6} md={3}>
                       <Typography variant="body2" color="text.secondary">
@@ -519,7 +596,12 @@ const ProductDetail: React.FC = () => {
                                 </Box>
                               </TableCell>
                               <TableCell align="right">
-                                {renderPrice(competitor.current_price, competitor.last_status)}
+                                {renderPrice(
+                                  competitor.current_price,
+                                  competitor.availability,
+                                  competitor.last_status,
+                                  competitor.last_scraped_at,
+                                )}
                               </TableCell>
                               <TableCell align="center">
                                 <Chip

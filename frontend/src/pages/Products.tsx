@@ -92,15 +92,15 @@ const Products: React.FC = () => {
 
   const listPageSize = 5;
   const paginatedItems = useMemo(() => {
-    if (!data?.items || viewMode !== 'list') return data?.items ?? [];
+    if (!visibleItems || viewMode !== 'list') return visibleItems ?? [];
     const offset = (page - 1) * listPageSize;
-    return data.items.slice(offset, offset + listPageSize);
-  }, [data?.items, page, viewMode]);
+    return visibleItems.slice(offset, offset + listPageSize);
+  }, [visibleItems, page, viewMode]);
 
   const totalPages = useMemo(() => {
-    if (!data?.items || viewMode !== 'list') return 1;
-    return Math.max(1, Math.ceil(data.items.length / listPageSize));
-  }, [data?.items, viewMode]);
+    if (!visibleItems || viewMode !== 'list') return 1;
+    return Math.max(1, Math.ceil(visibleItems.length / listPageSize));
+  }, [visibleItems, viewMode]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -172,29 +172,99 @@ const Products: React.FC = () => {
   };
 
   /**
-   * Formata o preço exibindo rótulo de coleta quando ainda não há valor disponível.
+   * Normaliza valores para comparação numérica evitando zeros como preços válidos
    */
   const parseToNumber = (value: string | number | null | undefined) => {
     return normalizePriceInput(value);
   };
 
   /**
-   * Mostra preço ou rótulo de indisponibilidade preservando o último status.
+   * Define o estado visual do produto para controlar mensagens e estilos dos cards.
    */
-  const renderAvailability = (value: string | number | null, lastStatus?: string) => {
-    const parsed = normalizePriceInput(value);
-    if (parsed === null) {
+  const resolveProductState = (product: MonitoredProduct) => {
+    const parsedPrice = parseToNumber(product.current_price);
+
+    if (product.availability === false) {
+      return 'inactive' as const;
+    }
+
+    if (product.availability === true && parsedPrice === null) {
+      return 'no_price' as const;
+    }
+
+    if (!product.last_scraped_at && parsedPrice === null) {
+      return 'collecting' as const;
+    }
+
+    return parsedPrice !== null ? ('active' as const) : ('unknown' as const);
+  };
+
+  /**
+   * Evita exibir cards logo após a criação, enquanto a primeira coleta não finalizou.
+   */
+  const shouldRenderProduct = (product: MonitoredProduct) => {
+    const parsedPrice = parseToNumber(product.current_price);
+    const hasScrapingHistory = Boolean(product.last_scraped_at || product.last_checked);
+    const hasAvailabilityInfo = product.availability !== undefined && product.availability !== null;
+
+    return hasScrapingHistory || parsedPrice !== null || hasAvailabilityInfo;
+  };
+
+  /**
+   * Ajusta lista de itens visíveis respeitando coleta incial e paginação
+   */
+  const visibleItems = useMemo(() => {
+    if (!data?.items) return [] as MonitoredProduct[];
+    return data.items.filter((product) => shouldRenderProduct(product));
+  }, [data?.items]);
+
+  /**
+   * Mostra preço ou mensagem contextual sem spinner infinito.
+   */
+  const renderMonitoredPrice = (product: MonitoredProduct) => {
+    const parsed = parseToNumber(product.current_price);
+    const state = resolveProductState(product);
+
+    if (state === 'inactive') {
       return (
-        <Box display="flex" alignItems="center" gap={1}>
+        <Box display="flex" flexDirection="column" gap={0.5}>
           <Typography variant="body1" color="text.secondary">
-            Indisponível / Pausado
+            Indisponível
           </Typography>
-          {lastStatus && <Chip label={lastStatus} size="small" color="default" />}
+          {product.last_status && <Chip label={product.last_status} size="small" color="default" />}
+          {product.last_scraped_at && (
+            <Typography variant="caption" color="text.secondary">
+              Última coleta: {new Date(product.last_scraped_at).toLocaleString('pt-BR')}
+            </Typography>
+          )}
         </Box>
       );
     }
 
-    return <>{formatCurrency(parsed)}</>;
+    if (state === 'no_price') {
+      return (
+        <Box display="flex" flexDirection="column" gap={0.5}>
+          <Typography variant="body1" color="text.secondary">
+            Sem preço identificado
+          </Typography>
+          {product.last_scraped_at && (
+            <Typography variant="caption" color="text.secondary">
+              Coleta em {new Date(product.last_scraped_at).toLocaleDateString('pt-BR')}
+            </Typography>
+          )}
+        </Box>
+      );
+    }
+
+    if (state === 'collecting') {
+      return (
+        <Typography variant="body1" color="text.secondary">
+          Coletando dados...
+        </Typography>
+      );
+    }
+
+    return <>{formatCurrency(parsed, { fallbackLabel: 'Sem preço' })}</>;
   };
 
   const getDifferenceValue = (product: MonitoredProduct) => {
@@ -208,6 +278,10 @@ const Products: React.FC = () => {
 
     const monitoredPrice = parseToNumber(product.current_price);
     const lowestCompetitorPrice = parseToNumber(product.comparison_summary?.competitors_min);
+
+    if ((product.comparison_summary?.competitors_with_price_count ?? 0) === 0) {
+      return null;
+    }
 
     if (monitoredPrice !== null && lowestCompetitorPrice !== null) {
       return monitoredPrice - lowestCompetitorPrice;
@@ -229,10 +303,14 @@ const Products: React.FC = () => {
   };
 
   /**
-   * Retorna label legível para o status de competitividade.
+   * Retorna label legível para o status de competitividade ou indisponibilidade.
    */
-  const getStatusLabel = (status?: string) => {
-    switch (status) {
+  const getStatusLabel = (product: MonitoredProduct) => {
+    if (resolveProductState(product) === 'inactive') {
+      return 'Inativo';
+    }
+
+    switch (product.competitiveness_status) {
       case 'competitivo':
         return 'Competitivo';
       case 'atencao':
@@ -240,8 +318,29 @@ const Products: React.FC = () => {
       case 'urgente':
         return 'Urgente';
       default:
-        return 'Sem Status';
+        return 'Sem status';
     }
+  };
+
+  /**
+   * Define cor do chip e da borda do card para modo lista.
+   */
+  const resolveVisualEmphasis = (product: MonitoredProduct) => {
+    const state = resolveProductState(product);
+    const color = state === 'inactive' ? 'default' : getStatusColor(product.competitiveness_status);
+
+    const borderColorMap: Record<string, string> = {
+      success: 'success.light',
+      warning: 'warning.light',
+      error: 'error.light',
+      default: 'divider',
+    };
+
+    return {
+      chipColor: color,
+      borderColor: borderColorMap[color] ?? 'divider',
+      isInactive: state === 'inactive',
+    };
   };
 
   return (
@@ -328,12 +427,16 @@ const Products: React.FC = () => {
       ) : error ? (
         // Estado de erro ao buscar produtos
         <Alert severity="error">Erro ao carregar produtos. Tente novamente.</Alert>
-      ) : data && data.items.length > 0 ? (
+      ) : visibleItems && visibleItems.length > 0 ? (
         viewMode === 'list' ? (
           // Modo Lista - exibe cartões por produto
           <Grid container spacing={3}>
             {paginatedItems.map((product) => {
-              const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
+              const competitorsWithPrice = product.comparison_summary?.competitors_with_price_count ?? 0;
+              const lowestCompetitorLabel =
+                competitorsWithPrice > 0
+                  ? formatCurrency(product.comparison_summary?.competitors_min, { fallbackLabel: '—' })
+                  : '—';
               const differenceValue = getDifferenceValue(product);
               const differenceLabel = formatCurrency(differenceValue, {
                 allowZero: true,
@@ -373,10 +476,18 @@ const Products: React.FC = () => {
                 product.comparison_summary?.competitors_count ??
                 0;
               const rankingLabel = `${getRankingLabel(product)} | ${activeCompetitors} Concorrentes`;
+              const visualEmphasis = resolveVisualEmphasis(product);
 
               return (
                 <Grid item xs={12} key={product.id}>
-                  <Card elevation={2}>
+                  <Card
+                    elevation={visualEmphasis.isInactive ? 0 : 2}
+                    sx={{
+                      border: '1px solid',
+                      borderColor: viewMode === 'list' ? visualEmphasis.borderColor : 'divider',
+                      backgroundColor: visualEmphasis.isInactive ? 'grey.50' : 'background.paper',
+                    }}
+                  >
                     <CardContent>
                       <Box display="flex" gap={2}>
                         {product.thumbnail && (
@@ -409,8 +520,8 @@ const Products: React.FC = () => {
                               />
                             </Box>
                             <Chip
-                              label={getStatusLabel(product.competitiveness_status)}
-                              color={getStatusColor(product.competitiveness_status)}
+                              label={getStatusLabel(product)}
+                              color={visualEmphasis.chipColor}
                               size="small"
                             />
                           </Box>
@@ -422,7 +533,7 @@ const Products: React.FC = () => {
                                 MEU PREÇO
                               </Typography>
                               <Typography variant="h5" color="primary">
-                                {renderAvailability(product.current_price, product.last_status)}
+                                {renderMonitoredPrice(product)}
                               </Typography>
                             </Grid>
                             <Grid item xs={4}>
@@ -479,7 +590,7 @@ const Products: React.FC = () => {
                 </Grid>
               );
             })}
-            {data.items.length > listPageSize && (
+            {visibleItems.length > listPageSize && (
               <Grid item xs={12}>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
                   <Button
@@ -522,8 +633,12 @@ const Products: React.FC = () => {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {data.items.map((product) => {
-                  const lowestCompetitorLabel = formatCurrency(product.comparison_summary?.competitors_min);
+                {visibleItems.map((product) => {
+                  const competitorsWithPrice = product.comparison_summary?.competitors_with_price_count ?? 0;
+                  const lowestCompetitorLabel =
+                    competitorsWithPrice > 0
+                      ? formatCurrency(product.comparison_summary?.competitors_min, { fallbackLabel: '—' })
+                      : '—';
                   const differenceValue = getDifferenceValue(product);
                   const differenceLabel = formatCurrency(differenceValue, {
                     allowZero: true,
@@ -546,8 +661,10 @@ const Products: React.FC = () => {
                   const rankingLabel = getRankingLabel(product);
                   const isCheaperOrEqual = differenceValue !== null ? differenceValue <= 0 : null;
 
+                  const visualEmphasis = resolveVisualEmphasis(product);
+
                   return (
-                    <TableRow key={product.id} hover>
+                    <TableRow key={product.id} hover selected={visualEmphasis.isInactive}>
                       <TableCell sx={{ maxWidth: 360, width: 360 }}>
                         <Box display="flex" alignItems="center" gap={1}>
                           {product.thumbnail && (
@@ -570,7 +687,7 @@ const Products: React.FC = () => {
                         </Box>
                       </TableCell>
                       <TableCell align="right">
-                        {renderAvailability(product.current_price, product.last_status)}
+                        {renderMonitoredPrice(product)}
                       </TableCell>
                       <TableCell align="right">
                         <Typography sx={{ color: lowestColor }}>{lowestCompetitorLabel}</Typography>
@@ -593,8 +710,8 @@ const Products: React.FC = () => {
                       <TableCell align="center">{rankingLabel}</TableCell>
                       <TableCell align="center">
                         <Chip
-                          label={getStatusLabel(product.competitiveness_status)}
-                          color={getStatusColor(product.competitiveness_status)}
+                          label={getStatusLabel(product)}
+                          color={visualEmphasis.chipColor}
                           size="small"
                         />
                       </TableCell>
