@@ -46,6 +46,7 @@ import { formatDateOnly, formatDateTime, formatRelativeTime } from '../utils/dat
 import TruncatedText from '../utils/TruncatedText';
 import MonitoredStateBadge from '../components/MonitoredStateBadge';
 import { resolveMonitoredStatus } from '../utils/monitoredStatus';
+import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -360,15 +361,10 @@ const ProductDetail: React.FC = () => {
                         <Typography variant="body2" color="text.secondary">
                           Preço Atual
                         </Typography>
-                        <Typography variant="h4" color="primary">
-                          {renderPrice(
-                            product.current_price,
-                            product.availability,
-                            product.last_status,
-                            product.last_scraped_at,
-                            product.is_paused,
-                          )}
-                        </Typography>
+                        { /* Padroniza renderização de preço com componente utilitário */ }
+                        <Box>
+                          {renderMonitoredPrice(product, { variant: 'h4' })}
+                        </Box>
                       </Grid>
                       <Grid item xs={12} sm={4}>
                         <Typography variant="body2" color="text.secondary">
@@ -410,27 +406,13 @@ const ProductDetail: React.FC = () => {
                     </Grid>
                     <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
-                        Concorrentes com preço
-                      </Typography>
-                      <Typography variant="h6">{summary.competitors_with_price_count ?? 0}</Typography>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={4}>
-                      <Typography variant="body2" color="text.secondary">
-                        Seu preço (resumo)
-                      </Typography>
-                      <Typography variant="h6">
-                        {renderSummaryCurrency(summary?.monitored_price)}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Typography variant="body2" color="text.secondary">
                         Preço Médio
                       </Typography>
                       <Typography variant="h6">
                         {renderSummaryCurrency(summary?.competitors_mean)}
                       </Typography>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Preço Mínimo
                       </Typography>
@@ -438,7 +420,7 @@ const ProductDetail: React.FC = () => {
                         {renderSummaryCurrency(summary?.competitors_min)}
                       </Typography>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Preço Máximo
                       </Typography>
@@ -446,7 +428,7 @@ const ProductDetail: React.FC = () => {
                         {renderSummaryCurrency(summary?.competitors_max)}
                       </Typography>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Reduzir seu Preço
                       </Typography>
@@ -641,7 +623,12 @@ const ProductDetail: React.FC = () => {
                 <Typography variant="h6" gutterBottom>
                   Insights de Comparação
                 </Typography>
-                {summary?.comparison_insights ? (
+                {/** Quando o produto está inativo, deixar explícito que não há comparação válida */}
+                {monitoredStatus === 'inactive' || summary?.ignored_due_to_inactive ? (
+                  <Alert severity="info" sx={{ mb: highlightedAlerts.length ? 2 : 0 }}>
+                    Comparação não realizada: anúncio indisponível no site de origem.
+                  </Alert>
+                ) : summary?.comparison_insights ? (
                   <Alert severity="info" sx={{ mb: highlightedAlerts.length ? 2 : 0 }}>
                     {summary.comparison_insights}
                   </Alert>
