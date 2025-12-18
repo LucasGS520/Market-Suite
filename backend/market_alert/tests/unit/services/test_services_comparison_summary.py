@@ -94,6 +94,7 @@ def test_build_comparison_summary_without_data() -> None:
     assert summary["competitors_with_price_count"] == 0
     assert summary["competitiveness_status"] is None
     assert summary["reason"] == "sem_concorrentes_disponiveis"
+    assert summary["ignored_due_to_inactive"] is False
 
 
 def test_build_comparison_summary_with_metrics() -> None:

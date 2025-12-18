@@ -73,11 +73,12 @@ def build_monitored_response(
     compatibilidade com consumidores existentes.último resumo armazenado para o produto.
     """
     current_price = _ensure_price(monitored.current_price, "monitorado", allow_missing_price=allow_missing_price)
-    availability = None
-    if monitored.status in {MonitoredStatus.active, MonitoredStatus.pending}:
-        availability = True
-    elif monitored.status == MonitoredStatus.failed:
-        availability = False
+    availability = monitored.availability
+    if availability is None:
+        if monitored.status in {MonitoredStatus.active, MonitoredStatus.pending}:
+            availability = True
+        elif monitored.status == MonitoredStatus.failed:
+            availability = False
 
     competitiveness_status: CompetitivenessStatus | None = None
     comparison_summary: PriceComparisonSummaryResponse | None = None
@@ -107,6 +108,8 @@ def build_monitored_response(
         global_last_price_change_at or last_price_change_at
     )
 
+    normalized_last_status = monitored.last_status or monitored.status.value
+
     return MonitoredProductResponse(
         id=monitored.id,
         owner_id=monitored.user_id,
@@ -117,7 +120,7 @@ def build_monitored_response(
         currency=monitored.currency,
         source="monitored",
         availability=availability,
-        last_status=monitored.status.value,
+        last_status=normalized_last_status,
         last_checked=_normalize_timestamp(monitored.last_checked),
         thumbnail=monitored.thumbnail,
         created_at=_normalize_timestamp(monitored.created_at),

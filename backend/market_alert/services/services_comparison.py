@@ -35,7 +35,7 @@ from market_alert.crud.crud_comparison import (
 )
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.enums.enums_products import ProductStatus
+from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
 from market_alert.models import User
 from market_alert.schemas.schemas_comparisons import (
     PaginatedPriceComparisonResponse,
@@ -166,6 +166,52 @@ def run_price_comparison(
             logger.info(
                 "comparison_filtered_competitors", filtered=filtered_out, total=len(competitors)
             )
+
+        inactive_reason = _resolve_monitored_inactive_reason(monitored)
+        if inactive_reason:
+            logger.info(
+                "comparison_skipped_inactive_monitored",
+                monitored_id=str(monitored_id),
+                reason=inactive_reason,
+                competitors_count=len(available_competitors),
+            )
+            payload_stub = {
+                "monitored_price": None,
+                "alerts": [],
+                "discrepancies": [],
+                "lowest_competitor": None,
+                "highest_competitor": None,
+                "reason": inactive_reason,
+                "ignored_due_to_inactive": True,
+            }
+            comparison = create_price_comparison(db, monitored.id, payload_stub)
+            summary_payload = _apply_summary_defaults(
+                payload_stub,
+                timestamp=comparison.timestamp,
+                comparison_id=comparison.id,
+                competitors_count=len(available_competitors),
+            )
+            summary_payload["competitors_with_price_count"] = len(available_competitors)
+            summary_payload["competitiveness_status"] = None
+            summary_payload["comparison_insights"] = None
+
+            encoded_summary = jsonable_encoder(summary_payload)
+            upsert_price_comparison_summary(
+                db,
+                monitored.id,
+                comparison.id,
+                encoded_summary,
+            )
+            encoded_result = {
+                "summary": encoded_summary,
+                "comparison_id": str(comparison.id),
+                "monitored_id": str(monitored.id),
+                "user_id": str(monitored.user_id),
+                "lowest_competitor": None,
+                "highest_competitor": None,
+            }
+            result = encoded_result
+            return result, alerts
 
         if not available_competitors:
             COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL.inc()
@@ -304,6 +350,7 @@ def _empty_summary(competitors_count: int) -> Dict[str, Any]:
         "competitors_max": None,
         "position_rank": None,
         "potential_adjustment": None,
+        "ignored_due_to_inactive": False,
         "competitiveness_status": None,
         "comparison_insights": None,
         "discrepancies": [],
@@ -437,6 +484,11 @@ def _compute_summary_from_payload(
         summary["alerts"] = alerts_raw if isinstance(alerts_raw, list) else []
         monitored_price = _to_decimal(payload.get("monitored_price"))
 
+        summary["ignored_due_to_inactive"] = bool(payload.get("ignored_due_to_inactive"))
+        reason = payload.get("reason") or summary.get("reason")
+        if reason:
+            summary["reason"] = reason
+
         if monitored_price is not None:
             summary["monitored_price"] = monitored_price
         competitor_prices: list[Decimal] = []
@@ -459,6 +511,11 @@ def _compute_summary_from_payload(
         _append_price(highest_price)
 
         summary["competitors_with_price_count"] = len(competitor_prices)
+
+        if summary["ignored_due_to_inactive"]:
+            summary["competitiveness_status"] = None
+            summary["comparison_insights"] = None
+            return summary
 
         if competitor_prices:
             competitors_min = min(competitor_prices)
@@ -611,6 +668,12 @@ def _apply_summary_defaults(
     except (TypeError, ValueError, KeyError):
         summary["competitors_with_price_count"] = 0
 
+    summary["ignored_due_to_inactive"] = bool(summary.get("ignored_due_to_inactive"))
+
+    if summary["ignored_due_to_inactive"]:
+        summary["competitiveness_status"] = None
+        summary["comparison_insights"] = None
+
     summary = _coerce_decimal_fields(summary)
 
     if summary.get("competitiveness_status") is None:
@@ -716,3 +779,22 @@ def build_comparison_summary(
         comparison_id=comparison.id,
         competitors_count=competitors_count,
     )
+
+def _resolve_monitored_inactive_reason(monitored: Any) -> str | None:
+    """ Determina se o monitorado deve ser tratado como inativo na comparação """
+    unavailable_statuses = {"unavailable", "removed", "sold_out"}
+    last_status = (getattr(monitored, "last_status", None) or "").lower()
+    availability = getattr(monitored, "availability", None)
+    has_price = getattr(monitored, "current_price", None) is not None
+    monitoring_status = getattr(monitored, "status", None)
+
+    if availability is False:
+        return "monitored_unavailable"
+    if last_status in unavailable_statuses:
+        return "monitored_unavailable"
+    if monitoring_status == MonitoredStatus.inactive and not has_price:
+        return "monitored_without_price"
+    if not has_price:
+        return "monitored_without_price"
+
+    return None
