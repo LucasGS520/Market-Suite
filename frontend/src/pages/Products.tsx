@@ -5,7 +5,7 @@
  * adicionar produtos monitorados pelo usuário.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, startTransition } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -87,10 +87,33 @@ const Products: React.FC = () => {
 
   // Ajusta paginação client-side quando filtros ou modo de visualização mudam
   useEffect(() => {
-    setPage(1);
-  }, [searchQuery, statusFilter, viewMode]);
+    if (page !== 1) {
+      startTransition(() => setPage(1));
+    }
+  }, [searchQuery, statusFilter, viewMode, page]);
 
   const listPageSize = 5;
+  /**
+   * Normaliza valores para comparação numérica evitando zeros como preços válidos
+   */
+  const parseToNumber = (value: string | number | null | undefined) => {
+    return normalizePriceInput(value);
+  };
+  /**
+   * Ajusta lista de itens visíveis respeitando coleta inicial e paginação
+   */
+  const visibleItems = useMemo(() => {
+    if (!data?.items) return [] as MonitoredProduct[];
+
+    return data.items.filter((product) => {
+      const parsedPrice = parseToNumber(product.current_price);
+      const hasScrapingHistory = Boolean(product.last_scraped_at || product.last_checked);
+      const hasAvailabilityInfo = product.availability !== undefined && product.availability !== null;
+
+      return hasScrapingHistory || parsedPrice !== null || hasAvailabilityInfo;
+    });
+  }, [data]);
+
   const paginatedItems = useMemo(() => {
     if (!visibleItems || viewMode !== 'list') return visibleItems ?? [];
     const offset = (page - 1) * listPageSize;
@@ -104,7 +127,7 @@ const Products: React.FC = () => {
 
   useEffect(() => {
     if (page > totalPages) {
-      setPage(totalPages);
+      startTransition(() => setPage(totalPages));
     }
   }, [page, totalPages]);
 
@@ -158,7 +181,7 @@ const Products: React.FC = () => {
    * Retorna a cor do Chip de status com base no status de competitividade.
    * Usado para manter consistência visual com MUI.
    */
-  const getStatusColor = (status?: string) => {
+  const getStatusColor = (status?: string): 'success' | 'warning' | 'error' | 'default' => {
     switch (status) {
       case 'competitivo':
         return 'success';
@@ -169,13 +192,6 @@ const Products: React.FC = () => {
       default:
         return 'default';
     }
-  };
-
-  /**
-   * Normaliza valores para comparação numérica evitando zeros como preços válidos
-   */
-  const parseToNumber = (value: string | number | null | undefined) => {
-    return normalizePriceInput(value);
   };
 
   /**
@@ -202,21 +218,7 @@ const Products: React.FC = () => {
   /**
    * Evita exibir cards logo após a criação, enquanto a primeira coleta não finalizou.
    */
-  const shouldRenderProduct = (product: MonitoredProduct) => {
-    const parsedPrice = parseToNumber(product.current_price);
-    const hasScrapingHistory = Boolean(product.last_scraped_at || product.last_checked);
-    const hasAvailabilityInfo = product.availability !== undefined && product.availability !== null;
 
-    return hasScrapingHistory || parsedPrice !== null || hasAvailabilityInfo;
-  };
-
-  /**
-   * Ajusta lista de itens visíveis respeitando coleta incial e paginação
-   */
-  const visibleItems = useMemo(() => {
-    if (!data?.items) return [] as MonitoredProduct[];
-    return data.items.filter((product) => shouldRenderProduct(product));
-  }, [data?.items]);
 
   /**
    * Mostra preço ou mensagem contextual sem spinner infinito.
@@ -329,7 +331,7 @@ const Products: React.FC = () => {
     const state = resolveProductState(product);
     const color = state === 'inactive' ? 'default' : getStatusColor(product.competitiveness_status);
 
-    const borderColorMap: Record<string, string> = {
+    const borderColorMap: Record<'success' | 'warning' | 'error' | 'default', string> = {
       success: 'success.light',
       warning: 'warning.light',
       error: 'error.light',
@@ -337,8 +339,8 @@ const Products: React.FC = () => {
     };
 
     return {
-      chipColor: color,
-      borderColor: borderColorMap[color] ?? 'divider',
+      chipColor: color as 'success' | 'warning' | 'error' | 'default',
+      borderColor: borderColorMap[color],
       isInactive: state === 'inactive',
     };
   };
