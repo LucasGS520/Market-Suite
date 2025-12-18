@@ -28,9 +28,9 @@ import {
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import TruncatedText from '../utils/TruncatedText';
-import { formatCurrency, normalizePriceInput } from '../utils/currency';
 import MonitoredStateBadge from '../components/MonitoredStateBadge';
 import { resolveMonitoredStatus } from '../utils/monitoredStatus';
+import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 import type { MonitoredProduct } from '../types';
 
 /**
@@ -117,40 +117,6 @@ const Dashboard: React.FC = () => {
     },
   ];
 
-  /**
-   * Exibe preço ou mensagem de estado para o produto em destaque.
-   */
-  const renderPrice = (product: MonitoredProduct) => {
-    const normalized = normalizePriceInput(product.current_price);
-    const status = resolveMonitoredStatus(product);
-
-    if (status === 'inactive') {
-      return (
-        <Typography variant="body1" color="text.secondary">
-          Indisponível no site
-        </Typography>
-      );
-    }
-
-    if (status === 'paused') {
-      return (
-        <Typography variant="body1" color="text.secondary">
-          Monitoramento pausado
-        </Typography>
-      );
-    }
-
-    if (status === 'no_price' || status === 'collecting') {
-      return (
-        <Typography variant="body1" color="text.secondary">
-          Coletando dados...
-        </Typography>
-      );
-    }
-
-    return formatCurrency(normalized, { fallbackLabel: 'Sem preço' });
-  };
-
   return (
     <Layout>
       {/* Cabeçalho do Dashboard */}
@@ -208,15 +174,14 @@ const Dashboard: React.FC = () => {
         <Grid container spacing={3}>
           {featuredProducts.map((product) => {
             const productStatus = resolveMonitoredStatus(product);
-            const isInactive = productStatus === 'inactive';
 
             return (
               <Grid item xs={12} md={6} lg={4} key={product.id}>
                 <Card
-                  elevation={isInactive ? 0 : 2}
+                  elevation={productStatus === 'inactive' ? 0 : 2}
                   sx={{
-                    opacity: isInactive ? 0.75 : 1,
-                    backgroundColor: isInactive ? 'grey.50' : 'background.paper',
+                    opacity: productStatus === 'inactive' ? 0.75 : 1,
+                    backgroundColor: productStatus === 'inactive' ? 'grey.50' : 'background.paper',
                   }}
                 >
                   <CardContent>
@@ -240,9 +205,7 @@ const Dashboard: React.FC = () => {
                         <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
                         <Box display="flex" alignItems="center" gap={1} mt={1}>
                           <MonitoredStateBadge product={product} />
-                          <Typography variant="h6" color="primary">
-                            {renderPrice(product)}
-                          </Typography>
+                          {renderMonitoredPrice(product, { variant: 'h6' })}
                         </Box>
                       </Box>
                     </Box>
@@ -255,7 +218,6 @@ const Dashboard: React.FC = () => {
                       sx={{ mt: 2 }}
                       onClick={() => navigate(`/product/${product.id}`)}
                       startIcon={<TrendingUpIcon />}
-                      disabled={isInactive}
                     >
                       Ver Detalhes
                     </Button>

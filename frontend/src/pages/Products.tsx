@@ -51,6 +51,7 @@ import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types'
 import TruncatedText from '../utils/TruncatedText';
 import MonitoredStateBadge from '../components/MonitoredStateBadge';
 import { resolveMonitoredStatus, statusToBadge } from '../utils/monitoredStatus';
+import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -170,70 +171,6 @@ const Products: React.FC = () => {
     }
 
     createProductMutation.mutate(payload);
-  };
-
-  /**
-   * Define mensagens exibidas para o preço com base no status resolvido.
-   */
-  const renderMonitoredPrice = (product: MonitoredProduct) => {
-    const parsed = parseToNumber(product.current_price);
-    const status = resolveMonitoredStatus(product);
-
-    if (status === 'inactive') {
-      return (
-        <Box display="flex" flexDirection="column" gap={0.5}>
-          <Typography variant="body1" color="text.secondary">
-            Indisponível
-          </Typography>
-          {product.last_status && <MonitoredStateBadge product={product} />}
-          {product.last_scraped_at && (
-            <Typography variant="caption" color="text.secondary">
-              Última coleta: {new Date(product.last_scraped_at).toLocaleString('pt-BR')}
-            </Typography>
-          )}
-        </Box>
-      );
-    }
-
-    if (status === 'paused') {
-      return (
-        <Box display="flex" flexDirection="column" gap={0.5}>
-          <Typography variant="body1" color="text.secondary">
-            Monitoramento pausado
-          </Typography>
-          {product.last_scraped_at && (
-            <Typography variant="caption" color="text.secondary">
-              Última coleta: {new Date(product.last_scraped_at).toLocaleString('pt-BR')}
-            </Typography>
-          )}
-        </Box>
-      );
-    }
-
-    if (status === 'no_price') {
-      return (
-        <Box display="flex" flexDirection="column" gap={0.5}>
-          <Typography variant="body1" color="text.secondary">
-            Sem preço identificado
-          </Typography>
-          {product.last_scraped_at && (
-            <Typography variant="caption" color="text.secondary">
-              Coleta em {new Date(product.last_scraped_at).toLocaleDateString('pt-BR')}
-            </Typography>
-          )}
-        </Box>
-      );
-    }
-
-    if (status === 'collecting') {
-      return (
-        <Typography variant="body1" color="text.secondary">
-          Coletando dados...
-        </Typography>
-      );
-    }
-
-    return <>{formatCurrency(parsed, { fallbackLabel: 'Sem preço' })}</>;
   };
 
   const getDifferenceValue = (product: MonitoredProduct) => {
@@ -431,7 +368,6 @@ const Products: React.FC = () => {
                 0;
               const rankingLabel = `${getRankingLabel(product)} | ${activeCompetitors} Concorrentes`;
               const visualEmphasis = resolveVisualEmphasis(product);
-              const disableActions = visualEmphasis.status === 'inactive';
 
               return (
                 <Grid item xs={12} key={product.id}>
@@ -484,9 +420,7 @@ const Products: React.FC = () => {
                               <Typography variant="body2" color="text.secondary">
                                 MEU PREÇO
                               </Typography>
-                              <Typography variant="h5" color="primary">
-                                {renderMonitoredPrice(product)}
-                              </Typography>
+                              {renderMonitoredPrice(product, { variant: 'h5' })}
                             </Grid>
                             <Grid item xs={4}>
                               <Typography variant="body2" color="text.secondary">
@@ -530,7 +464,6 @@ const Products: React.FC = () => {
                                 variant="contained"
                                 size="small"
                                 onClick={() => navigate(`/product/${product.id}`)}
-                                disabled={disableActions}
                               >
                                 Ver Detalhes
                               </Button>
@@ -615,7 +548,6 @@ const Products: React.FC = () => {
                   const isCheaperOrEqual = differenceValue !== null ? differenceValue <= 0 : null;
 
                   const visualEmphasis = resolveVisualEmphasis(product);
-                  const disableActions = visualEmphasis.status === 'inactive';
 
                   return (
                     <TableRow
@@ -646,7 +578,7 @@ const Products: React.FC = () => {
                         </Box>
                       </TableCell>
                       <TableCell align="right">
-                        {renderMonitoredPrice(product)}
+                        {renderMonitoredPrice(product, { align: 'right' })}
                       </TableCell>
                       <TableCell align="right">
                         <Typography sx={{ color: lowestColor }}>{lowestCompetitorLabel}</Typography>
@@ -687,7 +619,6 @@ const Products: React.FC = () => {
                             variant="contained"
                             size="small"
                             onClick={() => navigate(`/product/${product.id}`)}
-                            disabled={disableActions}
                           >
                             Ver Detalhes
                           </Button>
