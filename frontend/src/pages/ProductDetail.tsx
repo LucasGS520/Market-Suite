@@ -307,18 +307,12 @@ const ProductDetail: React.FC = () => {
             
             {/* Cartão com informações principais do produto */}
             <Card
-              elevation={monitoredStatus === 'inactive' || monitoredStatus === 'paused' ? 0 : 2}
+              elevation={monitoredStatus === 'inactive' ? 0 : 2}
               sx={{
                 border: '1px solid',
-                borderColor:
-                  monitoredStatus === 'inactive' || monitoredStatus === 'paused'
-                    ? 'divider'
-                    : 'transparent',
-                backgroundColor:
-                  monitoredStatus === 'inactive' || monitoredStatus === 'paused'
-                    ? 'grey.50'
-                    : 'background.paper',
-                opacity: monitoredStatus === 'inactive' || monitoredStatus === 'paused' ? 0.8 : 1,
+                borderColor: monitoredStatus === 'inactive' ? 'divider' : 'transparent',
+                backgroundColor: monitoredStatus === 'inactive' ? 'grey.50' : 'background.paper',
+                opacity: monitoredStatus === 'inactive' ? 0.8 : 1,
               }}
             >
               <CardContent>

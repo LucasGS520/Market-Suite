@@ -14,6 +14,7 @@ export type MonitoredStatusKey =
   | 'competitive'
   | 'attention'
   | 'urgent'
+  | 'no_competitors'
   | 'collecting'
   | 'unknown';
 
@@ -57,6 +58,11 @@ export const statusToBadge: Record<MonitoredStatusKey, MonitoredBadgeMeta> = {
     color: 'error',
     tooltip: 'Necessita ação rápida para recuperar competitividade.',
   },
+  no_competitors: {
+    label: 'Sem concorrentes',
+    color: 'default',
+    tooltip: 'Nenhum concorrente com preço disponível.',
+  },
   collecting: {
     label: 'Coletando',
     color: 'default',
@@ -77,18 +83,51 @@ export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStat
   const price = normalizePriceInput(product.current_price);
   const isPaused = product.is_paused ?? false;
   const availability = product.availability;
-  const competitiveness =
-    product.competitiveness_status || product.comparison_summary?.competitiveness_status;
+  const competitiveness = product.competitiveness_status || product.comparison_summary?.competitiveness_status;
+  const lastStatus = product.last_status;
+
+  const competitorsWithPrice =
+    product.comparison_summary?.competitors_with_price_count ??
+    product.comparison_summary?.competitors_count ??
+    0;
+
+  if (availability === false) return 'inactive';
+  if (lastStatus) {
+    const normalized = lastStatus
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+
+    const unavailableSignals = [
+      'indisponivel',
+      'sem estoque',
+      'sold out',
+      'soldout',
+      'sold_out',
+      'no stock',
+      'removed',
+      'unavailable',
+    ];
+
+    if (unavailableSignals.some((signal) => normalized.includes(signal))) {
+      return 'inactive';
+    }
+  }
 
   if (isPaused) return 'paused';
-  if (availability === false) return 'inactive';
+
+  if (!product.last_scraped_at && price === null) {
+    return 'collecting';
+  }
 
   if (availability === true && price === null && product.last_scraped_at) {
     return 'no_price';
   }
 
-  if (!product.last_scraped_at && price === null) {
-    return 'collecting';
+  if (competitorsWithPrice === 0) {
+    return 'no_competitors';
   }
 
   if (competitiveness === 'competitivo') return 'competitive';

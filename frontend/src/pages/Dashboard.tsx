@@ -208,13 +208,16 @@ const Dashboard: React.FC = () => {
         <Grid container spacing={3}>
           {featuredProducts.map((product) => {
             const productStatus = resolveMonitoredStatus(product);
-            const disableActions = productStatus === 'inactive' || productStatus === 'paused';
+            const isInactive = productStatus === 'inactive';
 
             return (
               <Grid item xs={12} md={6} lg={4} key={product.id}>
                 <Card
-                  elevation={disableActions ? 0 : 2}
-                  sx={{ opacity: disableActions ? 0.75 : 1 }}
+                  elevation={isInactive ? 0 : 2}
+                  sx={{
+                    opacity: isInactive ? 0.75 : 1,
+                    backgroundColor: isInactive ? 'grey.50' : 'background.paper',
+                  }}
                 >
                   <CardContent>
                     <Box display="flex" gap={2}>
@@ -252,7 +255,7 @@ const Dashboard: React.FC = () => {
                       sx={{ mt: 2 }}
                       onClick={() => navigate(`/product/${product.id}`)}
                       startIcon={<TrendingUpIcon />}
-                      disabled={disableActions}
+                      disabled={isInactive}
                     >
                       Ver Detalhes
                     </Button>

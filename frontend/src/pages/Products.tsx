@@ -277,7 +277,7 @@ const Products: React.FC = () => {
   const resolveVisualEmphasis = (product: MonitoredProduct) => {
     const status = resolveMonitoredStatus(product);
     const badgeMeta = statusToBadge[status] ?? statusToBadge.unknown;
-    const isDisabled = status === 'inactive' || status === 'paused';
+    const isInactive = status === 'inactive';
 
     const borderColorMap: Record<string, string> = {
       success: 'success.light',
@@ -292,7 +292,7 @@ const Products: React.FC = () => {
     return {
       chipColor: badgeMeta.color,
       borderColor: borderColorMap[colorKey] || 'divider',
-      isInactive: isDisabled,
+      isInactive,
       status,
     };
   };
@@ -431,7 +431,7 @@ const Products: React.FC = () => {
                 0;
               const rankingLabel = `${getRankingLabel(product)} | ${activeCompetitors} Concorrentes`;
               const visualEmphasis = resolveVisualEmphasis(product);
-              const disableActions = visualEmphasis.status === 'inactive' || visualEmphasis.status === 'paused';
+              const disableActions = visualEmphasis.status === 'inactive';
 
               return (
                 <Grid item xs={12} key={product.id}>
@@ -615,7 +615,7 @@ const Products: React.FC = () => {
                   const isCheaperOrEqual = differenceValue !== null ? differenceValue <= 0 : null;
 
                   const visualEmphasis = resolveVisualEmphasis(product);
-                  const disableActions = visualEmphasis.status === 'inactive' || visualEmphasis.status === 'paused';
+                  const disableActions = visualEmphasis.status === 'inactive';
 
                   return (
                     <TableRow

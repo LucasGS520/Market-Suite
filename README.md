@@ -89,6 +89,7 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 - **Sincronização de estado**: `react-query` evita chamadas duplicadas e trata revalidação automática.
 - **Isolamento de mock**: a aplicação pode rodar com mocks locais para demonstração sem depender do backend, útil para testes de UI.
 - **Paginação ajustável na listagem de produtos**: a tela de Produtos controla paginação no cliente, oferecendo 5/10/25 itens por página ou carregamento total (200 itens) em modo tabela; o backend apenas responde aos parâmetros `page` e `per_page` sem impor lógicas adicionais.
+- **Prioridades de status e competitividade**: anúncios indisponíveis são tratados como `Inativo` (incluindo sinais em `last_status`), `Pausado` só aparece quando o monitoramento foi suspenso manualmente com anúncio disponível e estados competitivos (`Competitivo`/`Atenção`/`Urgente`) só são exibidos quando há pelo menos um concorrente com preço. Na ausência de concorrentes, a UI exibe `Sem concorrentes`.
 
 
 ## Integração frontend ⇄ backend

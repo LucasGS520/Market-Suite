@@ -8,7 +8,58 @@ import {
   CompetitorProductCreateScraping,
   ScrapeCreationResponse,
   DashboardStats,
+  CompetitivenessStatus,
 } from '../types';
+
+/**
+ * Identifica sinais de indisponibilidade vindos do backend via last_status.
+ * Inclui termos comuns retornados pelo scraper para evitar falsos positivos de disponibilidade.
+ */
+const isUnavailableFromLastStatus = (lastStatus?: string): boolean => {
+  if (!lastStatus) return false;
+
+  const normalized = lastStatus
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+  const unavailableSignals = [
+    'indisponivel',
+    'indisponivel no momento',
+    'sem estoque',
+    'sem estoque no momento',
+    'sold out',
+    'soldout',
+    'sold_out',
+    'no stock',
+    'removed',
+    'unavailable',
+    'not available',
+    'paused by seller',
+  ];
+
+  return unavailableSignals.some((signal) => normalized.includes(signal));
+};
+
+/**
+ * Sanitiza o status de competitividade para que apenas valores com concorrentes relevantes sejam propagados.
+ * Evita badges enganosos quando não há comparativos de preço disponíveis.
+ */
+const sanitizeCompetitivenessStatus = (
+  status: CompetitivenessStatus | undefined,
+  summary?: PriceComparisonSummary
+): CompetitivenessStatus | undefined => {
+  const competitorsWithPrice = summary?.competitors_with_price_count ?? 0;
+  const competitorsCount = summary?.competitors_count ?? 0;
+
+  if (!status) return undefined;
+  if (competitorsWithPrice <= 0 && competitorsCount <= 0) return undefined;
+  if (competitorsWithPrice <= 0) return undefined;
+
+  return status;
+};
 
 /**
  * Normaliza campos centrais de produtos monitorados para evitar nullables inconsistentes.
@@ -18,15 +69,28 @@ const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct 
   const comparisonSummary =
     product.comparison_summary === undefined ? undefined : product.comparison_summary;
 
-  const competitivenessStatus =
-    product.competitiveness_status || comparisonSummary?.competitiveness_status || undefined;
+  const inferredAvailability =
+    product.availability === false || isUnavailableFromLastStatus(product.last_status)
+      ? false
+      : product.availability ?? undefined;
+
+  const competitivenessStatus = sanitizeCompetitivenessStatus(
+    product.competitiveness_status || comparisonSummary?.competitiveness_status || undefined,
+    comparisonSummary
+  );
 
   return {
     ...product,
     current_price: product.current_price ?? null,
-    availability: product.availability ?? undefined,
+    availability: inferredAvailability,
     is_paused: product.is_paused ?? false,
-    comparison_summary: comparisonSummary,
+    comparison_summary: comparisonSummary
+      ? {
+          ...comparisonSummary,
+          competitors_count: comparisonSummary.competitors_count ?? 0,
+          competitors_with_price_count: comparisonSummary.competitors_with_price_count ?? 0,
+        }
+      : comparisonSummary,
     competitiveness_status: competitivenessStatus,
   };
 };
