@@ -82,14 +82,19 @@ export const statusToBadge: Record<MonitoredStatusKey, MonitoredBadgeMeta> = {
 export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStatusKey => {
   const price = normalizePriceInput(product.current_price);
   const isPaused = product.is_paused ?? false;
-  const availability = product.availability;
+  const availability = product.availability as boolean | undefined;
   const competitiveness = product.competitiveness_status || product.comparison_summary?.competitiveness_status;
   const lastStatus = product.last_status;
+  const displayStatus = product.display_status;
 
   const competitorsWithPrice =
     product.comparison_summary?.competitors_with_price_count ??
     product.comparison_summary?.competitors_count ??
     0;
+
+  if (product.comparison_summary?.ignored_due_to_inactive) {
+    return 'inactive';
+  }
 
   if (availability === false) return 'inactive';
   if (lastStatus) {
@@ -117,6 +122,14 @@ export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStat
   }
 
   if (isPaused) return 'paused';
+
+  if (displayStatus) {
+    if (['competitive', 'attention', 'urgent'].includes(displayStatus)) {
+      if (competitorsWithPrice <= 0) return 'no_competitors';
+      if (availability === false) return 'inactive';
+    }
+    return displayStatus as MonitoredStatusKey;
+  }
 
   if (!product.last_scraped_at && price === null) {
     return 'collecting';

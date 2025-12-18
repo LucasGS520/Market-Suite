@@ -50,6 +50,23 @@ class MonitoredProductResponse(ProductResponse):
     """ Contrato simplificado de um produto monitorado """
     owner_id: UUID = Field(..., description="Identificador do responsável pelo monitoramento")
     source: Literal["monitored"] = "monitored"
+    display_status: Literal[
+        "inactive",
+        "paused",
+        "collecting",
+        "no_price",
+        "no_competitors",
+        "competitive",
+        "attention",
+        "urgent",
+        "unknown",
+    ] | None = Field(
+        None,
+        description=(
+            "Status consolidado para exibição, priorizando disponibilidade, pausa e competitividade "
+            "sem depender apenas do `competitiveness_status` legado."
+        ),
+    )
     thumbnail: str | None = Field(None, description="Miniatura mais recente identificada pelo fluxo de scraping")
     created_at: datetime | None = Field(None, description="Momento de criação do monitoramento (timestamp do cadastro)")
     last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")

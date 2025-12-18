@@ -52,9 +52,55 @@ def _ensure_price(
             detail=(
                 f"O produto {context} ainda não possui preço coletado. "
             ),
-        )
+    )
     return value
 
+def _resolve_display_status(
+    *,
+    monitored: MonitoredProduct,
+    availability: bool | None,
+    current_price: Decimal | None,
+    summary: PriceComparisonSummaryResponse | None,
+    competitiveness_status: CompetitivenessStatus | None,
+) -> str:
+    """ Consolida o status exibido priorizando indisponibilidade e pausa. """
+    normalized_last_status = (monitored.last_status or "").strip().lower()
+    unavailable_signals = {"unavailable", "removed", "sold_out"}
+
+    if availability is False or normalized_last_status in unavailable_signals:
+        return "inactive"
+
+    if monitored.status == MonitoredStatus.inactive and availability is not False:
+        return "paused"
+
+    if summary and getattr(summary, "ignored_due_to_inactive", False):
+        return "inactive"
+
+    if not monitored.last_scraped_at and current_price is None:
+        return "collecting"
+
+    if availability is True and current_price is None:
+        return "no_price"
+
+    competitors_with_price = 0
+    competitors_total = 0
+    if summary:
+        competitors_with_price = summary.competitors_with_price_count or 0
+        competitors_total = summary.competitors_count or 0
+
+    if competitors_with_price <= 0 and competitors_total <= 0:
+        return "no_competitors"
+    if competitors_with_price <= 0:
+        return "no_competitors"
+
+    if competitiveness_status == CompetitivenessStatus.COMPETITIVE:
+        return "competitive"
+    if competitiveness_status == CompetitivenessStatus.ATTENTION:
+        return "attention"
+    if competitiveness_status == CompetitivenessStatus.URGENT:
+        return "urgent"
+
+    return "unknown"
 
 def build_monitored_response(
     monitored: MonitoredProduct,
@@ -110,6 +156,14 @@ def build_monitored_response(
 
     normalized_last_status = monitored.last_status or monitored.status.value
 
+    display_status = _resolve_display_status(
+        monitored=monitored,
+        availability=availability,
+        current_price=current_price,
+        summary=comparison_summary,
+        competitiveness_status=competitiveness_status,
+    )
+
     return MonitoredProductResponse(
         id=monitored.id,
         owner_id=monitored.user_id,
@@ -119,6 +173,7 @@ def build_monitored_response(
         current_price=current_price,
         currency=monitored.currency,
         source="monitored",
+        display_status=display_status,
         availability=availability,
         last_status=normalized_last_status,
         last_checked=_normalize_timestamp(monitored.last_checked),

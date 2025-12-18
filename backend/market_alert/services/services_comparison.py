@@ -191,9 +191,10 @@ def run_price_comparison(
                 comparison_id=comparison.id,
                 competitors_count=len(available_competitors),
             )
-            summary_payload["competitors_with_price_count"] = len(available_competitors)
+            summary_payload["competitors_with_price_count"] = 0
             summary_payload["competitiveness_status"] = None
             summary_payload["comparison_insights"] = None
+            summary_payload["ignored_due_to_inactive"] = True
 
             encoded_summary = jsonable_encoder(summary_payload)
             upsert_price_comparison_summary(

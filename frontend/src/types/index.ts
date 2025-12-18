@@ -37,6 +37,16 @@ export interface MonitoredProduct {
   currency?: string; // Código da moeda
   thumbnail?: string; // URL da imagem em miniatura
   is_featured: boolean; // Indica se o produto é destacado
+  display_status?: // Status consolidado para exibição
+    | 'inactive'
+    | 'paused'
+    | 'collecting'
+    | 'no_price'
+    | 'no_competitors'
+    | 'competitive'
+    | 'attention'
+    | 'urgent'
+    | 'unknown'; 
   last_checked?: string; // Timestamp da última checagem do produto
   last_scraped_at?: string; // Timestamp do último scraping
   created_at?: string; // Data de criação do monitoramento
@@ -102,6 +112,7 @@ export interface PriceComparisonSummary {
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
   discrepancies?: Array<Record<string, unknown>>; // Lista de discrepâncias detectadas
   alerts?: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
+  ignored_due_to_inactive?: boolean; // Indica se comparação foi ignorada por indisponibilidade
 }
 
 /**

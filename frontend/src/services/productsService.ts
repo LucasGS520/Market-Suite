@@ -74,24 +74,44 @@ const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct 
       ? false
       : product.availability ?? undefined;
 
+  const normalizedSummary = comparisonSummary
+    ? {
+        ...comparisonSummary,
+        competitors_count: comparisonSummary.competitors_count ?? 0,
+        competitors_with_price_count: comparisonSummary.competitors_with_price_count ?? 0,
+        ignored_due_to_inactive: Boolean(comparisonSummary.ignored_due_to_inactive),
+      }
+    : comparisonSummary;
+
   const competitivenessStatus = sanitizeCompetitivenessStatus(
-    product.competitiveness_status || comparisonSummary?.competitiveness_status || undefined,
-    comparisonSummary
+    product.competitiveness_status || normalizedSummary?.competitiveness_status || undefined,
+    normalizedSummary
   );
+
+  let displayStatus = product.display_status;
+  const hasCompetitors = (normalizedSummary?.competitors_with_price_count ?? 0) > 0;
+
+  if (inferredAvailability === false || normalizedSummary?.ignored_due_to_inactive) {
+    displayStatus = 'inactive';
+  }
+
+  if (
+    displayStatus &&
+    ['competitive', 'attention', 'urgent'].includes(displayStatus) &&
+    (!hasCompetitors || inferredAvailability === false)
+  ) {
+    displayStatus = hasCompetitors ? displayStatus : 'no_competitors';
+    if (inferredAvailability === false) displayStatus = 'inactive';
+  }
 
   return {
     ...product,
     current_price: product.current_price ?? null,
     availability: inferredAvailability,
     is_paused: product.is_paused ?? false,
-    comparison_summary: comparisonSummary
-      ? {
-          ...comparisonSummary,
-          competitors_count: comparisonSummary.competitors_count ?? 0,
-          competitors_with_price_count: comparisonSummary.competitors_with_price_count ?? 0,
-        }
-      : comparisonSummary,
+    comparison_summary: normalizedSummary,
     competitiveness_status: competitivenessStatus,
+    display_status: displayStatus,
   };
 };
 

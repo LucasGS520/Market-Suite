@@ -114,6 +114,16 @@ def _should_replace_with_scraped(
         return True
     return existing_name.strip().casefold() == fallback_name.strip().casefold()
 
+def _resolve_availability(
+    scraped_availability: bool | None, last_status: str | None
+) -> bool | None:
+    """ Determina disponibilidade priorizando sinais de indisponibilidade """
+    unavailable_statuses = {"unavailable", "removed", "sold_out"}
+    normalized_status = (last_status or "").strip().lower()
+    if normalized_status in unavailable_statuses:
+        return False
+    return scraped_availability
+
 def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_url: str) -> MonitoredProduct | None:
     """ Busca produto específico combinando usuário e URL normalizada """
 
@@ -263,7 +273,7 @@ def create_or_update_monitored_product_scraped(
 
     if existing:
         resolved_price = normalize_scraped_price(scraped_info.current_price)
-        availability = scraped_info.availability
+        availability = _resolve_availability(scraped_info.availability, scraped_info.last_status)
         last_status = scraped_info.last_status or existing.last_status
         inactive_due_to_data = availability is False or resolved_price is None
 
@@ -362,7 +372,7 @@ def create_or_update_monitored_product_scraped(
     #Se não existir, cria o registro
     resolved_price = normalize_scraped_price(scraped_info.current_price)
     resolved_currency = currency or scraped_info.currency
-    availability = scraped_info.availability
+    availability = _resolve_availability(scraped_info.availability, scraped_info.last_status)
     last_status = scraped_info.last_status
     inactive_due_to_data = availability is False or resolved_price is None
 
