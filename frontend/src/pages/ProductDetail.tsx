@@ -44,6 +44,8 @@ import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
 import { formatDateOnly, formatDateTime, formatRelativeTime } from '../utils/date';
 import TruncatedText from '../utils/TruncatedText';
+import MonitoredStateBadge from '../components/MonitoredStateBadge';
+import { resolveMonitoredStatus } from '../utils/monitoredStatus';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -162,52 +164,17 @@ const ProductDetail: React.FC = () => {
   }
 
   /**
-   * Retorna a cor do Chip de status de competitividade com base no status recebido.
-   * Status esperados: 'competitivo', 'atencao', 'urgente'.
-   */
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'competitivo':
-        return 'success';
-      case 'atencao':
-        return 'warning';
-      case 'urgente':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
-
-  /**
-   * Retorna o rótulo legível em PT-BR para o status de competitividade.
-   */
-  const getStatusLabel = (status?: string, availability?: boolean) => {
-    if (availability === false) {
-      return 'Inativo';
-    }
-
-    switch (status) {
-      case 'competitivo':
-        return 'Competitivo';
-      case 'atencao':
-        return 'Atenção';
-      case 'urgente':
-        return 'Urgente';
-      default:
-        return 'Sem status';
-    }
-  };
-
-  /**
    * Define estado do item (monitorado ou concorrente) para guiar rótulos e cores.
    */
   const resolveItemState = (
     value: string | number | null,
     availability?: boolean,
     lastScrapedAt?: string | null,
+    isPaused?: boolean,
   ) => {
     const normalized = normalizePriceInput(value);
 
+    if (isPaused) return 'paused' as const;
     if (availability === false) return 'inactive' as const;
     if (availability === true && normalized === null && lastScrapedAt) return 'no_price' as const;
     if (!lastScrapedAt && normalized === null) return 'collecting' as const;
@@ -222,9 +189,18 @@ const ProductDetail: React.FC = () => {
     availability?: boolean,
     lastStatus?: string,
     lastScrapedAt?: string | null,
+    isPaused?: boolean,
   ) => {
     const normalized = normalizePriceInput(value);
-    const state = resolveItemState(value, availability, lastScrapedAt);
+    const state = resolveItemState(value, availability, lastScrapedAt, isPaused);
+
+    if (state === 'paused') {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Monitoramento pausado
+        </Typography>
+      );
+    }
 
     if (state === 'inactive') {
       return (
@@ -306,7 +282,7 @@ const ProductDetail: React.FC = () => {
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
   const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
-  const monitoredState = resolveItemState(product.current_price, product.availability, product.last_scraped_at);
+  const monitoredStatus = resolveMonitoredStatus(product);
 
   return (
     <Layout>
@@ -331,11 +307,18 @@ const ProductDetail: React.FC = () => {
             
             {/* Cartão com informações principais do produto */}
             <Card
-              elevation={monitoredState === 'inactive' ? 0 : 2}
+              elevation={monitoredStatus === 'inactive' || monitoredStatus === 'paused' ? 0 : 2}
               sx={{
                 border: '1px solid',
-                borderColor: monitoredState === 'inactive' ? 'divider' : 'transparent',
-                backgroundColor: monitoredState === 'inactive' ? 'grey.50' : 'background.paper',
+                borderColor:
+                  monitoredStatus === 'inactive' || monitoredStatus === 'paused'
+                    ? 'divider'
+                    : 'transparent',
+                backgroundColor:
+                  monitoredStatus === 'inactive' || monitoredStatus === 'paused'
+                    ? 'grey.50'
+                    : 'background.paper',
+                opacity: monitoredStatus === 'inactive' || monitoredStatus === 'paused' ? 0.8 : 1,
               }}
             >
               <CardContent>
@@ -375,10 +358,7 @@ const ProductDetail: React.FC = () => {
                           tooltip={true}
                         />
                       </Box>
-                      <Chip
-                        label={getStatusLabel(product.competitiveness_status, product.availability)}
-                        color={product.availability === false ? 'default' : getStatusColor(product.competitiveness_status)}
-                      />
+                      <MonitoredStateBadge product={product} />
                     </Box>
 
                     <Grid container spacing={2} sx={{ mt: 2 }}>
@@ -392,6 +372,7 @@ const ProductDetail: React.FC = () => {
                             product.availability,
                             product.last_status,
                             product.last_scraped_at,
+                            product.is_paused,
                           )}
                         </Typography>
                       </Grid>
@@ -601,6 +582,7 @@ const ProductDetail: React.FC = () => {
                                   competitor.availability,
                                   competitor.last_status,
                                   competitor.last_scraped_at,
+                                  competitor.is_paused,
                                 )}
                               </TableCell>
                               <TableCell align="center">
@@ -608,6 +590,7 @@ const ProductDetail: React.FC = () => {
                                   label={competitor.availability ? 'Disponível' : 'Indisponível'}
                                   color={competitor.availability ? 'success' : 'default'}
                                   size="small"
+                                  title={competitor.availability ? 'Disponível no site' : 'Indisponível no site'}
                                 />
                               </TableCell>
                               <TableCell align="center">
@@ -615,6 +598,7 @@ const ProductDetail: React.FC = () => {
                                   label={competitor.is_paused ? 'Pausado' : 'Ativo'}
                                   color={competitor.is_paused ? 'default' : 'success'}
                                   size="small"
+                                  title={competitor.is_paused ? 'Monitoramento pausado' : 'Monitoramento ativo'}
                                 />
                               </TableCell>
                               <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>

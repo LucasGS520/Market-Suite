@@ -11,6 +11,27 @@ import {
 } from '../types';
 
 /**
+ * Normaliza campos centrais de produtos monitorados para evitar nullables inconsistentes.
+ * Garante que disponibilidade, pausa e resumo de comparação estejam preenchidos e coerentes.
+ */
+const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct => {
+  const comparisonSummary =
+    product.comparison_summary === undefined ? undefined : product.comparison_summary;
+
+  const competitivenessStatus =
+    product.competitiveness_status || comparisonSummary?.competitiveness_status || undefined;
+
+  return {
+    ...product,
+    current_price: product.current_price ?? null,
+    availability: product.availability ?? undefined,
+    is_paused: product.is_paused ?? false,
+    comparison_summary: comparisonSummary,
+    competitiveness_status: competitivenessStatus,
+  };
+};
+
+/**
  * Serviço de produtos
  *
  * Responsável por encapsular as chamadas HTTP para endpoints relacionados a:
@@ -54,7 +75,12 @@ export const productsService = {
       '/monitored',
       { params: sanitizedParams }
     );
-    return response.data;
+    const normalizedItems = (response.data.items || []).map(normalizeMonitoredProduct);
+
+    return {
+      ...response.data,
+      items: normalizedItems,
+    };
   },
 
   /**
@@ -63,7 +89,7 @@ export const productsService = {
    */
   async getFeaturedProducts(): Promise<MonitoredProduct[]> {
     const response = await apiClient.get<MonitoredProduct[]>('/monitored/featured');
-    return response.data;
+    return (response.data || []).map(normalizeMonitoredProduct);
   },
 
   /**
@@ -73,7 +99,7 @@ export const productsService = {
     productId: string
   ): Promise<MonitoredProduct> {
     const response = await apiClient.get<MonitoredProduct>(`/monitored/${productId}`);
-    return response.data;
+    return normalizeMonitoredProduct(response.data);
   },
 
   /**

@@ -16,7 +16,6 @@ import {
   CircularProgress,
   Alert,
   Button,
-  Chip,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import {
@@ -30,6 +29,9 @@ import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import TruncatedText from '../utils/TruncatedText';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
+import MonitoredStateBadge from '../components/MonitoredStateBadge';
+import { resolveMonitoredStatus } from '../utils/monitoredStatus';
+import type { MonitoredProduct } from '../types';
 
 /**
  * Tipagens locais para maior clareza e manutenção.
@@ -40,16 +42,6 @@ interface DashboardStats {
   active_alerts?: number;
   ok_prices?: number;
   total_competitors?: number;
-}
-
-interface FeaturedProduct {
-  id: string | number;
-  name: string;
-  url?: string;
-  thumbnail?: string;
-  current_price: string | number | null;
-  last_status?: string;
-  competitiveness_status?: 'competitivo' | 'atencao' | 'urgente' | string;
 }
 
 /**
@@ -70,7 +62,7 @@ const Dashboard: React.FC = () => {
   });
 
   // Query para obter produtos em destaque
-  const { data: featuredProducts, isLoading: featuredLoading } = useQuery<FeaturedProduct[]>({
+  const { data: featuredProducts, isLoading: featuredLoading } = useQuery<MonitoredProduct[]>({
     queryKey: ['featuredProducts'],
     queryFn: () => productsService.getFeaturedProducts(),
   });
@@ -126,64 +118,37 @@ const Dashboard: React.FC = () => {
   ];
 
   /**
-   * mapStatus => getStatusColor
-   *
-   * Retorna a cor do Chip do MUI baseado no status de competitividade.
-   * Utilizar os tokens de cor do MUI ('success' | 'warning' | 'error' | 'default')
-   * para manter consistência visual com a biblioteca.
+   * Exibe preço ou mensagem de estado para o produto em destaque.
    */
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'competitivo':
-        return 'success';
-      case 'atencao':
-        return 'warning';
-      case 'urgente':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
+  const renderPrice = (product: MonitoredProduct) => {
+    const normalized = normalizePriceInput(product.current_price);
+    const status = resolveMonitoredStatus(product);
 
-  /**
-   * Formata preços exibindo rótulo quando ainda não há valor disponível
-   */
-  /**
-   * Exibe preço ou mensagem de indisponibilidade com badge opcional de status.
-   */
-  const renderPrice = (value: string | number | null, lastStatus?: string) => {
-    const normalized = normalizePriceInput(value);
-    if (normalized === null) {
+    if (status === 'inactive') {
       return (
-        <Box display="flex" alignItems="center" gap={1}>
-          <Typography variant="body1" color="text.secondary">
-            Indisponível / Pausado
-          </Typography>
-          {lastStatus && <Chip label={lastStatus} size="small" color="default" />}
-        </Box>
+        <Typography variant="body1" color="text.secondary">
+          Indisponível no site
+        </Typography>
       );
     }
-    
-    return formatCurrency(normalized);
-  };
 
-  /**
-   * mapStatus => getStatusLabel
-   *
-   * Converte chaves internas de status em rótulos legíveis para o usuário.
-   * Mantido em PT-BR para consistência com a interface.
-   */
-  const getStatusLabel = (status?: string) => {
-    switch (status) {
-      case 'competitivo':
-        return 'Competitivo';
-      case 'atencao':
-        return 'Atenção';
-      case 'urgente':
-        return 'Urgente';
-      default:
-        return 'Sem Status';
+    if (status === 'paused') {
+      return (
+        <Typography variant="body1" color="text.secondary">
+          Monitoramento pausado
+        </Typography>
+      );
     }
+
+    if (status === 'no_price' || status === 'collecting') {
+      return (
+        <Typography variant="body1" color="text.secondary">
+          Coletando dados...
+        </Typography>
+      );
+    }
+
+    return formatCurrency(normalized, { fallbackLabel: 'Sem preço' });
   };
 
   return (
@@ -241,59 +206,61 @@ const Dashboard: React.FC = () => {
         </Box>
       ) : featuredProducts && featuredProducts.length > 0 ? (
         <Grid container spacing={3}>
-          {featuredProducts.map((product) => (
-            <Grid item xs={12} md={6} lg={4} key={product.id}>
-              <Card elevation={2}>
-                <CardContent>
-                  <Box display="flex" gap={2}>
-                    {/* Thumbnail do produto (se existir) */}
-                    {product.thumbnail && (
-                      <Box
-                        component="img"
-                        src={product.thumbnail}
-                        alt={product.name}
-                        sx={{
-                          width: 80,
-                          height: 80,
-                          objectFit: 'cover',
-                          borderRadius: 1,
-                        }}
-                      />
-                    )}
-                    <Box flex={1}>
-                      <TruncatedText text={product.name} variant="h6" lines={2} maxWidth="100%" tooltip={false} />
-                      <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
-                      <Box display="flex" alignItems="center" gap={1} mt={1}>
-                        {/* Chip indicando status de competitividade */}
-                        <Chip
-                          label={getStatusLabel(product.competitiveness_status)}
-                          color={getStatusColor(product.competitiveness_status)}
-                          size="small"
+          {featuredProducts.map((product) => {
+            const productStatus = resolveMonitoredStatus(product);
+            const disableActions = productStatus === 'inactive' || productStatus === 'paused';
+
+            return (
+              <Grid item xs={12} md={6} lg={4} key={product.id}>
+                <Card
+                  elevation={disableActions ? 0 : 2}
+                  sx={{ opacity: disableActions ? 0.75 : 1 }}
+                >
+                  <CardContent>
+                    <Box display="flex" gap={2}>
+                      {/* Thumbnail do produto (se existir) */}
+                      {product.thumbnail && (
+                        <Box
+                          component="img"
+                          src={product.thumbnail}
+                          alt={product.name}
+                          sx={{
+                            width: 80,
+                            height: 80,
+                            objectFit: 'cover',
+                            borderRadius: 1,
+                          }}  
                         />
-                        {/* Exibição de preço com formatação mínima.
-                            Usamos parseFloat por segurança caso a API retorne string. */}
-                        <Typography variant="h6" color="primary">
-                          {renderPrice(product.current_price, product.last_status)}
-                        </Typography>
+                      )}
+                      <Box flex={1}>
+                        <TruncatedText text={product.name} variant="h6" lines={2} maxWidth="100%" tooltip={false} />
+                        <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
+                        <Box display="flex" alignItems="center" gap={1} mt={1}>
+                          <MonitoredStateBadge product={product} />
+                          <Typography variant="h6" color="primary">
+                            {renderPrice(product)}
+                          </Typography>
+                        </Box>
                       </Box>
                     </Box>
-                  </Box>
 
-                  {/* Botão para navegar aos detalhes do produto */}
-                  <Button
-                    variant="contained"
-                    size="small"
-                    fullWidth
-                    sx={{ mt: 2 }}
-                    onClick={() => navigate(`/product/${product.id}`)}
-                    startIcon={<TrendingUpIcon />}
-                  >
-                    Ver Detalhes
-                  </Button>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
+                    {/* Botão para navegar aos detalhes do produto */}
+                    <Button
+                      variant="contained"
+                      size="small"
+                      fullWidth
+                      sx={{ mt: 2 }}
+                      onClick={() => navigate(`/product/${product.id}`)}
+                      startIcon={<TrendingUpIcon />}
+                      disabled={disableActions}
+                    >
+                      Ver Detalhes
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            );
+          })}
         </Grid>
       ) : (
         // Caso não existam produtos em destaque, informar ao usuário

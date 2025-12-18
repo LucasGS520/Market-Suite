@@ -19,7 +19,6 @@ import {
   InputLabel,
   Card,
   CardContent,
-  Chip,
   Table,
   TableBody,
   TableCell,
@@ -50,6 +49,8 @@ import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
 import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types';
 import TruncatedText from '../utils/TruncatedText';
+import MonitoredStateBadge from '../components/MonitoredStateBadge';
+import { resolveMonitoredStatus, statusToBadge } from '../utils/monitoredStatus';
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -105,13 +106,7 @@ const Products: React.FC = () => {
   const visibleItems = useMemo(() => {
     if (!data?.items) return [] as MonitoredProduct[];
 
-    return data.items.filter((product) => {
-      const parsedPrice = parseToNumber(product.current_price);
-      const hasScrapingHistory = Boolean(product.last_scraped_at || product.last_checked);
-      const hasAvailabilityInfo = product.availability !== undefined && product.availability !== null;
-
-      return hasScrapingHistory || parsedPrice !== null || hasAvailabilityInfo;
-    });
+    return data.items;
   }, [data]);
 
   const paginatedItems = useMemo(() => {
@@ -178,62 +173,19 @@ const Products: React.FC = () => {
   };
 
   /**
-   * Retorna a cor do Chip de status com base no status de competitividade.
-   * Usado para manter consistência visual com MUI.
-   */
-  const getStatusColor = (status?: string): 'success' | 'warning' | 'error' | 'default' => {
-    switch (status) {
-      case 'competitivo':
-        return 'success';
-      case 'atencao':
-        return 'warning';
-      case 'urgente':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
-
-  /**
-   * Define o estado visual do produto para controlar mensagens e estilos dos cards.
-   */
-  const resolveProductState = (product: MonitoredProduct) => {
-    const parsedPrice = parseToNumber(product.current_price);
-
-    if (product.availability === false) {
-      return 'inactive' as const;
-    }
-
-    if (product.availability === true && parsedPrice === null) {
-      return 'no_price' as const;
-    }
-
-    if (!product.last_scraped_at && parsedPrice === null) {
-      return 'collecting' as const;
-    }
-
-    return parsedPrice !== null ? ('active' as const) : ('unknown' as const);
-  };
-
-  /**
-   * Evita exibir cards logo após a criação, enquanto a primeira coleta não finalizou.
-   */
-
-
-  /**
-   * Mostra preço ou mensagem contextual sem spinner infinito.
+   * Define mensagens exibidas para o preço com base no status resolvido.
    */
   const renderMonitoredPrice = (product: MonitoredProduct) => {
     const parsed = parseToNumber(product.current_price);
-    const state = resolveProductState(product);
+    const status = resolveMonitoredStatus(product);
 
-    if (state === 'inactive') {
+    if (status === 'inactive') {
       return (
         <Box display="flex" flexDirection="column" gap={0.5}>
           <Typography variant="body1" color="text.secondary">
             Indisponível
           </Typography>
-          {product.last_status && <Chip label={product.last_status} size="small" color="default" />}
+          {product.last_status && <MonitoredStateBadge product={product} />}
           {product.last_scraped_at && (
             <Typography variant="caption" color="text.secondary">
               Última coleta: {new Date(product.last_scraped_at).toLocaleString('pt-BR')}
@@ -243,7 +195,22 @@ const Products: React.FC = () => {
       );
     }
 
-    if (state === 'no_price') {
+    if (status === 'paused') {
+      return (
+        <Box display="flex" flexDirection="column" gap={0.5}>
+          <Typography variant="body1" color="text.secondary">
+            Monitoramento pausado
+          </Typography>
+          {product.last_scraped_at && (
+            <Typography variant="caption" color="text.secondary">
+              Última coleta: {new Date(product.last_scraped_at).toLocaleString('pt-BR')}
+            </Typography>
+          )}
+        </Box>
+      );
+    }
+
+    if (status === 'no_price') {
       return (
         <Box display="flex" flexDirection="column" gap={0.5}>
           <Typography variant="body1" color="text.secondary">
@@ -258,7 +225,7 @@ const Products: React.FC = () => {
       );
     }
 
-    if (state === 'collecting') {
+    if (status === 'collecting') {
       return (
         <Typography variant="body1" color="text.secondary">
           Coletando dados...
@@ -305,43 +272,28 @@ const Products: React.FC = () => {
   };
 
   /**
-   * Retorna label legível para o status de competitividade ou indisponibilidade.
-   */
-  const getStatusLabel = (product: MonitoredProduct) => {
-    if (resolveProductState(product) === 'inactive') {
-      return 'Inativo';
-    }
-
-    switch (product.competitiveness_status) {
-      case 'competitivo':
-        return 'Competitivo';
-      case 'atencao':
-        return 'Atenção';
-      case 'urgente':
-        return 'Urgente';
-      default:
-        return 'Sem status';
-    }
-  };
-
-  /**
-   * Define cor do chip e da borda do card para modo lista.
+   * Define cor do destaque visual com base no badge centralizado.
    */
   const resolveVisualEmphasis = (product: MonitoredProduct) => {
-    const state = resolveProductState(product);
-    const color = state === 'inactive' ? 'default' : getStatusColor(product.competitiveness_status);
+    const status = resolveMonitoredStatus(product);
+    const badgeMeta = statusToBadge[status] ?? statusToBadge.unknown;
+    const isDisabled = status === 'inactive' || status === 'paused';
 
-    const borderColorMap: Record<'success' | 'warning' | 'error' | 'default', string> = {
+    const borderColorMap: Record<string, string> = {
       success: 'success.light',
       warning: 'warning.light',
       error: 'error.light',
       default: 'divider',
+      info: 'info.light',
     };
 
+    const colorKey = badgeMeta.color ?? 'default';
+
     return {
-      chipColor: color as 'success' | 'warning' | 'error' | 'default',
-      borderColor: borderColorMap[color],
-      isInactive: state === 'inactive',
+      chipColor: badgeMeta.color,
+      borderColor: borderColorMap[colorKey] || 'divider',
+      isInactive: isDisabled,
+      status,
     };
   };
 
@@ -479,6 +431,7 @@ const Products: React.FC = () => {
                 0;
               const rankingLabel = `${getRankingLabel(product)} | ${activeCompetitors} Concorrentes`;
               const visualEmphasis = resolveVisualEmphasis(product);
+              const disableActions = visualEmphasis.status === 'inactive' || visualEmphasis.status === 'paused';
 
               return (
                 <Grid item xs={12} key={product.id}>
@@ -488,6 +441,7 @@ const Products: React.FC = () => {
                       border: '1px solid',
                       borderColor: viewMode === 'list' ? visualEmphasis.borderColor : 'divider',
                       backgroundColor: visualEmphasis.isInactive ? 'grey.50' : 'background.paper',
+                      opacity: visualEmphasis.isInactive ? 0.7 : 1,
                     }}
                   >
                     <CardContent>
@@ -521,11 +475,7 @@ const Products: React.FC = () => {
                                 maxWidth={420}
                               />
                             </Box>
-                            <Chip
-                              label={getStatusLabel(product)}
-                              color={visualEmphasis.chipColor}
-                              size="small"
-                            />
+                            <MonitoredStateBadge product={product} />
                           </Box>
 
                           {/* Informações de preço resumidas */}
@@ -580,6 +530,7 @@ const Products: React.FC = () => {
                                 variant="contained"
                                 size="small"
                                 onClick={() => navigate(`/product/${product.id}`)}
+                                disabled={disableActions}
                               >
                                 Ver Detalhes
                               </Button>
@@ -664,9 +615,15 @@ const Products: React.FC = () => {
                   const isCheaperOrEqual = differenceValue !== null ? differenceValue <= 0 : null;
 
                   const visualEmphasis = resolveVisualEmphasis(product);
+                  const disableActions = visualEmphasis.status === 'inactive' || visualEmphasis.status === 'paused';
 
                   return (
-                    <TableRow key={product.id} hover selected={visualEmphasis.isInactive}>
+                    <TableRow
+                      key={product.id}
+                      hover={!visualEmphasis.isInactive}
+                      selected={visualEmphasis.isInactive}
+                      sx={{ opacity: visualEmphasis.isInactive ? 0.7 : 1 }}
+                    >
                       <TableCell sx={{ maxWidth: 360, width: 360 }}>
                         <Box display="flex" alignItems="center" gap={1}>
                           {product.thumbnail && (
@@ -711,11 +668,7 @@ const Products: React.FC = () => {
                       <TableCell align="center">{competitorsCount}</TableCell>
                       <TableCell align="center">{rankingLabel}</TableCell>
                       <TableCell align="center">
-                        <Chip
-                          label={getStatusLabel(product)}
-                          color={visualEmphasis.chipColor}
-                          size="small"
-                        />
+                        <MonitoredStateBadge product={product} />
                       </TableCell>
                       <TableCell align="center">
                         <Box display="flex" justifyContent="center" gap={1}>
@@ -734,6 +687,7 @@ const Products: React.FC = () => {
                             variant="contained"
                             size="small"
                             onClick={() => navigate(`/product/${product.id}`)}
+                            disabled={disableActions}
                           >
                             Ver Detalhes
                           </Button>
