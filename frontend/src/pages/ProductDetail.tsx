@@ -47,6 +47,7 @@ import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
+import { MonitoredProduct } from '../types';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -65,6 +66,9 @@ const ProductDetail: React.FC = () => {
   const [competitorName, setCompetitorName] = useState('');
   const [competitorFeedback, setCompetitorFeedback] = useState<string | null>(null);
   const [competitorError, setCompetitorError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   // Query: detalhes do produto monitorado
   const { data: product, isLoading: productLoading, error: productError } = useQuery({
@@ -110,8 +114,88 @@ const ProductDetail: React.FC = () => {
     },
     onError: () => {
       // Orienta o usuário a revisar a URL ou a sessão antes de tentar novamente
-      setCompetitorError('Não foi possível adicionar concorrente. Revise a URL e tente novamente')
+      setCompetitorError('Não foi possível adicionar concorrente. Revise a URL e tente novamente');
     }
+  });
+
+  /**
+   * Mutations de pausa e retomada com atualização otimista na cache do produto.
+   */
+  const pauseMonitoredMutation = useMutation({
+    mutationFn: () => productsService.pauseMonitored(id!),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['monitoredProduct', id] });
+      const previous = queryClient.getQueryData<MonitoredProduct | undefined>(['monitoredProduct', id]);
+      const optimistic: MonitoredProduct | undefined = previous
+        ? {
+            ...previous,
+            paused: true,
+            is_paused: true,
+            paused_at: new Date().toISOString(),
+            display_status: 'paused',
+          }
+        : previous;
+      if (optimistic) {
+        queryClient.setQueryData(['monitoredProduct', id], optimistic);
+      }
+      return { previous };
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['monitoredProduct', id], data);
+      setActionSuccess('Monitoramento pausado com sucesso.');
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['monitoredProduct', id], context.previous);
+      }
+      setActionError('Não foi possível pausar o monitoramento. Tente novamente.');
+    },
+  });
+
+  const resumeMonitoredMutation = useMutation({
+    mutationFn: () => productsService.resumeMonitored(id!),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['monitoredProduct', id] });
+      const previous = queryClient.getQueryData<MonitoredProduct | undefined>(['monitoredProduct', id]);
+      const optimistic: MonitoredProduct | undefined = previous
+        ? {
+            ...previous,
+            paused: false,
+            is_paused: false,
+            paused_at: null,
+            display_status: previous.display_status === 'paused' ? 'unknown' : previous.display_status,
+          }
+        : previous;
+      if (optimistic) {
+        queryClient.setQueryData(['monitoredProduct', id], optimistic);
+      }
+      return { previous };
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['monitoredProduct', id], data);
+      setActionSuccess('Monitoramento retomado. Nova coleta será agendada.');
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['monitoredProduct', id], context.previous);
+      }
+      setActionError('Não foi possível retomar o monitoramento. Tente novamente.');
+    },
+  });
+
+  const deleteMonitoredMutation = useMutation({
+    mutationFn: () => productsService.deleteMonitoredProduct(id!),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ['monitoredProduct', id] });
+      queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
+      setConfirmDeleteOpen(false);
+      window.alert('Produto removido com sucesso. Histórico e concorrentes foram descartados.');
+      navigate('/products');
+    },
+    onError: () => {
+      setConfirmDeleteOpen(false);
+      setActionError('Falha ao remover produto. Verifique sua conexão e tente novamente.');
+    },
   });
 
   /**
@@ -140,10 +224,26 @@ const ProductDetail: React.FC = () => {
   };
 
   /**
-   * Exibe aviso simples para ações que ainda não foram conectadas ao backend.
+   * Alterna monitoramento aplicando pause/resume com atualização otimista.
    */
-  const handlePlaceholderAction = (message: string) => {
-    alert(message);
+  const handleToggleMonitoring = () => {
+    if (!id) return;
+    setActionSuccess(null);
+    setActionError(null);
+    if (product?.paused ?? product?.is_paused) {
+      resumeMonitoredMutation.mutate();
+    } else {
+      pauseMonitoredMutation.mutate();
+    }
+  };
+
+  /**
+   * Dispara remoção após confirmação explícita.
+   */
+  const handleDeleteProduct = () => {
+    if (!id) return;
+    setActionError(null);
+    deleteMonitoredMutation.mutate();
   };
 
   // Estado de carregamento do produto: mostra spinner enquanto carrega
@@ -271,11 +371,12 @@ const ProductDetail: React.FC = () => {
   const summaryAlerts = summary?.alerts || [];
   const highlightedAlerts = summaryAlerts.slice(0, 3);
   const monitoredSince = product.created_at;
-  const monitoringPaused = product.is_paused ?? false;
+  const monitoringPaused = (product.paused ?? product.is_paused) ?? false;
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
   const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
   const monitoredStatus = resolveMonitoredStatus(product);
+  const actionBusy = pauseMonitoredMutation.isPending || resumeMonitoredMutation.isPending || deleteMonitoredMutation.isPending;
 
   return (
     <Layout>
@@ -691,6 +792,16 @@ const ProductDetail: React.FC = () => {
                 <Typography variant="h6" gutterBottom>
                   Ações Rápidas
                 </Typography>
+                {actionError && (
+                  <Alert severity="error" sx={{ mb: 1 }}>
+                    {actionError}
+                  </Alert>
+                )}
+                {actionSuccess && (
+                  <Alert severity="success" sx={{ mb: 1 }}>
+                    {actionSuccess}
+                  </Alert>
+                )}
                 <Box display="flex" flexDirection="column" gap={1.5}>
                   <Button
                     variant="contained"
@@ -715,26 +826,30 @@ const ProductDetail: React.FC = () => {
                   >
                     Ver Anúncio
                   </Button>
-                  <Tooltip title="Funcionalidade não implementada — apenas visual por ora" placement="top">
-                    <Button
-                      variant="outlined"
-                      color="warning"
-                      startIcon={<PauseIcon />}
-                      onClick={() => handlePlaceholderAction('Funcionalidade não implementada: pausar monitoramento ainda não disponível.')}
-                    >
-                      {monitoringPaused ? 'Ativar Monitoramento' : 'Pausar Monitoramento'}
-                    </Button>
-                  </Tooltip>
-                  <Tooltip title="Remoção de produto não implementada" placement="top">
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      startIcon={<DeleteIcon />}
-                      onClick={() => handlePlaceholderAction('Funcionalidade não implementada: remoção de produto ainda não disponível.')}
-                    >
-                      Remover Produto
-                    </Button>
-                  </Tooltip>
+                  <Button
+                    variant="outlined"
+                    color={monitoringPaused ? 'success' : 'warning'}
+                    startIcon={<PauseIcon />}
+                    onClick={handleToggleMonitoring}
+                    disabled={actionBusy}
+                  >
+                    {pauseMonitoredMutation.isPending || resumeMonitoredMutation.isPending ? (
+                      <CircularProgress size={20} />
+                    ) : monitoringPaused ? (
+                      'Retomar Monitoramento'
+                    ) : (
+                      'Pausar Monitoramento'
+                    )}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => setConfirmDeleteOpen(true)}
+                    disabled={actionBusy}
+                  >
+                    {deleteMonitoredMutation.isPending ? <CircularProgress size={20} /> : 'Remover Produto'}
+                  </Button>
                 </Box>
               </CardContent>
             </Card>
@@ -824,6 +939,34 @@ const ProductDetail: React.FC = () => {
             disabled={!competitorUrl || createCompetitorMutation.isPending}
           >
             {createCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Adicionar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo de confirmação para remover monitorado */}
+      <Dialog
+        open={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Remover produto monitorado</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Esta ação remove o monitorado, histórico de preços e concorrentes de forma definitiva. Deseja continuar?
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeleteOpen(false)} color="secondary">
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleDeleteProduct}
+            variant="contained"
+            color="error"
+            disabled={deleteMonitoredMutation.isPending}
+          >
+            {deleteMonitoredMutation.isPending ? <CircularProgress size={24} /> : 'Remover'}
           </Button>
         </DialogActions>
       </Dialog>

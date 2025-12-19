@@ -105,11 +105,16 @@ const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct 
     if (inferredAvailability === false) displayStatus = 'inactive';
   }
 
+  const normalizedPaused = product.paused ?? product.is_paused ?? false;
+
   return {
     ...product,
     current_price: product.current_price ?? null,
     availability: inferredAvailability,
-    is_paused: product.is_paused ?? false,
+    is_paused: normalizedPaused,
+    paused: normalizedPaused,
+    paused_at: product.paused_at ?? null,
+    next_check_at: product.next_check_at ?? null,
     comparison_summary: normalizedSummary,
     competitiveness_status: competitivenessStatus,
     display_status: displayStatus,
@@ -202,13 +207,28 @@ export const productsService = {
   },
 
   /**
+   * Pausa um produto monitorado e retorna o estado atualizado.
+   */
+  async pauseMonitored(productId: string): Promise<MonitoredProduct> {
+    const response = await apiClient.post<MonitoredProduct>(`/monitored/${productId}/pause`);
+    return normalizeMonitoredProduct(response.data);
+  },
+
+  /**
+   * Retoma o monitoramento de um produto e retorna o estado atualizado.
+   */
+  async resumeMonitored(productId: string): Promise<MonitoredProduct> {
+    const response = await apiClient.post<MonitoredProduct>(`/monitored/${productId}/resume`);
+    return normalizeMonitoredProduct(response.data);
+  },
+
+  /**
    * Remove um produto monitorado
    */
   async deleteMonitoredProduct(
     productId: string
-  ): Promise<MonitoredProduct> {
-    const response = await apiClient.delete<MonitoredProduct>(`/monitored/${productId}`);
-    return response.data;
+  ): Promise<void> {
+    await apiClient.delete(`/monitored/${productId}`);
   },
 
   /**

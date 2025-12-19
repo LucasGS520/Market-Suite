@@ -87,7 +87,7 @@ export const statusToBadge: Record<MonitoredStatusKey, MonitoredBadgeMeta> = {
  */
 export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStatusKey => {
   const price = normalizePriceInput(product.current_price);
-  const isPaused = product.is_paused ?? false;
+  const isPaused = product.is_paused ?? product.paused ?? false;
   const availability = product.availability as boolean | undefined;
   const competitiveness = product.competitiveness_status || product.comparison_summary?.competitiveness_status;
   const lastStatus = product.last_status;
