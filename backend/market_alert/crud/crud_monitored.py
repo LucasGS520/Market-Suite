@@ -791,7 +791,20 @@ def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
             .subquery()
         )
 
-        with db.begin():
+
+
+        # Em ambientes de teste ou quando o caller já iniciou uma transação
+        # o SQLAlchemy lança InvalidRequestError ao tentar iniciar outra
+        # transaction nesse mesmo `Session`. Para ser resiliente, usamos
+        # uma transação nested (savepoint) quando já houver uma transação
+        # ativa; caso contrário, abrimos a transação normal.
+        if db.in_transaction():
+            tx = db.begin_nested()
+        else:
+            tx = db.begin()
+
+        with tx:
+            # remove price history ligado ao monitorado e aos seus concorrentes
             db.query(PriceHistory).filter(
                 or_(
                     PriceHistory.monitored_product_id == monitored_id,
@@ -799,10 +812,12 @@ def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
                 )
             ).delete(synchronize_session=False)
 
+            # remove produtos concorrentes
             db.query(CompetitorProduct).filter(
-                CompetitorProduct.monitored_product_id == monitored_id
+                CompetitorProduct.monitored_product_id == monitored.id
             ).delete(synchronize_session=False)
 
+            # remove o monitorado
             db.delete(monitored)
 
         MONITORED_DELETED_TOTAL.inc()

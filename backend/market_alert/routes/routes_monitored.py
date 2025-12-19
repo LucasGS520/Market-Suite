@@ -182,7 +182,7 @@ def resume_product(request: Request, product_id: UUID, db: Session = Depends(get
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
     return response_payload
 
-@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{product_id}", status_code=status.HTTP_200_OK)
 def delete_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """ Endpoint para deletar um produto monitorado """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), product_id=str(product_id))
@@ -192,4 +192,4 @@ def delete_product(request: Request, product_id: UUID, db: Session = Depends(get
         user=user,
     )
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return {"success": True, "product_id": str(product_id)}
