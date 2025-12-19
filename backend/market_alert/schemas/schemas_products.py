@@ -110,3 +110,22 @@ class PaginatedCompetitorResponse(BaseModel):
     """ Envelope padronizado para retornar concorrentes paginados com metadados """
     items: list[CompetitorProductResponse]
     meta: PaginationMeta
+
+class CompetitorsListResponse(BaseModel):
+    """ Lista concorrentes e expõe contadores úteis para a UI """
+
+    items: list[CompetitorProductResponse]
+    competitors_total: int = Field(
+        ..., description="Quantidade total de concorrentes vinculados ao monitorado"
+    )
+    competitors_with_price_count: int = Field(
+        ..., description="Concorrentes com preço utilizável em métricas e comparações"
+    )
+    excluded_due_to_inactive_count: int = Field(
+        ...,
+        description=(
+            "Concorrentes ignorados em cálculos por falta de preço ou indisponibilidade"
+        ),
+    )
+    page: int = Field(..., description="Página atual baseada em 1")
+    per_page: int = Field(..., description="Quantidade de registros retornados por página")

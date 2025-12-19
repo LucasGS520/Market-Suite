@@ -9,7 +9,7 @@ import React from 'react';
 import { Typography } from '@mui/material';
 import type { TypographyProps } from '@mui/material';
 import { formatCurrency, normalizePriceInput } from './currency';
-import { resolveMonitoredStatus } from './monitoredStatus';
+import { resolveMonitoredStatus } from './productStatus';
 import type { MonitoredProduct } from '../types';
 
 interface RenderPriceOptions {

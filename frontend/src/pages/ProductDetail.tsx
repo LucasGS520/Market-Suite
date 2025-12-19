@@ -44,8 +44,8 @@ import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
 import { formatDateOnly, formatDateTime, formatRelativeTime } from '../utils/date';
 import TruncatedText from '../utils/TruncatedText';
-import MonitoredStateBadge from '../components/MonitoredStateBadge';
-import { resolveMonitoredStatus } from '../utils/monitoredStatus';
+import ProductStateBadge from '../components/ProductStateBadge';
+import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 
 /**
@@ -81,6 +81,8 @@ const ProductDetail: React.FC = () => {
         monitored_id: id!,
         page: 1,
         per_page: 100,
+        include_inactive: true,
+        include_paused: true,
       }),
     enabled: !!id,
   });
@@ -195,6 +197,7 @@ const ProductDetail: React.FC = () => {
     const normalized = normalizePriceInput(value);
     const state = resolveItemState(value, availability, lastScrapedAt, isPaused);
 
+    // Mostrar apenas texto compacto na coluna de preço: valor ou um rótulo curto.
     if (state === 'paused') {
       return (
         <Typography variant="body2" color="text.secondary">
@@ -205,32 +208,17 @@ const ProductDetail: React.FC = () => {
 
     if (state === 'inactive') {
       return (
-        <Box display="flex" flexDirection="column" gap={0.5}>
-          <Typography variant="body2" color="text.secondary">
-            Indisponível no site
-          </Typography>
-          {lastStatus && <Chip label={lastStatus} size="small" color="default" />}
-          {lastScrapedAt && (
-            <Typography variant="caption" color="text.secondary">
-              Última coleta: {formatDateTime(lastScrapedAt)}
-            </Typography>
-          )}
-        </Box>
+        <Typography variant="body2" color="text.secondary">
+          Indisponível
+        </Typography>
       );
     }
 
     if (state === 'no_price') {
       return (
-        <Box display="flex" flexDirection="column" gap={0.25}>
-          <Typography variant="body2" color="text.secondary">
-            Sem preço identificado
-          </Typography>
-          {lastScrapedAt && (
-            <Typography variant="caption" color="text.secondary">
-              Coletado em {formatDateOnly(lastScrapedAt)}
-            </Typography>
-          )}
-        </Box>
+        <Typography variant="body2" color="text.secondary">
+          Sem preço
+        </Typography>
       );
     }
 
@@ -242,7 +230,11 @@ const ProductDetail: React.FC = () => {
       );
     }
 
-    return formatCurrency(normalized, { fallbackLabel: 'Sem preço' });  
+    return (
+      <Typography variant="body1" color="text.primary">
+        {formatCurrency(normalized, { fallbackLabel: 'Sem preço' })}
+      </Typography>
+    );
   };
 
   const renderSummaryCurrency = (value?: string | number | null) => {
@@ -353,7 +345,7 @@ const ProductDetail: React.FC = () => {
                           tooltip={true}
                         />
                       </Box>
-                      <MonitoredStateBadge product={product} />
+                      <ProductStateBadge product={product} />
                     </Box>
 
                     <Grid container spacing={2} sx={{ mt: 2 }}>
@@ -470,6 +462,17 @@ const ProductDetail: React.FC = () => {
                   </Alert>
                 )}
 
+                {competitors && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    {`${competitors.competitors_with_price_count} de ${competitors.competitors_total} concorrentes serão considerados nas comparações.`}
+                    {competitors.excluded_due_to_inactive_count > 0 && (
+                      <>
+                        {` (${competitors.excluded_due_to_inactive_count} ignorados por indisponibilidade ou falta de preço).`}
+                      </>
+                    )}
+                  </Typography>
+                )}
+
                 {competitorsLoading ? (
                   // Spinner enquanto carrega a lista de concorrentes
                   <Box display="flex" justifyContent="center" py={4}>
@@ -478,7 +481,7 @@ const ProductDetail: React.FC = () => {
                 ) : competitors && competitors.items.length > 0 ? (
                   // Tabela de concorrentes quando houver itens
                   <TableContainer>
-                    <Table>
+                    <Table sx={{ tableLayout: 'fixed' }}>
                       <TableHead>
                         <TableRow>
                           <TableCell sx={{ maxWidth: 420, width: 420 }}>Produto</TableCell>
@@ -495,23 +498,39 @@ const ProductDetail: React.FC = () => {
                             Ações
                           </TableCell>
                         </TableRow>
-                      </TableHead>
-                      <TableBody>
+                        </TableHead>
+                        <TableBody>
                         {competitors.items.map((competitor) => {
                           const resolvedName =
                             competitor.name || competitor.display_name || fallbackFromUrl(competitor.url);
                           const isPendingName = !competitor.name && !competitor.display_name;
 
-                            const nameContent = (
-                              <TruncatedText
-                                text={resolvedName}
-                                variant="body2"
-                                lines={2}
-                                maxWidth={380}
-                                tooltip={false}
-                                sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
-                              />
-                            );
+                          const excludedFromMetrics =
+                            competitor.availability === false || competitor.current_price === null;
+                          const availabilityLabel =
+                            competitor.availability === false
+                              ? 'Indisponível'
+                              : competitor.availability === true
+                                ? 'Disponível'
+                                : 'Aguardando coleta';
+                          const availabilityColor =
+                            competitor.availability === false
+                              ? 'default'
+                              : competitor.availability === true
+                                ? 'success'
+                                : 'warning';
+
+                          
+                          const nameContent = (
+                            <TruncatedText
+                              text={resolvedName}
+                              variant="body2"
+                              lines={2}
+                              maxWidth={380}
+                              tooltip={false}
+                              sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
+                            />
+                          );                            
 
                           const wrappedName = isPendingName ? (
                             <Tooltip title="Coletando nome...">{nameContent}</Tooltip>
@@ -520,7 +539,17 @@ const ProductDetail: React.FC = () => {
                           );
 
                           return (
-                            <TableRow key={competitor.id}>
+                            <TableRow
+                              key={competitor.id}
+                              sx={{
+                                opacity: excludedFromMetrics ? 0.6 : 1,
+                                borderLeft: excludedFromMetrics ? '4px solid' : undefined,
+                                borderColor: excludedFromMetrics ? 'divider' : undefined,
+                                '&:hover': excludedFromMetrics
+                                  ? { backgroundColor: 'action.hover' }
+                                  : undefined,
+                              }}
+                            >
                               <TableCell sx={{ maxWidth: 420, width: 420 }}>
                                 <Box display="flex" alignItems="center" gap={1}>
                                   {competitor.thumbnail && (
@@ -552,7 +581,7 @@ const ProductDetail: React.FC = () => {
                                   </Box>
                                 </Box>
                               </TableCell>
-                              <TableCell align="right">
+                              <TableCell align="right" sx={{ verticalAlign: 'middle', width: 160 }}>
                                 {renderPrice(
                                   competitor.current_price,
                                   competitor.availability,
@@ -561,23 +590,27 @@ const ProductDetail: React.FC = () => {
                                   competitor.is_paused,
                                 )}
                               </TableCell>
-                              <TableCell align="center">
-                                <Chip
-                                  label={competitor.availability ? 'Disponível' : 'Indisponível'}
-                                  color={competitor.availability ? 'success' : 'default'}
-                                  size="small"
-                                  title={competitor.availability ? 'Disponível no site' : 'Indisponível no site'}
-                                />
+                              <TableCell align="center" sx={{ verticalAlign: 'middle' }}>
+                                <Box display="flex" justifyContent="center">
+                                  <Chip
+                                    label={availabilityLabel}
+                                    color={availabilityColor}
+                                    size="small"
+                                    title={availabilityLabel}
+                                  />
+                                </Box>
                               </TableCell>
-                              <TableCell align="center">
-                                <Chip
-                                  label={competitor.is_paused ? 'Pausado' : 'Ativo'}
-                                  color={competitor.is_paused ? 'default' : 'success'}
-                                  size="small"
-                                  title={competitor.is_paused ? 'Monitoramento pausado' : 'Monitoramento ativo'}
-                                />
+                              <TableCell align="center" sx={{ verticalAlign: 'middle' }}>
+                                <Box display="flex" justifyContent="center">
+                                  <Chip
+                                    label={competitor.is_paused ? 'Pausado' : 'Ativo'}
+                                    color={competitor.is_paused ? 'default' : 'success'}
+                                    size="small"
+                                    title={competitor.is_paused ? 'Monitoramento pausado' : 'Monitoramento ativo'}
+                                  />
+                                </Box>
                               </TableCell>
-                              <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+                              <TableCell align="center" sx={{ whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
                                 <IconButton
                                   size="small"
                                   color="default"

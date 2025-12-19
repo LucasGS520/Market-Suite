@@ -2,6 +2,7 @@ import apiClient from '../lib/api';
 import {
   MonitoredProduct,
   CompetitorProduct,
+  CompetitorsListResponse,
   PriceComparisonSummary,
   PaginatedResponse,
   MonitoredProductCreateScraping,
@@ -215,7 +216,7 @@ export const productsService = {
    * - monitored_id: ID do produto monitorado (obrigatório)
    * - page, per_page: paginação
    * - order_by: campo de ordenação
-   * - include_paused: incluir concorrentes pausados
+   * - include_paused/include_inactive: incluir concorrentes pausados ou indisponíveis
    */
   async getCompetitors(params: {
     monitored_id: string;
@@ -223,10 +224,17 @@ export const productsService = {
     per_page?: number;
     order_by?: string;
     include_paused?: boolean;
-  }): Promise<PaginatedResponse<CompetitorProduct>> {
-    const response = await apiClient.get<PaginatedResponse<CompetitorProduct>>(
+    include_inactive?: boolean;
+  }): Promise<CompetitorsListResponse> {
+    const requestParams = {
+      include_inactive: params.include_inactive ?? true,
+      include_paused: params.include_paused ?? true,
+      ...params,
+    };
+
+    const response = await apiClient.get<CompetitorsListResponse>(
       '/competitors',
-      { params }
+      { params: requestParams }
     );
     const normalizedItems = (response.data.items || []).map((competitor) => {
       const fallbackName = (() => {
@@ -252,6 +260,18 @@ export const productsService = {
     return {
       ...response.data,
       items: normalizedItems,
+      competitors_total:
+        response.data.competitors_total ?? normalizedItems.length,
+      competitors_with_price_count:
+        response.data.competitors_with_price_count ??
+        normalizedItems.filter(
+          (item) => item.current_price !== null && item.availability !== false
+        ).length,
+      excluded_due_to_inactive_count:
+        response.data.excluded_due_to_inactive_count ??
+        normalizedItems.filter(
+          (item) => item.current_price === null || item.availability === false
+        ).length,
     };
   },
 

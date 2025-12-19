@@ -12,9 +12,8 @@ from backend.shared.schemas.shared_schemas_products import CompetitorProductCrea
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
-    CompetitorProductResponse,
     CompetitorScrapeCreationResponse,
-    PaginatedCompetitorResponse,
+    CompetitorsListResponse,
 )
 from market_alert.services.services_competitors import (
     clear_competitors_from_monitored,
@@ -52,7 +51,7 @@ def create_competitor_scrape(
         },
     )
 
-@router.get("/", response_model=PaginatedCompetitorResponse)
+@router.get("/", response_model=CompetitorsListResponse)
 def list_competitors(
     request: Request,
     *,
@@ -70,9 +69,17 @@ def list_competitors(
         le=MAX_PER_PAGE,
         description="Quantidade de concorrentes retornados por página",
     ),
+    include_inactive: bool = Query(
+        True,
+        description="Inclui concorrentes indisponíveis ou sem preço na listagem",
+    ),
+    include_paused: bool = Query(
+        True,
+        description="Inclui concorrentes pausados sem impactar contadores de preço",
+    ),
     
 ):
-    """ Lista concorrentes com os campos mínimos e paginação previsível """
+    """ Lista concorrentes sem filtrar inativos, preservando contagens úteis """
     logger.info(
         "route_called",
         path=request.url.path,
@@ -81,6 +88,8 @@ def list_competitors(
         monitored_id=str(monitored_product_id),
         page=page,
         per_page=per_page,
+        include_inactive=include_inactive,
+        include_paused=include_paused,
     )
 
     payload = list_competitors_with_pagination(
@@ -89,6 +98,8 @@ def list_competitors(
         monitored_product_id=monitored_product_id,
         page=page,
         per_page=per_page,
+        include_inactive=include_inactive,
+        include_paused=include_paused,
         context={
             "path": request.url.path,
             "method": request.method,
@@ -103,6 +114,6 @@ def list_competitors(
         monitored_id=str(monitored_product_id),
         page=page,
         count=len(payload.items),
-        total=payload.meta.total,
+        total=payload.competitors_total,
     )
     return payload

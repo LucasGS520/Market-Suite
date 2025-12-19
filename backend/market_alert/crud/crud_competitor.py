@@ -364,18 +364,21 @@ def get_competitors_by_monitored_id(
     monitored_product_id: UUID,
     *,
     include_paused: bool = False,
+    include_inactive: bool = False,
 ) -> List[CompetitorProduct]:
     """ Lista concorrentes associados respeitando filtros de pausa e disponibilidade"""
     query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
     )
     if not include_paused:
-        #Evita enfileirar ou listar concorrentes pausados ou já indisponíveis
+        #Evita enfileirar concorrentes pausados sem bloquear listagem administrativa
+        query = query.filter(CompetitorProduct.is_paused.is_(False))
+
+    if not include_inactive:
+        #Garante que comparações automáticas não usem itens marcados como indisponíveis
         query = query.filter(
-            CompetitorProduct.is_paused.is_(False),
-            CompetitorProduct.status.in_(
-                [ProductStatus.available, ProductStatus.pending]
-            ),
+            CompetitorProduct.status.in_([ProductStatus.available, ProductStatus.pending]),
+            CompetitorProduct.availability.isnot(False),
         )
     return query.all()
 
@@ -393,29 +396,39 @@ def paginate_competitors(
     *,
     page: int,
     per_page: int,
-    include_paused: bool = False,
-) -> tuple[int, List[CompetitorProduct]]:
-    """ Retorna concorrentes paginados usando apenas filtros essenciais. """
-    query = db.query(CompetitorProduct).filter(
+    include_paused: bool = True,
+    include_inactive: bool = True,
+) -> tuple[int, int, int, List[CompetitorProduct]]:
+    """ Retorna concorrentes paginados preservando contagens para métricas """
+    base_query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
     )
 
-    query = query.filter(
-        CompetitorProduct.status != ProductStatus.pending,
-        CompetitorProduct.current_price.isnot(None),
-    )
-
     if not include_paused:
-        query = query.filter(CompetitorProduct.is_paused.is_(False))
+        base_query = base_query.filter(CompetitorProduct.is_paused.is_(False))
 
-    total = int(query.count())
+    if not include_inactive:
+        base_query = base_query.filter(
+            CompetitorProduct.status.in_([ProductStatus.available, ProductStatus.pending]),
+            CompetitorProduct.availability.isnot(False),
+            CompetitorProduct.current_price.isnot(None),
+        )
+
+    total = int(base_query.count())
+
+    usable_query = base_query.filter(
+        CompetitorProduct.current_price.isnot(None),
+        CompetitorProduct.availability.isnot(False),
+    )
+    with_price_count = int(usable_query.count())
+    excluded_due_to_inactive = max(total - with_price_count, 0)
 
     offset_value = max(page - 1, 0) * per_page
     items = (
-        query.order_by(desc(CompetitorProduct.last_checked), CompetitorProduct.id)
+        base_query.order_by(desc(CompetitorProduct.last_checked), CompetitorProduct.id)
         .offset(offset_value)
         .limit(per_page)
         .all()
     )
 
-    return total, items
+    return total, with_price_count, excluded_due_to_inactive, items

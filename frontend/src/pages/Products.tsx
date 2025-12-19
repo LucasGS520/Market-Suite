@@ -49,8 +49,8 @@ import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
 import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types';
 import TruncatedText from '../utils/TruncatedText';
-import MonitoredStateBadge from '../components/MonitoredStateBadge';
-import { resolveMonitoredStatus, statusToBadge } from '../utils/monitoredStatus';
+import ProductStateBadge from '../components/ProductStateBadge';
+import { resolveMonitoredStatus, statusToBadge } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 
 /**
@@ -411,7 +411,7 @@ const Products: React.FC = () => {
                                 maxWidth={420}
                               />
                             </Box>
-                            <MonitoredStateBadge product={product} />
+                            <ProductStateBadge product={product} />
                           </Box>
 
                           {/* Informações de preço resumidas */}
@@ -600,7 +600,7 @@ const Products: React.FC = () => {
                       <TableCell align="center">{competitorsCount}</TableCell>
                       <TableCell align="center">{rankingLabel}</TableCell>
                       <TableCell align="center">
-                        <MonitoredStateBadge product={product} />
+                        <ProductStateBadge product={product} />
                       </TableCell>
                       <TableCell align="center">
                         <Box display="flex" justifyContent="center" gap={1}>

@@ -150,15 +150,19 @@ def run_price_comparison(
             raise ValueError(f"Monitored product {monitored_id} not found")
 
         #Recupera concorrentes associados
-        competitors = get_competitors_by_monitored_id(db, monitored_id)
+        competitors = get_competitors_by_monitored_id(
+            db, monitored_id, include_paused=True, include_inactive=True
+        )
         competitors = _deduplicate_competitors(competitors)
         
         available_competitors = [
             competitor
             for competitor in competitors
             if competitor.current_price is not None
+            and competitor.availability is not False
             and getattr(competitor, "status", ProductStatus.available)
             not in {ProductStatus.unavailable, ProductStatus.removed}
+            and not getattr(competitor, "is_paused", False)
         ]
 
         filtered_out = len(competitors) - len(available_competitors)

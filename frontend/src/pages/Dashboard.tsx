@@ -28,8 +28,8 @@ import {
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import TruncatedText from '../utils/TruncatedText';
-import MonitoredStateBadge from '../components/MonitoredStateBadge';
-import { resolveMonitoredStatus } from '../utils/monitoredStatus';
+import ProductStateBadge from '../components/ProductStateBadge';
+import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 import type { MonitoredProduct } from '../types';
 
@@ -204,7 +204,7 @@ const Dashboard: React.FC = () => {
                         <TruncatedText text={product.name} variant="h6" lines={2} maxWidth="100%" tooltip={false} />
                         <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
                         <Box display="flex" alignItems="center" gap={1} mt={1}>
-                          <MonitoredStateBadge product={product} />
+                          <ProductStateBadge product={product} />
                           {renderMonitoredPrice(product, { variant: 'h6' })}
                         </Box>
                       </Box>

@@ -82,6 +82,18 @@ export interface CompetitorProduct {
 }
 
 /**
+ * Resposta consolidada para listagem de concorrentes com contagens auxiliares.
+ */
+export interface CompetitorsListResponse {
+  items: CompetitorProduct[]; // Concorrentes retornados na página
+  competitors_total: number; // Quantidade total de concorrentes vinculados ao monitorado
+  competitors_with_price_count: number; // Concorrentes que entram nos cálculos de preço
+  excluded_due_to_inactive_count: number; // Concorrentes ignorados por falta de preço ou indisponibilidade
+  page: number; // Página atual (base 1)
+  per_page: number; // Registros por página
+}
+
+/**
  * Registro de comparação de preços gerado por um scraping/processamento.
  */
 export interface PriceComparison {

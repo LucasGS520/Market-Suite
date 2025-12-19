@@ -208,11 +208,12 @@ def build_competitor_response(
     """ Converte um concorrente em contrato simplificado com preço obrigatório """
 
     current_price = _ensure_price(competitor.current_price, "concorrente", allow_missing_price=allow_missing_price)
-    availability = None
-    if competitor.status == ProductStatus.available:
-        availability = True
-    elif competitor.status == ProductStatus.unavailable:
-        availability = False
+    availability = competitor.availability
+    if availability is None:
+        if competitor.status == ProductStatus.available:
+            availability = True
+        elif competitor.status == ProductStatus.unavailable:
+            availability = False
 
     sanitized_display_name = sanitize_text(competitor.display_name)
     friendly_name = sanitized_display_name or _friendly_name_from_url(competitor.product_url)

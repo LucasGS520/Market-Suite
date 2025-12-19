@@ -5,12 +5,13 @@
  */
 import type { ChipProps } from '@mui/material';
 import { normalizePriceInput } from './currency';
-import type { MonitoredProduct } from '../types';
+import type { CompetitorProduct, MonitoredProduct } from '../types';
 
 export type MonitoredStatusKey =
   | 'inactive'
   | 'paused'
   | 'no_price'
+  | 'active'
   | 'competitive'
   | 'attention'
   | 'urgent'
@@ -67,6 +68,11 @@ export const statusToBadge: Record<MonitoredStatusKey, MonitoredBadgeMeta> = {
     label: 'Coletando',
     color: 'default',
     tooltip: 'Primeira coleta em andamento ou dados ainda não consolidados.',
+  },
+  active: {
+    label: 'Disponível',
+    color: 'success',
+    tooltip: 'Concorrente disponível e apto para comparação.',
   },
   unknown: {
     label: 'Sem status',
@@ -149,4 +155,25 @@ export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStat
 
   if (price === null) return 'unknown';
   return 'competitive';
+};
+
+/**
+ * Resolve status de concorrentes para manter badge coerente com indisponibilidade e pausa.
+ */
+export const resolveCompetitorStatus = (
+  competitor: CompetitorProduct
+): MonitoredStatusKey => {
+  const availability = competitor.availability;
+  const isPaused = competitor.is_paused ?? false;
+  const price = normalizePriceInput(competitor.current_price);
+
+  if (availability === false) return 'inactive';
+
+  if (isPaused) return 'paused';
+
+  if (!competitor.last_scraped_at && price === null) return 'collecting';
+
+  if (availability === true && price === null) return 'no_price';
+
+  return price === null ? 'unknown' : 'active';
 };

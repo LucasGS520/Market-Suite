@@ -22,10 +22,7 @@ from market_alert.crud.crud_competitor import (
     delete_competitors_by_monitored_id,
 )
 from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
-from market_alert.schemas.schemas_products import (
-    PaginationMeta,
-    PaginatedCompetitorResponse,
-)
+from market_alert.schemas.schemas_products import CompetitorsListResponse
 from market_alert.services.services_products import build_competitor_response
 from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
@@ -227,9 +224,11 @@ def list_competitors_with_pagination(
     monitored_product_id: UUID,
     page: int,
     per_page: int,
+    include_inactive: bool,
+    include_paused: bool,
     context: dict[str, str] | None = None,
-) -> PaginatedCompetitorResponse:
-    """ Coordena validação de acesso e paginação simplificada de concorrentes """
+) -> CompetitorsListResponse:
+    """ Coordena validação de acesso, filtros e paginação de concorrentes """
     ensure_user_can_access_monitored(
         db=db,
         product_id=monitored_product_id,
@@ -238,17 +237,19 @@ def list_competitors_with_pagination(
         hide_forbidden=False,
     )
 
-    _total, competitors = paginate_competitors(
+    total, with_price_count, excluded_count, competitors = paginate_competitors(
         db,
         monitored_product_id,
         page=page,
         per_page=per_page,
+        include_inactive=include_inactive,
+        include_paused=include_paused,
     )
 
     items: list = []
     for competitor in competitors:
         try:
-            items.append(build_competitor_response(competitor))
+            items.append(build_competitor_response(competitor, allow_missing_price=True))
         except HTTPException as exc:
             # Ignora concorrentes incompletos preservando previsibilidade da listagem
             logger.warning(
@@ -261,13 +262,13 @@ def list_competitors_with_pagination(
             )
             continue
 
-    return PaginatedCompetitorResponse(
+    return CompetitorsListResponse(
         items=items,
-        meta=PaginationMeta(
-            total=len(items),
-            page=page,
-            per_page=len(items),
-        ),
+        competitors_total=total,
+        competitors_with_price_count=with_price_count,
+        excluded_due_to_inactive_count=excluded_count,
+        page=page,
+        per_page=per_page,
     )
 
 def clear_competitors_from_monitored(
