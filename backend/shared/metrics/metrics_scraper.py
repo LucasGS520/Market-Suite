@@ -193,6 +193,12 @@ RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL = Counter(
     ["reason"],
 )
 
+MONITORED_SKIPPED_PAUSED_TOTAL = Counter(
+    "monitored_skipped_paused_total",
+    "Monitorados ignorados por estarem pausados",
+    ["source"],
+)
+
 RECHECK_NEXT_CHECK_MISSING_TOTAL = Counter(
     "recheck_next_check_missing_total",
     "Contagem absoluta de monitorados sem next_check_at definido",
@@ -346,6 +352,7 @@ __all__ = [
     "RECHECK_COMPETITOR_RESULT_TOTAL",
     "RECHECK_ENQUEUED_TOTAL",
     "RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL",
+    "MONITORED_SKIPPED_PAUSED_TOTAL",
     "RECHECK_NEXT_CHECK_MISSING_TOTAL",
     "RECHECK_FINALIZE_FAILED_TOTAL",
 ]

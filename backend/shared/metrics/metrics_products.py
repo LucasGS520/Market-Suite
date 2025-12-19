@@ -2,6 +2,21 @@
 
 from prometheus_client import Counter
 
+MONITORED_PAUSED_TOTAL = Counter(
+    "monitored_paused_total",
+    "Total de produtos monitorados colocados em pausa",
+)
+
+MONITORED_RESUMED_TOTAL = Counter(
+    "monitored_resumed_total",
+    "Total de produtos monitorados reativados",
+)
+
+MONITORED_DELETED_TOTAL = Counter(
+    "monitored_deleted_total",
+    "Total de produtos monitorados removidos com segurança",
+)
+
 PENDING_COMPETITOR_CREATED_TOTAL = Counter(
     "pending_competitor_created_total",
     "Total de concorrentes criados com status pendente aguardando scraping",
@@ -29,4 +44,7 @@ __all__ = [
     "PRICE_HISTORY_CREATED_TOTAL",
     "PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL",
     "MONITORED_LISTED_WITHOUT_PRICE_TOTAL",
+    "MONITORED_PAUSED_TOTAL",
+    "MONITORED_RESUMED_TOTAL",
+    "MONITORED_DELETED_TOTAL",
 ]

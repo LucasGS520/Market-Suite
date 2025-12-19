@@ -32,6 +32,7 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_DURATION_MS,
     COLLECT_LOCK_SKIPPED_TOTAL,
     COLLECT_SUCCESS_TOTAL,
+    MONITORED_SKIPPED_PAUSED_TOTAL,
     SCRAPER_IN_FLIGHT,
 )
 from shared.utils.redis_client import is_scraping_suspended
@@ -41,6 +42,7 @@ from market_alert.core.celery_app import celery_app
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.tasks.compare_prices_task import compare_prices_task
+from market_alert.models.models_products import MonitoredProduct
 
 
 logger = structlog.get_logger("collector_product_task")
@@ -219,16 +221,39 @@ def collect_product(
                             payload=payload_model,
                         )
                     else:
-                        payload_model = MonitoredProductCreateScraping(
-                            name_identification=payload.get("name") if payload else None,
-                            product_url=url,
-                        )
-                        result = scrape_monitored_product(
-                            db=db,
-                            url=url,
-                            user_id=user_uuid or monitored_id,
-                            payload=payload_model,
-                        )
+                        monitored_row: MonitoredProduct | None = None
+                        if monitored_id is not None:
+                            monitored_row = (
+                                db.query(MonitoredProduct)
+                                .filter(MonitoredProduct.id == monitored_id)
+                                .first()
+                            )
+
+                        if monitored_row is not None and monitored_row.paused:
+                            reason = "paused"
+                            MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="collector").inc()
+                            task_logger.info(
+                                "collect_skipped_paused",
+                                monitored_id=str(monitored_id),
+                                trace_id=trace_id,
+                            )
+                            result = ScrapeResult(
+                                status="no_result",
+                                product_id=str(monitored_id) if monitored_id else None,
+                                http_status=200,
+                                error_code=None,
+                            )
+                        else:
+                            payload_model = MonitoredProductCreateScraping(
+                                name_identification=payload.get("name") if payload else None,
+                                product_url=url,
+                            )
+                            result = scrape_monitored_product(
+                                db=db,
+                                url=url,
+                                user_id=user_uuid or monitored_id,
+                                payload=payload_model,
+                            )
     except ScraperError as exc:
         reason = "scraper_error"
         task_logger.warning("scraper_error", kind=kind, error=str(exc))

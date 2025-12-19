@@ -21,9 +21,14 @@ from market_alert.crud.crud_monitored import (
     get_all_monitored_products,
     get_featured_monitored_products,
     get_monitored_product_by_id,
-    delete_monitored_product,
+    delete_monitored,
     get_last_price_change_for_monitored,
     count_notifications_for_monitored_product,
+    pause_monitored,
+    resume_monitored,
+    MonitoredLockError,
+    MonitoredNotFoundError,
+    MonitoredOwnershipError,
 )
 from market_alert.crud.crud_comparison import (
     get_latest_summaries_for_products,
@@ -44,6 +49,25 @@ from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_
 
 
 logger = structlog.get_logger("monitored_service")
+
+def _raise_from_monitored_error(exc: Exception) -> None:
+    """ Converte exceções de domínio em respostas HTTP coerentes """
+    if isinstance(exc, MonitoredNotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Produto não encontrado.",
+        ) from exc
+    if isinstance(exc, MonitoredOwnershipError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operação não permitida para este usuário.",
+        ) from exc
+    if isinstance(exc, MonitoredLockError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Monitorado em processamento, tente novamente em instantes.",
+        ) from exc
+    raise exc
 
 def list_monitored_products(
     *,
@@ -163,25 +187,53 @@ def get_monitored_product(
     )
 
 
-def delete_monitored_product_entry(
-    *, db: Session, product_id: UUID, user_id: UUID
+def pause_monitored_product_entry(
+    *, db: Session, product_id: UUID, user: User
 ) -> MonitoredProductResponse:
-    """ Remove monitorado após validar posse e monta resposta final.
+    """ Pausa monitorado e devolve estado atualizado """
+    try:
+        monitored = pause_monitored(db, product_id, user)
+    except Exception as exc:
+        _raise_from_monitored_error(exc)
+    
+    summary = get_latest_summary(db, product_id)
+    return build_monitored_response(
+        monitored,
+        summary=summary,
+        allow_missing_price=True,
+    )
 
-    Centraliza a busca do resumo para devolver o contrato esperado mesmo após a
-    exclusão do registro principal.
-    """
-    product = get_monitored_product_by_id(db, product_id)
-    if not product or product.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Produto não encontrado.",
-        )
+def resume_monitored_product_entry(
+    *, db: Session, product_id: UUID, user: User
+) -> MonitoredProductResponse:
+    """ Retoma monitorado atualizando janela de rechecagem otimista """
+    try:
+        monitored = resume_monitored(db, product_id, user)
+    except Exception as exc:  # noqa: BLE001 - conversão controlada para HTTP
+        _raise_from_monitored_error(exc)
 
     summary = get_latest_summary(db, product_id)
-    response_payload = build_monitored_response(product, summary=summary, allow_missing_price=True)
-    _ = delete_monitored_product(db, product_id)
-    return response_payload
+    last_price_change_at = get_last_price_change_for_monitored(db, product_id)
+    alerts_sent = count_notifications_for_monitored_product(
+        db, user_id=user.id, monitored_product_id=product_id
+    )
+    return build_monitored_response(
+        monitored,
+        summary=summary,
+        allow_missing_price=True,
+        last_price_change_at=last_price_change_at,
+        global_last_price_change_at=last_price_change_at,
+        alerts_sent=alerts_sent,
+    )
+
+def delete_monitored_product_entry(
+    *, db: Session, product_id: UUID, user: User
+) -> None:
+    """ Remove monitorado aplicando lock e sem payload de resposta """
+    try:
+        delete_monitored(db, product_id, user)
+    except Exception as exc:
+        _raise_from_monitored_error(exc)
 
 def schedule_monitored_scrape(
     *,
