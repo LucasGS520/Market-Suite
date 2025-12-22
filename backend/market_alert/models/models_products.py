@@ -1,4 +1,8 @@
-""" Modelos SQLAlchemy para produtos monitorados e concorrentes """
+""" Modelos SQLAlchemy para produtos monitorados e concorrentes.
+
+Os relacionamentos dependem de cascata no banco para remover concorrentes
+atrelados a um monitorado sem precisar de deleções manuais em código. 
+"""
 
 import uuid
 from datetime import datetime, timezone
@@ -85,7 +89,7 @@ class MonitoredProduct(Base):
 
 # ---------- PRODUTO CONCORRENTE ----------
 class CompetitorProduct(Base):
-    """ Produto concorrente usado para comparação """
+    """ Produto concorrente usado para comparação e dependente do monitorado """
 
     __tablename__ = "competitor_products"
 
@@ -96,7 +100,13 @@ class CompetitorProduct(Base):
 
     #ID unico com UUIDv4
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    monitored_product_id = Column(PG_UUID(as_uuid=True), ForeignKey("monitored_products.id"), nullable=False, index=True)
+    # Cascata no banco elimina concorrentes quando o monitorado é removido, evitando limpezas manuais
+    monitored_product_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("monitored_products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     #Dados do concorrente
     name_competitor = Column("name", String, nullable=False)
