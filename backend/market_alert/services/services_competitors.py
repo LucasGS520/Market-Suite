@@ -330,23 +330,25 @@ def delete_competitor_entry(
     logger.info("competitor_delete_requested", **log_context)
 
     try:
-        with db.begin():
-            competitor = _ensure_competitor_access(
-                db=db,
-                competitor_id=competitor_id,
-                user=user,
-                context=context,
-            )
+        competitor = _ensure_competitor_access(
+            db=db,
+            competitor_id=competitor_id,
+            user=user,
+            context=context,
+        )
 
-            monitored_id = competitor.monitored_product_id
-            delete_competitor(db, competitor)
+        monitored_id = competitor.monitored_product_id
+        delete_competitor(db, competitor)
 
-            #Cascatas de relacionamento cuidam do histórico de preços e dependências
-            logger.info(
-                "competitor_deleted",
-                **log_context,
-                monitored_id=str(monitored_id),
-            )
+        # Evita reabrir transações ativas ao usar o commit explícito
+        db.commit()
+
+        #Cascatas de relacionamento cuidam do histórico de preços e dependências
+        logger.info(
+            "competitor_deleted",
+            **log_context,
+            monitored_id=str(monitored_id),
+        )
 
         COMPETITOR_DELETED_TOTAL.inc()
         #Enfileira recálculo via Celery sem importar a task diretamente para evitar ciclo
@@ -362,9 +364,11 @@ def delete_competitor_entry(
         )
         return monitored_id
     except HTTPException:
+        db.rollback()
         COMPETITOR_DELETE_FAILURES_TOTAL.inc()
         raise
     except Exception as exc:
+        db.rollback()
         COMPETITOR_DELETE_FAILURES_TOTAL.inc()
         logger.exception("competitor_delete_failed", **log_context)
         raise HTTPException(
