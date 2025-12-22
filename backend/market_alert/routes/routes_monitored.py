@@ -11,6 +11,7 @@ from backend.shared.schemas.shared_schemas_products import MonitoredProductCreat
 from market_alert.models import User
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.schemas.schemas_products import (
+    MonitoredPausedUpdateRequest,
     MonitoredProductResponse,
     PaginatedMonitoredProductsResponse,
     MonitoredScrapeCreationResponse,
@@ -21,9 +22,8 @@ from market_alert.services.services_monitored import (
     get_monitored_product,
     list_featured_monitored_products,
     list_monitored_products as list_monitored_products_service,
-    pause_monitored_product_entry,
-    resume_monitored_product_entry,
     schedule_monitored_scrape,
+    update_monitored_pause_state,
 )
 
 
@@ -176,25 +176,28 @@ def get_product(
     )
     return response_payload
 
-@router.post("/{product_id}/pause", response_model=MonitoredProductResponse)
-def pause_product(
+@router.put("/{product_id}/paused", response_model=MonitoredProductResponse)
+def update_paused_state(
     request: Request,
     product_id: UUID,
+    payload: MonitoredPausedUpdateRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
 ):
-    """ Endpoint para pausar produto monitorado de forma idempotente """
+    """ Endpoint idempotente para pausar ou retomar monitorado """
     logger.info(
         "route_called",
         path=request.url.path,
         method=request.method,
         user_id=str(user.id),
-        product_id=str(product_id)
+        product_id=str(product_id),
+        paused=payload.paused,
     )
-    response_payload = pause_monitored_product_entry(
+    response_payload = update_monitored_pause_state(
         db=db,
         product_id=product_id,
         user=user,
+        paused=payload.paused,
     )
 
     logger.info(
@@ -202,37 +205,8 @@ def pause_product(
         path=request.url.path,
         method=request.method,
         status="success",
-        product_id=str(product_id)
-    )
-    return response_payload
-
-@router.post("/{product_id}/resume", response_model=MonitoredProductResponse)
-def resume_product(
-    request: Request,
-    product_id: UUID,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user)
-):
-    """ Endpoint para reativar monitorado e recalcular próxima checagem """
-    logger.info(
-        "route_called",
-        path=request.url.path,
-        method=request.method,
-        user_id=str(user.id),
-        product_id=str(product_id)
-    )
-    response_payload = resume_monitored_product_entry(
-        db=db,
-        product_id=product_id,
-        user=user,
-    )
-
-    logger.info(
-        "route_completed",
-        path=request.url.path,
-        method=request.method,
-        status="success",
-        product_id=str(product_id)
+        product_id=str(product_id),
+        paused=payload.paused,
     )
     return response_payload
 

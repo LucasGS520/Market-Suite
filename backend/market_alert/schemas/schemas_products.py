@@ -86,6 +86,9 @@ class MonitoredProductResponse(ProductResponse):
         description=("Último resumo consolidado de comparação de preços com métricas normalizadas para exibição imediata no frontend."),
     )
 
+class MonitoredPausedUpdateRequest(BaseModel):
+    """ Requisição para alternar estado de pausa de um monitorado de forma idempotente """
+    paused: bool = Field(..., description="Define se o monitoramento deve ficar pausado ou ativo")
 
 class PaginationMeta(BaseModel):
     """ Metadados padronizados para paginação de listagens."""

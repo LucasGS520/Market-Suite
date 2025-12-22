@@ -47,7 +47,7 @@ def test_pause_and_resume_monitored(client, db_session, test_user, prepare_test_
 
     monitored = _create_monitored(db_session, test_user.id)
 
-    pause_response = client.post(f"/monitored/{monitored.id}/pause")
+    pause_response = client.put(f"/monitored/{monitored.id}/paused", json={"paused": True})
     assert pause_response.status_code == 200
     paused_payload = pause_response.json()
     assert paused_payload["paused"] is True
@@ -57,7 +57,7 @@ def test_pause_and_resume_monitored(client, db_session, test_user, prepare_test_
     assert monitored.paused is True
     assert monitored.paused_at is not None
 
-    resume_response = client.post(f"/monitored/{monitored.id}/resume")
+    resume_response = client.put(f"/monitored/{monitored.id}/paused", json={"paused": False})
     assert resume_response.status_code == 200
     resumed_payload = resume_response.json()
     assert resumed_payload["paused"] is False
