@@ -36,8 +36,7 @@ from shared.metrics.metrics_products import (
     COMPETITOR_DELETED_TOTAL,
     COMPETITOR_DELETE_FAILURES_TOTAL,
 )
-
-from market_alert.tasks.compare_prices_task import compare_prices_task
+from market_alert.core.celery_app import celery_app
 
 
 logger = structlog.get_logger(__name__)
@@ -350,7 +349,12 @@ def delete_competitor_entry(
             )
 
         COMPETITOR_DELETED_TOTAL.inc()
-        compare_prices_task.apply_async(args=[str(monitored_id)], queue="monitor")
+        #Enfileira recálculo via Celery sem importar a task diretamente para evitar ciclo
+        celery_app.send_task(
+            "market_alert.tasks.compare_prices_task.compare_prices_task",
+            args=[str(monitored_id)],
+            queue="monitor",
+        )
         logger.info(
             "competitor_delete_recalculation_enqueued",
             monitored_id=str(monitored_id),

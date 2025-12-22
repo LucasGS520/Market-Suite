@@ -42,7 +42,6 @@ from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 from market_alert.core.celery_app import celery_app
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
-from market_alert.tasks.compare_prices_task import compare_prices_task
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 
 
@@ -148,8 +147,12 @@ def _dispatch_comparison(monitored_id: UUID | None, result: ScrapeResult | None)
     
     changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
     if changed:
-        compare_prices_task.apply_async(args=[str(monitored_id)], queue="monitor")
-
+        #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
+        celery_app.send_task(
+            "market_alert.tasks.compare_prices_task.compare_prices_task",
+            args=[str(monitored_id)],
+            queue="monitor",
+        )
 
 def collect_product(
     payload: Mapping[str, str] | None,
