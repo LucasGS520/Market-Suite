@@ -785,40 +785,14 @@ def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
         monitored = _ensure_monitored_access(db, monitored_id, user)
         lock_owner = _acquire_monitored_lock(monitored_id)
 
-        competitor_ids = (
-            db.query(CompetitorProduct.id)
-            .filter(CompetitorProduct.monitored_product_id == monitored_id)
-            .subquery()
-        )
-
-
-
-        # Em ambientes de teste ou quando o caller já iniciou uma transação
-        # o SQLAlchemy lança InvalidRequestError ao tentar iniciar outra
-        # transaction nesse mesmo `Session`. Para ser resiliente, usamos
-        # uma transação nested (savepoint) quando já houver uma transação
-        # ativa; caso contrário, abrimos a transação normal.
         if db.in_transaction():
-            tx = db.begin_nested()
-        else:
-            tx = db.begin()
+            #Bloqueia reuso de transações externas para evitar nested que dificultam ratreabilidade de commits e métricas
+            raise RuntimeError("Sessão já está em transação ativa para delete_monitored")
 
-        with tx:
-            # remove price history ligado ao monitorado e aos seus concorrentes
-            db.query(PriceHistory).filter(
-                or_(
-                    PriceHistory.monitored_product_id == monitored_id,
-                    PriceHistory.competitor_product_id.in_(competitor_ids),
-                )
-            ).delete(synchronize_session=False)
-
-            # remove produtos concorrentes
-            db.query(CompetitorProduct).filter(
-                CompetitorProduct.monitored_product_id == monitored.id
-            ).delete(synchronize_session=False)
-
-            # remove o monitorado
+        with db.begin():
+            #Confia na cascata configurada em MonitoredProduct para eliminar concorrentes e históricos associados sem desincronizar a sessão
             db.delete(monitored)
+            db.flush()
 
         MONITORED_DELETED_TOTAL.inc()
     finally:
