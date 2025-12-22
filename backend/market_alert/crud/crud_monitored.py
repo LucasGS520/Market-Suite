@@ -23,6 +23,7 @@ from shared.metrics.metrics_products import (
     PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL,
 )
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
+from shared.infra.db import SessionLocal
 
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparisonSummary
@@ -779,23 +780,21 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
             release_product_lock(monitored_id, lock_owner)
 
 def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
-    """ Remove monitorado e dependências dentro de transação protegida por lock """
+    """ Remove monitorado utilizando sessão dedicada para isolar a transação """
     lock_owner: str | None = None
+    dedicated_session: Session | None = None
     try:
-        monitored = _ensure_monitored_access(db, monitored_id, user)
+        #Utiliza nova sessão para evitar interferência de transações externas do ciclo da requisição
+        dedicated_session = SessionLocal()
+        monitored = _ensure_monitored_access(dedicated_session, monitored_id, user)
         lock_owner = _acquire_monitored_lock(monitored_id)
 
-        if db.in_transaction():
-            #Bloqueia reuso de transações externas para evitar nested que dificultam ratreabilidade de commits e métricas
-            raise RuntimeError("Sessão já está em transação ativa para delete_monitored")
-
-        with db.begin():
-            #Confia na cascata configurada em MonitoredProduct para eliminar concorrentes e históricos associados sem desincronizar a sessão
-            db.delete(monitored)
-            db.flush()
-
+        dedicated_session.delete(monitored)
+        dedicated_session.commit()
         MONITORED_DELETED_TOTAL.inc()
     finally:
+        if dedicated_session:
+            dedicated_session.close()
         if lock_owner:
             release_product_lock(monitored_id, lock_owner)
 
