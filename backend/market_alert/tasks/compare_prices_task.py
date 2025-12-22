@@ -27,7 +27,6 @@ logger = structlog.get_logger("compare_prices")
 @celery_app.task(
     bind=True,
     max_retries=0,
-    name="compare_prices_task",
     soft_time_limit=20,
     time_limit=40,
     acks_late=True,
