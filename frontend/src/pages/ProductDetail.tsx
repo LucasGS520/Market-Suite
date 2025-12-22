@@ -5,7 +5,7 @@
  * de preços e a lista de concorrentes. Permite adicionar concorrentes.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -69,6 +69,10 @@ const ProductDetail: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement | null>(null);
+  const confirmDeleteButtonRef = useRef<HTMLButtonElement | null>(null);
+
 
   // Query: detalhes do produto monitorado
   const { data: product, isLoading: productLoading, error: productError } = useQuery({
@@ -184,16 +188,17 @@ const ProductDetail: React.FC = () => {
   });
 
   const deleteMonitoredMutation = useMutation({
-    mutationFn: () => productsService.deleteMonitoredProduct(id!),
+    mutationFn: () => productsService.deleteProduct(id!),
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: ['monitoredProduct', id] });
       queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
       setConfirmDeleteOpen(false);
-      window.alert('Produto removido com sucesso. Histórico e concorrentes foram descartados.');
+      setActionSuccess('Produto removido com sucesso. Histórico e concorrentes foram descartados.');
       navigate('/products');
     },
     onError: () => {
-      setConfirmDeleteOpen(false);
+      // Mantém o modal aberto para permitir nova tentativa e indica falha de forma visível.
+      setDeleteError('Falha ao remover produto. Verifique sua conexão e tente novamente.');
       setActionError('Falha ao remover produto. Verifique sua conexão e tente novamente.');
     },
   });
@@ -243,8 +248,19 @@ const ProductDetail: React.FC = () => {
   const handleDeleteProduct = () => {
     if (!id) return;
     setActionError(null);
+    setDeleteError(null);
     deleteMonitoredMutation.mutate();
   };
+
+  // Gerencia foco e acessibilidade do modal de remoção, direcionando foco ao confirmar e devolvendo ao gatilho.
+  useEffect(() => {
+    if (confirmDeleteOpen) {
+      setDeleteError(null);
+      confirmDeleteButtonRef.current?.focus();
+    } else {
+      deleteButtonRef.current?.focus();
+    }
+  }, [confirmDeleteOpen]);
 
   // Estado de carregamento do produto: mostra spinner enquanto carrega
   if (productLoading) {
@@ -845,8 +861,13 @@ const ProductDetail: React.FC = () => {
                     variant="outlined"
                     color="error"
                     startIcon={<DeleteIcon />}
-                    onClick={() => setConfirmDeleteOpen(true)}
+                    onClick={() => {
+                      setActionError(null);
+                      setActionSuccess(null);
+                      setConfirmDeleteOpen(true);
+                    }}
                     disabled={actionBusy}
+                    ref={deleteButtonRef}
                   >
                     {deleteMonitoredMutation.isPending ? <CircularProgress size={20} /> : 'Remover Produto'}
                   </Button>
@@ -955,9 +976,14 @@ const ProductDetail: React.FC = () => {
           <Alert severity="warning" sx={{ mb: 2 }}>
             Esta ação remove o monitorado, histórico de preços e concorrentes de forma definitiva. Deseja continuar?
           </Alert>
+          {deleteError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {deleteError}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmDeleteOpen(false)} color="secondary">
+          <Button onClick={() => setConfirmDeleteOpen(false)} color="secondary" disabled={deleteMonitoredMutation.isPending}>
             Cancelar
           </Button>
           <Button
@@ -965,6 +991,7 @@ const ProductDetail: React.FC = () => {
             variant="contained"
             color="error"
             disabled={deleteMonitoredMutation.isPending}
+            ref={confirmDeleteButtonRef}
           >
             {deleteMonitoredMutation.isPending ? <CircularProgress size={24} /> : 'Remover'}
           </Button>

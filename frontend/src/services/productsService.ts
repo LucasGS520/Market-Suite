@@ -228,6 +228,14 @@ export const productsService = {
   async deleteMonitoredProduct(
     productId: string
   ): Promise<void> {
+    await productsService.deleteProduct(productId);
+  },
+
+  /**
+   * Remove um produto monitorado utilizando a rota padrão de deleção.
+   * Mantém compatibilidade com nomenclatura mais genérica usada em handlers da UI.
+   */
+  async deleteProduct(productId: string): Promise<void> {
     await apiClient.delete(`/monitored/${productId}`);
   },
 
