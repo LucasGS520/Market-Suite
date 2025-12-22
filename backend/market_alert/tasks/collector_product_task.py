@@ -30,6 +30,7 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_SUCCESS_NEW_DATA_TOTAL,
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL,
     COLLECTOR_DURATION_MS,
+    COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL,
     COLLECT_LOCK_SKIPPED_TOTAL,
     COLLECT_SUCCESS_TOTAL,
     MONITORED_SKIPPED_PAUSED_TOTAL,
@@ -42,7 +43,7 @@ from market_alert.core.celery_app import celery_app
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.tasks.compare_prices_task import compare_prices_task
-from market_alert.models.models_products import MonitoredProduct
+from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 
 
 logger = structlog.get_logger("collector_product_task")
@@ -110,6 +111,11 @@ def _record_metrics(
     if reason == "invalid_payload":
         COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
         return "error"
+    
+    if reason == "missing_target":
+        COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL.labels(kind=kind).inc()
+        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
+        return "no_result"
 
     if reason in {"scraper_error", "unexpected_error"}:
         COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
@@ -209,7 +215,30 @@ def collect_product(
                     user_uuid = None
 
                 with SessionLocal() as db:
+                    competitor_row: CompetitorProduct | None = None
                     if competitor_id is not None:
+                        competitor_row = (
+                            db.query(CompetitorProduct)
+                            .filter(CompetitorProduct.id == competitor_id)
+                            .first()
+                        )
+
+                    if competitor_id is not None and competitor_row is None:
+                        reason = "missing_target"
+                        task_logger.info(
+                            "collect_skipped_missing_competitor",
+                            competitor_id=str(competitor_id),
+                            monitored_id=str(monitored_id) if monitored_id else None,
+                            trace_id=trace_id,
+                        )
+                        result = ScrapeResult(
+                            status="no_result",
+                            product_id=str(competitor_id),
+                            http_status=404,
+                            error_code="missing_target",
+                        )
+                    elif competitor_id is not None:
+                        monitored_id = monitored_id or competitor_row.monitored_product_id if competitor_row else monitored_id
                         payload_model = CompetitorProductCreateScraping(
                             monitored_product_id=monitored_id,
                             product_url=url,

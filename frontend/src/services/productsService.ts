@@ -318,6 +318,13 @@ export const productsService = {
   },
 
   /**
+   * Remove um concorrente específico
+   */
+  async deleteCompetitor(competitorId: string): Promise<void> {
+    await apiClient.delete(`/competitors/${competitorId}`);
+  },
+
+  /**
    * Obtém resumo de comparação de preços
    * Retorna um resumo das comparações de preços para um produto monitorado específico,
    * usado em relatórios e widgets de comparação.

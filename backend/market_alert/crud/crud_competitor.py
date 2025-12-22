@@ -60,6 +60,15 @@ def get_competitor_by_monitored_and_url(
         .first()
     )
 
+def get_competitor_by_id(db: Session, competitor_id: UUID) -> CompetitorProduct | None:
+    """ Recupera concorrente por ID com relacionamento do monitorado para autorização """
+    return (
+        db.query(CompetitorProduct)
+        .join(MonitoredProduct)
+        .filter(CompetitorProduct.id == competitor_id)
+        .first()
+    )
+
 def _derive_competitor_name_from_url(product_url: str) -> str:
     """Gera um nome provisório a partir da URL para preencher o cadastro pendente."""
     parsed = urlparse(product_url)
@@ -389,6 +398,11 @@ def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) 
         db.delete(item)
     db.commit()
     return competitors
+
+def delete_competitor(db: Session, competitor: CompetitorProduct) -> None:
+    """ Remove concorrente específico garantindo flush para cascatas """
+    db.delete(competitor)
+    db.flush()
 
 def paginate_competitors(
     db: Session,

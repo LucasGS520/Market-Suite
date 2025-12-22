@@ -18,6 +18,7 @@ from market_alert.schemas.schemas_products import (
 from market_alert.services.services_competitors import (
     clear_competitors_from_monitored,
     create_competitor_scrape_request,
+    delete_competitor_entry,
     list_competitors_with_pagination,
 )
 from market_alert.core.security import get_current_user
@@ -117,3 +118,39 @@ def list_competitors(
         total=payload.competitors_total,
     )
     return payload
+
+@router.delete("/{competitor_id}", status_code=status.HTTP_200_OK)
+def delete_competitor(
+    request: Request,
+    competitor_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """ Remove um concorrente específico e aciona recálculo do monitorado """
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        competitor_id=str(competitor_id),
+    )
+
+    delete_competitor_entry(
+        db=db,
+        competitor_id=competitor_id,
+        user=user,
+        context={
+            "path": request.url.path,
+            "method": request.method,
+        },
+    )
+
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        competitor_id=str(competitor_id),
+
+    )
+    return {"success": True, "competitor_id": str(competitor_id)}

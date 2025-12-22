@@ -47,7 +47,7 @@ import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
-import { MonitoredProduct } from '../types';
+import { CompetitorProduct, MonitoredProduct } from '../types';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -68,6 +68,9 @@ const ProductDetail: React.FC = () => {
   const [competitorError, setCompetitorError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [competitorToDelete, setCompetitorToDelete] = useState<CompetitorProduct | null>(null);
+  const [confirmCompetitorDeleteOpen, setConfirmCompetitorDeleteOpen] = useState(false);
+  const [competitorDeleteError, setCompetitorDeleteError] = useState<string | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -120,6 +123,21 @@ const ProductDetail: React.FC = () => {
       // Orienta o usuário a revisar a URL ou a sessão antes de tentar novamente
       setCompetitorError('Não foi possível adicionar concorrente. Revise a URL e tente novamente');
     }
+  });
+
+  const deleteCompetitorMutation = useMutation({
+    mutationFn: (competitorId: string) => productsService.deleteCompetitor(competitorId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['competitors', id] });
+      queryClient.invalidateQueries({ queryKey: ['comparisonSummary', id] });
+      setConfirmCompetitorDeleteOpen(false);
+      setCompetitorToDelete(null);
+      setCompetitorDeleteError(null);
+      setActionSuccess('Concorrente removido. Resumo será recalculado em instantes.');
+    },
+    onError: () => {
+      setCompetitorDeleteError('Falha ao remover concorrente. Tente novamente.');
+    },
   });
 
   /**
@@ -214,6 +232,24 @@ const ProductDetail: React.FC = () => {
       product_url: competitorUrl,
       name: competitorName.trim() || undefined,
     });
+  };
+
+  /**
+   * Abre modal de remoção de concorrente com o item selecionado.
+   */
+  const handleOpenCompetitorDelete = (competitor: CompetitorProduct) => {
+    setCompetitorToDelete(competitor);
+    setCompetitorDeleteError(null);
+    setConfirmCompetitorDeleteOpen(true);
+  };
+
+  /**
+   * Confirma remoção do concorrente selecionado.
+   */
+  const handleConfirmCompetitorDelete = () => {
+    if (!competitorToDelete) return;
+    setCompetitorDeleteError(null);
+    deleteCompetitorMutation.mutate(competitorToDelete.id);
   };
 
   /**
@@ -740,11 +776,23 @@ const ProductDetail: React.FC = () => {
                                   <OpenInNewIcon />
                                 </IconButton>
                                 
-                                {/* Excluir concorrente: ação não implementada — apresentar feedback claro e estado desabilitado */}
-                                <Tooltip title="Remoção de concorrentes não implementada" placement="top">
+                                <Tooltip title="Remover concorrente" placement="top">
                                   <span>
-                                    <IconButton size="small" color="error" disabled aria-label="Remoção não implementada">
-                                      <DeleteIcon />
+                                    <IconButton
+                                      size="small"
+                                      color="error"
+                                      aria-label="Remover concorrente"
+                                      onClick={() => handleOpenCompetitorDelete(competitor)}
+                                      disabled={
+                                        deleteCompetitorMutation.isPending &&
+                                        competitorToDelete?.id === competitor.id
+                                      }
+                                    >
+                                      {deleteCompetitorMutation.isPending && competitorToDelete?.id === competitor.id ? (
+                                        <CircularProgress size={18} />
+                                      ) : (
+                                        <DeleteIcon />
+                                      )}
                                     </IconButton>
                                   </span>
                                 </Tooltip>
@@ -959,7 +1007,40 @@ const ProductDetail: React.FC = () => {
             variant="contained"
             disabled={!competitorUrl || createCompetitorMutation.isPending}
           >
-            {createCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Adicionar'}
+          {createCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Adicionar'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+
+      {/* Diálogo de confirmação para remover concorrente */}
+      <Dialog
+        open={confirmCompetitorDeleteOpen}
+        onClose={() => setConfirmCompetitorDeleteOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Remover concorrente</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {`Esta ação remove o concorrente ${competitorToDelete?.name || competitorToDelete?.display_name || 'selecionado'} e seu histórico.`}
+          </Alert>
+          {competitorDeleteError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {competitorDeleteError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmCompetitorDeleteOpen(false)} color="secondary" disabled={deleteCompetitorMutation.isPending}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleConfirmCompetitorDelete}
+            variant="contained"
+            color="error"
+            disabled={deleteCompetitorMutation.isPending}
+          >
+            {deleteCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Remover'}  
           </Button>
         </DialogActions>
       </Dialog>

@@ -199,6 +199,12 @@ MONITORED_SKIPPED_PAUSED_TOTAL = Counter(
     ["source"],
 )
 
+COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL = Counter(
+    "collector_skipped_missing_target_total",
+    "Coletas ignoradas por alvo removido ou inexistente",
+    ["kind"],
+)
+
 RECHECK_NEXT_CHECK_MISSING_TOTAL = Counter(
     "recheck_next_check_missing_total",
     "Contagem absoluta de monitorados sem next_check_at definido",
@@ -344,6 +350,7 @@ __all__ = [
     "COLLECTOR_LOCK_ACQUIRED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL",
+    "COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL",
     "COLLECT_LOCK_SKIPPED_TOTAL",
     "COLLECT_SUCCESS_TOTAL",
     "COLLECTOR_DURATION_MS",

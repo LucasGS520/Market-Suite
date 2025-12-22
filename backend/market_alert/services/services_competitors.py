@@ -18,7 +18,9 @@ from market_alert.crud.crud_competitor import (
     count_competitors_by_monitored,
     create_pending_competitor_product,
     get_competitor_by_monitored_and_url,
+    get_competitor_by_id,
     paginate_competitors,
+    delete_competitor,
     delete_competitors_by_monitored_id,
 )
 from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
@@ -30,6 +32,12 @@ from market_alert.core.config_alert import settings
 
 from shared.utils.url_validation import normalize_and_validate_product_url
 from shared import metrics
+from shared.metrics.metrics_products import (
+    COMPETITOR_DELETED_TOTAL,
+    COMPETITOR_DELETE_FAILURES_TOTAL,
+)
+
+from market_alert.tasks.compare_prices_task import compare_prices_task
 
 
 logger = structlog.get_logger(__name__)
@@ -74,6 +82,40 @@ def ensure_user_can_access_monitored(
         )
 
     return monitored
+
+def _ensure_competitor_access(
+    *,
+    db: Session,
+    competitor_id: UUID,
+    user: User,
+    context: dict[str, str] | None = None,
+) -> CompetitorProduct:
+    """ Valida se o concorrente pertence ao usuário autenticado """
+    log_context: dict[str, str] = {
+        "competitor_id": str(competitor_id),
+        "user_id": str(user.id),
+    }
+    if context:
+        log_context.update(context)
+
+    competitor = get_competitor_by_id(db, competitor_id)
+    if competitor is None:
+        logger.warning("competitor_not_found", **log_context)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Concorrente não encontrado.",
+        )
+    
+    owner_id = competitor.monitored_product.user_id if competitor.monitored_product else None
+    if owner_id != user.id:
+        log_context["owner_id"] = str(owner_id)
+        logger.warning("competitor_forbidden", **log_context)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuário não possui permissão para remover este concorrente.",
+        )
+    
+    return competitor
 
 def validate_competitor_limit(
     *,
@@ -271,6 +313,61 @@ def list_competitors_with_pagination(
         per_page=per_page,
     )
 
+def delete_competitor_entry(
+    *,
+    db: Session,
+    competitor_id: UUID,
+    user: User,
+    context: dict[str, str] | None = None,
+) -> UUID:
+    """ Remove concorrente com transação, limpeza de históricos e recálculo """
+    log_context: dict[str, str] = {
+        "competitor_id": str(competitor_id),
+        "user_id": str(user.id),
+    }
+    if context:
+        log_context.update(context)
+
+    logger.info("competitor_delete_requested", **log_context)
+
+    try:
+        with db.begin():
+            competitor = _ensure_competitor_access(
+                db=db,
+                competitor_id=competitor_id,
+                user=user,
+                context=context,
+            )
+
+            monitored_id = competitor.monitored_product_id
+            delete_competitor(db, competitor)
+
+            #Cascatas de relacionamento cuidam do histórico de preços e dependências
+            logger.info(
+                "competitor_deleted",
+                **log_context,
+                monitored_id=str(monitored_id),
+            )
+
+        COMPETITOR_DELETED_TOTAL.inc()
+        compare_prices_task.apply_async(args=[str(monitored_id)], queue="monitor")
+        logger.info(
+            "competitor_delete_recalculation_enqueued",
+            monitored_id=str(monitored_id),
+            competitor_id=str(competitor_id),
+        )
+        return monitored_id
+    except HTTPException:
+        COMPETITOR_DELETE_FAILURES_TOTAL.inc()
+        raise
+    except Exception as exc:
+        COMPETITOR_DELETE_FAILURES_TOTAL.inc()
+        logger.exception("competitor_delete_failed", **log_context)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao remover concorrente.",
+        ) from exc
+        
 def clear_competitors_from_monitored(
     *,
     db: Session,
