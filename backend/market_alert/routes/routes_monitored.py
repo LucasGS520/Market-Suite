@@ -191,13 +191,14 @@ def update_paused_state(
         method=request.method,
         user_id=str(user.id),
         product_id=str(product_id),
-        paused=payload.paused,
+        payload=payload,
     )
+    
     response_payload = update_monitored_pause_state(
         db=db,
         product_id=product_id,
         user=user,
-        paused=payload.paused,
+        payload=payload,
     )
 
     logger.info(
@@ -206,7 +207,7 @@ def update_paused_state(
         method=request.method,
         status="success",
         product_id=str(product_id),
-        paused=payload.paused,
+        paused=response_payload.paused,
     )
     return response_payload
 
