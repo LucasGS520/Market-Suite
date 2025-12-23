@@ -196,10 +196,15 @@ def pause_monitored_product_entry(
         monitored = pause_monitored(db, product_id, user)
     except Exception as exc:
         _raise_from_monitored_error(exc)
-    
+    #Recarrega estado canônico do banco antes de montar o DTO
+    refreshed = get_monitored_product_by_id(db, product_id)
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado")
+
+    logger.info("monitored_paused", product_id=str(product_id), user_id=str(user.id))
     summary = get_latest_summary(db, product_id)
     return build_monitored_response(
-        monitored,
+        refreshed,
         summary=summary,
         allow_missing_price=True,
     )
@@ -212,14 +217,19 @@ def resume_monitored_product_entry(
         monitored = resume_monitored(db, product_id, user)
     except Exception as exc:  # noqa: BLE001 - conversão controlada para HTTP
         _raise_from_monitored_error(exc)
+    #Recarrega estado canônico do banco antes de montar o DTO
+    refreshed = get_monitored_product_by_id(db, product_id)
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado")
 
+    logger.info("monitored_resumed", product_id=str(product_id), user_id=str(user.id))
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
     alerts_sent = count_notifications_for_monitored_product(
         db, user_id=user.id, monitored_product_id=product_id
     )
     return build_monitored_response(
-        monitored,
+        refreshed,
         summary=summary,
         allow_missing_price=True,
         last_price_change_at=last_price_change_at,
@@ -239,6 +249,13 @@ def update_monitored_pause_state(
         )
     except Exception as exc:
         _raise_from_monitored_error(exc)
+    #Garante que retornamos o estado canônico recarregado do banco
+    refreshed = get_monitored_product_by_id(db, product_id)
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado")
+
+    action = "paused" if payload.paused else "resumed"
+    logger.info(f"monitored_{action}", product_id=str(product_id), user_id=str(user.id))
 
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
@@ -246,7 +263,7 @@ def update_monitored_pause_state(
         db, user_id=user.id, monitored_product_id=product_id
     )
     return build_monitored_response(
-        monitored,
+        refreshed,
         summary=summary,
         allow_missing_price=True,
         last_price_change_at=last_price_change_at,

@@ -180,7 +180,7 @@ def get_product(
 def update_paused_state(
     request: Request,
     product_id: UUID,
-    payload: MonitoredPausedUpdateRequest,
+    paused: bool,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -191,9 +191,10 @@ def update_paused_state(
         method=request.method,
         user_id=str(user.id),
         product_id=str(product_id),
-        payload=payload,
+        paused=paused,
     )
-    
+    # Compatibilidade com contrato de serviço: cria objeto de request internamente
+    payload = MonitoredPausedUpdateRequest(paused=paused)
     response_payload = update_monitored_pause_state(
         db=db,
         product_id=product_id,

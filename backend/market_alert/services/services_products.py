@@ -181,6 +181,8 @@ def build_monitored_response(
         created_at=_normalize_timestamp(monitored.created_at),
         last_scraped_at=_normalize_timestamp(monitored.last_scraped_at),
         next_check_at=_normalize_timestamp(monitored.next_check_at),
+        paused=bool(getattr(monitored, "paused", False)),
+        paused_at=_normalize_timestamp(getattr(monitored, "paused_at", None)),
         last_price_change_at=resolved_last_change,
         last_price_change_global_at=resolved_last_change,
         competitiveness_status=competitiveness_status,
