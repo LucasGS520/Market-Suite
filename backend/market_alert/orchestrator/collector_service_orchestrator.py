@@ -18,6 +18,7 @@ from market_alert.core.config_alert import settings
 from shared import metrics
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
+from shared.metrics.metrics_scraper import MONITORED_SKIPPED_PAUSED_TOTAL
 
 
 logger = structlog.get_logger("collector_service")
@@ -72,6 +73,16 @@ def enqueue_monitored_collection(
     user_id: UUID
 ) -> None:
     """ Abstrai o enfileiramento de monitorados e registra contexto em log """
+    #Se o monitorado estiver pausado, não enfileira e incrementa métrica
+    if getattr(monitored, "paused", False):
+        MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="orchestrator").inc()
+        logger.info(
+            "enqueue_skipped_monitored_paused",
+            monitored_id=str(monitored.id),
+            user_id=str(user_id),
+        )
+        return
+
     payload = build_monitored_payload(monitored, user_id=user_id)
     logger.info(
         "enqueue_monitored_collection",

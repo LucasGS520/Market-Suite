@@ -15,10 +15,12 @@ from sqlalchemy.orm import Session
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import canonicalize_product_url, normalize_product_url_for_storage
+from shared.metrics.metrics_products import PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
+from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
 logger = structlog.get_logger("crud_competitor")
@@ -55,6 +57,15 @@ def get_competitor_by_monitored_and_url(
             CompetitorProduct.monitored_product_id == monitored_product_id,
             CompetitorProduct.product_url == normalized_url,
         )
+        .first()
+    )
+
+def get_competitor_by_id(db: Session, competitor_id: UUID) -> CompetitorProduct | None:
+    """ Recupera concorrente por ID com relacionamento do monitorado para autorização """
+    return (
+        db.query(CompetitorProduct)
+        .join(MonitoredProduct)
+        .filter(CompetitorProduct.id == competitor_id)
         .first()
     )
 
@@ -183,12 +194,16 @@ def create_or_update_competitor_product_scraped(
     )
 
     if existing:
-        resolved_price = _to_decimal(scraped_info.current_price)
+        resolved_price = normalize_scraped_price(scraped_info.current_price)
         
         #Atualiza somente campos relevantes
         previous_price = existing.current_price
         previous_status = existing.status
         existing.old_price = existing.current_price
+        availability = scraped_info.availability
+        last_status = scraped_info.last_status or existing.last_status
+        unavailable_by_data = availability is False or resolved_price is None
+
         price_changed = _different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
 
@@ -203,7 +218,9 @@ def create_or_update_competitor_product_scraped(
             existing.last_modified = last_modified or existing.last_modified
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
-            existing.status = ProductStatus.available
+            existing.status = ProductStatus.unavailable if unavailable_by_data else ProductStatus.available
+            existing.availability = availability
+            existing.last_status = last_status
             existing.product_url = normalized_url
 
             #Sanitiza e persiste somente se tivermos um nome útil retornado pelo scraper.
@@ -212,7 +229,19 @@ def create_or_update_competitor_product_scraped(
                 if sanitized_name:
                     existing.name_competitor = sanitized_name
 
-            price_history_needed = price_changed and resolved_price is not None
+            history_allowed = should_create_price_history(resolved_price, availability)
+            price_history_needed = price_changed and history_allowed
+
+            if not history_allowed:
+                PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="competitor").inc()
+                logger.info(
+                    "product_marked_unavailable",
+                    product_id=str(existing.id),
+                    availability=availability,
+                    last_status=last_status,
+                    availability_inferred=availability is None,
+                    price_missing=resolved_price is None,
+                )
 
             logger.info(
                 "update_competitor_product_scraped",
@@ -240,7 +269,7 @@ def create_or_update_competitor_product_scraped(
 
         db.refresh(existing)
         existing._price_changed = price_changed
-        existing._availability_changed = previous_status != ProductStatus.available
+        existing._availability_changed = previous_status != existing.status
 
         logger.info(
             "updated_competitor",
@@ -248,13 +277,18 @@ def create_or_update_competitor_product_scraped(
             price_changed=existing._price_changed,
             availability_changed=existing._availability_changed,
             last_checked=last_checked.isoformat(),
+            availability=existing.availability,
+            last_status=existing.last_status,
         )
         return existing
 
     #Caso não exista, cria um registro
-    resolved_price = _to_decimal(scraped_info.current_price)
+    resolved_price = normalize_scraped_price(scraped_info.current_price)
     resolved_currency = currency or scraped_info.currency
-
+    availability = scraped_info.availability
+    last_status = scraped_info.last_status
+    unavailable_by_data = availability is False or resolved_price is None
+    
     new = CompetitorProduct(
         monitored_product_id=product_data.monitored_product_id,
         name_competitor=scraped_info.name,
@@ -265,17 +299,30 @@ def create_or_update_competitor_product_scraped(
         seller=scraped_info.seller,
         seller_rating=scraped_info.seller_rating,
         thumbnail=scraped_info.thumbnail,
-        status=ProductStatus.available,
+        status=ProductStatus.unavailable if unavailable_by_data else ProductStatus.available,
         last_checked=last_checked,
         last_scraped_at=last_checked,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
+        availability=availability,
+        last_status=last_status,
         )
     try:
         db.add(new)
         db.flush()
-        if resolved_price is not None:
+        history_allowed = should_create_price_history(resolved_price, availability)
+        if not history_allowed:
+            PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="competitor").inc()
+            logger.info(
+                "product_marked_unavailable",
+                product_id=str(new.id),
+                availability=availability,
+                last_status=last_status,
+                availability_inferred=availability is None,
+                price_missing=resolved_price is None,
+            )
+        if resolved_price is not None and history_allowed:
             crud_price_history.create_for_competitor(
                 db,
                 new.id,
@@ -326,18 +373,21 @@ def get_competitors_by_monitored_id(
     monitored_product_id: UUID,
     *,
     include_paused: bool = False,
+    include_inactive: bool = False,
 ) -> List[CompetitorProduct]:
     """ Lista concorrentes associados respeitando filtros de pausa e disponibilidade"""
     query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
     )
     if not include_paused:
-        #Evita enfileirar ou listar concorrentes pausados ou já indisponíveis
+        #Evita enfileirar concorrentes pausados sem bloquear listagem administrativa
+        query = query.filter(CompetitorProduct.is_paused.is_(False))
+
+    if not include_inactive:
+        #Garante que comparações automáticas não usem itens marcados como indisponíveis
         query = query.filter(
-            CompetitorProduct.is_paused.is_(False),
-            CompetitorProduct.status.in_(
-                [ProductStatus.available, ProductStatus.pending]
-            ),
+            CompetitorProduct.status.in_([ProductStatus.available, ProductStatus.pending]),
+            CompetitorProduct.availability.isnot(False),
         )
     return query.all()
 
@@ -349,35 +399,50 @@ def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) 
     db.commit()
     return competitors
 
+def delete_competitor(db: Session, competitor: CompetitorProduct) -> None:
+    """ Remove concorrente específico garantindo flush para cascatas """
+    db.delete(competitor)
+    db.flush()
+
 def paginate_competitors(
     db: Session,
     monitored_product_id: UUID,
     *,
     page: int,
     per_page: int,
-    include_paused: bool = False,
-) -> tuple[int, List[CompetitorProduct]]:
-    """ Retorna concorrentes paginados usando apenas filtros essenciais. """
-    query = db.query(CompetitorProduct).filter(
+    include_paused: bool = True,
+    include_inactive: bool = True,
+) -> tuple[int, int, int, List[CompetitorProduct]]:
+    """ Retorna concorrentes paginados preservando contagens para métricas """
+    base_query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
     )
 
-    query = query.filter(
-        CompetitorProduct.status != ProductStatus.pending,
-        CompetitorProduct.current_price.isnot(None),
-    )
-
     if not include_paused:
-        query = query.filter(CompetitorProduct.is_paused.is_(False))
+        base_query = base_query.filter(CompetitorProduct.is_paused.is_(False))
 
-    total = int(query.count())
+    if not include_inactive:
+        base_query = base_query.filter(
+            CompetitorProduct.status.in_([ProductStatus.available, ProductStatus.pending]),
+            CompetitorProduct.availability.isnot(False),
+            CompetitorProduct.current_price.isnot(None),
+        )
+
+    total = int(base_query.count())
+
+    usable_query = base_query.filter(
+        CompetitorProduct.current_price.isnot(None),
+        CompetitorProduct.availability.isnot(False),
+    )
+    with_price_count = int(usable_query.count())
+    excluded_due_to_inactive = max(total - with_price_count, 0)
 
     offset_value = max(page - 1, 0) * per_page
     items = (
-        query.order_by(desc(CompetitorProduct.last_checked), CompetitorProduct.id)
+        base_query.order_by(desc(CompetitorProduct.last_checked), CompetitorProduct.id)
         .offset(offset_value)
         .limit(per_page)
         .all()
     )
 
-    return total, items
+    return total, with_price_count, excluded_due_to_inactive, items

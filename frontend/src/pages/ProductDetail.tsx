@@ -5,7 +5,7 @@
  * de preços e a lista de concorrentes. Permite adicionar concorrentes.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -41,9 +41,13 @@ import {
 } from '@mui/icons-material';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
-import { formatCurrency } from '../utils/currency';
+import { formatCurrency, normalizePriceInput } from '../utils/currency';
 import { formatDateOnly, formatDateTime, formatRelativeTime } from '../utils/date';
 import TruncatedText from '../utils/TruncatedText';
+import ProductStateBadge from '../components/ProductStateBadge';
+import { resolveMonitoredStatus } from '../utils/productStatus';
+import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
+import { CompetitorProduct, MonitoredProduct } from '../types';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -62,6 +66,16 @@ const ProductDetail: React.FC = () => {
   const [competitorName, setCompetitorName] = useState('');
   const [competitorFeedback, setCompetitorFeedback] = useState<string | null>(null);
   const [competitorError, setCompetitorError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [competitorToDelete, setCompetitorToDelete] = useState<CompetitorProduct | null>(null);
+  const [confirmCompetitorDeleteOpen, setConfirmCompetitorDeleteOpen] = useState(false);
+  const [competitorDeleteError, setCompetitorDeleteError] = useState<string | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement | null>(null);
+  const confirmDeleteButtonRef = useRef<HTMLButtonElement | null>(null);
+
 
   // Query: detalhes do produto monitorado
   const { data: product, isLoading: productLoading, error: productError } = useQuery({
@@ -78,6 +92,8 @@ const ProductDetail: React.FC = () => {
         monitored_id: id!,
         page: 1,
         per_page: 100,
+        include_inactive: true,
+        include_paused: true,
       }),
     enabled: !!id,
   });
@@ -105,8 +121,109 @@ const ProductDetail: React.FC = () => {
     },
     onError: () => {
       // Orienta o usuário a revisar a URL ou a sessão antes de tentar novamente
-      setCompetitorError('Não foi possível adicionar concorrente. Revise a URL e tente novamente')
+      setCompetitorError('Não foi possível adicionar concorrente. Revise a URL e tente novamente');
     }
+  });
+
+  const deleteCompetitorMutation = useMutation({
+    mutationFn: (competitorId: string) => productsService.deleteCompetitor(competitorId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['competitors', id] });
+      queryClient.invalidateQueries({ queryKey: ['comparisonSummary', id] });
+      setConfirmCompetitorDeleteOpen(false);
+      setCompetitorToDelete(null);
+      setCompetitorDeleteError(null);
+      setActionSuccess('Concorrente removido. Resumo será recalculado em instantes.');
+    },
+    onError: () => {
+      setCompetitorDeleteError('Falha ao remover concorrente. Tente novamente.');
+    },
+  });
+
+  /**
+   * Mutations de pausa e retomada com atualização otimista na cache do produto.
+   */
+  const pauseMonitoredMutation = useMutation({
+    mutationFn: () => productsService.pauseMonitored(id!),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['monitoredProduct', id] });
+      const previous = queryClient.getQueryData<MonitoredProduct | undefined>(['monitoredProduct', id]);
+      const pausedAt = new Date().toISOString();
+      const optimistic: MonitoredProduct | undefined = previous
+        ? {
+            ...previous,
+            paused: true,
+            is_paused: true,
+            paused_at: pausedAt,
+            display_status: 'paused',
+          }
+        : previous;
+      if (optimistic) {
+        queryClient.setQueryData(['monitoredProduct', id], optimistic);
+      }
+      return { previous };
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['monitoredProduct', id], data);
+      queryClient.invalidateQueries({ queryKey: ['monitoredProduct', id] });
+      queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
+      setActionSuccess('Monitoramento pausado com sucesso.');
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['monitoredProduct', id], context.previous);
+      }
+      setActionError('Não foi possível pausar o monitoramento. Tente novamente.');
+    },
+  });
+
+  const resumeMonitoredMutation = useMutation({
+    mutationFn: () => productsService.resumeMonitored(id!),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['monitoredProduct', id] });
+      const previous = queryClient.getQueryData<MonitoredProduct | undefined>(['monitoredProduct', id]);
+      const optimistic: MonitoredProduct | undefined = previous
+        ? {
+            ...previous,
+            paused: false,
+            is_paused: false,
+            paused_at: null,
+            display_status: previous.display_status === 'paused' ? 'unknown' : previous.display_status,
+          }
+        : previous;
+      if (optimistic) {
+        queryClient.setQueryData(['monitoredProduct', id], optimistic);
+      }
+      return { previous };
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['monitoredProduct', id], data);
+      queryClient.invalidateQueries({ queryKey: ['monitoredProduct', id] });
+      queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
+      setActionSuccess('Monitoramento retomado. Nova coleta será agendada.');
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['monitoredProduct', id], context.previous);
+      }
+      setActionError('Não foi possível retomar o monitoramento. Tente novamente.');
+    },
+  });
+
+  const deleteMonitoredMutation = useMutation({
+    mutationFn: () => productsService.deleteProduct(id!),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: ['monitoredProduct', id] });
+      queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
+      setConfirmDeleteOpen(false);
+      setActionSuccess('Produto removido com sucesso. Histórico e concorrentes foram descartados.');
+      navigate('/products');
+    },
+    onError: () => {
+      // Mantém o modal aberto para permitir nova tentativa e indica falha de forma visível.
+      setDeleteError('Falha ao remover produto. Verifique sua conexão e tente novamente.');
+      setActionError('Falha ao remover produto. Verifique sua conexão e tente novamente.');
+    },
   });
 
   /**
@@ -123,6 +240,24 @@ const ProductDetail: React.FC = () => {
   };
 
   /**
+   * Abre modal de remoção de concorrente com o item selecionado.
+   */
+  const handleOpenCompetitorDelete = (competitor: CompetitorProduct) => {
+    setCompetitorToDelete(competitor);
+    setCompetitorDeleteError(null);
+    setConfirmCompetitorDeleteOpen(true);
+  };
+
+  /**
+   * Confirma remoção do concorrente selecionado.
+   */
+  const handleConfirmCompetitorDelete = () => {
+    if (!competitorToDelete) return;
+    setCompetitorDeleteError(null);
+    deleteCompetitorMutation.mutate(competitorToDelete.id);
+  };
+
+  /**
    * Gera um nome amigável a partir do domínio/URL quando não há nome salvo.
    */
   const fallbackFromUrl = (url: string) => {
@@ -135,11 +270,38 @@ const ProductDetail: React.FC = () => {
   };
 
   /**
-   * Exibe aviso simples para ações que ainda não foram conectadas ao backend.
+   * Alterna monitoramento aplicando pause/resume com atualização otimista.
    */
-  const handlePlaceholderAction = (message: string) => {
-    alert(message);
+  const handleToggleMonitoring = () => {
+    if (!id) return;
+    setActionSuccess(null);
+    setActionError(null);
+    if (product?.paused ?? product?.is_paused) {
+      resumeMonitoredMutation.mutate();
+    } else {
+      pauseMonitoredMutation.mutate();
+    }
   };
+
+  /**
+   * Dispara remoção após confirmação explícita.
+   */
+  const handleDeleteProduct = () => {
+    if (!id) return;
+    setActionError(null);
+    setDeleteError(null);
+    deleteMonitoredMutation.mutate();
+  };
+
+  // Gerencia foco e acessibilidade do modal de remoção, direcionando foco ao confirmar e devolvendo ao gatilho.
+  useEffect(() => {
+    if (confirmDeleteOpen) {
+      setDeleteError(null);
+      confirmDeleteButtonRef.current?.focus();
+    } else {
+      deleteButtonRef.current?.focus();
+    }
+  }, [confirmDeleteOpen]);
 
   // Estado de carregamento do produto: mostra spinner enquanto carrega
   if (productLoading) {
@@ -162,62 +324,82 @@ const ProductDetail: React.FC = () => {
   }
 
   /**
-   * Retorna a cor do Chip de status de competitividade com base no status recebido.
-   * Status esperados: 'competitivo', 'atencao', 'urgente'.
+   * Define estado do item (monitorado ou concorrente) para guiar rótulos e cores.
    */
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'competitivo':
-        return 'success';
-      case 'atencao':
-        return 'warning';
-      case 'urgente':
-        return 'error';
-      default:
-        return 'default';
-    }
+  const resolveItemState = (
+    value: string | number | null,
+    availability?: boolean,
+    lastScrapedAt?: string | null,
+    isPaused?: boolean,
+  ) => {
+    const normalized = normalizePriceInput(value);
+
+    if (isPaused) return 'paused' as const;
+    if (availability === false) return 'inactive' as const;
+    if (availability === true && normalized === null && lastScrapedAt) return 'no_price' as const;
+    if (!lastScrapedAt && normalized === null) return 'collecting' as const;
+    return normalized !== null ? ('active' as const) : ('unknown' as const);
   };
 
   /**
-   * Retorna o rótulo legível em PT-BR para o status de competitividade.
+   * Renderiza preço do monitorado ou concorrente com fallback de indisponibilidade.
    */
-  const getStatusLabel = (status?: string) => {
-    switch (status) {
-      case 'competitivo':
-        return 'Competitivo';
-      case 'atencao':
-        return 'Atenção';
-      case 'urgente':
-        return 'Urgente';
-      default:
-        return 'Sem Status';
-    }
-  };
+  const renderPrice = (
+    value: string | number | null,
+    availability?: boolean,
+    lastStatus?: string,
+    lastScrapedAt?: string | null,
+    isPaused?: boolean,
+  ) => {
+    const normalized = normalizePriceInput(value);
+    const state = resolveItemState(value, availability, lastScrapedAt, isPaused);
 
-  /**
-   * Formata o preço exibindo estado de coleta quando ainda não existe valor salvo
-   */
-  const renderPrice = (value: string | number | null) => {
-    if (value === null) {
+    // Mostrar apenas texto compacto na coluna de preço: valor ou um rótulo curto.
+    if (state === 'paused') {
       return (
-        <Box display="flex" alignItems="center" gap={1}>
-          <CircularProgress size={18} />
-          <Typography variant="body2" color="text.secondary">
-            Scraping em andamento
-          </Typography>
-        </Box>
+        <Typography variant="body2" color="text.secondary">
+          Monitoramento pausado
+        </Typography>
       );
     }
 
-    return formatCurrency(value);
+    if (state === 'inactive') {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Indisponível
+        </Typography>
+      );
+    }
+
+    if (state === 'no_price') {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Sem preço
+        </Typography>
+      );
+    }
+
+    if (state === 'collecting') {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Coletando dados...
+        </Typography>
+      );
+    }
+
+    return (
+      <Typography variant="body1" color="text.primary">
+        {formatCurrency(normalized, { fallbackLabel: 'Sem preço' })}
+      </Typography>
+    );
   };
 
   const renderSummaryCurrency = (value?: string | number | null) => {
-    if (value === null || value === undefined) {
+    if (value === null || value === undefined || normalizePriceInput(value, { allowZero: true }) === null) {
       return '—';
     }
 
-    return formatCurrency(value, { fallbackLabel: '—' });
+    return formatCurrency(value, { fallbackLabel: '—', allowZero: true });
   };
 
   const resolveAdjustmentColor = (value?: string | number | null) => {
@@ -246,10 +428,13 @@ const ProductDetail: React.FC = () => {
   const summaryAlerts = summary?.alerts || [];
   const highlightedAlerts = summaryAlerts.slice(0, 3);
   const monitoredSince = product.created_at;
-  const monitoringPaused = product.is_paused ?? false;
+  const monitoringPaused = (product.paused ?? product.is_paused) ?? false;
+  const monitoredStatus = resolveMonitoredStatus(product);
+  const detailCardOpacity = monitoringPaused ? 0.5 : monitoredStatus === 'inactive' ? 0.8 : 1;
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
   const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
+  const actionBusy = pauseMonitoredMutation.isPending || resumeMonitoredMutation.isPending || deleteMonitoredMutation.isPending;
 
   return (
     <Layout>
@@ -273,7 +458,20 @@ const ProductDetail: React.FC = () => {
           <Box display="flex" flexDirection="column" gap={3}>
             
             {/* Cartão com informações principais do produto */}
-            <Card elevation={2}>
+            <Card
+              elevation={monitoredStatus === 'inactive' ? 0 : 2}
+              sx={{
+                border: '1px solid',
+                borderColor: monitoringPaused
+                  ? 'warning.light'
+                  : monitoredStatus === 'inactive'
+                    ? 'divider'
+                    : 'transparent',
+                backgroundColor:
+                  monitoringPaused || monitoredStatus === 'inactive' ? 'background.default' : 'background.paper',
+                opacity: detailCardOpacity,
+              }}
+            >
               <CardContent>
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={3}>
@@ -311,10 +509,7 @@ const ProductDetail: React.FC = () => {
                           tooltip={true}
                         />
                       </Box>
-                      <Chip
-                        label={getStatusLabel(product.competitiveness_status)}
-                        color={getStatusColor(product.competitiveness_status)}
-                      />
+                      <ProductStateBadge product={product} />
                     </Box>
 
                     <Grid container spacing={2} sx={{ mt: 2 }}>
@@ -322,9 +517,10 @@ const ProductDetail: React.FC = () => {
                         <Typography variant="body2" color="text.secondary">
                           Preço Atual
                         </Typography>
-                        <Typography variant="h4" color="primary">
-                          {renderPrice(product.current_price)}
-                        </Typography>
+                        { /* Padroniza renderização de preço com componente utilitário */ }
+                        <Box>
+                          {renderMonitoredPrice(product, { variant: 'h4' })}
+                        </Box>
                       </Grid>
                       <Grid item xs={12} sm={4}>
                         <Typography variant="body2" color="text.secondary">
@@ -358,13 +554,13 @@ const ProductDetail: React.FC = () => {
                     Resumo de Comparação
                   </Typography>
                   <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Total de Concorrentes
                       </Typography>
-                      <Typography variant="h6">{summary.competitors_count}</Typography>
+                      <Typography variant="h6">{summary.competitors_count ?? 0}</Typography>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Preço Médio
                       </Typography>
@@ -372,7 +568,7 @@ const ProductDetail: React.FC = () => {
                         {renderSummaryCurrency(summary?.competitors_mean)}
                       </Typography>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Preço Mínimo
                       </Typography>
@@ -380,7 +576,7 @@ const ProductDetail: React.FC = () => {
                         {renderSummaryCurrency(summary?.competitors_min)}
                       </Typography>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Preço Máximo
                       </Typography>
@@ -388,7 +584,7 @@ const ProductDetail: React.FC = () => {
                         {renderSummaryCurrency(summary?.competitors_max)}
                       </Typography>
                     </Grid>
-                    <Grid item xs={12} sm={6} md={3}>
+                    <Grid item xs={12} sm={6} md={4}>
                       <Typography variant="body2" color="text.secondary">
                         Reduzir seu Preço
                       </Typography>
@@ -430,6 +626,17 @@ const ProductDetail: React.FC = () => {
                   </Alert>
                 )}
 
+                {competitors && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    {`${competitors.competitors_with_price_count} de ${competitors.competitors_total} concorrentes serão considerados nas comparações.`}
+                    {competitors.excluded_due_to_inactive_count > 0 && (
+                      <>
+                        {` (${competitors.excluded_due_to_inactive_count} ignorados por indisponibilidade ou falta de preço).`}
+                      </>
+                    )}
+                  </Typography>
+                )}
+
                 {competitorsLoading ? (
                   // Spinner enquanto carrega a lista de concorrentes
                   <Box display="flex" justifyContent="center" py={4}>
@@ -438,7 +645,7 @@ const ProductDetail: React.FC = () => {
                 ) : competitors && competitors.items.length > 0 ? (
                   // Tabela de concorrentes quando houver itens
                   <TableContainer>
-                    <Table>
+                    <Table sx={{ tableLayout: 'fixed' }}>
                       <TableHead>
                         <TableRow>
                           <TableCell sx={{ maxWidth: 420, width: 420 }}>Produto</TableCell>
@@ -455,23 +662,39 @@ const ProductDetail: React.FC = () => {
                             Ações
                           </TableCell>
                         </TableRow>
-                      </TableHead>
-                      <TableBody>
+                        </TableHead>
+                        <TableBody>
                         {competitors.items.map((competitor) => {
                           const resolvedName =
                             competitor.name || competitor.display_name || fallbackFromUrl(competitor.url);
                           const isPendingName = !competitor.name && !competitor.display_name;
 
-                            const nameContent = (
-                              <TruncatedText
-                                text={resolvedName}
-                                variant="body2"
-                                lines={2}
-                                maxWidth={380}
-                                tooltip={false}
-                                sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
-                              />
-                            );
+                          const excludedFromMetrics =
+                            competitor.availability === false || competitor.current_price === null;
+                          const availabilityLabel =
+                            competitor.availability === false
+                              ? 'Indisponível'
+                              : competitor.availability === true
+                                ? 'Disponível'
+                                : 'Aguardando coleta';
+                          const availabilityColor =
+                            competitor.availability === false
+                              ? 'default'
+                              : competitor.availability === true
+                                ? 'success'
+                                : 'warning';
+
+                          
+                          const nameContent = (
+                            <TruncatedText
+                              text={resolvedName}
+                              variant="body2"
+                              lines={2}
+                              maxWidth={380}
+                              tooltip={false}
+                              sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
+                            />
+                          );                            
 
                           const wrappedName = isPendingName ? (
                             <Tooltip title="Coletando nome...">{nameContent}</Tooltip>
@@ -480,7 +703,17 @@ const ProductDetail: React.FC = () => {
                           );
 
                           return (
-                            <TableRow key={competitor.id}>
+                            <TableRow
+                              key={competitor.id}
+                              sx={{
+                                opacity: excludedFromMetrics ? 0.6 : 1,
+                                borderLeft: excludedFromMetrics ? '4px solid' : undefined,
+                                borderColor: excludedFromMetrics ? 'divider' : undefined,
+                                '&:hover': excludedFromMetrics
+                                  ? { backgroundColor: 'action.hover' }
+                                  : undefined,
+                              }}
+                            >
                               <TableCell sx={{ maxWidth: 420, width: 420 }}>
                                 <Box display="flex" alignItems="center" gap={1}>
                                   {competitor.thumbnail && (
@@ -512,22 +745,36 @@ const ProductDetail: React.FC = () => {
                                   </Box>
                                 </Box>
                               </TableCell>
-                              <TableCell align="right">{renderPrice(competitor.current_price)}</TableCell>
-                              <TableCell align="center">
-                                <Chip
-                                  label={competitor.availability ? 'Disponível' : 'Indisponível'}
-                                  color={competitor.availability ? 'success' : 'default'}
-                                  size="small"
-                                />
+                              <TableCell align="right" sx={{ verticalAlign: 'middle', width: 160 }}>
+                                {renderPrice(
+                                  competitor.current_price,
+                                  competitor.availability,
+                                  competitor.last_status,
+                                  competitor.last_scraped_at,
+                                  competitor.is_paused,
+                                )}
                               </TableCell>
-                              <TableCell align="center">
-                                <Chip
-                                  label={competitor.is_paused ? 'Pausado' : 'Ativo'}
-                                  color={competitor.is_paused ? 'default' : 'success'}
-                                  size="small"
-                                />
+                              <TableCell align="center" sx={{ verticalAlign: 'middle' }}>
+                                <Box display="flex" justifyContent="center">
+                                  <Chip
+                                    label={availabilityLabel}
+                                    color={availabilityColor}
+                                    size="small"
+                                    title={availabilityLabel}
+                                  />
+                                </Box>
                               </TableCell>
-                              <TableCell align="center" sx={{ whiteSpace: 'nowrap' }}>
+                              <TableCell align="center" sx={{ verticalAlign: 'middle' }}>
+                                <Box display="flex" justifyContent="center">
+                                  <Chip
+                                    label={competitor.is_paused ? 'Pausado' : 'Ativo'}
+                                    color={competitor.is_paused ? 'default' : 'success'}
+                                    size="small"
+                                    title={competitor.is_paused ? 'Monitoramento pausado' : 'Monitoramento ativo'}
+                                  />
+                                </Box>
+                              </TableCell>
+                              <TableCell align="center" sx={{ whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
                                 <IconButton
                                   size="small"
                                   color="default"
@@ -540,11 +787,23 @@ const ProductDetail: React.FC = () => {
                                   <OpenInNewIcon />
                                 </IconButton>
                                 
-                                {/* Excluir concorrente: ação não implementada — apresentar feedback claro e estado desabilitado */}
-                                <Tooltip title="Remoção de concorrentes não implementada" placement="top">
+                                <Tooltip title="Remover concorrente" placement="top">
                                   <span>
-                                    <IconButton size="small" color="error" disabled aria-label="Remoção não implementada">
-                                      <DeleteIcon />
+                                    <IconButton
+                                      size="small"
+                                      color="error"
+                                      aria-label="Remover concorrente"
+                                      onClick={() => handleOpenCompetitorDelete(competitor)}
+                                      disabled={
+                                        deleteCompetitorMutation.isPending &&
+                                        competitorToDelete?.id === competitor.id
+                                      }
+                                    >
+                                      {deleteCompetitorMutation.isPending && competitorToDelete?.id === competitor.id ? (
+                                        <CircularProgress size={18} />
+                                      ) : (
+                                        <DeleteIcon />
+                                      )}
                                     </IconButton>
                                   </span>
                                 </Tooltip>
@@ -573,7 +832,12 @@ const ProductDetail: React.FC = () => {
                 <Typography variant="h6" gutterBottom>
                   Insights de Comparação
                 </Typography>
-                {summary?.comparison_insights ? (
+                {/** Quando o produto está inativo, deixar explícito que não há comparação válida */}
+                {monitoredStatus === 'inactive' || summary?.ignored_due_to_inactive ? (
+                  <Alert severity="info" sx={{ mb: highlightedAlerts.length ? 2 : 0 }}>
+                    Comparação não realizada: anúncio indisponível no site de origem.
+                  </Alert>
+                ) : summary?.comparison_insights ? (
                   <Alert severity="info" sx={{ mb: highlightedAlerts.length ? 2 : 0 }}>
                     {summary.comparison_insights}
                   </Alert>
@@ -603,6 +867,16 @@ const ProductDetail: React.FC = () => {
                 <Typography variant="h6" gutterBottom>
                   Ações Rápidas
                 </Typography>
+                {actionError && (
+                  <Alert severity="error" sx={{ mb: 1 }}>
+                    {actionError}
+                  </Alert>
+                )}
+                {actionSuccess && (
+                  <Alert severity="success" sx={{ mb: 1 }}>
+                    {actionSuccess}
+                  </Alert>
+                )}
                 <Box display="flex" flexDirection="column" gap={1.5}>
                   <Button
                     variant="contained"
@@ -627,26 +901,35 @@ const ProductDetail: React.FC = () => {
                   >
                     Ver Anúncio
                   </Button>
-                  <Tooltip title="Funcionalidade não implementada — apenas visual por ora" placement="top">
-                    <Button
-                      variant="outlined"
-                      color="warning"
-                      startIcon={<PauseIcon />}
-                      onClick={() => handlePlaceholderAction('Funcionalidade não implementada: pausar monitoramento ainda não disponível.')}
-                    >
-                      {monitoringPaused ? 'Ativar Monitoramento' : 'Pausar Monitoramento'}
-                    </Button>
-                  </Tooltip>
-                  <Tooltip title="Remoção de produto não implementada" placement="top">
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      startIcon={<DeleteIcon />}
-                      onClick={() => handlePlaceholderAction('Funcionalidade não implementada: remoção de produto ainda não disponível.')}
-                    >
-                      Remover Produto
-                    </Button>
-                  </Tooltip>
+                  <Button
+                    variant="outlined"
+                    color={monitoringPaused ? 'success' : 'warning'}
+                    startIcon={<PauseIcon />}
+                    onClick={handleToggleMonitoring}
+                    disabled={actionBusy}
+                  >
+                    {pauseMonitoredMutation.isPending || resumeMonitoredMutation.isPending ? (
+                      <CircularProgress size={20} />
+                    ) : monitoringPaused ? (
+                      'Retomar Monitoramento'
+                    ) : (
+                      'Pausar Monitoramento'
+                    )}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => {
+                      setActionError(null);
+                      setActionSuccess(null);
+                      setConfirmDeleteOpen(true);
+                    }}
+                    disabled={actionBusy}
+                    ref={deleteButtonRef}
+                  >
+                    {deleteMonitoredMutation.isPending ? <CircularProgress size={20} /> : 'Remover Produto'}
+                  </Button>
                 </Box>
               </CardContent>
             </Card>
@@ -735,7 +1018,74 @@ const ProductDetail: React.FC = () => {
             variant="contained"
             disabled={!competitorUrl || createCompetitorMutation.isPending}
           >
-            {createCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Adicionar'}
+          {createCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Adicionar'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+
+      {/* Diálogo de confirmação para remover concorrente */}
+      <Dialog
+        open={confirmCompetitorDeleteOpen}
+        onClose={() => setConfirmCompetitorDeleteOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Remover concorrente</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {`Esta ação remove o concorrente ${competitorToDelete?.name || competitorToDelete?.display_name || 'selecionado'} e seu histórico.`}
+          </Alert>
+          {competitorDeleteError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {competitorDeleteError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmCompetitorDeleteOpen(false)} color="secondary" disabled={deleteCompetitorMutation.isPending}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleConfirmCompetitorDelete}
+            variant="contained"
+            color="error"
+            disabled={deleteCompetitorMutation.isPending}
+          >
+            {deleteCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Remover'}  
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Diálogo de confirmação para remover monitorado */}
+      <Dialog
+        open={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Remover produto monitorado</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Esta ação remove o monitorado, histórico de preços e concorrentes de forma definitiva. Deseja continuar?
+          </Alert>
+          {deleteError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {deleteError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeleteOpen(false)} color="secondary" disabled={deleteMonitoredMutation.isPending}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleDeleteProduct}
+            variant="contained"
+            color="error"
+            disabled={deleteMonitoredMutation.isPending}
+            ref={confirmDeleteButtonRef}
+          >
+            {deleteMonitoredMutation.isPending ? <CircularProgress size={24} /> : 'Remover'}
           </Button>
         </DialogActions>
       </Dialog>

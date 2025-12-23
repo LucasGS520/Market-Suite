@@ -1,4 +1,8 @@
-""" Modelos SQLAlchemy para produtos monitorados e concorrentes """
+""" Modelos SQLAlchemy para produtos monitorados e concorrentes.
+
+Os relacionamentos dependem de cascata no banco para remover concorrentes
+atrelados a um monitorado sem precisar de deleções manuais em código. 
+"""
 
 import uuid
 from datetime import datetime, timezone
@@ -40,6 +44,8 @@ class MonitoredProduct(Base):
     free_shipping = Column(Boolean, default=False)
     currency = Column(String(8), nullable=True)
     thumbnail = Column(Text, nullable=True)
+    availability = Column(Boolean, nullable=True, default=True, server_default="true")
+    last_status = Column(Text, nullable=True)
 
     #Flag indicando destaque manual exibido no dashboard
     is_featured = Column(Boolean, nullable=False, default=False, server_default="false")
@@ -51,6 +57,8 @@ class MonitoredProduct(Base):
 
     #Controle de status - Rechecagens usados pelo agendador
     status = Column(PgEnum(MonitoredStatus, name="monitored_status_enum"), nullable=False, default=MonitoredStatus.active)
+    paused = Column(Boolean, nullable=False, default=False, server_default="false")
+    paused_at = Column(DateTime(timezone=True), nullable=True)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
     next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -81,7 +89,7 @@ class MonitoredProduct(Base):
 
 # ---------- PRODUTO CONCORRENTE ----------
 class CompetitorProduct(Base):
-    """ Produto concorrente usado para comparação """
+    """ Produto concorrente usado para comparação e dependente do monitorado """
 
     __tablename__ = "competitor_products"
 
@@ -92,7 +100,13 @@ class CompetitorProduct(Base):
 
     #ID unico com UUIDv4
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    monitored_product_id = Column(PG_UUID(as_uuid=True), ForeignKey("monitored_products.id"), nullable=False, index=True)
+    # Cascata no banco elimina concorrentes quando o monitorado é removido, evitando limpezas manuais
+    monitored_product_id = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("monitored_products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     #Dados do concorrente
     name_competitor = Column("name", String, nullable=False)
@@ -105,6 +119,8 @@ class CompetitorProduct(Base):
     seller_rating = Column(Float, nullable=True)
     currency = Column(String(8), nullable=True)
     thumbnail = Column(String, nullable=True)
+    availability = Column(Boolean, nullable=True, default=True, server_default="true")
+    last_status = Column(Text, nullable=True)
 
     #Cache condicional
     etag = Column(String, nullable=True)

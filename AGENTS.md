@@ -36,6 +36,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Agendador de rechecagem (`tasks.recheck_scheduler_task.schedule_rechecks`)**: Beat que varre `next_check_at` vencidos, atualiza o próximo horário calculado a partir de `check_interval` (ou `RECHECK_INTERVAL_DEFAULT`) e enfileira a própria `collect_product_task` com jitter leve.
 - **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: idempotente e leve; usada pelo collector em cenários assíncronos e em acionamentos manuais para recalcular histórico/comparativos.
 - **Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando flags em banco e mantendo TTL automático como único mecanismo de exclusão mútua.
+- **Pausa de monitoramento**: monitorados com `paused=true` devem ser ignorados por agendador e collector, incrementando `monitored_skipped_paused` e mantendo histórico íntegro até retomada explícita.
 - **Contratos de desfecho**: quando o lock não é adquirido o collector retorna `no_result` (mantendo métrica de lock skipped) para preservar o contrato enxuto; rechecagens sem mudança (`not_modified`) não geram novo `PriceHistory` e já atualizam `next_check_at`.
 
 ## Diretrizes de Desenvolvimento para Agentes
@@ -54,6 +55,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Segurança**: não exponha segredos. Utilize arquivos `.env` e helpers para acessar configurações.
 - **Compatibilidade local/Docker**: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos.
 - **Manutenção documental**: ao final de cada sprint ou mudança estrutural, sinalize ou execute atualizações necessárias em `README.md` e `AGENTS.md`.
+- **Scraper**: a inferência de disponibilidade ocorre antes do validador e deve propagar `last_status` em ordem de precedência (payload > inferência > validador). A rota `GET /monitored/` lista itens sem preço para indicar indisponibilidade.
 
 ## Interação entre serviços
 - Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/client/src/lib/api.ts`) injeta JWT no header `Authorization`.

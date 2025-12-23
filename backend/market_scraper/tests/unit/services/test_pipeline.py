@@ -53,6 +53,10 @@ async def test_pipeline_returns_first_success() -> None:
         "current_price": "10.00",
         "url": "https://exemplo.com",
         "source": "exemplo.com",
+        "currency": None,
+        "availability": None,
+        "last_status": None,
+        "payload": None,
     }
     assert len(outcome.steps) == 2
     assert outcome.context is context

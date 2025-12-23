@@ -1,7 +1,7 @@
 """ Rotas para produtos monitorados pelo usuário """
 
 import structlog
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -11,6 +11,7 @@ from backend.shared.schemas.shared_schemas_products import MonitoredProductCreat
 from market_alert.models import User
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.schemas.schemas_products import (
+    MonitoredPausedUpdateRequest,
     MonitoredProductResponse,
     PaginatedMonitoredProductsResponse,
     MonitoredScrapeCreationResponse,
@@ -22,6 +23,7 @@ from market_alert.services.services_monitored import (
     list_featured_monitored_products,
     list_monitored_products as list_monitored_products_service,
     schedule_monitored_scrape,
+    update_monitored_pause_state,
 )
 
 
@@ -145,21 +147,97 @@ def list_featured_products(
     return response_payload
 
 @router.get("/{product_id}", response_model=MonitoredProductResponse)
-def get_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def get_product(
+    request: Request,
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
     """ Endpoint para listar produtos monitorados pelo ID """
-    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), product_id=str(product_id))
-    response_payload = get_monitored_product(
-        db=db, product_id=product_id, user_id=user.id
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        product_id=str(product_id)
     )
-    logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
+    response_payload = get_monitored_product(
+        db=db,
+        product_id=product_id,
+        user_id=user.id
+    )
+
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        product_id=str(product_id)
+    )
     return response_payload
 
-@router.delete("/{product_id}", response_model=MonitoredProductResponse)
-def delete_product(request: Request, product_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """ Endpoint para deletar um produto monitorado """
-    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), product_id=str(product_id))
-    response_payload = delete_monitored_product_entry(
-        db=db, product_id=product_id, user_id=user.id
+@router.put("/{product_id}/paused", response_model=MonitoredProductResponse)
+def update_paused_state(
+    request: Request,
+    product_id: UUID,
+    paused: bool,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """ Endpoint idempotente para pausar ou retomar monitorado """
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        product_id=str(product_id),
+        paused=paused,
     )
-    logger.info("route_completed", path=request.url.path, method=request.method, status="success", product_id=str(product_id))
+    # Compatibilidade com contrato de serviço: cria objeto de request internamente
+    payload = MonitoredPausedUpdateRequest(paused=paused)
+    response_payload = update_monitored_pause_state(
+        db=db,
+        product_id=product_id,
+        user=user,
+        payload=payload,
+    )
+
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        product_id=str(product_id),
+        paused=response_payload.paused,
+    )
     return response_payload
+
+@router.delete("/{product_id}", status_code=status.HTTP_200_OK)
+def delete_product(
+    request: Request,
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """ Endpoint para deletar um produto monitorado """
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        product_id=str(product_id)
+    )
+    delete_monitored_product_entry(
+        db=db,
+        product_id=product_id,
+        user=user,
+    )
+
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        product_id=str(product_id)
+    )
+    return {"success": True, "product_id": str(product_id)}

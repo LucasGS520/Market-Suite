@@ -41,11 +41,14 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 | **backend/market_scraper** | valida URLs, realiza download das páginas, executa pipeline de parsing multiestágio e devolve `ParserResponse` | [`backend/market_scraper/README.md`](backend/market_scraper/README.md) |
 | **backend/shared** | reúne contratos Pydantic, métricas, configuração, clientes externos e utilidades comuns | [`backend/shared/`](backend/shared/) |
 
+> Nota operacional: a inferência de disponibilidade agora antecede a validação do parser e preserva `last_status` informado pelo scraper. A listagem `GET /monitored/` também exibe itens sem preço coletado para sinalizar anúncios pausados ou indisponíveis.
+
 #### Fluxo interno do backend
 1. **Autenticação e entrada de requisições**: o `market_alert` recebe chamadas HTTP, autentica usuários via JWT e valida payloads com esquemas de `backend/shared/schemas`.
 2. **Orquestração de tarefas**: operações que exigem processamento assíncrono geram tasks Celery (`collect_product_task`, `collect_competitor_task`, `compare_prices_task`) enfileiradas no Redis.
 3. **Coleta de dados**: tasks que demandam scraping invocam o `ScraperClient` (`backend/market_alert/services/scraper_client.py`), enviando `POST /scraper/parse` ao `market_scraper`.
 4. **Pipeline de scraping**: o `market_scraper` executa validação de URL, checagem de `robots.txt`, caching LRU com TTL e pipeline sequencial (`FetchHTML` → `DomainSpecificParser` → `JsonLdParser` → `HtmlMetadataParser` → `GenericFallbackParser`). Resultados são devolvidos como `ParserResponse`.
+   - O contrato do `ParserResponse` expõe sempre `price|currency` (admite `null`), `availability`/`last_status` e cabeçalhos (`etag`, `not_modified`) para sinalizar indisponibilidade sem gravar preços `0.00`.
 5. **Persistência e regras de negócio**: workers Celery consolidam dados no PostgreSQL (`backend/market_alert/repositories`), recalculam comparações, aplicam regras de alerta e armazenam histórico de coletas.
 6. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 
@@ -86,6 +89,7 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 - **Sincronização de estado**: `react-query` evita chamadas duplicadas e trata revalidação automática.
 - **Isolamento de mock**: a aplicação pode rodar com mocks locais para demonstração sem depender do backend, útil para testes de UI.
 - **Paginação ajustável na listagem de produtos**: a tela de Produtos controla paginação no cliente, oferecendo 5/10/25 itens por página ou carregamento total (200 itens) em modo tabela; o backend apenas responde aos parâmetros `page` e `per_page` sem impor lógicas adicionais.
+- **Prioridades de status e competitividade**: anúncios indisponíveis são tratados como `Inativo` (incluindo sinais em `last_status`), `Pausado` só aparece quando o monitoramento foi suspenso manualmente com anúncio disponível e estados competitivos (`Competitivo`/`Atenção`/`Urgente`) só são exibidos quando há pelo menos um concorrente com preço. Na ausência de concorrentes, a UI exibe `Sem concorrentes`.
 
 
 ## Integração frontend ⇄ backend

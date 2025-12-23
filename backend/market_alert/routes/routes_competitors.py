@@ -12,13 +12,13 @@ from backend.shared.schemas.shared_schemas_products import CompetitorProductCrea
 
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
-    CompetitorProductResponse,
     CompetitorScrapeCreationResponse,
-    PaginatedCompetitorResponse,
+    CompetitorsListResponse,
 )
 from market_alert.services.services_competitors import (
     clear_competitors_from_monitored,
     create_competitor_scrape_request,
+    delete_competitor_entry,
     list_competitors_with_pagination,
 )
 from market_alert.core.security import get_current_user
@@ -52,7 +52,7 @@ def create_competitor_scrape(
         },
     )
 
-@router.get("/", response_model=PaginatedCompetitorResponse)
+@router.get("/", response_model=CompetitorsListResponse)
 def list_competitors(
     request: Request,
     *,
@@ -70,9 +70,17 @@ def list_competitors(
         le=MAX_PER_PAGE,
         description="Quantidade de concorrentes retornados por página",
     ),
+    include_inactive: bool = Query(
+        True,
+        description="Inclui concorrentes indisponíveis ou sem preço na listagem",
+    ),
+    include_paused: bool = Query(
+        True,
+        description="Inclui concorrentes pausados sem impactar contadores de preço",
+    ),
     
 ):
-    """ Lista concorrentes com os campos mínimos e paginação previsível """
+    """ Lista concorrentes sem filtrar inativos, preservando contagens úteis """
     logger.info(
         "route_called",
         path=request.url.path,
@@ -81,6 +89,8 @@ def list_competitors(
         monitored_id=str(monitored_product_id),
         page=page,
         per_page=per_page,
+        include_inactive=include_inactive,
+        include_paused=include_paused,
     )
 
     payload = list_competitors_with_pagination(
@@ -89,6 +99,8 @@ def list_competitors(
         monitored_product_id=monitored_product_id,
         page=page,
         per_page=per_page,
+        include_inactive=include_inactive,
+        include_paused=include_paused,
         context={
             "path": request.url.path,
             "method": request.method,
@@ -103,6 +115,42 @@ def list_competitors(
         monitored_id=str(monitored_product_id),
         page=page,
         count=len(payload.items),
-        total=payload.meta.total,
+        total=payload.competitors_total,
     )
     return payload
+
+@router.delete("/{competitor_id}", status_code=status.HTTP_200_OK)
+def delete_competitor(
+    request: Request,
+    competitor_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """ Remove um concorrente específico e aciona recálculo do monitorado """
+    logger.info(
+        "route_called",
+        path=request.url.path,
+        method=request.method,
+        user_id=str(user.id),
+        competitor_id=str(competitor_id),
+    )
+
+    delete_competitor_entry(
+        db=db,
+        competitor_id=competitor_id,
+        user=user,
+        context={
+            "path": request.url.path,
+            "method": request.method,
+        },
+    )
+
+    logger.info(
+        "route_completed",
+        path=request.url.path,
+        method=request.method,
+        status="success",
+        competitor_id=str(competitor_id),
+
+    )
+    return {"success": True, "competitor_id": str(competitor_id)}

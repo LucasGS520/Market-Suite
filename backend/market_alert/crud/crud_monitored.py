@@ -1,5 +1,6 @@
 """ Operações CRUD para produtos monitorados pelo sistema """
 
+import random
 from typing import List, Optional, Tuple
 
 from uuid import UUID
@@ -15,6 +16,14 @@ import structlog
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url_for_storage
+from shared.metrics.metrics_products import (
+    MONITORED_DELETED_TOTAL,
+    MONITORED_PAUSED_TOTAL,
+    MONITORED_RESUMED_TOTAL,
+    PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL,
+)
+from shared.utils.redis_locks import acquire_product_lock, release_product_lock
+from shared.infra.db import SessionLocal
 
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparisonSummary
@@ -27,9 +36,37 @@ from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
 from market_alert.crud import crud_alert_rules
 from market_alert.crud import crud_price_history
 from market_alert.core.config_alert import settings
+from market_alert.models import User
+from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
 logger = structlog.get_logger("crud_monitored")
+_LOCK_TTL_SECONDS = min(settings.PRODUCT_LOCK_TTL_SECONDS, 30)
+
+def _ensure_monitored_access(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
+    """ Obtém monitorado garantindo posse do usuário """
+    product = get_monitored_product_by_id(db, monitored_id)
+    if product is None:
+        raise MonitoredNotFoundError("Monitorado não encontrado")
+    if product.user_id != user.id:
+        raise MonitoredOwnershipError("Usuário sem permissão para este monitorado")
+    return product
+
+def _acquire_monitored_lock(monitored_id: UUID) -> str:
+    """ Adquire lock curto para operações críticas do monitorado """
+    acquired, owner = acquire_product_lock(monitored_id, ttl_seconds=_LOCK_TTL_SECONDS)
+    if not acquired:
+        raise MonitoredLockError("Não foi possível adquirir lock do monitorado")
+    return owner or ""
+
+class MonitoredOwnershipError(PermissionError):
+    """Erro lançado quando o usuário não possui acesso ao monitorado"""
+
+class MonitoredNotFoundError(LookupError):
+    """Erro lançado quando o monitorado não é localizado"""
+
+class MonitoredLockError(RuntimeError):
+    """Erro lançado quando o lock exclusivo não pode ser adquirido"""
 
 def _to_decimal(value: Decimal | float | int | str | None) -> Decimal | None:
     """ Converte valores diversos para `Decimal` preservando `None`
@@ -67,6 +104,19 @@ def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime | No
     if not isinstance(interval_seconds, int) or interval_seconds <= 0:
         interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
     return base_time + timedelta(seconds=interval_seconds)
+
+def _compute_resume_window(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
+    """ Calcula janela curta para retomada aplicando jitter controlado """
+    base_time = reference or datetime.now(timezone.utc)
+    if base_time.tzinfo is None:
+        base_time = base_time.replace(tzinfo=timezone.utc)
+    interval_seconds = getattr(monitored, "check_interval", None)
+    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
+        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
+
+    delay_seconds = min(interval_seconds, 5)
+    jitter_seconds = random.uniform(0, 5)
+    return base_time + timedelta(seconds=delay_seconds + jitter_seconds)
 
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
@@ -111,6 +161,16 @@ def _should_replace_with_scraped(
     if existing_name is None:
         return True
     return existing_name.strip().casefold() == fallback_name.strip().casefold()
+
+def _resolve_availability(
+    scraped_availability: bool | None, last_status: str | None
+) -> bool | None:
+    """ Determina disponibilidade priorizando sinais de indisponibilidade """
+    unavailable_statuses = {"unavailable", "removed", "sold_out"}
+    normalized_status = (last_status or "").strip().lower()
+    if normalized_status in unavailable_statuses:
+        return False
+    return scraped_availability
 
 def get_monitored_product_by_user_and_url(db: Session, user_id: UUID, product_url: str) -> MonitoredProduct | None:
     """ Busca produto específico combinando usuário e URL normalizada """
@@ -260,7 +320,10 @@ def create_or_update_monitored_product_scraped(
     )
 
     if existing:
-        resolved_price = _to_decimal(scraped_info.current_price)
+        resolved_price = normalize_scraped_price(scraped_info.current_price)
+        availability = _resolve_availability(scraped_info.availability, scraped_info.last_status)
+        last_status = scraped_info.last_status or existing.last_status
+        inactive_due_to_data = availability is False or resolved_price is None
 
         #Atualiza somente campos relevantes
         if product_data.name_identification and existing.name_identification != product_data.name_identification:
@@ -276,6 +339,14 @@ def create_or_update_monitored_product_scraped(
         resolved_currency = currency or scraped_info.currency or existing.currency
 
         #Executa commit único garantindo atomicidade com o histórico
+        logger.info(
+            "monitored_commit_preview",
+            product_id=str(existing.id),
+            availability=availability,
+            last_status=last_status,
+            resolved_price=str(resolved_price) if resolved_price is not None else None,
+            price_changed=price_changed,
+        )
         try:
             existing.current_price = resolved_price
 
@@ -288,10 +359,24 @@ def create_or_update_monitored_product_scraped(
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
             existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
-            existing.status = MonitoredStatus.active
+            existing.status = MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active
+            existing.availability = availability
+            existing.last_status = last_status
             existing.normalized_url = normalized_url
 
-            price_history_needed = price_changed and resolved_price is not None
+            history_allowed = should_create_price_history(resolved_price, availability)
+            price_history_needed = price_changed and history_allowed
+
+            if not history_allowed:
+                PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="monitored").inc()
+                logger.info(
+                    "product_marked_unavailable",
+                    product_id=str(existing.id),
+                    availability=availability,
+                    last_status=last_status,
+                    availability_inferred=availability is None,
+                    price_missing=resolved_price is None,
+                )
 
             logger.info(
                 "updated_monitored_product_scraped",
@@ -319,7 +404,7 @@ def create_or_update_monitored_product_scraped(
 
         db.refresh(existing)
         existing._price_changed = price_changed
-        existing._availability_changed = previous_status != MonitoredStatus.active
+        existing._availability_changed = previous_status != existing.status
         
         logger.info(
             "updated_monitored",
@@ -327,13 +412,17 @@ def create_or_update_monitored_product_scraped(
             price_changed=existing._price_changed,
             availability_changed=existing._availability_changed,
             last_checked=last_checked.isoformat(),
+            availability=existing.availability,
+            last_status=existing.last_status,
         )
         return existing
 
     #Se não existir, cria o registro
-    resolved_price = _to_decimal(scraped_info.current_price)
+    resolved_price = normalize_scraped_price(scraped_info.current_price)
     resolved_currency = currency or scraped_info.currency
-
+    availability = _resolve_availability(scraped_info.availability, scraped_info.last_status)
+    last_status = scraped_info.last_status
+    inactive_due_to_data = availability is False or resolved_price is None
 
     new = MonitoredProduct(
         user_id=user_id,
@@ -345,20 +434,33 @@ def create_or_update_monitored_product_scraped(
         thumbnail=scraped_info.thumbnail,
         free_shipping=scraped_info.free_shipping,
         monitoring_type=MonitoringType.scraping,
-        status=MonitoredStatus.active,
+        status=MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active,
         last_checked=last_checked,
         last_scraped_at=last_checked,
         next_check_at=None,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
+        availability=availability,
+        last_status=last_status,
     )
     new.next_check_at = _compute_next_check_at(new, reference=last_checked)
     
     try:
         db.add(new)
         db.flush()
-        if resolved_price is not None:
+        history_allowed = should_create_price_history(resolved_price, availability)
+        if not history_allowed:
+            PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="monitored").inc()
+            logger.info(
+                "product_marked_unavailable",
+                product_id=str(new.id),
+                availability=availability,
+                last_status=last_status,
+                availability_inferred=availability is None,
+                price_missing=resolved_price is None,
+            )
+        if resolved_price is not None and history_allowed:
             crud_price_history.create_for_monitored(
                 db,
                 new.id,
@@ -441,7 +543,6 @@ def get_all_monitored_products(
 
     base_query = db.query(MonitoredProduct).filter(
         MonitoredProduct.user_id == user_id,
-        MonitoredProduct.current_price.isnot(None),
     )
     if monitoring_type:
         base_query = base_query.filter(MonitoredProduct.monitoring_type == monitoring_type)
@@ -633,13 +734,69 @@ def get_monitored_product_by_id(db: Session, product_id: UUID) -> Optional[Monit
         .first()
     )
 
-def delete_monitored_product(db: Session, product_id: UUID) -> Optional[MonitoredProduct]:
-    """ Remove um produto monitorado específico do banco de dados """
-    product = get_monitored_product_by_id(db, product_id)
-    if product:
-        db.delete(product)
+def pause_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
+    """ Pausa monitorado de forma idempotente garantindo lock curto """
+    lock_owner: str | None = None
+    try:
+        monitored = _ensure_monitored_access(db, monitored_id, user)
+        lock_owner = _acquire_monitored_lock(monitored_id)
+
+        if monitored.paused:
+            db.commit()
+            db.refresh(monitored)
+            return monitored
+
+        now = datetime.now(timezone.utc)
+        monitored.paused = True
+        monitored.paused_at = now
         db.commit()
-    return product
+        db.refresh(monitored)
+        MONITORED_PAUSED_TOTAL.inc()
+        return monitored
+    finally:
+        if lock_owner:
+            release_product_lock(monitored_id, lock_owner)
+
+def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
+    """ Retoma monitorado recalculando janela de rechecagem com jitter """
+    lock_owner: str | None = None
+    try:
+        monitored = _ensure_monitored_access(db, monitored_id, user)
+        lock_owner = _acquire_monitored_lock(monitored_id)
+
+        was_paused = bool(monitored.paused)
+        reference = datetime.now(timezone.utc)
+        monitored.paused = False
+        monitored.paused_at = None
+        monitored.next_check_at = _compute_resume_window(monitored, reference=reference)
+
+        db.commit()
+        db.refresh(monitored)
+        if was_paused:
+            MONITORED_RESUMED_TOTAL.inc()
+        return monitored
+    finally:
+        if lock_owner:
+            release_product_lock(monitored_id, lock_owner)
+
+def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
+    """ Remove monitorado utilizando sessão dedicada para isolar a transação """
+    lock_owner: str | None = None
+    dedicated_session: Session | None = None
+    try:
+        #Utiliza nova sessão para evitar interferência de transações externas do ciclo da requisição
+        dedicated_session = SessionLocal()
+        monitored = _ensure_monitored_access(dedicated_session, monitored_id, user)
+        lock_owner = _acquire_monitored_lock(monitored_id)
+
+        dedicated_session.delete(monitored)
+        dedicated_session.commit()
+        MONITORED_DELETED_TOTAL.inc()
+    finally:
+        if dedicated_session:
+            dedicated_session.close()
+        if lock_owner:
+            release_product_lock(monitored_id, lock_owner)
 
 def mark_monitored_product_failed(
     db: Session,

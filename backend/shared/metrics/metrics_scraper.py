@@ -59,6 +59,12 @@ SCRAPER_VALIDATION_REJECT_TOTAL = Counter(
     ["domain", "step", "reason"],
 )
 
+SCRAPER_AVAILABILITY_HEURISTICS_TOTAL = Counter(
+    "scraper_availability_heuristics_total",
+    "Total de vezes que heurísticas de disponibilidade foram aplicadas",
+    ["reason"],
+)
+
 SCRAPER_NO_RESULT_TOTAL = Counter(
     "scraper_no_result_total",
     "Execuções que não retornaram um payload válido ao final do pipeline",
@@ -80,6 +86,12 @@ SCRAPER_IN_FLIGHT = Gauge(
 SCRAPER_HEAD_FAILURES_TOTAL = Counter(
     "scraper_head_failures_total",
     "Total de falhas de scraping registradas",
+)
+
+SCRAPER_RESPONSE_SANITIZED_TOTAL = Counter(
+    "scraper_response_sanitized_total",
+    "Respostas ajustadas pelo cliente para remover campos extras ou preços inválidos",
+    ["reason"],
 )
 
 #Contadores específicos do orquestrador de coleta
@@ -179,6 +191,18 @@ RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL = Counter(
     "recheck_skipped_no_next_check_total",
     "Monitorados ignorados por ausência de next_check_at",
     ["reason"],
+)
+
+MONITORED_SKIPPED_PAUSED_TOTAL = Counter(
+    "monitored_skipped_paused_total",
+    "Monitorados ignorados por estarem pausados",
+    ["source"],
+)
+
+COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL = Counter(
+    "collector_skipped_missing_target_total",
+    "Coletas ignoradas por alvo removido ou inexistente",
+    ["kind"],
 )
 
 RECHECK_NEXT_CHECK_MISSING_TOTAL = Counter(
@@ -326,6 +350,7 @@ __all__ = [
     "COLLECTOR_LOCK_ACQUIRED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL",
+    "COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL",
     "COLLECT_LOCK_SKIPPED_TOTAL",
     "COLLECT_SUCCESS_TOTAL",
     "COLLECTOR_DURATION_MS",
@@ -334,6 +359,7 @@ __all__ = [
     "RECHECK_COMPETITOR_RESULT_TOTAL",
     "RECHECK_ENQUEUED_TOTAL",
     "RECHECK_SKIPPED_NO_NEXT_CHECK_TOTAL",
+    "MONITORED_SKIPPED_PAUSED_TOTAL",
     "RECHECK_NEXT_CHECK_MISSING_TOTAL",
     "RECHECK_FINALIZE_FAILED_TOTAL",
 ]

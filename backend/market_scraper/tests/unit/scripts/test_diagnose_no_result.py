@@ -68,9 +68,8 @@ def test_run_parsers_reports_validation_issue() -> None:
     assert reports["json_ld"]["status"] == "invalid"
     assert reports["json_ld"]["validation_issue"]["reason"] == "name_missing"
     assert reports["json_ld"]["validation_issue"]["reason_message"]
-    assert reports["fallback"]["status"] == "invalid"
-    assert reports["fallback"]["validation_issue"]["reason"] == "price_invalid"
-    assert reports["fallback"]["validation_issue"]["reason_message"]
+    assert reports["fallback"]["status"] == "valid"
+    assert reports["fallback"].get("validation_issue") is None
     assert reports["success"]["status"] == "valid"
     assert reports["success"]["validated_payload"]["name"] == "Produto"
 

@@ -37,6 +37,16 @@ export interface MonitoredProduct {
   currency?: string; // Código da moeda
   thumbnail?: string; // URL da imagem em miniatura
   is_featured: boolean; // Indica se o produto é destacado
+  display_status?: // Status consolidado para exibição
+    | 'inactive'
+    | 'paused'
+    | 'collecting'
+    | 'no_price'
+    | 'no_competitors'
+    | 'competitive'
+    | 'attention'
+    | 'urgent'
+    | 'unknown'; 
   last_checked?: string; // Timestamp da última checagem do produto
   last_scraped_at?: string; // Timestamp do último scraping
   created_at?: string; // Data de criação do monitoramento
@@ -47,7 +57,10 @@ export interface MonitoredProduct {
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
   last_status?: string; // Último status registrado
   comparison_summary?: PriceComparisonSummary; // Resumo consolidado de comparação para renderização imediata
-  is_paused?: boolean; // Indica se o monitoramento do produto está pausado
+  paused?: boolean; // Flag explícita de pausa retornada pelo backend
+  paused_at?: string | null; // Momento em que a pausa foi aplicada
+  next_check_at?: string | null; // Próxima rechecagem planejada
+  is_paused?: boolean; // Alias legado para compatibilidade com lógicas existentes
 }
 
 /**
@@ -69,6 +82,18 @@ export interface CompetitorProduct {
   last_status?: string; // Último status textual registrado (opcional)
   last_checked?: string; // Timestamp da última checagem desse concorrente (pode diferir do scraping)
   last_scraped_at?: string; // Timestamp do último scraping desse concorrente (opcional)
+}
+
+/**
+ * Resposta consolidada para listagem de concorrentes com contagens auxiliares.
+ */
+export interface CompetitorsListResponse {
+  items: CompetitorProduct[]; // Concorrentes retornados na página
+  competitors_total: number; // Quantidade total de concorrentes vinculados ao monitorado
+  competitors_with_price_count: number; // Concorrentes que entram nos cálculos de preço
+  excluded_due_to_inactive_count: number; // Concorrentes ignorados por falta de preço ou indisponibilidade
+  page: number; // Página atual (base 1)
+  per_page: number; // Registros por página
 }
 
 /**
@@ -102,6 +127,7 @@ export interface PriceComparisonSummary {
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
   discrepancies?: Array<Record<string, unknown>>; // Lista de discrepâncias detectadas
   alerts?: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
+  ignored_due_to_inactive?: boolean; // Indica se comparação foi ignorada por indisponibilidade
 }
 
 /**

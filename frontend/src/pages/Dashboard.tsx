@@ -16,7 +16,6 @@ import {
   CircularProgress,
   Alert,
   Button,
-  Chip,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import {
@@ -29,6 +28,10 @@ import {
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import TruncatedText from '../utils/TruncatedText';
+import ProductStateBadge from '../components/ProductStateBadge';
+import { resolveMonitoredStatus } from '../utils/productStatus';
+import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
+import type { MonitoredProduct } from '../types';
 
 /**
  * Tipagens locais para maior clareza e manutenção.
@@ -39,15 +42,6 @@ interface DashboardStats {
   active_alerts?: number;
   ok_prices?: number;
   total_competitors?: number;
-}
-
-interface FeaturedProduct {
-  id: string | number;
-  name: string;
-  url?: string;
-  thumbnail?: string;
-  current_price: string | number | null;
-  competitiveness_status?: 'competitivo' | 'atencao' | 'urgente' | string;
 }
 
 /**
@@ -68,7 +62,7 @@ const Dashboard: React.FC = () => {
   });
 
   // Query para obter produtos em destaque
-  const { data: featuredProducts, isLoading: featuredLoading } = useQuery<FeaturedProduct[]>({
+  const { data: featuredProducts, isLoading: featuredLoading } = useQuery<MonitoredProduct[]>({
     queryKey: ['featuredProducts'],
     queryFn: () => productsService.getFeaturedProducts(),
   });
@@ -122,62 +116,6 @@ const Dashboard: React.FC = () => {
       color: '#9c27b0',
     },
   ];
-
-  /**
-   * mapStatus => getStatusColor
-   *
-   * Retorna a cor do Chip do MUI baseado no status de competitividade.
-   * Utilizar os tokens de cor do MUI ('success' | 'warning' | 'error' | 'default')
-   * para manter consistência visual com a biblioteca.
-   */
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'competitivo':
-        return 'success';
-      case 'atencao':
-        return 'warning';
-      case 'urgente':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
-
-  /**
-   * Formata preços exibindo rótulo quando ainda não há valor disponível
-   */
-  const renderPrice = (value: string | number | null) => {
-    if (value === null) {
-      return 'Em processamento';
-    }
-    // Normaliza entradas do backend que podem ser string (ex: "5699.05") ou número já parseado. 
-    // Remove quaisquer caracteres não numéricos (ex: 'R$ ', pontos de milhar ou espaços) antes de converter.
-    const cleaned = typeof value === 'string' ? value.replace(/[^0-9.,-]/g, '').replace(',', '.') : String(value);
-    const num = Number(cleaned);
-    if (!Number.isFinite(num)) return 'Em processamento';
-
-    // Formata para pt-BR com símbolo de moeda BRL
-    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  };
-
-  /**
-   * mapStatus => getStatusLabel
-   *
-   * Converte chaves internas de status em rótulos legíveis para o usuário.
-   * Mantido em PT-BR para consistência com a interface.
-   */
-  const getStatusLabel = (status?: string) => {
-    switch (status) {
-      case 'competitivo':
-        return 'Competitivo';
-      case 'atencao':
-        return 'Atenção';
-      case 'urgente':
-        return 'Urgente';
-      default:
-        return 'Sem Status';
-    }
-  };
 
   return (
     <Layout>
@@ -234,59 +172,60 @@ const Dashboard: React.FC = () => {
         </Box>
       ) : featuredProducts && featuredProducts.length > 0 ? (
         <Grid container spacing={3}>
-          {featuredProducts.map((product) => (
-            <Grid item xs={12} md={6} lg={4} key={product.id}>
-              <Card elevation={2}>
-                <CardContent>
-                  <Box display="flex" gap={2}>
-                    {/* Thumbnail do produto (se existir) */}
-                    {product.thumbnail && (
-                      <Box
-                        component="img"
-                        src={product.thumbnail}
-                        alt={product.name}
-                        sx={{
-                          width: 80,
-                          height: 80,
-                          objectFit: 'cover',
-                          borderRadius: 1,
-                        }}
-                      />
-                    )}
-                    <Box flex={1}>
-                      <TruncatedText text={product.name} variant="h6" lines={2} maxWidth="100%" tooltip={false} />
-                      <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
-                      <Box display="flex" alignItems="center" gap={1} mt={1}>
-                        {/* Chip indicando status de competitividade */}
-                        <Chip
-                          label={getStatusLabel(product.competitiveness_status)}
-                          color={getStatusColor(product.competitiveness_status)}
-                          size="small"
+          {featuredProducts.map((product) => {
+            const productStatus = resolveMonitoredStatus(product);
+
+            return (
+              <Grid item xs={12} md={6} lg={4} key={product.id}>
+                <Card
+                  elevation={productStatus === 'inactive' ? 0 : 2}
+                  sx={{
+                    opacity: productStatus === 'inactive' ? 0.75 : 1,
+                    backgroundColor: productStatus === 'inactive' ? 'grey.50' : 'background.paper',
+                  }}
+                >
+                  <CardContent>
+                    <Box display="flex" gap={2}>
+                      {/* Thumbnail do produto (se existir) */}
+                      {product.thumbnail && (
+                        <Box
+                          component="img"
+                          src={product.thumbnail}
+                          alt={product.name}
+                          sx={{
+                            width: 80,
+                            height: 80,
+                            objectFit: 'cover',
+                            borderRadius: 1,
+                          }}  
                         />
-                        {/* Exibição de preço com formatação mínima.
-                            Usamos parseFloat por segurança caso a API retorne string. */}
-                        <Typography variant="h6" color="primary">
-                          {renderPrice(product.current_price)}
-                        </Typography>
+                      )}
+                      <Box flex={1}>
+                        <TruncatedText text={product.name} variant="h6" lines={2} maxWidth="100%" tooltip={false} />
+                        <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
+                        <Box display="flex" alignItems="center" gap={1} mt={1}>
+                          <ProductStateBadge product={product} />
+                          {renderMonitoredPrice(product, { variant: 'h6' })}
+                        </Box>
                       </Box>
                     </Box>
-                  </Box>
 
-                  {/* Botão para navegar aos detalhes do produto */}
-                  <Button
-                    variant="contained"
-                    size="small"
-                    fullWidth
-                    sx={{ mt: 2 }}
-                    onClick={() => navigate(`/product/${product.id}`)}
-                    startIcon={<TrendingUpIcon />}
-                  >
-                    Ver Detalhes
-                  </Button>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
+                    {/* Botão para navegar aos detalhes do produto */}
+                    <Button
+                      variant="contained"
+                      size="small"
+                      fullWidth
+                      sx={{ mt: 2 }}
+                      onClick={() => navigate(`/product/${product.id}`)}
+                      startIcon={<TrendingUpIcon />}
+                    >
+                      Ver Detalhes
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            );
+          })}
         </Grid>
       ) : (
         // Caso não existam produtos em destaque, informar ao usuário

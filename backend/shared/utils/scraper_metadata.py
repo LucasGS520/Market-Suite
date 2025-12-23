@@ -57,6 +57,11 @@ def extract_scraper_metadata(
         raise TypeError("payload precisa ser ParserResponse")
     
     extras = dict(payload.payload or {})
+    extras.setdefault("availability", payload.availability)
+    extras.setdefault("last_status", payload.last_status)
+    extras.setdefault("currency", payload.currency)
+    extras.setdefault("etag", payload.etag)
+    extras.setdefault("not_modified", payload.not_modified)
     normalized = normalize_headers(headers)
     return ScraperMetadata(
         extras=extras,

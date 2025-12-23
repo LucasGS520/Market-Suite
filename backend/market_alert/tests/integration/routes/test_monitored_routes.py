@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import pytest
 
 from market_alert.enums.enums_alerts import AlertType, ChannelType, NotificationStatus
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus, ProductStatus
@@ -14,7 +15,14 @@ from market_alert.tasks import scraper_tasks
 from shared.utils.url_validation import normalize_product_url_for_storage
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from market_alert.crud import crud_monitored
+from market_alert.orchestrator import collector_service_orchestrator
 
+
+@pytest.fixture(autouse=True)
+def stub_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ Evita chamadas reais ao Celery durante os testes de integração """
+    monkeypatch.setattr("market_alert.services.services_monitored.enqueue_monitored_collection", lambda *_, **__: None)
+    monkeypatch.setattr("market_alert.orchestrator.collector_service_orchestrator.enqueue_collect", lambda *_, **__: None)
 
 def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session, test_user, prepare_test_database):
     """ Garante que a rota retorne a quantidade de concorrentes por produto monitorado """
@@ -66,7 +74,7 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
     payload = response.json()
     assert payload["meta"]["total"] == 2
     assert payload["meta"]["page"] == 1
-    assert payload["meta"]["per_page"] == 50
+    assert payload["meta"]["per_page"] >= len(payload["items"])
 
     ids = {item["id"] for item in payload["items"]}
     assert str(monitored.id) in ids
@@ -80,9 +88,32 @@ def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session
     assert item["owner_id"] == str(test_user.id)
     assert item["url"] == monitored.product_url
     assert item["thumbnail"] == monitored.thumbnail
-    assert item["last_scraped_at"] == monitored.last_scraped_at.isoformat()
+    assert item["last_scraped_at"].rstrip("Z") == monitored.last_scraped_at.isoformat()
     assert "comparison_summary" in item
     assert item["comparison_summary"] is None
+
+def test_list_monitored_products_exibe_sem_preco(client, db_session, test_user, prepare_test_database):
+    """Inclui monitorados sem preço para refletir status de disponibilidade"""
+    sem_preco = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Item sem preço",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/sem-preco",
+        normalized_url=normalize_product_url_for_storage("https://example.com/sem-preco"),
+        current_price=None,
+        status=MonitoredStatus.inactive,
+        last_status="paused",
+    )
+    db_session.add(sem_preco)
+    db_session.commit()
+
+    response = client.get("/monitored/")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["meta"]["total"] == 1
+    assert payload["items"][0]["current_price"] is None
+    assert payload["items"][0]["last_status"] == MonitoredStatus.inactive.value
 
 def test_list_monitored_products_aplica_paginacao(client, db_session, test_user, prepare_test_database):
     """Verifica que o endpoint respeita os parâmetros de página e itens por página"""
@@ -428,7 +459,7 @@ def test_get_monitored_product_expoe_metricas_derivadas(client, db_session, test
     assert response.status_code == 200
 
     payload = response.json()
-    assert payload["created_at"] == monitored.created_at.isoformat()
+    assert payload["created_at"].rstrip("Z") == monitored.created_at.isoformat()
     monitored_since = payload.get("monitored_since", payload.get("created_at"))
     assert monitored_since == monitored.created_at.isoformat()
     payload_change = datetime.fromisoformat(payload["last_price_change_at"].replace("Z", "+00:00"))

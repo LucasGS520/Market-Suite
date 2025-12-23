@@ -2,13 +2,124 @@ import apiClient from '../lib/api';
 import {
   MonitoredProduct,
   CompetitorProduct,
+  CompetitorsListResponse,
   PriceComparisonSummary,
   PaginatedResponse,
   MonitoredProductCreateScraping,
   CompetitorProductCreateScraping,
   ScrapeCreationResponse,
   DashboardStats,
+  CompetitivenessStatus,
 } from '../types';
+
+/**
+ * Identifica sinais de indisponibilidade vindos do backend via last_status.
+ * Inclui termos comuns retornados pelo scraper para evitar falsos positivos de disponibilidade.
+ */
+const isUnavailableFromLastStatus = (lastStatus?: string): boolean => {
+  if (!lastStatus) return false;
+
+  const normalized = lastStatus
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+  const unavailableSignals = [
+    'indisponivel',
+    'indisponivel no momento',
+    'sem estoque',
+    'sem estoque no momento',
+    'sold out',
+    'soldout',
+    'sold_out',
+    'no stock',
+    'removed',
+    'unavailable',
+    'not available',
+    'paused by seller',
+  ];
+
+  return unavailableSignals.some((signal) => normalized.includes(signal));
+};
+
+/**
+ * Sanitiza o status de competitividade para que apenas valores com concorrentes relevantes sejam propagados.
+ * Evita badges enganosos quando não há comparativos de preço disponíveis.
+ */
+const sanitizeCompetitivenessStatus = (
+  status: CompetitivenessStatus | undefined,
+  summary?: PriceComparisonSummary
+): CompetitivenessStatus | undefined => {
+  const competitorsWithPrice = summary?.competitors_with_price_count ?? 0;
+  const competitorsCount = summary?.competitors_count ?? 0;
+
+  if (!status) return undefined;
+  if (competitorsWithPrice <= 0 && competitorsCount <= 0) return undefined;
+  if (competitorsWithPrice <= 0) return undefined;
+
+  return status;
+};
+
+/**
+ * Normaliza campos centrais de produtos monitorados para evitar nullables inconsistentes.
+ * Garante que disponibilidade, pausa e resumo de comparação estejam preenchidos e coerentes.
+ */
+const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct => {
+  const comparisonSummary =
+    product.comparison_summary === undefined ? undefined : product.comparison_summary;
+
+  const inferredAvailability =
+    product.availability === false || isUnavailableFromLastStatus(product.last_status)
+      ? false
+      : product.availability ?? undefined;
+
+  const normalizedSummary = comparisonSummary
+    ? {
+        ...comparisonSummary,
+        competitors_count: comparisonSummary.competitors_count ?? 0,
+        competitors_with_price_count: comparisonSummary.competitors_with_price_count ?? 0,
+        ignored_due_to_inactive: Boolean(comparisonSummary.ignored_due_to_inactive),
+      }
+    : comparisonSummary;
+
+  const competitivenessStatus = sanitizeCompetitivenessStatus(
+    product.competitiveness_status || normalizedSummary?.competitiveness_status || undefined,
+    normalizedSummary
+  );
+
+  let displayStatus = product.display_status;
+  const hasCompetitors = (normalizedSummary?.competitors_with_price_count ?? 0) > 0;
+
+  if (inferredAvailability === false || normalizedSummary?.ignored_due_to_inactive) {
+    displayStatus = 'inactive';
+  }
+
+  if (
+    displayStatus &&
+    ['competitive', 'attention', 'urgent'].includes(displayStatus) &&
+    (!hasCompetitors || inferredAvailability === false)
+  ) {
+    displayStatus = hasCompetitors ? displayStatus : 'no_competitors';
+    if (inferredAvailability === false) displayStatus = 'inactive';
+  }
+
+  const normalizedPaused = product.paused ?? product.is_paused ?? false;
+
+  return {
+    ...product,
+    current_price: product.current_price ?? null,
+    availability: inferredAvailability,
+    is_paused: normalizedPaused,
+    paused: normalizedPaused,
+    paused_at: product.paused_at ?? null,
+    next_check_at: product.next_check_at ?? null,
+    comparison_summary: normalizedSummary,
+    competitiveness_status: competitivenessStatus,
+    display_status: displayStatus,
+  };
+};
 
 /**
  * Serviço de produtos
@@ -54,7 +165,12 @@ export const productsService = {
       '/monitored',
       { params: sanitizedParams }
     );
-    return response.data;
+    const normalizedItems = (response.data.items || []).map(normalizeMonitoredProduct);
+
+    return {
+      ...response.data,
+      items: normalizedItems,
+    };
   },
 
   /**
@@ -63,7 +179,7 @@ export const productsService = {
    */
   async getFeaturedProducts(): Promise<MonitoredProduct[]> {
     const response = await apiClient.get<MonitoredProduct[]>('/monitored/featured');
-    return response.data;
+    return (response.data || []).map(normalizeMonitoredProduct);
   },
 
   /**
@@ -73,7 +189,7 @@ export const productsService = {
     productId: string
   ): Promise<MonitoredProduct> {
     const response = await apiClient.get<MonitoredProduct>(`/monitored/${productId}`);
-    return response.data;
+    return normalizeMonitoredProduct(response.data);
   },
 
   /**
@@ -91,13 +207,40 @@ export const productsService = {
   },
 
   /**
+   * Pausa um produto monitorado e retorna o estado atualizado.
+   */
+  async pauseMonitored(productId: string): Promise<MonitoredProduct> {
+    const response = await apiClient.put<MonitoredProduct>(`/monitored/${productId}/paused`, null, {
+        params: { paused: true },
+      });
+    return normalizeMonitoredProduct(response.data);
+  },
+
+  /**
+   * Retoma o monitoramento de um produto e retorna o estado atualizado.
+   */
+  async resumeMonitored(productId: string): Promise<MonitoredProduct> {
+    const response = await apiClient.put<MonitoredProduct>(`/monitored/${productId}/paused`, null, {
+        params: { paused: false },
+      });
+    return normalizeMonitoredProduct(response.data);
+  },
+
+  /**
    * Remove um produto monitorado
    */
   async deleteMonitoredProduct(
     productId: string
-  ): Promise<MonitoredProduct> {
-    const response = await apiClient.delete<MonitoredProduct>(`/monitored/${productId}`);
-    return response.data;
+  ): Promise<void> {
+    await productsService.deleteProduct(productId);
+  },
+
+  /**
+   * Remove um produto monitorado utilizando a rota padrão de deleção.
+   * Mantém compatibilidade com nomenclatura mais genérica usada em handlers da UI.
+   */
+  async deleteProduct(productId: string): Promise<void> {
+    await apiClient.delete(`/monitored/${productId}`);
   },
 
   /**
@@ -105,7 +248,7 @@ export const productsService = {
    * - monitored_id: ID do produto monitorado (obrigatório)
    * - page, per_page: paginação
    * - order_by: campo de ordenação
-   * - include_paused: incluir concorrentes pausados
+   * - include_paused/include_inactive: incluir concorrentes pausados ou indisponíveis
    */
   async getCompetitors(params: {
     monitored_id: string;
@@ -113,10 +256,17 @@ export const productsService = {
     per_page?: number;
     order_by?: string;
     include_paused?: boolean;
-  }): Promise<PaginatedResponse<CompetitorProduct>> {
-    const response = await apiClient.get<PaginatedResponse<CompetitorProduct>>(
+    include_inactive?: boolean;
+  }): Promise<CompetitorsListResponse> {
+    const requestParams = {
+      include_inactive: params.include_inactive ?? true,
+      include_paused: params.include_paused ?? true,
+      ...params,
+    };
+
+    const response = await apiClient.get<CompetitorsListResponse>(
       '/competitors',
-      { params }
+      { params: requestParams }
     );
     const normalizedItems = (response.data.items || []).map((competitor) => {
       const fallbackName = (() => {
@@ -142,6 +292,18 @@ export const productsService = {
     return {
       ...response.data,
       items: normalizedItems,
+      competitors_total:
+        response.data.competitors_total ?? normalizedItems.length,
+      competitors_with_price_count:
+        response.data.competitors_with_price_count ??
+        normalizedItems.filter(
+          (item) => item.current_price !== null && item.availability !== false
+        ).length,
+      excluded_due_to_inactive_count:
+        response.data.excluded_due_to_inactive_count ??
+        normalizedItems.filter(
+          (item) => item.current_price === null || item.availability === false
+        ).length,
     };
   },
 
@@ -157,6 +319,13 @@ export const productsService = {
       data
     );
     return response.data;
+  },
+
+  /**
+   * Remove um concorrente específico
+   */
+  async deleteCompetitor(competitorId: string): Promise<void> {
+    await apiClient.delete(`/competitors/${competitorId}`);
   },
 
   /**

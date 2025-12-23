@@ -50,6 +50,23 @@ class MonitoredProductResponse(ProductResponse):
     """ Contrato simplificado de um produto monitorado """
     owner_id: UUID = Field(..., description="Identificador do responsável pelo monitoramento")
     source: Literal["monitored"] = "monitored"
+    display_status: Literal[
+        "inactive",
+        "paused",
+        "collecting",
+        "no_price",
+        "no_competitors",
+        "competitive",
+        "attention",
+        "urgent",
+        "unknown",
+    ] | None = Field(
+        None,
+        description=(
+            "Status consolidado para exibição, priorizando disponibilidade, pausa e competitividade "
+            "sem depender apenas do `competitiveness_status` legado."
+        ),
+    )
     thumbnail: str | None = Field(None, description="Miniatura mais recente identificada pelo fluxo de scraping")
     created_at: datetime | None = Field(None, description="Momento de criação do monitoramento (timestamp do cadastro)")
     last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")
@@ -62,11 +79,16 @@ class MonitoredProductResponse(ProductResponse):
     competitiveness_status: CompetitivenessStatus | None = Field(None, description="Classificação de competitividade calculada a partir das comparações")
     is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
     alerts_sent: int | None = Field(None, description="Quantidade de notificações enviadas para o monitorado")
+    paused: bool = Field(False, description="Indica se o monitoramento está pausado para evitar novas coletas")
+    paused_at: datetime | None = Field(None, description="Momento em que a pausa foi ativada, quando existir")
     comparison_summary: PriceComparisonSummaryResponse | None = Field(
         default=None,
         description=("Último resumo consolidado de comparação de preços com métricas normalizadas para exibição imediata no frontend."),
     )
 
+class MonitoredPausedUpdateRequest(BaseModel):
+    """ Requisição para alternar estado de pausa de um monitorado de forma idempotente """
+    paused: bool = Field(..., description="Define se o monitoramento deve ficar pausado ou ativo")
 
 class PaginationMeta(BaseModel):
     """ Metadados padronizados para paginação de listagens."""
@@ -93,3 +115,22 @@ class PaginatedCompetitorResponse(BaseModel):
     """ Envelope padronizado para retornar concorrentes paginados com metadados """
     items: list[CompetitorProductResponse]
     meta: PaginationMeta
+
+class CompetitorsListResponse(BaseModel):
+    """ Lista concorrentes e expõe contadores úteis para a UI """
+
+    items: list[CompetitorProductResponse]
+    competitors_total: int = Field(
+        ..., description="Quantidade total de concorrentes vinculados ao monitorado"
+    )
+    competitors_with_price_count: int = Field(
+        ..., description="Concorrentes com preço utilizável em métricas e comparações"
+    )
+    excluded_due_to_inactive_count: int = Field(
+        ...,
+        description=(
+            "Concorrentes ignorados em cálculos por falta de preço ou indisponibilidade"
+        ),
+    )
+    page: int = Field(..., description="Página atual baseada em 1")
+    per_page: int = Field(..., description="Quantidade de registros retornados por página")

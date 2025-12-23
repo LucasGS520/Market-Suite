@@ -18,27 +18,31 @@ logger = structlog.get_logger("price_comparator")
 
 def calculate_discrepancies(
     competitor: CompetitorProduct,
-    monitored_price: Decimal,
+    monitored_price: Decimal | None,
     min_price: Decimal,
     tolerance: Decimal,
 ) -> Dict[str, Any]:
     """ Calcula discrepâncias básicas para um concorrente.
 
     Mantém somente deltas essenciais para exibir no dashboard, evitando
-    metadados históricos e variações complexas.
+    metadados históricos e variações complexas. Quando o preço monitorado
+    está ausente, os deltas relacionados ao monitorado permanecem nulos para
+    evitar conclusões indevidas de competitividade.
     """
     price: Decimal = competitor.current_price
 
     pct_below_monitored: Optional[Decimal] = None
-    if monitored_price > 0 and price < monitored_price:
-        pct_below_monitored = (
-            (monitored_price - price) / monitored_price * 100
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    delta_x_monitored: Optional[Decimal] = None
+    if monitored_price is not None:
+        if monitored_price > 0 and price < monitored_price:
+            pct_below_monitored = (
+                (monitored_price - price) / monitored_price * 100
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        delta_x_monitored = (price - monitored_price).quantize(
+            tolerance, rounding=ROUND_HALF_UP
+        )
 
     delta_x_min = (price - min_price).quantize(tolerance, rounding=ROUND_HALF_UP)
-    delta_x_monitored = (price - monitored_price).quantize(
-        tolerance, rounding=ROUND_HALF_UP
-    )
 
     return {
         "competitor_id": str(competitor.id),
@@ -64,7 +68,7 @@ def compare_prices(
     - alerts: eventos diretos de preço e disponibilidade consumidos pelas regras
     """
     #Valor base para referência durante a comparação
-    monitored_price = monitored.current_price or Decimal("0")
+    monitored_price = monitored.current_price
 
     #Se não houver concorrentes cadastrados, retorna um resultado vazio
     if not competitors:
@@ -78,8 +82,14 @@ def compare_prices(
             "alerts": []
         }
 
-    #Filtra concorrentes que possuem preço válido
-    valid_competitors = [c for c in competitors if c.current_price is not None]
+    #Filtra concorrentes disponíveis com preço válido
+    ignored_statuses = {ProductStatus.unavailable, ProductStatus.removed}
+    valid_competitors = [
+        c
+        for c in competitors
+        if c.current_price is not None
+        and getattr(c, "status", ProductStatus.available) not in ignored_statuses
+    ]
 
     #Se nenhum concorrente possui preço válido, retorna resultado vazio
     if not valid_competitors:

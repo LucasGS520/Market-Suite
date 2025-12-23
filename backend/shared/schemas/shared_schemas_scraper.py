@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, Mapping, Optional
 from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
@@ -67,6 +67,24 @@ class ParserResponse(BaseModel):
         None,
         description="Preço atual capturado pelo scraper em formato decimal",
     )
+    currency: Optional[str] = Field(
+        None,
+        description="Moeda informada pelo scraper quando identificada",
+    )
+    availability: bool | None = Field(
+        None,
+        description="Disponibilidade reportada pelo scraper; ``False`` sinaliza anúncio inativo",
+    )
+    last_status: str | None = Field(
+        None,
+        description="Indicador textual do último estado conhecido do anúncio",
+    )
+    etag: str | None = Field(
+        None, description="ETag devolvido pelo scraper para reutilizar condicionais"
+    )
+    not_modified: bool = Field(
+        False, description="Indica uso de heurística de 304 mesmo com corpo presente"
+    )
     url: AnyHttpUrl | None = Field(
         None,
         description="URL canônica utilizada na coleta",
@@ -94,6 +112,20 @@ class ParserResponse(BaseModel):
             return None
         cleaned = value.strip()
         return cleaned or None
+    
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_zero_price(cls, data: Any) -> Any:
+        """ Converte preço zero em ``None`` para evitar histórico inválido """
+        if not isinstance(data, Mapping):
+            return data
+
+        if "current_price" in data and data["current_price"] in {0, 0.0, "0", "0.0"}:
+            rewritten = dict(data)
+            rewritten["current_price"] = None
+            rewritten.setdefault("last_status", "price_zero_filtered")
+            return rewritten
+        return data
 
     @model_validator(mode="before")
     @classmethod

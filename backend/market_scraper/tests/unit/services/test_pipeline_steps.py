@@ -444,6 +444,9 @@ async def test_domain_specific_parser_aplica_parser_de_mercadolivre() -> None:
         "current_price": "549.90",
         "url": "https://produto.mercadolivre.com.br/MLB-123456789",
         "source": "produto.mercadolivre.com.br",
+        "currency": None,
+        "availability": None,
+        "last_status": None,
     }
     assert context.data.get("domain_parser_suffix") == "mercadolivre.com.br"
 

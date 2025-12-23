@@ -30,8 +30,10 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_SUCCESS_NEW_DATA_TOTAL,
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL,
     COLLECTOR_DURATION_MS,
+    COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL,
     COLLECT_LOCK_SKIPPED_TOTAL,
     COLLECT_SUCCESS_TOTAL,
+    MONITORED_SKIPPED_PAUSED_TOTAL,
     SCRAPER_IN_FLIGHT,
 )
 from shared.utils.redis_client import is_scraping_suspended
@@ -40,7 +42,7 @@ from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 from market_alert.core.celery_app import celery_app
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
-from market_alert.tasks.compare_prices_task import compare_prices_task
+from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 
 
 logger = structlog.get_logger("collector_product_task")
@@ -108,6 +110,11 @@ def _record_metrics(
     if reason == "invalid_payload":
         COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
         return "error"
+    
+    if reason == "missing_target":
+        COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL.labels(kind=kind).inc()
+        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
+        return "no_result"
 
     if reason in {"scraper_error", "unexpected_error"}:
         COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
@@ -140,8 +147,12 @@ def _dispatch_comparison(monitored_id: UUID | None, result: ScrapeResult | None)
     
     changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
     if changed:
-        compare_prices_task.apply_async(args=[str(monitored_id)], queue="monitor")
-
+        #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
+        celery_app.send_task(
+            "market_alert.tasks.compare_prices_task.compare_prices_task",
+            args=[str(monitored_id)],
+            queue="monitor",
+        )
 
 def collect_product(
     payload: Mapping[str, str] | None,
@@ -207,7 +218,30 @@ def collect_product(
                     user_uuid = None
 
                 with SessionLocal() as db:
+                    competitor_row: CompetitorProduct | None = None
                     if competitor_id is not None:
+                        competitor_row = (
+                            db.query(CompetitorProduct)
+                            .filter(CompetitorProduct.id == competitor_id)
+                            .first()
+                        )
+
+                    if competitor_id is not None and competitor_row is None:
+                        reason = "missing_target"
+                        task_logger.info(
+                            "collect_skipped_missing_competitor",
+                            competitor_id=str(competitor_id),
+                            monitored_id=str(monitored_id) if monitored_id else None,
+                            trace_id=trace_id,
+                        )
+                        result = ScrapeResult(
+                            status="no_result",
+                            product_id=str(competitor_id),
+                            http_status=404,
+                            error_code="missing_target",
+                        )
+                    elif competitor_id is not None:
+                        monitored_id = monitored_id or competitor_row.monitored_product_id if competitor_row else monitored_id
                         payload_model = CompetitorProductCreateScraping(
                             monitored_product_id=monitored_id,
                             product_url=url,
@@ -219,16 +253,39 @@ def collect_product(
                             payload=payload_model,
                         )
                     else:
-                        payload_model = MonitoredProductCreateScraping(
-                            name_identification=payload.get("name") if payload else None,
-                            product_url=url,
-                        )
-                        result = scrape_monitored_product(
-                            db=db,
-                            url=url,
-                            user_id=user_uuid or monitored_id,
-                            payload=payload_model,
-                        )
+                        monitored_row: MonitoredProduct | None = None
+                        if monitored_id is not None:
+                            monitored_row = (
+                                db.query(MonitoredProduct)
+                                .filter(MonitoredProduct.id == monitored_id)
+                                .first()
+                            )
+
+                        if monitored_row is not None and monitored_row.paused:
+                            reason = "paused"
+                            MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="collector").inc()
+                            task_logger.info(
+                                "collect_skipped_paused",
+                                monitored_id=str(monitored_id),
+                                trace_id=trace_id,
+                            )
+                            result = ScrapeResult(
+                                status="no_result",
+                                product_id=str(monitored_id) if monitored_id else None,
+                                http_status=200,
+                                error_code=None,
+                            )
+                        else:
+                            payload_model = MonitoredProductCreateScraping(
+                                name_identification=payload.get("name") if payload else None,
+                                product_url=url,
+                            )
+                            result = scrape_monitored_product(
+                                db=db,
+                                url=url,
+                                user_id=user_uuid or monitored_id,
+                                payload=payload_model,
+                            )
     except ScraperError as exc:
         reason = "scraper_error"
         task_logger.warning("scraper_error", kind=kind, error=str(exc))

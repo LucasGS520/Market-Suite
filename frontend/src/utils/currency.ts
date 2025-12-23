@@ -14,14 +14,17 @@ export type CurrencyInput = number | string | null | undefined;
  * informado. A função também troca vírgulas por pontos para aceitar formatos
  * comuns em respostas serializadas como string.
  */
-export function formatCurrency(
-  value: CurrencyInput,
-  { prefix = 'R$', fallbackLabel }: { prefix?: string; fallbackLabel?: string } = {},
-): string {
-  const fallback = fallbackLabel ?? (prefix ? `${prefix} 0,00` : '0,00');
-
+export function normalizePriceInput(value: CurrencyInput, { allowZero = false } = {}): number | null {
+  /**
+   * Normaliza entradas de preço retornando ``null`` quando inválidas ou zeradas.
+   *
+   * Converte strings, números ou valores nulos em um número pronto para
+   * formatação, descartando ocorrências com valor ``0`` para evitar exibir
+   * "R$ 0,00" na interface, com opção para permitir zeros em cenários de
+   * diferença ou ajustes.
+   */
   if (value === null || value === undefined) {
-    return fallback;
+    return null;
   }
 
   const numericValue =
@@ -30,9 +33,29 @@ export function formatCurrency(
       : Number(value);
 
   if (!Number.isFinite(numericValue)) {
-    return fallback;
+    return null;
   }
 
-  const formatted = numericValue.toFixed(2).replace('.', ',');
+  if (numericValue === 0 && !allowZero) {
+    return null;
+  }
+
+  return numericValue;
+}
+
+export function formatCurrency(
+  value: CurrencyInput,
+  { prefix = 'R$', fallbackLabel = 'Indisponível / Pausado', allowZero = false }: {
+    prefix?: string;
+    fallbackLabel?: string;
+    allowZero?: boolean;
+  } = {},
+): string {
+  const normalized = normalizePriceInput(value, { allowZero: allowZero ?? false });
+  if (normalized === null) {
+    return fallbackLabel;
+  }
+
+  const formatted = normalized.toFixed(2).replace('.', ',');
   return prefix ? `${prefix} ${formatted}` : formatted;
 }

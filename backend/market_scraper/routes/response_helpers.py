@@ -93,9 +93,39 @@ def build_no_result_response(
 
 def _extract_additional_payload(data: dict[str, Any]) -> dict[str, Any] | None:
     """ Remove campos padrão preservando apenas metadados adicionais """
-    base_keys = {"name", "current_price", "url", "source", "marketplace"}
+    base_keys = {
+        "name",
+        "current_price",
+        "url",
+        "source",
+        "marketplace",
+        "currency",
+        "availability",
+        "last_status",
+        "etag",
+        "not_modified",
+    }
     extras = {key: value for key, value in data.items() if key not in base_keys and value is not None}
     return extras or None
+
+def _merge_availability_and_status(
+    payload: dict[str, Any],
+    context_data: dict[str, Any],
+) -> dict[str, Any]:
+    """ Aplica precedência explícita para disponibilidade e último status """
+    merged = dict(payload)
+    inferred_availability = context_data.get("availability_inferred")
+    if merged.get("availability") is None and inferred_availability is not None:
+        merged["availability"] = inferred_availability
+
+    inferred_last_status = context_data.get("last_status_inferred")
+    if not merged.get("last_status") and inferred_last_status:
+        merged["last_status"] = inferred_last_status
+
+    context_last_status = context_data.get("last_status")
+    if not merged.get("last_status") and context_last_status:
+        merged["last_status"] = context_last_status
+    return merged
 
 def build_success_response(
     payload: dict[str, Any],
@@ -103,15 +133,21 @@ def build_success_response(
     normalized_url: str,
     outcome: PipelineOutcome,
     request_logger: BoundLogger,
-    current_price: Decimal,
+    current_price: Decimal | None,
 ) -> ParserResponse:
     """ Cria ``ParserResponse`` garantindo consistência de logs """
+    merged_payload = _merge_availability_and_status(payload, outcome.context.data)
     response = ParserResponse(
-        name=payload.get("name", ""),
+        name=merged_payload.get("name", ""),
         current_price=current_price,
+        currency=merged_payload.get("currency"),
+        availability=merged_payload.get("availability"),
+        last_status=merged_payload.get("last_status"),
         url=normalized_url,
-        source=payload.get("source") or payload.get("marketplace") or outcome.context.source,
-        payload=_extract_additional_payload(payload),
+        source=merged_payload.get("source")
+        or merged_payload.get("marketplace")
+        or outcome.context.source,
+        payload=_extract_additional_payload(merged_payload),
     )
     request_logger.info(
         "parse_success",
@@ -125,6 +161,7 @@ __all__ = [
     "_http_error",
     "_map_http_download_issue",
     "_extract_additional_payload",
+    "_merge_availability_and_status",
     "_sanitize_payload",
     "build_no_result_response",
     "build_success_response",

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_recheck import RECHECK_SCHEDULED_TOTAL
-from shared.metrics.metrics_scraper import RECHECK_ENQUEUED_TOTAL
+from shared.metrics.metrics_scraper import MONITORED_SKIPPED_PAUSED_TOTAL, RECHECK_ENQUEUED_TOTAL
 from shared.utils.redis_client import is_scraping_suspended
 
 from market_alert.core.celery_app import celery_app
@@ -46,12 +46,27 @@ def _list_due_monitored(db: Session, reference: datetime) -> list[MonitoredProdu
         .filter(
             MonitoredProduct.monitoring_type == MonitoringType.scraping,
             MonitoredProduct.status.in_([MonitoredStatus.active, MonitoredStatus.pending]),
+            MonitoredProduct.paused.is_(False),
             MonitoredProduct.next_check_at.isnot(None),
             MonitoredProduct.next_check_at <= reference,
         )
         .order_by(MonitoredProduct.next_check_at)
         .limit(settings.RECHECK_ENQUEUE_BATCH_SIZE)
         .all()
+    )
+
+def _count_paused_due(db: Session, reference: datetime) -> int:
+    """ Conta monitorados vencidos porém pausados para registrar métricas """
+    return (
+        db.query(MonitoredProduct)
+        .filter(
+            MonitoredProduct.monitoring_type == MonitoringType.scraping,
+            MonitoredProduct.status.in_([MonitoredStatus.active, MonitoredStatus.pending]),
+            MonitoredProduct.paused.is_(True),
+            MonitoredProduct.next_check_at.isnot(None),
+            MonitoredProduct.next_check_at <= reference,
+        )
+        .count()
     )
 
 def _hydrate_missing_next_check(db: Session, reference: datetime, logger_bound=None) -> int:
@@ -107,6 +122,10 @@ def schedule_rechecks(
         return 0
     
     _hydrate_missing_next_check(db, reference, logger_bound=bound_logger)
+
+    paused_due = _count_paused_due(db, reference)
+    if paused_due:
+        MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="recheck_scheduler").inc(paused_due)
 
     due_monitored = _list_due_monitored(db, reference)
     if not due_monitored:

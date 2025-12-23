@@ -152,20 +152,24 @@ async def parse_endpoint(
     
     payload_data = outcome.payload
 
-    try:
-        price: Decimal = parse_price_str(
-            payload_data.get("current_price"),
-            normalized_url,
-        )
-    except ValueError as exc:
-        issue = UrlIssue(code="invalid_price", message=str(exc))
-        invalidate_cached_response(normalized_url)
-        return _http_error(
-            issue,
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            trace_id=trace_id,
-            request_logger=request_logger,
-        )
+    price_value = payload_data.get("current_price")
+    price: Decimal | None = None
+    if price_value is not None:
+        try:
+            price = parse_price_str(
+                price_value,
+                normalized_url,
+            )
+        except ValueError:
+            price = None
+
+    request_logger.info(
+        "route_payload_ready",
+        url=sanitize_log_data(normalized_url),
+        availability=payload_data.get("availability"),
+        last_status=payload_data.get("last_status"),
+        has_price=price is not None,
+    )
     
     parse_response = build_success_response(
         payload_data,

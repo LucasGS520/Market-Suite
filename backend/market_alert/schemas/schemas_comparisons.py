@@ -60,6 +60,12 @@ class PriceComparisonSummaryResponse(BaseModel):
         default=None,
         description="Ajuste potencial calculado contra o menor preço disponível.",
     )
+    ignored_due_to_inactive: bool = Field(
+        default=False,
+        description=(
+            "Indica que a comparação foi ignorada porque o produto monitorado estava indisponível ou sem preço válido no momento do cálculo."
+        ),
+    )
     comparison_insights: Optional[str] = None
     competitiveness_status: Optional[CompetitivenessStatus] = Field(
         default=None,
