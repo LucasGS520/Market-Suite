@@ -148,12 +148,13 @@ const ProductDetail: React.FC = () => {
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: ['monitoredProduct', id] });
       const previous = queryClient.getQueryData<MonitoredProduct | undefined>(['monitoredProduct', id]);
+      const pausedAt = new Date().toISOString();
       const optimistic: MonitoredProduct | undefined = previous
         ? {
             ...previous,
             paused: true,
             is_paused: true,
-            paused_at: new Date().toISOString(),
+            paused_at: pausedAt,
             display_status: 'paused',
           }
         : previous;
@@ -164,6 +165,8 @@ const ProductDetail: React.FC = () => {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(['monitoredProduct', id], data);
+      queryClient.invalidateQueries({ queryKey: ['monitoredProduct', id] });
+      queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
       setActionSuccess('Monitoramento pausado com sucesso.');
     },
     onError: (_error, _variables, context) => {
@@ -195,6 +198,8 @@ const ProductDetail: React.FC = () => {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(['monitoredProduct', id], data);
+      queryClient.invalidateQueries({ queryKey: ['monitoredProduct', id] });
+      queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
       setActionSuccess('Monitoramento retomado. Nova coleta será agendada.');
     },
     onError: (_error, _variables, context) => {
@@ -424,10 +429,11 @@ const ProductDetail: React.FC = () => {
   const highlightedAlerts = summaryAlerts.slice(0, 3);
   const monitoredSince = product.created_at;
   const monitoringPaused = (product.paused ?? product.is_paused) ?? false;
+  const monitoredStatus = resolveMonitoredStatus(product);
+  const detailCardOpacity = monitoringPaused ? 0.5 : monitoredStatus === 'inactive' ? 0.8 : 1;
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
   const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
-  const monitoredStatus = resolveMonitoredStatus(product);
   const actionBusy = pauseMonitoredMutation.isPending || resumeMonitoredMutation.isPending || deleteMonitoredMutation.isPending;
 
   return (
@@ -456,9 +462,14 @@ const ProductDetail: React.FC = () => {
               elevation={monitoredStatus === 'inactive' ? 0 : 2}
               sx={{
                 border: '1px solid',
-                borderColor: monitoredStatus === 'inactive' ? 'divider' : 'transparent',
-                backgroundColor: monitoredStatus === 'inactive' ? 'grey.50' : 'background.paper',
-                opacity: monitoredStatus === 'inactive' ? 0.8 : 1,
+                borderColor: monitoringPaused
+                  ? 'warning.light'
+                  : monitoredStatus === 'inactive'
+                    ? 'divider'
+                    : 'transparent',
+                backgroundColor:
+                  monitoringPaused || monitoredStatus === 'inactive' ? 'background.default' : 'background.paper',
+                opacity: detailCardOpacity,
               }}
             >
               <CardContent>

@@ -23,6 +23,7 @@ const ProductStateBadge: React.FC<ProductStateBadgeProps> = ({ product, variant 
       ? resolveMonitoredStatus(product as MonitoredProduct)
       : resolveCompetitorStatus(product as CompetitorProduct);
   const badge = statusToBadge[status] ?? statusToBadge.unknown;
+  const isPaused = status === 'paused';
 
   return (
     <Tooltip title={badge.tooltip} placement="top">
@@ -30,6 +31,7 @@ const ProductStateBadge: React.FC<ProductStateBadgeProps> = ({ product, variant 
         label={badge.label}
         color={badge.color}
         size="small"
+        variant={isPaused ? 'outlined' : 'filled'}
         aria-label={`Status: ${badge.label}`}
       />
     </Tooltip>

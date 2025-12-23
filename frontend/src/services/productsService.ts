@@ -210,9 +210,9 @@ export const productsService = {
    * Pausa um produto monitorado e retorna o estado atualizado.
    */
   async pauseMonitored(productId: string): Promise<MonitoredProduct> {
-    const response = await apiClient.put<MonitoredProduct>(`/monitored/${productId}/paused`, {
-      paused: true,
-    });
+    const response = await apiClient.put<MonitoredProduct>(`/monitored/${productId}/paused`, null, {
+        params: { paused: true },
+      });
     return normalizeMonitoredProduct(response.data);
   },
 
@@ -220,9 +220,9 @@ export const productsService = {
    * Retoma o monitoramento de um produto e retorna o estado atualizado.
    */
   async resumeMonitored(productId: string): Promise<MonitoredProduct> {
-    const response = await apiClient.put<MonitoredProduct>(`/monitored/${productId}/paused`, {
-      paused: false,
-    });
+    const response = await apiClient.put<MonitoredProduct>(`/monitored/${productId}/paused`, null, {
+        params: { paused: false },
+      });
     return normalizeMonitoredProduct(response.data);
   },
 

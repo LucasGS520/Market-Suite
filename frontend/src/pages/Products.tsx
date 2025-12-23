@@ -215,6 +215,7 @@ const Products: React.FC = () => {
     const status = resolveMonitoredStatus(product);
     const badgeMeta = statusToBadge[status] ?? statusToBadge.unknown;
     const isInactive = status === 'inactive';
+    const isPaused = (product.paused ?? product.is_paused) ?? false;
 
     const borderColorMap: Record<string, string> = {
       success: 'success.light',
@@ -225,11 +226,15 @@ const Products: React.FC = () => {
     };
 
     const colorKey = badgeMeta.color ?? 'default';
+    const borderColor = isPaused ? 'warning.light' : borderColorMap[colorKey] || 'divider';
+    const backgroundColor = isInactive ? 'grey.50' : 'background.paper';
 
     return {
       chipColor: badgeMeta.color,
-      borderColor: borderColorMap[colorKey] || 'divider',
+      borderColor,
+      backgroundColor,
       isInactive,
+      isPaused,
       status,
     };
   };
@@ -376,8 +381,8 @@ const Products: React.FC = () => {
                     sx={{
                       border: '1px solid',
                       borderColor: viewMode === 'list' ? visualEmphasis.borderColor : 'divider',
-                      backgroundColor: visualEmphasis.isInactive ? 'grey.50' : 'background.paper',
-                      opacity: visualEmphasis.isInactive ? 0.7 : 1,
+                      backgroundColor: visualEmphasis.backgroundColor,
+                      opacity: visualEmphasis.isPaused ? 0.5 : visualEmphasis.isInactive ? 0.7 : 1,
                     }}
                   >
                     <CardContent>
@@ -554,7 +559,7 @@ const Products: React.FC = () => {
                       key={product.id}
                       hover={!visualEmphasis.isInactive}
                       selected={visualEmphasis.isInactive}
-                      sx={{ opacity: visualEmphasis.isInactive ? 0.7 : 1 }}
+                      sx={{ opacity: visualEmphasis.isPaused ? 0.5 : visualEmphasis.isInactive ? 0.7 : 1 }}
                     >
                       <TableCell sx={{ maxWidth: 360, width: 360 }}>
                         <Box display="flex" alignItems="center" gap={1}>
