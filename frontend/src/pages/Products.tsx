@@ -175,6 +175,7 @@ const Products: React.FC = () => {
         key: 'monitoring:product:create',
         message: 'Produto criado e scraping em andamento. A lista será atualizada automaticamente.',
         severity: 'info',
+        replace: true,
       });
     },
     onError: () => {
@@ -184,6 +185,7 @@ const Products: React.FC = () => {
         message: 'Não foi possível criar o produto. Verifique a URL e tente novamente.',
         severity: 'error',
         persist: true,
+        replace: true,
       });
     },
   });

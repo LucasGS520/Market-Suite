@@ -132,6 +132,7 @@ const ProductDetail: React.FC = () => {
         key: `monitoring:product:${id}:competitor:create`,
         message: 'Concorrente criado e scraping em andamento. A listagem será atualizada automaticamente.',
         severity: 'info',
+        replace: true,
       });
     },
     onError: () => {
@@ -141,6 +142,7 @@ const ProductDetail: React.FC = () => {
         message: 'Não foi possível adicionar concorrente. Revise a URL e tente novamente.',
         severity: 'error',
         persist: true,
+        replace: true,
       });
     },
   });
@@ -156,6 +158,7 @@ const ProductDetail: React.FC = () => {
         key: `monitoring:product:${id}:competitor:delete`,
         message: 'Concorrente removido. Resumo será recalculado em instantes.',
         severity: 'success',
+        replace: true,
       });
     },
     onError: () => {
@@ -164,6 +167,7 @@ const ProductDetail: React.FC = () => {
         message: 'Falha ao remover concorrente. Tente novamente.',
         severity: 'error',
         persist: true,
+        replace: true,
       });
     },
   });
@@ -199,6 +203,7 @@ const ProductDetail: React.FC = () => {
         key: `monitoring:product:${id}:pause`,
         message: 'Monitoramento pausado com sucesso.',
         severity: 'success',
+        replace: true,
       });
     },
     onError: (_error, _variables, context) => {
@@ -210,6 +215,7 @@ const ProductDetail: React.FC = () => {
         message: 'Não foi possível pausar o monitoramento. Tente novamente.',
         severity: 'error',
         persist: true,
+        replace: true,
       });
     },
   });
@@ -241,6 +247,7 @@ const ProductDetail: React.FC = () => {
         key: `monitoring:product:${id}:resume`,
         message: 'Monitoramento retomado. Nova coleta será agendada.',
         severity: 'success',
+        replace: true,
       });
     },
     onError: (_error, _variables, context) => {
@@ -252,6 +259,7 @@ const ProductDetail: React.FC = () => {
         message: 'Não foi possível retomar o monitoramento. Tente novamente.',
         severity: 'error',
         persist: true,
+        replace: true,
       });
     },
   });
@@ -267,6 +275,7 @@ const ProductDetail: React.FC = () => {
         key: `monitoring:product:${id}:delete`,
         message: 'Produto removido com sucesso. Histórico e concorrentes foram descartados.',
         severity: 'success',
+        replace: true,
       });
       navigate('/products');
     },
@@ -278,6 +287,7 @@ const ProductDetail: React.FC = () => {
         message: 'Falha ao remover produto. Verifique sua conexão e tente novamente.',
         severity: 'error',
         persist: true,
+        replace: true,
       });
     },
   });

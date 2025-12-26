@@ -5,8 +5,9 @@
  * permitindo que componentes disparem mensagens temporárias padronizadas sem
  * acoplamento direto à hierarquia de layout.
  */
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Snackbar } from '@mui/material';
+import type { SnackbarCloseReason } from '@mui/material/Snackbar';
 import { useLocation } from 'react-router-dom';
 
 export type ToastSeverity = 'success' | 'info' | 'warning' | 'error';
@@ -39,31 +40,37 @@ export const ToastProvider: React.FC<React.PropsWithChildren> = ({ children }) =
   const location = useLocation();
   const [queue, setQueue] = useState<ToastMessage[]>([]);
   const [open, setOpen] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+  const closingToastIdRef = useRef<number | null>(null);
 
   const currentToast = queue[0];
 
   useEffect(() => {
     // Ativa o Snackbar sempre que houver mensagem na fila e ele estiver fechado.
-    if (currentToast && !open) {
+    if (currentToast && !open && !isExiting) {
       setOpen(true);
     }
-  }, [currentToast, open]);
+  }, [currentToast, open, isExiting]);
 
   useEffect(() => {
     // Limpa a fila de toasts ao navegar para evitar mensagens "presas" na rota anterior
     setQueue([]);
     setOpen(false);
+    setIsExiting(false);
+    closingToastIdRef.current = null;
   }, [location.key]);
 
   const showToast = useCallback((toast: ToastOptions) => {
+    const shouldReplace = !!toast.key && toast.replace !== false;
     const nextToast: ToastMessage = {
       id: Date.now() + Math.random(),
       key: toast.key,
       message: toast.message,
       severity: toast.severity ?? 'info',
-      duration: toast.duration ?? DEFAULT_DURATION,
+      // Garante duração numérica para evitar comportamento indefinido no autoHide.
+      duration: typeof toast.duration === 'number' ? toast.duration : DEFAULT_DURATION,
       persist: toast.persist ?? false,
-      replace: toast.replace ?? false,
+      replace: shouldReplace,
       closeOnClickaway: toast.closeOnClickaway ?? false,
     };
 
@@ -80,28 +87,37 @@ export const ToastProvider: React.FC<React.PropsWithChildren> = ({ children }) =
     });
   }, []);
 
-  const handleClose = useCallback((_: unknown, reason?: string) => {
+  const handleClose = useCallback((_: React.SyntheticEvent | Event | undefined, reason?: SnackbarCloseReason) => {
     // Permite fechamento por clique fora apenas quando explicitamente configurado
     if (reason === 'clickaway' && !currentToast?.closeOnClickaway) return;
+    closingToastIdRef.current = currentToast?.id ?? null;
+    if (currentToast) {
+      // Remove imediatamente o toast atual para evitar dependência exclusiva do onExited.
+      setQueue((prev) => prev.filter((toast) => toast.id !== currentToast.id));
+    }
+    setIsExiting(true);
     setOpen(false);
   }, [currentToast]);
 
   const dismissToast = useCallback(
     (key?: string) => {
       if (!key) {
+        if (currentToast) {
+          closingToastIdRef.current = currentToast.id;
+          // Remove imediatamente o toast exibido antes de iniciar a transição.
+          setQueue((prev) => prev.filter((toast) => toast.id !== currentToast.id));
+          setIsExiting(true);
+        }
         setOpen(false);
         return;
       }
 
       // Remove mensagens específicas mantendo o comportamento de fila
-      setQueue((prev) => {
-        if (prev[0]?.key === key) {
-          return prev;
-        }
-        return prev.filter((toast) => toast.key !== key);
-      });
+      setQueue((prev) => prev.filter((toast) => toast.key !== key));
 
       if (currentToast?.key === key) {
+        closingToastIdRef.current = currentToast.id;
+        setIsExiting(true);
         setOpen(false);
       }
     },
@@ -109,8 +125,17 @@ export const ToastProvider: React.FC<React.PropsWithChildren> = ({ children }) =
   );
 
   const handleExited = useCallback(() => {
-    // Remove o toast exibido e avança na fila.
-    setQueue((prev) => prev.slice(1));
+    // Marca fim da transição e remove o toast exibido somente se ainda estiver na fila.
+    setIsExiting(false);
+    const closingId = closingToastIdRef.current;
+    closingToastIdRef.current = null;
+    if (!closingId) return;
+    setQueue((prev) => {
+      if (prev[0]?.id === closingId) {
+        return prev.slice(1);
+      }
+      return prev;
+    });
   }, []);
 
   const contextValue = useMemo(() => ({ showToast, dismissToast }), [showToast, dismissToast]);
@@ -127,7 +152,12 @@ export const ToastProvider: React.FC<React.PropsWithChildren> = ({ children }) =
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
         {currentToast ? (
-          <Alert severity={currentToast.severity} elevation={3} onClose={handleClose} sx={{ width: '100%' }}>
+          <Alert
+            severity={currentToast.severity}
+            elevation={3}
+            onClose={() => handleClose(undefined, 'close')}
+            sx={{ width: '100%' }}
+          >
             {currentToast.message}
           </Alert>
         ) : null}
