@@ -7,19 +7,25 @@
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert, Snackbar } from '@mui/material';
+import { useLocation } from 'react-router-dom';
 
 export type ToastSeverity = 'success' | 'info' | 'warning' | 'error';
 
 type ToastOptions = {
+  key?: string;
   message: string;
   severity?: ToastSeverity;
   duration?: number;
+  persist?: boolean;
+  replace?: boolean;
+  closeOnClickaway?: boolean;
 };
 
 type ToastMessage = ToastOptions & { id: number };
 
 type ToastContextValue = {
   showToast: (toast: ToastOptions) => void;
+  dismissToast: (key?: string) => void;
 };
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
@@ -30,6 +36,7 @@ const DEFAULT_DURATION = 4000;
  * Provider responsável por gerenciar a fila de toasts e renderizar o Snackbar.
  */
 export const ToastProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
+  const location = useLocation();
   const [queue, setQueue] = useState<ToastMessage[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -42,30 +49,71 @@ export const ToastProvider: React.FC<React.PropsWithChildren> = ({ children }) =
     }
   }, [currentToast, open]);
 
+  useEffect(() => {
+    // Limpa a fila de toasts ao navegar para evitar mensagens "presas" na rota anterior
+    setQueue([]);
+    setOpen(false);
+  }, [location.key]);
+
   const showToast = useCallback((toast: ToastOptions) => {
-    setQueue((prev) => [
-      ...prev,
-      {
-        id: Date.now() + Math.random(),
-        severity: toast.severity ?? 'info',
-        duration: toast.duration ?? DEFAULT_DURATION,
-        message: toast.message,
-      },
-    ]);
+    const nextToast: ToastMessage = {
+      id: Date.now() + Math.random(),
+      key: toast.key,
+      message: toast.message,
+      severity: toast.severity ?? 'info',
+      duration: toast.duration ?? DEFAULT_DURATION,
+      persist: toast.persist ?? false,
+      replace: toast.replace ?? false,
+      closeOnClickaway: toast.closeOnClickaway ?? false,
+    };
+
+    setQueue((prev) => {
+      if (nextToast.replace && nextToast.key) {
+        const existingIndex = prev.findIndex((item) => item.key === nextToast.key);
+        if (existingIndex !== -1) {
+          const updatedQueue = [...prev];
+          updatedQueue[existingIndex] = nextToast;
+          return updatedQueue;
+        }
+      }
+      return [...prev, nextToast];
+    });
   }, []);
 
   const handleClose = useCallback((_: unknown, reason?: string) => {
-    // Ignora fechamento por clique fora para evitar descartes acidentais.
-    if (reason === 'clickaway') return;
+    // Permite fechamento por clique fora apenas quando explicitamente configurado
+    if (reason === 'clickaway' && !currentToast?.closeOnClickaway) return;
     setOpen(false);
-  }, []);
+  }, [currentToast]);
+
+  const dismissToast = useCallback(
+    (key?: string) => {
+      if (!key) {
+        setOpen(false);
+        return;
+      }
+
+      // Remove mensagens específicas mantendo o comportamento de fila
+      setQueue((prev) => {
+        if (prev[0]?.key === key) {
+          return prev;
+        }
+        return prev.filter((toast) => toast.key !== key);
+      });
+
+      if (currentToast?.key === key) {
+        setOpen(false);
+      }
+    },
+    [currentToast]
+  );
 
   const handleExited = useCallback(() => {
     // Remove o toast exibido e avança na fila.
     setQueue((prev) => prev.slice(1));
   }, []);
 
-  const contextValue = useMemo(() => ({ showToast }), [showToast]);
+  const contextValue = useMemo(() => ({ showToast, dismissToast }), [showToast, dismissToast]);
 
   return (
     <ToastContext.Provider value={contextValue}>
@@ -73,7 +121,7 @@ export const ToastProvider: React.FC<React.PropsWithChildren> = ({ children }) =
       <Snackbar
         key={currentToast?.id}
         open={open}
-        autoHideDuration={currentToast?.duration ?? DEFAULT_DURATION}
+        autoHideDuration={currentToast?.persist ? null : currentToast?.duration ?? DEFAULT_DURATION}
         onClose={handleClose}
         TransitionProps={{ onExited: handleExited }}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}

@@ -60,7 +60,7 @@ const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const toast = useToast();
+  const { showToast, dismissToast } = useToast();
 
   // Estado local para controlar diálogo de adição de concorrente e campos do formulário
   const [openAddCompetitorDialog, setOpenAddCompetitorDialog] = useState(false);
@@ -102,6 +102,20 @@ const ProductDetail: React.FC = () => {
     enabled: !!id,
   });
 
+  useEffect(() => {
+    if (productError || (!productLoading && !product)) {
+      showToast({
+        key: `monitoring:product:${id ?? 'unknown'}:load-error`,
+        message: 'Erro ao carregar produto. Tente novamente.',
+        severity: 'error',
+        persist: true,
+        replace: true,
+      });
+    } else if (id) {
+      dismissToast(`monitoring:product:${id}:load-error`);
+    }
+  }, [dismissToast, id, product, productError, productLoading, showToast]);
+
   /**
    * Mutation para criar um concorrente.
    * - Ao concluir com sucesso, invalida a query de concorrentes e reseta o diálogo/formulário.
@@ -114,11 +128,20 @@ const ProductDetail: React.FC = () => {
       setCompetitorUrl('');
       setCompetitorName('');
       // Mensagem clara para indicar que scraping foi agendado e será atualizado em breve
-      toast.info('Concorrente criado e scraping em andamento. A listagem será atualizada automaticamente.');
+      showToast({
+        key: `monitoring:product:${id}:competitor:create`,
+        message: 'Concorrente criado e scraping em andamento. A listagem será atualizada automaticamente.',
+        severity: 'info',
+      });
     },
     onError: () => {
       // Orienta o usuário a revisar a URL ou a sessão antes de tentar novamente
-      toast.error('Não foi possível adicionar concorrente. Revise a URL e tente novamente.');
+      showToast({
+        key: `monitoring:product:${id}:competitor:create:error`,
+        message: 'Não foi possível adicionar concorrente. Revise a URL e tente novamente.',
+        severity: 'error',
+        persist: true,
+      });
     },
   });
 
@@ -129,10 +152,19 @@ const ProductDetail: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['comparisonSummary', id] });
       setConfirmCompetitorDeleteOpen(false);
       setCompetitorToDelete(null);
-      toast.success('Concorrente removido. Resumo será recalculado em instantes.');
+      showToast({
+        key: `monitoring:product:${id}:competitor:delete`,
+        message: 'Concorrente removido. Resumo será recalculado em instantes.',
+        severity: 'success',
+      });
     },
     onError: () => {
-      toast.error('Falha ao remover concorrente. Tente novamente.');
+      showToast({
+        key: `monitoring:product:${id}:competitor:delete:error`,
+        message: 'Falha ao remover concorrente. Tente novamente.',
+        severity: 'error',
+        persist: true,
+      });
     },
   });
 
@@ -163,13 +195,22 @@ const ProductDetail: React.FC = () => {
       queryClient.setQueryData(['monitoredProduct', id], data);
       queryClient.invalidateQueries({ queryKey: ['monitoredProduct', id] });
       queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
-      toast.success('Monitoramento pausado com sucesso.');
+      showToast({
+        key: `monitoring:product:${id}:pause`,
+        message: 'Monitoramento pausado com sucesso.',
+        severity: 'success',
+      });
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
         queryClient.setQueryData(['monitoredProduct', id], context.previous);
       }
-      toast.error('Não foi possível pausar o monitoramento. Tente novamente.');
+      showToast({
+        key: `monitoring:product:${id}:pause:error`,
+        message: 'Não foi possível pausar o monitoramento. Tente novamente.',
+        severity: 'error',
+        persist: true,
+      });
     },
   });
 
@@ -196,13 +237,22 @@ const ProductDetail: React.FC = () => {
       queryClient.setQueryData(['monitoredProduct', id], data);
       queryClient.invalidateQueries({ queryKey: ['monitoredProduct', id] });
       queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
-      toast.success('Monitoramento retomado. Nova coleta será agendada.');
+      showToast({
+        key: `monitoring:product:${id}:resume`,
+        message: 'Monitoramento retomado. Nova coleta será agendada.',
+        severity: 'success',
+      });
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
         queryClient.setQueryData(['monitoredProduct', id], context.previous);
       }
-      toast.error('Não foi possível retomar o monitoramento. Tente novamente.');
+      showToast({
+        key: `monitoring:product:${id}:resume:error`,
+        message: 'Não foi possível retomar o monitoramento. Tente novamente.',
+        severity: 'error',
+        persist: true,
+      });
     },
   });
 
@@ -213,13 +263,22 @@ const ProductDetail: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
       queryClient.invalidateQueries({ queryKey: ['monitoredProducts', '__all__'] });
       setConfirmDeleteOpen(false);
-      toast.success('Produto removido com sucesso. Histórico e concorrentes foram descartados.');
+      showToast({
+        key: `monitoring:product:${id}:delete`,
+        message: 'Produto removido com sucesso. Histórico e concorrentes foram descartados.',
+        severity: 'success',
+      });
       navigate('/products');
     },
     onError: () => {
       // Mantém o modal aberto para permitir nova tentativa e indica falha de forma visível.
       setDeleteError('Falha ao remover produto. Verifique sua conexão e tente novamente.');
-      toast.error('Falha ao remover produto. Verifique sua conexão e tente novamente.');
+      showToast({
+        key: `monitoring:product:${id}:delete:error`,
+        message: 'Falha ao remover produto. Verifique sua conexão e tente novamente.',
+        severity: 'error',
+        persist: true,
+      });
     },
   });
 
@@ -310,7 +369,7 @@ const ProductDetail: React.FC = () => {
   if (productError || !product) {
     return (
       <Layout>
-        <Alert severity="error">Erro ao carregar produto. Tente novamente.</Alert>
+        <Typography color="error">Erro ao carregar produto. Tente novamente.</Typography>
       </Layout>
     );
   }

@@ -27,7 +27,6 @@ import {
   TableRow,
   Paper,
   CircularProgress,
-  Alert,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -65,7 +64,7 @@ import { useToast } from '../hooks/useToast';
 const Products: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const toast = useToast();
+  const { showToast, dismissToast } = useToast();
 
   // Estado da UI
   const [viewMode, setViewMode] = useState<'list' | 'table'>('list'); // modo de exibição
@@ -100,6 +99,20 @@ const Products: React.FC = () => {
         status: statusFilter || undefined,
       }),
   });
+
+  useEffect(() => {
+    if (error) {
+      showToast({
+        key: 'monitoring:products:load-error',
+        message: 'Erro ao carregar produtos. Tente novamente.',
+        severity: 'error',
+        persist: true,
+        replace: true,
+      });
+    } else {
+      dismissToast('monitoring:products:load-error');
+    }
+  }, [dismissToast, error, showToast]);
 
   // Ajusta paginação client-side quando filtros ou modo de visualização mudam
   useEffect(() => {
@@ -158,11 +171,20 @@ const Products: React.FC = () => {
       setNewProductUrl('');
       setNewProductName('');
       setNewCompetitorUrl('');
-      toast.info('Produto criado e scraping em andamento. A lista será atualizada automaticamente.');
+      showToast({
+        key: 'monitoring:product:create',
+        message: 'Produto criado e scraping em andamento. A lista será atualizada automaticamente.',
+        severity: 'info',
+      });
     },
     onError: () => {
       // Mantém mensagem amigável para orientar ajuste de URL ou reautenticação
-      toast.error('Não foi possível criar o produto. Verifique a URL e tente novamente.');
+      showToast({
+        key: 'monitoring:product:create:error',
+        message: 'Não foi possível criar o produto. Verifique a URL e tente novamente.',
+        severity: 'error',
+        persist: true,
+      });
     },
   });
 
@@ -334,7 +356,7 @@ const Products: React.FC = () => {
         </Box>
       ) : error ? (
         // Estado de erro ao buscar produtos
-        <Alert severity="error">Erro ao carregar produtos. Tente novamente.</Alert>
+        <Typography color="error">Erro ao carregar produtos. Tente novamente.</Typography>
       ) : visibleItems && visibleItems.length > 0 ? (
         viewMode === 'list' ? (
           // Modo Lista - exibe cartões por produto

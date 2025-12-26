@@ -8,7 +8,6 @@ import { StrictMode } from 'react' // Ativa verificações adicionas em desenvol
 import { createRoot } from 'react-dom/client' // Nova API de montagem do React 18+
 import './index.css' // Estilos globais da aplicação
 import App from './App.tsx' // Componente raiz da aplicação
-import { ToastProvider } from './contexts/ToastContext.tsx' // Provedor global de toasts reutilizáveis
 
 // Obtém o elemento root do DOM onde a aplicação será montada.
 const rootElement = document.getElementById('root')!
@@ -17,8 +16,6 @@ const rootElement = document.getElementById('root')!
 // StrictMode ajuda a identificar práticas inseguras e side-effects inesperados durante o desenvolvimento.
 createRoot(rootElement).render(
   <StrictMode>
-    <ToastProvider>
-      <App />
-    </ToastProvider>
+    <App />
   </StrictMode>,
 )
