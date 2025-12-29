@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
 import AuthProvider from './contexts/AuthProvider';
+import { ToastProvider } from './contexts/ToastContext';
 import ProtectedRoute from './components/ProtectedRoute';
 
 // Páginas
@@ -73,6 +74,7 @@ const theme = createTheme({
  * - CssBaseline: reset de estilos base do MUI.
  * - AuthProvider: contexto de autenticação (login/jwt).
  * - BrowserRouter: roteamento do frontend.
+ * - ToastProvider: exibição global de toasts (precisa estar dentro do Router).
  *
  * As rotas públicas e protegidas estão declaradas abaixo. Rotas protegidas usam
  * o componente ProtectedRoute que verifica autenticação antes de renderizar.
@@ -84,65 +86,68 @@ const App: React.FC = () => {
         <CssBaseline />
         <AuthProvider>
           <BrowserRouter>
-            <Routes>
-              {/* Rotas públicas (acesso sem autenticação) */}
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
+            <ToastProvider>
+              {/* Mantém o ToastProvider dentro do Router para garantir acesso ao contexto de rota. */}
+              <Routes>
+                {/* Rotas públicas (acesso sem autenticação) */}
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
 
-              {/* Rotas protegidas (requerem autenticação) */}
-              <Route
-                path="/dashboard"
-                element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/products"
-                element={
-                  <ProtectedRoute>
-                    <Products />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/product/:id"
-                element={
-                  <ProtectedRoute>
-                    <ProductDetail />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/compare"
-                element={
-                  <ProtectedRoute>
-                    <Compare />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/alerts"
-                element={
-                  <ProtectedRoute>
-                    <Alerts />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/settings"
-                element={
-                  <ProtectedRoute>
-                    <Settings />
-                  </ProtectedRoute>
-                }
-              />
+                {/* Rotas protegidas (requerem autenticação) */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/products"
+                  element={
+                    <ProtectedRoute>
+                      <Products />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/product/:id"
+                  element={
+                    <ProtectedRoute>
+                      <ProductDetail />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/compare"
+                  element={
+                    <ProtectedRoute>
+                      <Compare />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/alerts"
+                  element={
+                    <ProtectedRoute>
+                      <Alerts />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/settings"
+                  element={
+                    <ProtectedRoute>
+                      <Settings />
+                    </ProtectedRoute>
+                  }
+                />
 
-              {/* Rota padrão e fallback: redirecionam para o dashboard */}
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
+                {/* Rota padrão e fallback: redirecionam para o dashboard */}
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+            </ToastProvider>
           </BrowserRouter>
         </AuthProvider>
       </ThemeProvider>

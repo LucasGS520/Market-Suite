@@ -27,7 +27,6 @@ import {
   TableRow,
   Paper,
   CircularProgress,
-  Alert,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -52,6 +51,7 @@ import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus, statusToBadge } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
+import { useToast } from '../hooks/useToast';
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -64,6 +64,7 @@ import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 const Products: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { showToast, dismissToast } = useToast();
 
   // Estado da UI
   const [viewMode, setViewMode] = useState<'list' | 'table'>('list'); // modo de exibição
@@ -74,8 +75,20 @@ const Products: React.FC = () => {
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto
   const [newCompetitorUrl, setNewCompetitorUrl] = useState(''); // URL opcional do concorrente inicial
-  const [creationFeedback, setCreationFeedback] = useState<string | null>(null); // mensagem pós-criação
-  const [creationError, setCreationError] = useState<string | null>(null); // erro ao criar produto
+
+  /**
+   * Busca quantidade total de produtos monitorados do usuário para personalizar mensagens de vazio.
+   * Usa uma página mínima para reduzir tráfego enquanto ainda obtém metadados de contagem.
+   */
+  const { data: totalMonitored } = useQuery({
+    queryKey: ['monitoredProducts', '__all__'],
+    queryFn: () =>
+      productsService.getMonitoredProducts({
+        page: 1,
+        per_page: 1,
+      }),
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Query para buscar produtos monitorados. A chave depende de pagina, busca e filtro.
   const { data, isLoading, error } = useQuery({
@@ -86,6 +99,20 @@ const Products: React.FC = () => {
         status: statusFilter || undefined,
       }),
   });
+
+  useEffect(() => {
+    if (error) {
+      showToast({
+        key: 'monitoring:products:load-error',
+        message: 'Erro ao carregar produtos. Tente novamente.',
+        severity: 'error',
+        persist: true,
+        replace: true,
+      });
+    } else {
+      dismissToast('monitoring:products:load-error');
+    }
+  }, [dismissToast, error, showToast]);
 
   // Ajusta paginação client-side quando filtros ou modo de visualização mudam
   useEffect(() => {
@@ -138,19 +165,29 @@ const Products: React.FC = () => {
     onSuccess: () => {
       // Invalida cache para forçar refresh da lista atualizada
       queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
+      queryClient.invalidateQueries({ queryKey: ['monitoredProducts', '__all__'] });
       // Fecha diálogo e reseta campos do formulário
       setOpenAddDialog(false);
       setNewProductUrl('');
       setNewProductName('');
       setNewCompetitorUrl('');
-      setCreationError(null);
-      // Feedback explícito para sinalizar que o backend ainda processará o scraping
-      setCreationFeedback('Produto criado e scraping em andamento. Lista atualizada automaticamente.');
+      showToast({
+        key: 'monitoring:product:create',
+        message: 'Produto criado e scraping em andamento. A lista será atualizada automaticamente.',
+        severity: 'info',
+        replace: true,
+      });
     },
     onError: () => {
       // Mantém mensagem amigável para orientar ajuste de URL ou reautenticação
-      setCreationError('Não foi possível criar o produto. Verifique a URL e tente novamente.');
-    }
+      showToast({
+        key: 'monitoring:product:create:error',
+        message: 'Não foi possível criar o produto. Verifique a URL e tente novamente.',
+        severity: 'error',
+        persist: true,
+        replace: true,
+      });
+    },
   });
 
   /**
@@ -207,6 +244,17 @@ const Products: React.FC = () => {
     const totalSellers = competitorsCount + 1; // inclui o produto monitorado
     return `Ranking #${positionRank} de ${totalSellers}`;
   };
+
+  const totalCount = useMemo(() => {
+    const filteredTotal = data?.meta?.total;
+    const globalTotal = totalMonitored?.meta?.total;
+
+    if (!searchQuery && !statusFilter) {
+      return filteredTotal ?? globalTotal ?? 0;
+    }
+
+    return globalTotal ?? filteredTotal ?? 0;
+  }, [data?.meta?.total, totalMonitored?.meta?.total, searchQuery, statusFilter]);
 
   /**
    * Define cor do destaque visual com base no badge centralizado.
@@ -302,18 +350,6 @@ const Products: React.FC = () => {
         </ToggleButtonGroup>
       </Box>
 
-      {/* Feedback para criação de produto */}
-      {creationFeedback && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          {creationFeedback}
-        </Alert>
-      )}
-      {creationError && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {creationError}
-        </Alert>
-      )}
-
       {/* Conteúdo */}
       {isLoading ? (
         // Estado de carregamento
@@ -322,7 +358,7 @@ const Products: React.FC = () => {
         </Box>
       ) : error ? (
         // Estado de erro ao buscar produtos
-        <Alert severity="error">Erro ao carregar produtos. Tente novamente.</Alert>
+        <Typography color="error">Erro ao carregar produtos. Tente novamente.</Typography>
       ) : visibleItems && visibleItems.length > 0 ? (
         viewMode === 'list' ? (
           // Modo Lista - exibe cartões por produto
@@ -510,17 +546,31 @@ const Products: React.FC = () => {
         ) : (
           // Modo Tabela - exibe produtos em linhas
           <TableContainer component={Paper} elevation={2}>
-            <Table>
+            <Table sx={{ tableLayout: 'fixed' }}>
               <TableHead>
                 <TableRow>
-                  <TableCell>Produto</TableCell>
-                  <TableCell align="right">Meu Preço</TableCell>
-                  <TableCell align="right">Menor Concorrente</TableCell>
-                  <TableCell align="right">Diferença</TableCell>
-                  <TableCell align="center">Concorrentes</TableCell>
-                  <TableCell align="center">Ranking</TableCell>
-                  <TableCell align="center">Status</TableCell>
-                  <TableCell align="center">Ações</TableCell>
+                  <TableCell sx={{ width: 380 }}>Produto</TableCell>
+                  <TableCell align="right" sx={{ width: 160 }}>
+                    Meu Preço
+                  </TableCell>
+                  <TableCell align="right" sx={{ width: 180 }}>
+                    Menor Concorrente
+                  </TableCell>
+                  <TableCell align="right" sx={{ width: 140 }}>
+                    Diferença
+                  </TableCell>
+                  <TableCell align="center" sx={{ width: 140 }}>
+                    Concorrentes
+                  </TableCell>
+                  <TableCell align="center" sx={{ width: 140 }}>
+                    Ranking
+                  </TableCell>
+                  <TableCell align="center" sx={{ width: 140 }}>
+                    Status
+                  </TableCell>
+                  <TableCell align="center" sx={{ width: 200 }}>
+                    Ações
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -561,7 +611,7 @@ const Products: React.FC = () => {
                       selected={visualEmphasis.isInactive}
                       sx={{ opacity: visualEmphasis.isPaused ? 0.5 : visualEmphasis.isInactive ? 0.7 : 1 }}
                     >
-                      <TableCell sx={{ maxWidth: 360, width: 360 }}>
+                      <TableCell sx={{ maxWidth: 380, width: 380 }}>
                         <Box display="flex" alignItems="center" gap={1}>
                           {product.thumbnail && (
                             <Box
@@ -637,10 +687,28 @@ const Products: React.FC = () => {
           </TableContainer>
         )
       ) : (
-        // Estado vazio - sem produtos encontrados
-        <Alert severity="info">
-          Nenhum produto encontrado. Adicione produtos para começar a monitorar.
-        </Alert>
+        // Estado vazio com mensagens contextualizadas
+        <Card elevation={0} sx={{ border: '1px dashed', borderColor: 'divider', p: 3 }}>
+          <CardContent sx={{ textAlign: 'center' }}>
+            <Typography variant="h6" gutterBottom>
+              {totalCount === 0
+                ? 'Nenhum produto monitorado.'
+                : 'Nenhum produto corresponde aos filtros selecionados.'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {totalCount === 0
+                ? 'Adicione seu primeiro produto para começar a acompanhar os preços.'
+                : 'Tente outro filtro ou limpe a busca para visualizar seus produtos.'}
+            </Typography>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setOpenAddDialog(true)}
+            >
+              {totalCount === 0 ? 'Adicionar seu produto' : 'Adicionar novo produto'}
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
       {/* Dialog de Adicionar Produto */}
