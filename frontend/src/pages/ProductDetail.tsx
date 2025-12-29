@@ -298,6 +298,7 @@ const ProductDetail: React.FC = () => {
    */
   const handleAddCompetitor = () => {
     if (!competitorUrl || !id) return;
+    if (product?.paused ?? product?.is_paused) return;
     createCompetitorMutation.mutate({
       monitored_product_id: id,
       product_url: competitorUrl,
@@ -318,6 +319,7 @@ const ProductDetail: React.FC = () => {
    */
   const handleConfirmCompetitorDelete = () => {
     if (!competitorToDelete) return;
+    if (product?.paused ?? product?.is_paused) return;
     deleteCompetitorMutation.mutate(competitorToDelete.id);
   };
 
@@ -492,6 +494,7 @@ const ProductDetail: React.FC = () => {
   const monitoringPaused = (product.paused ?? product.is_paused) ?? false;
   const monitoredStatus = resolveMonitoredStatus(product);
   const detailCardOpacity = monitoringPaused ? 0.5 : monitoredStatus === 'inactive' ? 0.8 : 1;
+  const competitorActionsBlocked = monitoringPaused;
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
   const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
@@ -666,14 +669,32 @@ const ProductDetail: React.FC = () => {
               <CardContent>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                   <Typography variant="h6">Concorrentes</Typography>
-                  <Button
-                    variant="contained"
-                    startIcon={<AddIcon />}
-                    onClick={() => setOpenAddCompetitorDialog(true)}
-                  >
-                    Adicionar Concorrente
-                  </Button>
+                  {/* Mostrar botão sem tooltip quando desabilitado; quando habilitado mantém comportamento simples */}
+                  {competitorActionsBlocked ? (
+                    <Button
+                      variant="contained"
+                      startIcon={<AddIcon />}
+                      onClick={() => setOpenAddCompetitorDialog(true)}
+                      disabled
+                    >
+                      Adicionar Concorrente
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="contained"
+                      startIcon={<AddIcon />}
+                      onClick={() => setOpenAddCompetitorDialog(true)}
+                    >
+                      Adicionar Concorrente
+                    </Button>
+                  )}
                 </Box>
+
+                {competitorActionsBlocked && (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    Monitoramento pausado: ações de concorrentes (adição e remoção) estão bloqueadas.
+                  </Alert>
+                )}
 
                 {competitors && (
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -836,26 +857,46 @@ const ProductDetail: React.FC = () => {
                                   <OpenInNewIcon />
                                 </IconButton>
                                 
-                                <Tooltip title="Remover concorrente" placement="top">
-                                  <span>
-                                    <IconButton
-                                      size="small"
-                                      color="error"
-                                      aria-label="Remover concorrente"
-                                      onClick={() => handleOpenCompetitorDelete(competitor)}
-                                      disabled={
-                                        deleteCompetitorMutation.isPending &&
-                                        competitorToDelete?.id === competitor.id
-                                      }
-                                    >
-                                      {deleteCompetitorMutation.isPending && competitorToDelete?.id === competitor.id ? (
-                                        <CircularProgress size={18} />
-                                      ) : (
-                                        <DeleteIcon />
-                                      )}
-                                    </IconButton>
-                                  </span>
-                                </Tooltip>
+                                {/* Mostrar tooltip apenas quando ações não estiverem bloqueadas */}
+                                {!competitorActionsBlocked ? (
+                                  <Tooltip title="Remover concorrente" placement="top">
+                                    <span>
+                                      <IconButton
+                                        size="small"
+                                        color="error"
+                                        aria-label="Remover concorrente"
+                                        onClick={() => handleOpenCompetitorDelete(competitor)}
+                                        disabled={
+                                          deleteCompetitorMutation.isPending &&
+                                          competitorToDelete?.id === competitor.id
+                                        }
+                                      >
+                                        {deleteCompetitorMutation.isPending && competitorToDelete?.id === competitor.id ? (
+                                          <CircularProgress size={18} />
+                                        ) : (
+                                          <DeleteIcon />
+                                        )}
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                ) : (
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    aria-label="Remover concorrente"
+                                    onClick={() => handleOpenCompetitorDelete(competitor)}
+                                    disabled={
+                                      competitorActionsBlocked ||
+                                      (deleteCompetitorMutation.isPending && competitorToDelete?.id === competitor.id)
+                                    }
+                                  >
+                                    {deleteCompetitorMutation.isPending && competitorToDelete?.id === competitor.id ? (
+                                      <CircularProgress size={18} />
+                                    ) : (
+                                      <DeleteIcon />
+                                    )}
+                                  </IconButton>
+                                )}
                               </TableCell>
                             </TableRow>
                           );
@@ -917,13 +958,27 @@ const ProductDetail: React.FC = () => {
                   Ações Rápidas
                 </Typography>
                 <Box display="flex" flexDirection="column" gap={1.5}>
-                  <Button
-                    variant="contained"
-                    startIcon={<AddIcon />}
-                    onClick={() => setOpenAddCompetitorDialog(true)}
-                  >
-                    Adicionar Concorrente
-                  </Button>
+                  {/* Botão com mesmo estilo dos demais no bloco Ações Rápidas. Sem tooltip quando desabilitado. */}
+                  {competitorActionsBlocked ? (
+                    <Button
+                      variant="contained"
+                      startIcon={<AddIcon />}
+                      onClick={() => setOpenAddCompetitorDialog(true)}
+                      disabled
+                      sx={{ alignSelf: 'stretch' }}
+                    >
+                      Adicionar Concorrente
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="contained"
+                      startIcon={<AddIcon />}
+                      onClick={() => setOpenAddCompetitorDialog(true)}
+                      sx={{ alignSelf: 'stretch' }}
+                    >
+                      Adicionar Concorrente
+                    </Button>
+                  )}
                   <Button
                     variant="outlined"
                     color="inherit"
@@ -1003,7 +1058,7 @@ const ProductDetail: React.FC = () => {
                     </Typography>
                     <Typography variant="body1">{product.alerts_sent ?? '—'}</Typography>
                   </Box>
-                </Box>
+                </Box>                
               </CardContent>
             </Card>
           </Box>
@@ -1018,13 +1073,18 @@ const ProductDetail: React.FC = () => {
         fullWidth
       >
         <DialogTitle>Adicionar Concorrente</DialogTitle>
-        <DialogContent>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Adicionar concorrente para: <strong>{product.name}</strong>
+      <DialogContent>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Adicionar concorrente para: <strong>{product.name}</strong>
+        </Alert>
+        {competitorActionsBlocked && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Monitoramento pausado: retome o produto para cadastrar concorrentes.
           </Alert>
-          <TextField
-            margin="dense"
-            label="Nome de Identificação (opcional)"
+        )}
+        <TextField
+          margin="dense"
+          label="Nome de Identificação (opcional)"          
             type="text"
             fullWidth
             value={competitorName}
@@ -1053,7 +1113,7 @@ const ProductDetail: React.FC = () => {
           <Button
             onClick={handleAddCompetitor}
             variant="contained"
-            disabled={!competitorUrl || createCompetitorMutation.isPending}
+            disabled={!competitorUrl || createCompetitorMutation.isPending || competitorActionsBlocked}
           >
           {createCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Adicionar'}
         </Button>
@@ -1068,21 +1128,30 @@ const ProductDetail: React.FC = () => {
         fullWidth
       >
         <DialogTitle>Remover concorrente</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            {`Esta ação remove o concorrente ${competitorToDelete?.name || competitorToDelete?.display_name || 'selecionado'} e seu histórico.`}
+      <DialogContent>
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {`Esta ação remove o concorrente ${competitorToDelete?.name || competitorToDelete?.display_name || 'selecionado'} e seu histórico.`}
+        </Alert>
+        {competitorActionsBlocked && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Monitoramento pausado: retome o produto para remover concorrentes.
           </Alert>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmCompetitorDeleteOpen(false)} color="secondary" disabled={deleteCompetitorMutation.isPending}>
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleConfirmCompetitorDelete}
-            variant="contained"
-            color="error"
-            disabled={deleteCompetitorMutation.isPending}
-          >
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button
+          onClick={() => setConfirmCompetitorDeleteOpen(false)}
+          color="secondary"
+          disabled={deleteCompetitorMutation.isPending}
+        >
+          Cancelar
+        </Button>
+        <Button
+          onClick={handleConfirmCompetitorDelete}
+          variant="contained"
+          color="error"
+          disabled={deleteCompetitorMutation.isPending || competitorActionsBlocked}
+        >
             {deleteCompetitorMutation.isPending ? <CircularProgress size={24} /> : 'Remover'}  
           </Button>
         </DialogActions>

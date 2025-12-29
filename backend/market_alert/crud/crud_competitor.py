@@ -11,6 +11,7 @@ import structlog
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
@@ -99,7 +100,19 @@ def create_pending_competitor_product(
     
     O nome exibido é sanitizado quando fornecido manualmente, caso contrário, 
     um rótulo é derivado da URL para evitar que o frontend exiba o ID bruto.
+    Bloqueia criação se o monitoramento do produto estiver pausado.
     """
+    monitored = (
+        db.query(MonitoredProduct)
+        .filter(MonitoredProduct.id == monitored_product_id)
+        .first()
+    )
+    if monitored and monitored.paused:
+        #Garante a defesa mesmo quando a validação de serviço não é acionada
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Monitoramento pausado. Retome o produto para adicionar concorrentes.",
+        )
     normalized_url = normalize_product_url_for_storage(str(product_url))
     if not normalized_url:
         try:
