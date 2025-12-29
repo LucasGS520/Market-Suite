@@ -8,9 +8,6 @@ from fastapi import HTTPException, status
 
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_users import UserResponse, UserCreate, UserUpdate
-from market_alert.enums.enums_alerts import AlertType
-from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
-from market_alert.crud import crud_alert_rules
 
 
 logger = structlog.get_logger("crud.user")
@@ -52,7 +49,6 @@ def create_user(db: Session, user_data: UserCreate) -> UserResponse:
             name=user_data.name,
             email=user_data.email,
             phone_number=user_data.phone_number,
-            notifications_enabled=user_data.notifications_enabled,
             is_active=True,
             is_email_verified=False,
             role="user",
@@ -63,16 +59,6 @@ def create_user(db: Session, user_data: UserCreate) -> UserResponse:
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-
-        #Cria regra de alerta padrão para novos usuários
-        crud_alert_rules.create_alert_rule(
-            db,
-            AlertRuleCreate(
-                user_id=new_user.id,
-                rule_type=AlertType.PRICE_CHANGE,
-                enabled=True
-            )
-        )
 
         logger.info("user_created", user_id=str(new_user.id))
         return UserResponse.model_validate(new_user)

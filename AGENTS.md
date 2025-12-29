@@ -29,7 +29,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Frontend (`frontend/`)**: aplicação React 18 servida por Vite, com servidor Express para produção. Consome a API pública e oferece dashboards responsivos.
 - **Backend (`backend/`)**: agrega `market_alert` (API FastAPI, Celery Worker e Beat) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, métricas, contratos Pydantic, clientes externos).
 - **Infraestrutura de apoio**: PostgreSQL, Redis, Prometheus, Grafana, Loki e Alertmanager são orquestrados via `docker-compose.yml`.
-- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery → worker conversa com o `market_scraper`, Redis e PostgreSQL → observabilidade coleta métricas/logs → notificações são disparadas conforme regras.
+- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery → worker conversa com o `market_scraper`, Redis e PostgreSQL → observabilidade coleta métricas/logs → dashboards são atualizados.
 
 ### Responsabilidades das tarefas Celery (`market_alert`)
 - **Collector (`tasks.collector_product_task.collect_product_task`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock no Redis e retorna um `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`) contendo `http_status`, `price_changed`/`availability_changed` e `error_code` quando aplicável.
@@ -51,7 +51,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Orquestração de scraping**: use sempre a task central `market_alert.tasks.collector_product_task.collect_product_task` e o serviço `services/collector_service_orchestrator.py` para enfileirar monitorados e concorrentes. Evite chamadas diretas ao scraper; as rechecagens periódicas passam pelo agendador `tasks.recheck_scheduler_task.schedule_rechecks`, que enfileira diretamente na fila `scraping`.
 - **Alterações de interface**: evite quebras em contratos de API, schemas Pydantic ou assinaturas de tasks Celery. Preserve retrocompatibilidade e documente qualquer deprecação. e atualize `AGENTS.md`, `README.md` e testes.
 - **Banco e migrações**: alterações de schema devem passar por Alembic; nunca execute deleções em massa sem salvaguardas.
-- **Observabilidade**: registre logs estruturados, atualize métricas e revise alertas ou Prometheus quando necessário.
+- **Observabilidade**: registre logs estruturados, atualize métricas e revise Prometheus quando necessário.
 - **Segurança**: não exponha segredos. Utilize arquivos `.env` e helpers para acessar configurações.
 - **Compatibilidade local/Docker**: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos.
 - **Manutenção documental**: ao final de cada sprint ou mudança estrutural, sinalize ou execute atualizações necessárias em `README.md` e `AGENTS.md`.
@@ -61,7 +61,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/client/src/lib/api.ts`) injeta JWT no header `Authorization`.
 - Workers Celery consomem filas `celery`, `scraping` e `monitor`, armazenando resultados no PostgreSQL e reprocessando comparações.
 - O `ScraperClient` (`backend/market_alert/services/scraper_client.py`) envia requisições `POST /scraper/parse` ao `market_scraper`, que executa pipeline `FetchHTML → DomainSpecificParser → JsonLdParser → HtmlMetadataParser → GenericFallbackParser`.
-- Resultados de scraping são persistidos e utilizados para calcular difusão de preços, disparar alertas e atualizar dashboards.
+- Resultados de scraping são persistidos e utilizados para calcular difusão de preços e atualizar dashboards.
 
 ### Arquivos de ambiente (.env)
 - O projeto utiliza três arquivos de configuração no `backend`:

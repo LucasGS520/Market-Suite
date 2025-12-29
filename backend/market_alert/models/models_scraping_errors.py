@@ -57,7 +57,7 @@ class ScrapingError(Base):
         db.commit()
         db.refresh(error)
 
-        #Verifica erros recorrentes e notifica o time interno
+        #Verifica erros recorrentes para sinalizar falhas persistentes
         count = (
             db.query(cls)
             .filter(cls.product_id == product_id)

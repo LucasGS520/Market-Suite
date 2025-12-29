@@ -1,16 +1,6 @@
 global:
   scrape_interval: 15s #A cada 15 segundos, coleta métricas
-  evaluation_interval: 15s #A cada 15 segundos avalia regras de alerta
-
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: ['alertmanager:9093']
-
-rule_files:
-  - alert_rules.yml
-
-
+  
 scrape_configs:
   #Fastapi (principal)
   - job_name: marketalert_app

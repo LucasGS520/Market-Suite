@@ -45,26 +45,6 @@
       "options": {
         "legend": { "showLegend": false }
       }
-    },
-    {
-      "id": 3,
-      "title": "Alertas Gerados por Minuto",
-      "type": "stat",
-      "datasource": "Prometheus",
-      "gridPos": { "x": 0, "y": 7, "w": 6, "h": 5 },
-      "targets": [
-        {
-          "expr": "sum(rate(price_alerts_total[1m]))",
-          "legendFormat": "Alertas",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": { "nullValueMode": "connected" }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] }
-      }
     }
   ],
   "time": { "from": "now-1h", "to": "now" },

@@ -15,7 +15,6 @@ def test_compute_summary_handles_none_payload_without_exploding():
 
     assert summary["computed_at"] == timestamp
     assert summary["discrepancies"] == []
-    assert summary["alerts"] == []
     assert summary["competitors_with_price_count"] == 0
 
 

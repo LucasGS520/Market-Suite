@@ -109,7 +109,6 @@ def build_monitored_response(
     allow_missing_price: bool = False,
     last_price_change_at: datetime | None = None,
     global_last_price_change_at: datetime | None = None,
-    alerts_sent: int | None = None,
 ) -> MonitoredProductResponse:
     """Converte um monitorado em contrato simplificado com preço obrigatório.
 
@@ -187,7 +186,6 @@ def build_monitored_response(
         last_price_change_global_at=resolved_last_change,
         competitiveness_status=competitiveness_status,
         is_featured=monitored.is_featured,
-        alerts_sent=alerts_sent,
         comparison_summary=comparison_summary,
     )
 

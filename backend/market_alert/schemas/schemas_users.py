@@ -38,7 +38,6 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """ Esquema para a criação de usuário (entrada na API)"""
     password: str #senha recebida em texto, mas será armazenada com hash
-    notifications_enabled: bool = True
 
     #Valida senha exigindo complexidade mínima
     @field_validator("password", mode="before")
@@ -58,7 +57,6 @@ class UserUpdate(BaseModel):
     """ Campos permitidos para atualização parcial do usuário """
     name: Optional[str] = None
     phone_number: Optional[str] = None
-    notifications_enabled: Optional[bool] = None
 
     #Valida se o nome não contem números
     @field_validator("name")
@@ -91,7 +89,6 @@ class UserResponse(BaseModel):
     phone_number: Optional[str] = None
     is_active: bool
     is_email_verified: bool
-    notifications_enabled: bool
     role: str
     last_login: Optional[datetime] = None
     created_date: datetime

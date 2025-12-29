@@ -306,23 +306,6 @@ services:
     networks:
       - monitoring-net
 
-
-  #Gerenciador de alertas do Prometheus
-  alertmanager:
-    build:
-      context: ./backend/shared/infra/alertmanager
-      dockerfile: Dockerfile
-    image: alertmanager-envsubst
-    volumes:
-      - ./backend/shared/infra/alertmanager:/etc/alertmanager:ro
-    env_file:
-      - .env.common
-    ports:
-      - "9093:9093"
-    networks:
-      - monitoring-net
-
-
   #Armazenamento centralizado de logs com Loki
   loki:
     image: grafana/loki:2.9.8

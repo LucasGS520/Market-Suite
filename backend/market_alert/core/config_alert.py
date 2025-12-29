@@ -9,7 +9,7 @@ from shared.core.config_base import ConfigBase
 __all__ = ["Settings", "settings"]
 
 class Settings(ConfigBase):
-    """ Configurações específicas do serviço de alertas """
+    """ Configurações específicas do serviço market_alert """
 
     #Configuração do banco de dados
     DATABASE_URL: str = os.getenv("DATABASE_URL")  # URL de conexão do Postgres

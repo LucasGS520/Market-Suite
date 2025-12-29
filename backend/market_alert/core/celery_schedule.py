@@ -16,7 +16,6 @@ TASK_MODULES = [
     "market_alert.tasks.collector_product_task",
     "market_alert.tasks.metrics_tasks",
     "market_alert.tasks.compare_prices_task",
-    "market_alert.tasks.alert_tasks",
     "market_alert.tasks.recheck_scheduler_task",
 ]
 

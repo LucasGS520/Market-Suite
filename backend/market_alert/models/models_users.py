@@ -28,7 +28,6 @@ class User(Base):
     phone_number = Column(String(20), unique=True) #Numero de telefone do usuário ate 20 caracteres e unico
     is_active = Column(Boolean, default=True) #Usuario ativo ou bloqueado
     is_email_verified = Column(Boolean, default=False) #Verificação do email
-    notifications_enabled = Column(Boolean, default=True)
     role = Column(String(20), default="user") #Função do usuário
     updated_by = Column(PG_UUID(as_uuid=True), nullable=True) #ID de quem atualizou o usuário
 

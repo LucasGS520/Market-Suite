@@ -1,8 +1,6 @@
 """ Serviços relacionados à autenticação e gerenciamento de tokens """
 
 import structlog
-from types import SimpleNamespace
-
 from uuid import uuid4
 from datetime import datetime, timezone
 from fastapi import HTTPException, status, Request
@@ -13,9 +11,6 @@ from market_alert.crud.crud_user import get_user_by_email
 from market_alert.core.bruteforce import block_ip, reset_failed_attempts, record_failed_attempt
 from market_alert.core.jwt import create_access_token
 from market_alert.core.tokens import generate_verification_token, generate_reset_token, token_expiry
-from market_alert.notifications.manager import get_notification_manager
-from market_alert.crud.crud_notification_logs import has_recent_duplicate_notification
-from market_alert.core.config_alert import settings
 from market_alert.schemas.schemas_auth import (
     ResetPasswordRequest,
     ResetPasswordConfirmRequest,
@@ -72,17 +67,12 @@ def login_user(request: Request, db: Session, username: str, password: str) -> T
     return TokenPairResponse(access_token=token, refresh_token=raw_refresh, token_type="bearer")
 
 def send_verification_email_service(db: Session, current_user: User) -> None:
-    """ Gera e envia um token de verificação de email """
+    """ Gera um token de verificação de email sem envio automático """
     token = generate_verification_token()
     current_user.verification_token = token
     db.commit()
     logger.info("verification_token_generated", user_id=str(current_user.id))
-
-    manager = get_notification_manager()
-    subject = "Verifique seu e-mail"
-    message = f"Seu token de verificação é: {token}"
-    if not has_recent_duplicate_notification(db, current_user.id, subject, message, settings.ALERT_DUPLICATE_WINDOW):
-        manager.send(db, current_user, subject, message, alert_rule_id=None)
+    logger.info("verification_dispatch_skipped", user_id=str(current_user.id))
 
 def confirm_email_verification_service(db: Session, request_model: EmailTokenRequest) -> None:
     """ Confirma verificação de email usando token """
@@ -98,7 +88,7 @@ def confirm_email_verification_service(db: Session, request_model: EmailTokenReq
     logger.info("verification_success", user_id=str(user.id))
 
 def request_password_reset_service(db: Session, request_model: ResetPasswordRequest) -> None:
-    """ Inicia o fluxo de reset de senha gerando um token e enviando por e-mail """
+    """ Inicia o fluxo de reset de senha gerando um token sem envio automático """
     email = request_model.email
     user = get_user_by_email(db, email)
     if not user:
@@ -110,13 +100,7 @@ def request_password_reset_service(db: Session, request_model: ResetPasswordRequ
     user.reset_token_expires = token_expiry()
     db.commit()
     logger.info("reset_token_generated", user_id=str(user.id))
-
-    manager = get_notification_manager()
-    dummy_user = SimpleNamespace(email=email, id=user.id)
-    subject = "Reset de senha"
-    message = f"Use este token para resetar sua senha: {token}"
-    if not has_recent_duplicate_notification(db, user.id, subject, message, settings.ALERT_DUPLICATE_WINDOW):
-        manager.send(db, dummy_user, subject, message, alert_rule_id=None)
+    logger.info("reset_dispatch_skipped", user_id=str(user.id))
 
 def confirm_password_service(db: Session, request_model: ResetPasswordConfirmRequest) -> None:
     """ Confirma reset de senha usando token e define nova senha """

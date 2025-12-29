@@ -78,7 +78,6 @@ class MonitoredProductResponse(ProductResponse):
     )
     competitiveness_status: CompetitivenessStatus | None = Field(None, description="Classificação de competitividade calculada a partir das comparações")
     is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
-    alerts_sent: int | None = Field(None, description="Quantidade de notificações enviadas para o monitorado")
     paused: bool = Field(False, description="Indica se o monitoramento está pausado para evitar novas coletas")
     paused_at: datetime | None = Field(None, description="Momento em que a pausa foi ativada, quando existir")
     comparison_summary: PriceComparisonSummaryResponse | None = Field(

@@ -2,7 +2,7 @@
 
 Fornece helpers simplificados para publicar mensagens em canais Redis e
 um assinante baseado em threads que repassa os eventos para filas
-assíncronas. O módulo é usado pelos serviços para distribuir alertas e
+assíncronas. O módulo é usado pelos serviços para distribuir eventos e
 atualizações em tempo real sem bloquear a aplicação principal.
 """
 

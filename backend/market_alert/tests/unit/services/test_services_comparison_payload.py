@@ -82,7 +82,6 @@ def test_run_price_comparison_persists_full_payload_when_enabled(monkeypatch):
     captured: dict = {}
     raw_result = {
         "monitored_price": "10.00",
-        "alerts": [{"type": "alerta"}],
         "discrepancies": [{"price": "9.00"}],
         "lowest_competitor": {"price": "9.00", "fonte": "x"},
         "highest_competitor": {"price": "12.00"},
@@ -107,7 +106,6 @@ def test_run_price_comparison_stores_compact_payload_by_default(monkeypatch):
     captured: dict = {}
     raw_result = {
         "monitored_price": "15.00",
-        "alerts": [],
         "discrepancies": [{"price": "14.00"}],
         "lowest_competitor": {"price": "14.00"},
         "highest_competitor": {"price": "16.00"},
@@ -121,7 +119,6 @@ def test_run_price_comparison_stores_compact_payload_by_default(monkeypatch):
 
     assert captured["payload"] == {
         "monitored_price": "15.00",
-        "alerts": [],
         "discrepancies": [{"price": "14.00"}],
         "lowest_competitor": {"price": "14.00"},
         "highest_competitor": {"price": "16.00"},
@@ -174,9 +171,8 @@ def test_run_price_comparison_skips_inactive_monitored(monkeypatch) -> None:
         comparison_service, "upsert_price_comparison_summary", fake_upsert_price_comparison_summary
     )
 
-    result, alerts = comparison_service.run_price_comparison(db=None, monitored_id=monitored_id)
+    result = comparison_service.run_price_comparison(db=None, monitored_id=monitored_id)
 
-    assert alerts == []
     assert captured["payload"]["ignored_due_to_inactive"] is True
     assert captured["payload"]["reason"] == "monitored_unavailable"
     summary = result["summary"]

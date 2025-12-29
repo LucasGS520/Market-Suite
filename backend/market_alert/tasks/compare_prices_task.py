@@ -16,7 +16,6 @@ from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
 from shared.metrics.metrics_price_comparison import (
     PRICE_COMPARISON_TASK_LATENCY_SECONDS,
 )
-from shared.infra.redis_pubsub import publish_message
 
 from market_alert.core.celery_app import celery_app
 from market_alert.services.services_comparison import run_price_comparison
@@ -41,7 +40,7 @@ def compare_prices_task(self, monitored_id: str) -> None:
 
     with SessionLocal() as db:
         try:
-            result, alerts = run_price_comparison(db, UUID(monitored_id))
+            result = run_price_comparison(db, UUID(monitored_id))
 
             summary = result.get("summary") or {}
             reason = summary.get("reason")
@@ -61,21 +60,7 @@ def compare_prices_task(self, monitored_id: str) -> None:
                 "compare_prices_completed",
                 lowest=result["lowest_competitor"],
                 highest=result["highest_competitor"],
-                alerts_count=len(alerts),
             )
-
-            _dispatch_realtime_event(
-                result,
-                alerts,
-                task_id=getattr(self.request, "id", None),
-            )
-
-            if alerts:
-                task_logger.info(
-                    "notifications_temporarily_disabled",
-                    alerts_count=len(alerts),
-                    monitored_id=mask_identifier(monitored_id),
-                )
 
         except Exception as exc:
             #Log estruturado para acompanhar falhas e motivos antes de propagar
@@ -91,46 +76,4 @@ def compare_prices_task(self, monitored_id: str) -> None:
             duration = (datetime.now(timezone.utc) - start).total_seconds()
             SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
             PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
-
-def _dispatch_realtime_event(
-    result: dict,
-    alerts: list,
-    *,
-    task_id: str | None,
-) -> None:
-    """ Publica evento no Redis com dados da comparação recém-criada """
-
-    monitored_id = result.get("monitored_id")
-    user_id = result.get("user_id")
-    comparison_id = result.get("comparison_id")
-    summary = result.get("summary")
-
-    channels: list[str] = []
-    if isinstance(user_id, str) and user_id:
-        channels.append(f"user:{user_id}")
-    if isinstance(monitored_id, str) and monitored_id:
-        channels.append(f"monitored:{monitored_id}")
-
-    if not channels or not isinstance(comparison_id, str) or not comparison_id:
-        return
-
-    event_payload = {
-        "type": "comparison.created",
-        "monitored_id": monitored_id,
-        "comparison_id": comparison_id,
-        "summary": summary,
-        "alerts": alerts,
-        "task_id": task_id,
-        "trace_id": task_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "channels": channels,
-        "user_id": user_id,
-    }
-
-    published = publish_message("notifications", event_payload)
-    if not published:
-        logger.warning(
-            "compare_prices_realtime_failed",
-            monitored_id=mask_identifier(monitored_id) if monitored_id else None,
-        )
         

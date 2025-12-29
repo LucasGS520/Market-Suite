@@ -75,7 +75,6 @@ class PriceComparisonSummaryResponse(BaseModel):
         ),
     )
     discrepancies: List[Dict[str, Any]] = Field(default_factory=list)
-    alerts: List[Dict[str, Any]] = Field(default_factory=list)
 
 class PaginationMeta(BaseModel):
     """ Informações básicas de paginação utilizadas em respostas listadas """

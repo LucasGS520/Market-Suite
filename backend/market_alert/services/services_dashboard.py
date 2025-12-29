@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models import User
-from market_alert.models.models_alerts import AlertRule
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 
 
@@ -46,19 +45,6 @@ def _count_competitors_from_active(db: Session, filters: list) -> int:
         or 0
     )
 
-def _count_active_alerts(db: Session, user: User) -> int:
-    """ Conta alertas habilitados pelo usuário """
-    return int(
-        db.query(func.count(AlertRule.id))
-        .filter(
-            AlertRule.user_id == user.id,
-            AlertRule.enabled.is_(True),
-        )
-        .scalar()
-        or 0
-    )
-
-
 def _count_with_prices(db: Session, filters: list) -> int:
     """ Conta produtos ativos que já possuem preço coletado """
     return int(
@@ -71,7 +57,6 @@ def _count_with_prices(db: Session, filters: list) -> int:
         or 0
     )
 
-
 def gather_dashboard_totals(db: Session, user: User) -> dict[str, int]:
     """ Calcula agregados apresentados no dashboard para o usuário autenticado.
 
@@ -82,12 +67,10 @@ def gather_dashboard_totals(db: Session, user: User) -> dict[str, int]:
 
     total_monitored = _count_active_monitored(db, active_filters)
     total_competitors = _count_competitors_from_active(db, active_filters)
-    active_alerts = _count_active_alerts(db, user)
     ok_prices = _count_with_prices(db, active_filters)
 
     return {
         "total_monitored": total_monitored,
         "total_competitors": total_competitors,
-        "active_alerts": active_alerts,
         "ok_prices": ok_prices,
     }

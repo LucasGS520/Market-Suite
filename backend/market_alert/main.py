@@ -26,24 +26,20 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 
-from shared.infra.db import get_engine, SessionLocal
+from shared.infra.db import get_engine
 from shared.metrics.metrics_logging import LOG_ENTRIES_TOTAL
 from shared.metrics.metrics_http import HTTP_REQUESTS_TOTAL, HTTP_REQUESTS_LATENCY_SECONDS
 from shared.metrics.metrics_api import API_ERRORS_TOTAL
 from shared.metrics.metrics_db import DB_POOL_CHECKOUTS, DB_POOL_SIZE
-from shared.metrics.metrics_alerts import ALERT_RULES_ACTIVE
 
 from market_alert.core.config_alert import settings
-from market_alert.models.models_alerts import AlertRule
 
 #Rotas
 from market_alert.routes.routes_users import router as users_router
 from market_alert.routes.routes_monitored import router as monitored_router
 from market_alert.routes.routes_competitors import router as competitor_router
-from market_alert.routes.routes_notifications import router as notifications_router
 from market_alert.routes.routes_dashboard import router as dashboard_router
 from market_alert.routes.routes_comparisons import router as comparisons_router
-from market_alert.routes.routes_alerts import router as alerts_router
 from market_alert.routes.routes_health import router as health_router
 
 #Rotas de auth
@@ -222,8 +218,6 @@ def create_app() -> FastAPI:
     app.include_router(monitored_router)
     app.include_router(competitor_router)
     app.include_router(comparisons_router)
-    app.include_router(alerts_router)
-    app.include_router(notifications_router)
     app.include_router(dashboard_router)
 
     #Health check
@@ -235,14 +229,6 @@ def create_app() -> FastAPI:
     for route in app.routes:
         if isinstance(route, APIRoute):
             logger.info("route_registered", path=route.path, name=route.name)
-
-    #Define o valor inicial do gauge de regras ativas
-    try:
-        with SessionLocal() as db:
-            count_enabled = db.query(AlertRule).filter(AlertRule.enabled.is_(True)).count()
-            ALERT_RULES_ACTIVE.set(count_enabled)
-    except Exception as exc:
-        logger.exception("init_alert_rule_metric_failed")
 
     logger.info("app_initialized", service="marketalert")
     return app

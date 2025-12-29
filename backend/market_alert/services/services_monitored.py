@@ -23,7 +23,6 @@ from market_alert.crud.crud_monitored import (
     get_monitored_product_by_id,
     delete_monitored,
     get_last_price_change_for_monitored,
-    count_notifications_for_monitored_product,
     pause_monitored,
     resume_monitored,
     MonitoredLockError,
@@ -174,9 +173,6 @@ def get_monitored_product(
 
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
-    alerts_sent = count_notifications_for_monitored_product(
-        db, user_id=user_id, monitored_product_id=product_id
-    )
 
     return build_monitored_response(
         product,
@@ -184,7 +180,6 @@ def get_monitored_product(
         allow_missing_price=True,
         last_price_change_at=last_price_change_at,
         global_last_price_change_at=last_price_change_at,
-        alerts_sent=alerts_sent,
     )
 
 
@@ -225,16 +220,12 @@ def resume_monitored_product_entry(
     logger.info("monitored_resumed", product_id=str(product_id), user_id=str(user.id))
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
-    alerts_sent = count_notifications_for_monitored_product(
-        db, user_id=user.id, monitored_product_id=product_id
-    )
     return build_monitored_response(
         refreshed,
         summary=summary,
         allow_missing_price=True,
         last_price_change_at=last_price_change_at,
         global_last_price_change_at=last_price_change_at,
-        alerts_sent=alerts_sent,
     )
 
 def update_monitored_pause_state(
@@ -259,16 +250,12 @@ def update_monitored_pause_state(
 
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
-    alerts_sent = count_notifications_for_monitored_product(
-        db, user_id=user.id, monitored_product_id=product_id
-    )
     return build_monitored_response(
         refreshed,
         summary=summary,
         allow_missing_price=True,
         last_price_change_at=last_price_change_at,
         global_last_price_change_at=last_price_change_at,
-        alerts_sent=alerts_sent,
     )
 
 def delete_monitored_product_entry(

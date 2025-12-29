@@ -8,7 +8,7 @@ configurações específicas de cada serviço.
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from pydantic import AnyHttpUrl, ConfigDict
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
@@ -56,9 +56,6 @@ class ConfigBase(BaseSettings):
     CIRCUIT_LVL3_THRESHOLD: int = int(os.getenv("CIRCUIT_LVL3_THRESHOLD", "25")) #Falhas p/ nível 3
     CIRCUIT_LVL3_SUSPEND: int = int(os.getenv("CIRCUIT_LVL3_SUSPEND", "7200")) #Suspensão nível 3
 
-    #Webhook Slack para notificações críticas
-    SLACK_WEBHOOK_URL: AnyHttpUrl | None = os.getenv("SLACK_WEBHOOK_URL", None)
-
     #Configurações de cache do robots.txt
     ROBOTS_CACHE_KEY: str = os.getenv("ROBOTS_CACHE_KEY", "robots.txt:content") #Chave base para cache
     ROBOTS_CACHE_TTL: int = int(os.getenv("ROBOTS_CACHE_TTL", str(24 * 3600))) #Tempo de vida do cache
@@ -71,12 +68,7 @@ class ConfigBase(BaseSettings):
     SCRAPER_RATE_LIMIT: str = os.getenv("SCRAPER_RATE_LIMIT", "10/m") #Limite de scraping
     COMPETITOR_RATE_LIMIT: str = os.getenv("COMPETITOR_RATE_LIMIT", "10/m") #Limite de concorrentes
     COMPARE_RATE_LIMIT: str = os.getenv("COMPARE_RATE_LIMIT", "120/m") #Limite de comparações
-    ALERT_RATE_LIMIT: str = os.getenv("ALERT_RATE_LIMIT", "60/m") #Limite de alertas
-    ALERT_DUPLICATE_WINDOW: int = int(os.getenv("ALERT_DUPLICATE_WINDOW", 600)) #Janela anti-duplicação
-    ALERT_RULE_COOLDOWN: int = int(os.getenv("ALERT_RULE_COOLDOWN", "3600")) #Intervalo para regras
-    ALERT_COOLDOWN_SECONDS: int = int(os.getenv("ALERT_COOLDOWN_SECONDS", str(2 * 3600))) #Cooldown global de alertas
-    ALERT_DEDUPE_TTL_SECONDS: int = int(os.getenv("ALERT_DEDUPE_TTL_SECONDS", str(2 * 3600))) #TTL para hash de deduplicação
-
+    
     #Parâmetros para comparação de preços
     PRICE_TOLERANCE: float = float(os.getenv("PRICE_TOLERANCE", "0.01")) #Variação permitida
     PRICE_CHANGE_THRESHOLD: float = float(os.getenv("PRICE_CHANGE_THRESHOLD", "0.01")) #Sensibilidade a mudanças
