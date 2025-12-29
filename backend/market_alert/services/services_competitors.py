@@ -202,6 +202,19 @@ def create_competitor_scrape_request(
         hide_forbidden=False,
     )
 
+    if monitored_product.paused:
+        #Bloqueia alterações em concorrentes quando o monitoramento está pausado
+        logger.warning(
+            "competitor_action_blocked_monitored_paused",
+            monitored_id=str(monitored_product.id),
+            user_id=str(user.id),
+            **context,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Monitoramento pausado. Retome o produto para adicionar concorrentes.",
+        )
+
     existing = get_competitor_by_monitored_and_url(db, monitored_product.id, normalized_url)
     if existing:
         logger.info(
@@ -337,6 +350,20 @@ def delete_competitor_entry(
             context=context,
         )
 
+        if competitor.monitored_product and competitor.monitored_product.paused:
+            #Evita remoção de concorrentes enquanto o monitoramento está pausado
+            logger.warning(
+                "competitor_delete_blocked_monitored_paused",
+                monitored_id=str(competitor.monitored_product_id),
+                competitor_id=str(competitor.id),
+                user_id=str(user.id),
+                **(context or {}),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Monitoramento pausado. Retome o produto para remover concorrentes.",
+            )
+
         monitored_id = competitor.monitored_product_id
         delete_competitor(db, competitor)
 
@@ -384,12 +411,25 @@ def clear_competitors_from_monitored(
     context: dict[str, str] | None = None,
 ) -> list[CompetitorProduct]:
     """ Apaga todos os concorrentes vinculados ao monitorado do usuário """
-    ensure_user_can_access_monitored(
+    monitored = ensure_user_can_access_monitored(
         db=db,
         product_id=monitored_product_id,
         user=user,
         context=context,
         hide_forbidden=False,
     )
+
+    if monitored.paused:
+        #Mantém consistência ao bloquear remoção em monitoramentos pausados
+        logger.warning(
+            "competitor_bulk_delete_blocked_monitored_paused",
+            monitored_id=str(monitored_product_id),
+            user_id=str(user.id),
+            **(context or {}),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Monitoramento pausado. Retome o produto para remover concorrentes.",
+        )
     
     return delete_competitors_by_monitored_id(db, monitored_product_id)

@@ -24,9 +24,15 @@ const ProductStateBadge: React.FC<ProductStateBadgeProps> = ({ product, variant 
       : resolveCompetitorStatus(product as CompetitorProduct);
   const badge = statusToBadge[status] ?? statusToBadge.unknown;
   const isPaused = status === 'paused';
+  const pausedTooltip = 
+    resolvedVariant === 'monitored' 
+      ? 'Monitoramento pausado. Ações de concorrentes estão bloqueadas até a retomada.' 
+      : badge.tooltip;
+  // Personaliza tooltip para deixar claro o bloqueio de ações quando monitorado está pausado.
+  const tooltipText = isPaused ? pausedTooltip : badge.tooltip;
 
   return (
-    <Tooltip title={badge.tooltip} placement="top">
+    <Tooltip title={tooltipText} placement="top">
       <Chip
         label={badge.label}
         color={badge.color}
