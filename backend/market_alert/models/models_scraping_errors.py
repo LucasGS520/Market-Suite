@@ -4,7 +4,15 @@ import uuid
 from uuid import UUID
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Text, DateTime, ForeignKey, Integer, String, Enum as PgEnum
+from sqlalchemy import (
+    Column,
+    Text,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Enum as PgEnum,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Session, relationship
 

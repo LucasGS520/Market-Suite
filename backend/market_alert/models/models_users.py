@@ -2,7 +2,15 @@
 
 import uuid
 
-from sqlalchemy import Column, String, func, LargeBinary, Boolean, DateTime, Integer
+from sqlalchemy import (
+    Column,
+    String,
+    func,
+    LargeBinary,
+    Boolean,
+    DateTime,
+    Integer,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID #UUID e uuid.uuid4 gera identificadores unicos (id)
 from sqlalchemy.orm import relationship
 

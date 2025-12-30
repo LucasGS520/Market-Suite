@@ -29,7 +29,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Frontend (`frontend/`)**: aplicação React 18 servida por Vite, com servidor Express para produção. Consome a API pública e oferece dashboards responsivos.
 - **Backend (`backend/`)**: agrega `market_alert` (API FastAPI, Celery Worker e Beat) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, métricas, contratos Pydantic, clientes externos).
 - **Infraestrutura de apoio**: PostgreSQL, Redis, Prometheus, Grafana, Loki e Alertmanager são orquestrados via `docker-compose.yml`.
-- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery → worker conversa com o `market_scraper`, Redis e PostgreSQL → observabilidade coleta métricas/logs → dashboards são atualizados.
+- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery → worker conversa com o `market_scraper`, Redis e PostgreSQL → eventos de domínio geram notificações persistidas → observabilidade coleta métricas/logs → dashboards são atualizados.
 
 ### Responsabilidades das tarefas Celery (`market_alert`)
 - **Collector (`tasks.collector_product_task.collect_product_task`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock no Redis e retorna um `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`) contendo `http_status`, `price_changed`/`availability_changed` e `error_code` quando aplicável.
@@ -59,7 +59,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 
 ## Interação entre serviços
 - Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/client/src/lib/api.ts`) injeta JWT no header `Authorization`.
-- Workers Celery consomem filas `celery`, `scraping` e `monitor`, armazenando resultados no PostgreSQL e reprocessando comparações.
+- Workers Celery consomem filas `celery`, `scraping`, `monitor` e `notifications`, armazenando resultados no PostgreSQL, reprocessando comparações e enfileirando entregas de alertas.
 - O `ScraperClient` (`backend/market_alert/services/scraper_client.py`) envia requisições `POST /scraper/parse` ao `market_scraper`, que executa pipeline `FetchHTML → DomainSpecificParser → JsonLdParser → HtmlMetadataParser → GenericFallbackParser`.
 - Resultados de scraping são persistidos e utilizados para calcular difusão de preços e atualizar dashboards.
 

@@ -1,7 +1,12 @@
 """ Modelo para registrar tentativas de login dos usuários """
 
 import structlog
-from sqlalchemy import Column, String, DateTime, func
+from sqlalchemy import (
+    Column,
+    String,
+    DateTime,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from uuid import uuid4
 

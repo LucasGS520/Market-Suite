@@ -13,6 +13,7 @@ API FastAPI responsável por autenticação, gestão e monitoramento, além de c
 - **Registrar métricas e logs estruturados** para Prometheus e Loki.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
 - **Regras de comparação**: comparações permanecem automáticas após coletas, priorizando mudanças de preço e disponibilidade sem thresholds dinâmicos ou idempotência distribuída. Fluxos manuais apenas disparam tasks já idempotentes (ex.: `compare_prices_task`).
+- **Notificações e alertas**: eventos de domínio alimentam regras configuráveis e geram notificações persistidas com idempotência e auditoria.
 
 ## Estrutura do Diretório
 ```text
@@ -56,7 +57,7 @@ market_alert/
 
 ## Celery
 - **Arquivo principal:** `core/celery_app.py`.
-- **Filas padrão:** `celery`, `scraping`, `monitor` (configuráveis via `.env.market_alert`).
+- **Filas padrão:** `celery`, `scraping`, `monitor`, `notifications` (configuráveis via `.env.market_alert`).
 - **Tasks de destaque:**
   - `tasks.collector_product_task.collect_product_task`
   - `tasks.recheck_scheduler_task.schedule_rechecks`
@@ -178,7 +179,7 @@ SCRAPER_SERVICE_URL=url_servico_scraping
   2. Configure `.env.common` e `.env.market_alert` com valores locais.
   3. Execute migrações: `alembic upgrade head`.
   4. Inicie API: `uvicorn market_alert.main:app --reload --port 8000`.
-  5. Suba worker Celery: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q celery,scraping,monitor`.
+  5. Suba worker Celery: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q celery,scraping,monitor,notifications`.
   6. Inicie o beat com métricas: `python market_alert/beat_with_metrics.py`.
 
 ## Testes
