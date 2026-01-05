@@ -1,0 +1,7 @@
+Olá {{ user_name }},
+
+Temos uma atualização sobre o monitorado "{{ monitored_name }}".
+
+Tipo de alerta: {{ alert_type }}
+Rastreamento: {{ trace_id }}
+ID do evento: {{ event_id }}

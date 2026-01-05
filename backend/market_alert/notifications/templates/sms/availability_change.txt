@@ -1,0 +1,2 @@
+Mudança de disponibilidade em "{{ monitored_name }}": {{ availability_previous }} para {{ availability }}
+ 

@@ -323,3 +323,50 @@ def list_notifications_for_user(
         .all()
     )
     return items, total
+
+def list_user_notification_preferences(
+    db: Session,
+    *,
+    user_id: UUID,
+    monitored_product_id: UUID | None = None,
+    alert_type: AlertType | None = None,
+) -> list[UserNotificationPreference]:
+    """ Lista preferências de notificação filtrando por usuário e contexto opcional """
+    query = db.query(UserNotificationPreference).filter(UserNotificationPreference.user_id == user_id)
+    if monitored_product_id is not None:
+        query = query.filter(UserNotificationPreference.monitored_product_id == monitored_product_id)
+    if alert_type is not None:
+        query = query.filter(UserNotificationPreference.alert_type == alert_type)
+    return query.order_by(UserNotificationPreference.created_at.desc()).all()
+
+def update_alert_rule_last_triggered(
+    db: Session,
+    *,
+    alert_rule: AlertRule,
+    triggered_at: datetime | None = None,
+    commit: bool = False,
+) -> AlertRule:
+    """ Atualiza o carimbo de último disparo da regra de alerta """
+    alert_rule.last_triggered_at = _normalize_datetime(triggered_at)
+    if commit:
+        db.commit()
+        db.refresh(alert_rule)
+    else:
+        db.flush()
+    return alert_rule
+
+def update_preference_last_notified(
+    db: Session,
+    *,
+    preference: UserNotificationPreference,
+    notified_at: datetime | None = None,
+    commit: bool = False,
+) -> UserNotificationPreference:
+    """ Atualiza o carimbo de última notificação da preferência """
+    preference.last_notified_at = _normalize_datetime(notified_at)
+    if commit:
+        db.commit()
+        db.refresh(preference)
+    else:
+        db.flush()
+    return preference

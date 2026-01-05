@@ -152,3 +152,19 @@ class UserNotificationPreferenceUpdate(BaseModel):
     last_notified_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+class UserNotificationPreferenceResponse(UserNotificationPreferenceUpdate):
+    """ Representação de preferência usada em listagens """
+    pass
+
+class NotificationPaginationMeta(BaseModel):
+    """ Metadados de paginação para listagens de notificações """
+    total: int = Field(..., description="Quantidade total de registros disponíveis")
+    page: int = Field(..., description="Página atual baseada em 1")
+    per_page: int = Field(..., description="Quatidade de registros por página")
+
+class PaginatedNotificationResponse(BaseModel):
+    """ Envelope paginado com notificações """
+    items: list[NotificationResponse]
+    meta: NotificationPaginationMeta
+    

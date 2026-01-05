@@ -41,6 +41,7 @@ from market_alert.routes.routes_competitors import router as competitor_router
 from market_alert.routes.routes_dashboard import router as dashboard_router
 from market_alert.routes.routes_comparisons import router as comparisons_router
 from market_alert.routes.routes_health import router as health_router
+from market_alert.routes.routes_notifications import router as notifications_router
 
 #Rotas de auth
 from market_alert.auth.routes_auth.routes_login import router as login_router
@@ -219,6 +220,7 @@ def create_app() -> FastAPI:
     app.include_router(competitor_router)
     app.include_router(comparisons_router)
     app.include_router(dashboard_router)
+    app.include_router(notifications_router)
 
     #Health check
     app.include_router(health_router)

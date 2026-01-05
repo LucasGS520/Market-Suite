@@ -1,0 +1,7 @@
+Olá {{ user_name }},
+
+Registramos uma falha ao coletar dados do monitorado "{{ monitored_name }}".
+Detalhes: {{ summary }}
+
+Rastreamento: {{ trace_id }}
+ID do evento: {{ event_id }}

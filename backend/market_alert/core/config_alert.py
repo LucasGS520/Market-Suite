@@ -155,5 +155,22 @@ class Settings(ConfigBase):
         os.getenv("ONBOARDING_ENQUEUE_STAGGER_SECONDS", "0.5")
     ) #Atraso leve para diluir enfileiramento inicial
 
+    #Configurações da camada de notificações
+    DEFAULT_COOLDOWN_SECONDS: int = int(
+        os.getenv("DEFAULT_COOLDOWN_SECONDS", "1800")
+    ) #Cooldown padrão por monitorado e tipo de alerta
+    MIN_PRICE_DELTA_PERCENT: float = float(
+        os.getenv("MIN_PRICE_DELTA_PERCENT", "1.0")
+    ) #Delta mínimo em porcentagem para alertas de preço
+    NOTIFICATION_MAX_ATTEMPTS: int = int(
+        os.getenv("NOTIFICATION_MAX_ATTEMPTS", "3")
+    ) #Quantidade máxima de tentativas de entrega
+    NOTIFICATION_BACKOFF_BASE_SECONDS: int = int(
+        os.getenv("NOTIFICATION_BACKOFF_BASE_SECONDS", "60")
+    ) #Base de espera para backoff exponencial
+    NOTIFICATION_BACKOFF_MULTIPLIER: int = int(
+        os.getenv("NOTIFICATION_BACKOFF_MULTIPLIER", "2")
+    ) #Multiplicador do backoff exponencial
+
 #Instância única de settings para a aplicação
 settings = Settings()

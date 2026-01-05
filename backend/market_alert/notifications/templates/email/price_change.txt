@@ -1,0 +1,9 @@
+Olá {{ user_name }},
+
+Detectamos mudança de preço no monitorado "{{ monitored_name }}".
+Preço anterior: {{ price_previous }}
+Preço atual: {{ price_current }}
+Variação: {{ price_delta_percent }}%
+
+Rastreamento: {{ trace_id }}
+ID do evento: {{ event_id }}

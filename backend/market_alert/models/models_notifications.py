@@ -42,7 +42,7 @@ class EventLog(Base):
     source = Column(String(80), nullable=True)
     monitored_product_id = Column(
         PG_UUID(as_uuid=True),
-        ForeignKey("monitored_product.id", ondelete="SET NULL"),
+        ForeignKey("monitored_products.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -79,7 +79,7 @@ class AlertRule(Base):
     )
     monitored_product_id = Column(
         PG_UUID(as_uuid=True),
-        ForeignKey("monitored_product.id", ondelete="SET NULL"),
+        ForeignKey("monitored_products.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -131,7 +131,7 @@ class Notification(Base):
     )
     monitored_product_id = Column(
         PG_UUID(as_uuid=True),
-        ForeignKey("monitored_product.id", ondelete="SET NULL"),
+        ForeignKey("monitored_products.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -200,7 +200,7 @@ class UserNotificationPreference(Base):
     )
     monitored_product_id = Column(
         PG_UUID(as_uuid=True),
-        ForeignKey("monitored_product.id", ondelete="SET NULL"),
+        ForeignKey("monitored_products.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

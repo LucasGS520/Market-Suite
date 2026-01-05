@@ -1,0 +1,8 @@
+Olá {{ user_name }},
+
+Detectamos mudança de disponibilidade no monitorado "{{ monitored_name }}".
+Disponibilidade anterior: {{ availability_previous }}
+Disponibilidade atual: {{ availability }}
+
+Rastreamento: {{ trace_id }}
+ID do evento: {{ event_id }}

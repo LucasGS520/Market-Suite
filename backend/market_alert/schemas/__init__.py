@@ -33,6 +33,8 @@ from .schemas_notifications import (
     UserNotificationPreferenceCreate,
     UserNotificationPreferenceUpdate,
     UserNotificationPreferenceResponse,
+    NotificationPaginationMeta,
+    PaginatedNotificationResponse,
 )
 
 
@@ -72,4 +74,6 @@ __all__ = [
     "UserNotificationPreferenceCreate",
     "UserNotificationPreferenceUpdate",
     "UserNotificationPreferenceResponse",
+    "NotificationPaginationMeta",
+    "PaginatedNotificationResponse",
 ]

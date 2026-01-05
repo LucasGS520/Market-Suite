@@ -43,10 +43,14 @@ market_alert/
 | `GET` | `/comparisons/{monitored_id}/summary` | Consolida métricas de comparação; `Decimal` enviado como número apenas no resumo (encoder existente). |
 | `GET` | `/competitors` | Lista todos os concorrentes vinculados (incluindo pausados e indisponíveis por padrão), aceita `include_inactive`/`include_paused` e retorna contadores `competitors_total`, `competitors_with_price_count` e `excluded_due_to_inactive_count`. |
 | `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo e agenda coleta na fila `scraping`. |
+| `GET` | `/notifications` | Lista histórico de notificações do usuário com paginação padrão. |
+| `GET` | `/notifications/preferences` | Retorna preferências de notificação do usuário. |
+| `POST` | `/notifications/preferences` | Cria ou atualiza preferência para canal e tipo de alerta. |
 | `GET` | `/metrics` | Exibe métricas Prometheus da API. |
 | `Celery` | `tasks.collector_product_task.collect_product_task` | Consome fila `scraping` e processa uma URL por vez (monitorado ou concorrente), respeitando lock Redis e retornando `ScrapeResult` padronizado; quando o lock não é adquirido retorna `no_result` e registra métrica de `lock_skipped`. |
 | `Celery` | `tasks.recheck_scheduler_task.schedule_rechecks` | Beat que identifica `next_check_at` vencido, recalcula o próximo horário e enfileira a `collect_product_task` diretamente com jitter leve. |
 | `Celery` | `tasks.compare_prices_task.compare_prices_task` | Idempotente e leve; recalcula comparação e `competitiveness_status` quando acionado. |
+| `Celery` | `tasks.notifications_enqueue_task.enqueue_notifications_task` | Normaliza notificações pendentes e calcula backoff exponencial antes de novos disparos. |
 
 ### Integração com os Serviços
 - **`market_scraper`**: consumido por `scraper/scraper_client.ScraperClient`, que envia `ParserRequest` valida `ParserResponse` do pacote e trata `304 Not Modified` retornando `None` quando nada mudou. O `ParserResponse` retorna sempre `price|currency` (pode ser `null`), `availability`, `last_status`, `etag` e `not_modified`, permitindo marcar anúncios inativos sem gravar preços `0.00`.
@@ -81,6 +85,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
+| Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER` |
 
 ### Padrões de contratos
 - **Paginação**: todas as rotas de listagem utilizam envelope `{ items: [], meta: { total, page, per_page } }` com paginação base 1. Quando `per_page` não é enviado em `/monitored`, a API retorna todos os registros disponíveis preservando um teto de segurança.
@@ -140,6 +145,12 @@ SECRET_KEY=chave_secreta_jwt
 
 ADAPTIVE_RECHECK_BASE_INTERVAL=7200
 SCRAPER_SERVICE_URL=url_servico_scraping
+
+DEFAULT_COOLDOWN_SECONDS=1800
+MIN_PRICE_DELTA_PERCENT=1.0
+NOTIFICATION_MAX_ATTEMPTS=3
+NOTIFICATION_BACKOFF_BASE_SECONDS=60
+NOTIFICATION_BACKOFF_MULTIPLIER=2
 
 ```
 
