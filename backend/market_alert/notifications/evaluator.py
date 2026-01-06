@@ -170,7 +170,7 @@ def evaluate(
     *,
     db: Session,
     user: User,
-    alert_rules: list[AlertRule],
+    alert_rule: list[AlertRule],
 ) -> list[NotificationCandidate]:
     """ Avalia snapshots e retorna notificações candidatas por canal """
     if monitored.paused:
@@ -202,7 +202,7 @@ def evaluate(
         }
         rules_by_channel = {
             rule.channel: rule
-            for rule in alert_rules
+            for rule in alert_rule
             if rule.alert_type == alert_type
         }
 
