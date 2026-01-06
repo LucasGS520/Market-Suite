@@ -45,7 +45,7 @@ from market_alert.schemas.schemas_comparisons import (
 from market_alert.utils.price_comparator import compare_prices
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.services.services_competitors import ensure_user_can_access_monitored
+from market_alert.services.services_access import ensure_user_can_access_monitored
 
 
 logger = structlog.get_logger("comparison_service")
