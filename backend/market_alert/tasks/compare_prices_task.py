@@ -28,13 +28,14 @@ from market_alert.core.config_alert import settings
 from market_alert.crud.crud_notifications import (
     create_event_log,
     create_notification,
-    get_notification_by_idempotency_key,
+    list_alert_rules,
+    list_user_notification_preferences,
     update_alert_rule_last_triggered,
     update_preference_last_notified,
 )
 from market_alert.enums.enums_notifications import EventType, NotificationStatus
 from market_alert.models import MonitoredProduct, PriceHistory, User
-from market_alert.notifications.evaluator import evaluate_event
+from market_alert.notifications.evaluator import evaluate
 from market_alert.services.services_comparison import run_price_comparison
 
 
@@ -113,13 +114,18 @@ def compare_prices_task(
                 return
             
             price_previous, price_current = _fetch_recent_prices(db, monitored.id)
+            availability_previous = None
+            if availability_changed and monitored.availability is not None:
+                # NÃO HÁ HISTÓRICO DE DISPONIBILIDADE, ENTÃO APENAS REGISTRA O VALOR ANTERIOR
+                availability_previous = not monitored.availability
+
             payload_base = {
                 "monitored_id": str(monitored.id),
                 "monitored_url": monitored.product_url,
                 "current_price": str(price_current) if price_current is not None else None,
                 "previous_price": str(price_previous) if price_previous is not None else None,
                 "availability": monitored.availability,
-                "availability_previous": None,
+                "availability_previous": availability_previous,
                 "summary": result.get("summary"),
             }
             if price_previous is not None and price_current is not None and price_previous != 0:
@@ -141,6 +147,42 @@ def compare_prices_task(
             if has_availability_change:
                 event_types.append(EventType.availability_change)
 
+            previous_snapshot = {
+                "price": price_previous,
+                "availability": availability_previous,
+            }
+            current_snapshot = {
+                "price": price_current,
+                "availability": monitored.availability,
+                "summary": result.get("summary"),
+                "price_delta_percent": payload_base.get("price_delta_percent"),
+            }
+
+            preferences = list_user_notification_preferences(
+                db,
+                user_id=monitored.user_id,
+                monitored_product_id=monitored.id,
+            )
+            alert_rules = list_alert_rules(
+                db,
+                user_id=monitored.user_id,
+                monitored_product_id=monitored.id,
+            )
+
+            candidates = evaluate(
+                monitored,
+                previous_snapshot,
+                current_snapshot,
+                preferences,
+                db=db,
+                user=user,
+                alert_rules=alert_rules,
+            )
+
+            candidates_by_event: dict[EventType, list] = {}
+            for candidate in candidates:
+                candidates_by_event.setdefault(candidate.event_type, []).append(candidate)
+
             for event_type in event_types:
                 payload = {
                     **payload_base,
@@ -158,59 +200,53 @@ def compare_prices_task(
                         user_id=user.id,
                         commit=False,
                     )
-                    specs = evaluate_event(
-                        db,
-                        event=event,
-                        user=user,
-                        monitored=monitored,
-                    )
                     NOTIFICATION_EVENTS_TOTAL.labels(
                         event_type=event_type.value,
                         outcome="evaluated",
                     ).inc()
 
-                    for spec in specs:
-                        existing = get_notification_by_idempotency_key(
-                            db, spec.idempotency_key
-                        )
-                        if existing:
-                            NOTIFICATION_IDEMPOTENCY_HITS_TOTAL.labels(
-                                channel=spec.channel.value,
-                            ).inc()
-                            continue
-                        
+                    for candidate in candidates_by_event.get(event_type, []):
                         notification = create_notification(
                             db,
                             event_id=event.id,
                             user_id=monitored.user_id,
-                            channel=spec.channel,
-                            recipient=spec.recipient,
-                            idempotency_key=spec.idempotency_key,
-                            alert_id=spec.alert_rule.id if spec.alert_rule else None,
+                            channel=candidate.channel,
+                            recipient=candidate.recipient,
+                            dedup_hash=candidate.dedup_hash,
+                            event_type=event_type,
+                            alert_id=candidate.alert_rule.id if candidate.alert_rule else None,
                             monitored_product_id=monitored.id,
-                            subject=spec.subject,
-                            message=spec.message,
+                            subject=candidate.subject,
+                            message=candidate.message,
+                            payload=candidate.payload,
+                            priority=candidate.priority,
+                            cooldown_seconds=candidate.cooldown_seconds,
                             status=NotificationStatus.pending,
                             max_attempts=settings.NOTIFICATION_MAX_ATTEMPTS,
                             commit=False,
                         )
+                        if notification is None:
+                            NOTIFICATION_IDEMPOTENCY_HITS_TOTAL.labels(
+                                channel=candidate.channel.value,
+                            ).inc()
+                            continue
                         notification_ids.append(str(notification.id))
                         NOTIFICATION_ALERTS_CREATED_TOTAL.labels(
-                            alert_type=spec.alert_type.value,
-                            channel=spec.channel.value,
+                            alert_type=event_type.value,
+                            channel=candidate.channel.value,
                         ).inc()
 
-                        if spec.alert_rule:
+                        if candidate.alert_rule:
                             update_alert_rule_last_triggered(
                                 db,
-                                alert_rule=spec.alert_rule,
+                                alert_rule=candidate.alert_rule,
                                 triggered_at=datetime.now(timezone.utc),
                                 commit=False,
                             )
-                        if spec.preference:
+                        if candidate.preference:
                             update_preference_last_notified(
                                 db,
-                                preference=spec.preference,
+                                preference=candidate.preference,
                                 notified_at=datetime.now(timezone.utc),
                                 commit=False,
                             )

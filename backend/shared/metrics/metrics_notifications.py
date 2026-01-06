@@ -27,9 +27,23 @@ NOTIFICATION_IDEMPOTENCY_HITS_TOTAL = Counter(
     ["channel"],
 )
 
+NOTIFICATION_DISPATCH_TOTAL = Counter(
+    "notification_dispatch_total",
+    "Total de notificações despachadas por canal e status",
+    ["channel", "status"],
+)
+
+NOTIFICATION_ATTEMPTS_TOTAL = Counter(
+    "notification_attempts_total",
+    "Total de tentativas de envio por canal e resultado",
+    ["channel", "outcome"],
+)
+
 __all__ = [
     "NOTIFICATION_EVENTS_TOTAL",
     "NOTIFICATION_ALERTS_CREATED_TOTAL",
     "NOTIFICATION_ALERTS_SKIPPED_TOTAL",
     "NOTIFICATION_IDEMPOTENCY_HITS_TOTAL",
+    "NOTIFICATION_DISPATCH_TOTAL",
+    "NOTIFICATION_ATTEMPTS_TOTAL",
 ]

@@ -107,7 +107,6 @@ class Notification(Base):
     __table_args__ = (
         #Idempotência por evento, destino e canal
         UniqueConstraint("event_id", "recipient", "channel", name="uq_notification_event_recipient_channel"),
-        UniqueConstraint("idempotency_key", name="uq_notification_idempotency_key"),
     )
 
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -140,26 +139,30 @@ class Notification(Base):
     subject = Column(Text, nullable=True)
     message = Column(Text, nullable=True)
     status = Column(PgEnum(NotificationStatus, name="notification_status_enum"), nullable=False, default=NotificationStatus.pending)
-    idempotency_key = Column(String(255), nullable=False)
+    dedup_hash = Column(String(255), nullable=False, index=True)
+    payload = Column(JSON, nullable=True)
+    priority = Column(Integer, nullable=False, default=0, server_default="0")
+    cooldown_seconds = Column(Integer, nullable=False, default=0, server_default="0")
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
     max_attempts = Column(Integer, nullable=False, default=3, server_default="3")
     next_attempt_at = Column(DateTime(timezone=True), nullable=True)
     last_attempt_at = Column(DateTime(timezone=True), nullable=True)
     sent_at = Column(DateTime(timezone=True), nullable=True)
+    cooldown_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     event_log = relationship("EventLog", back_populates="notifications")
     alert_rule = relationship("AlertRule", back_populates="notifications")
-    delivery_records = relationship("DeliveryRecord", back_populates="notifications", cascade="all, delete-orphan")
+    attempts_records = relationship("NotificationAttempt", back_populates="notification", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Notification id={self.id} channel={self.channel} status={self.status}>"
     
-class DeliveryRecord(Base):
+class NotificationAttempt(Base):
     """ Registro de tentativa de entrega de notificação """
 
-    __tablename__ = "delivery_record"
+    __tablename__ = "notification_attempt"
 
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     notification_id = Column(
@@ -171,15 +174,16 @@ class DeliveryRecord(Base):
     attempt_number = Column(Integer, nullable=False)
     status = Column(PgEnum(DeliveryStatus, name="delivery_status_enum"), nullable=False)
     provider_response = Column(JSON, nullable=True)
+    error_code = Column(String(120), nullable=True)
     error_message = Column(Text, nullable=True)
     latency_ms = Column(Integer, nullable=True)
-    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    attempted_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
-    notification = relationship("Notification", back_populates="delivery_records")
+    notification = relationship("Notification", back_populates="attempts_records")
 
     def __repr__(self) -> str:
-        return f"<DeliveryRecord id={self.id} notification_id={self.notification_id} status={self.status}>"
+        return f"<NotificationAttempt id={self.id} notification_id={self.notification_id} status={self.status}>"
     
 class UserNotificationPreference(Base):
     """ Preferências de notificação do usuário por canal e alerta """

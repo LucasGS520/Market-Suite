@@ -1,12 +1,14 @@
 """ Operações CRUD para eventos, alertas e notificações """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 import structlog
+
+from shared.utils.redis_client import get_redis_client, set_key_with_ttl
 
 from market_alert.enums.enums_notifications import (
     AlertType,
@@ -17,9 +19,9 @@ from market_alert.enums.enums_notifications import (
 )
 from market_alert.models.models_notifications import (
     AlertRule,
-    DeliveryRecord,
     EventLog,
     Notification,
+    NotificationAttempt,
     UserNotificationPreference,
 )
 
@@ -115,9 +117,53 @@ def create_alert_rule(
     )
     return rule
 
-def get_notification_by_idempotency_key(db: Session, idempotency_key: str) -> Notification | None:
-    """ Recupera notificação pela chave de idempotência """
-    return db.query(Notification).filter(Notification.idempotency_key == idempotency_key).first()
+def _dedup_key(dedup_hash: str) -> str:
+    """ Monta a chave de deduplicação usada no Redis """
+    return f"notifications:dedup:{dedup_hash}"
+
+def _cooldown_key(
+    *,
+    monitored_product_id: UUID | None,
+    channel: NotificationChannel,
+    event_type: EventType,
+) -> str:
+    """ Monta a chave de cooldown por produto, canal e evento """
+    product_value = str(monitored_product_id) if monitored_product_id else "global"
+    return f"notifications:cooldown:{product_value}:{channel.value}:{event_type.value}"
+
+def _redis_has_key(key: str) -> bool:
+    """ Verifica se uma chave está ativa no Redis """
+    client = get_redis_client()
+    if client is None:
+        return False
+    try:
+        return bool(client.exists(key))
+    except Exception:
+        return False
+    
+def _has_dedup_in_window(
+    db: Session,
+    *,
+    dedup_hash: str,
+    cooldown_seconds: int,
+    now: datetime,
+) -> bool:
+    """ Verifica duplicidade no banco dentro da janela de cooldown """
+    if cooldown_seconds <= 0:
+        return False
+    window_start = now - timedelta(seconds=cooldown_seconds)
+    existing = (
+        db.query(Notification.id)
+        .filter(
+            Notification.dedup_hash == dedup_hash,
+            Notification.created_at >= window_start,
+            Notification.status.in_(
+                [NotificationStatus.pending, NotificationStatus.processing, NotificationStatus.sent]
+            ),
+        )
+        .first()
+    )
+    return existing is not None
 
 def create_notification(
     db: Session,
@@ -126,20 +172,48 @@ def create_notification(
     user_id: UUID,
     channel: NotificationChannel,
     recipient: str,
-    idempotency_key: str,
+    dedup_hash: str,
+    event_type: EventType,
     alert_id: UUID | None = None,
     monitored_product_id: UUID | None = None,
     subject: str | None = None,
     message: str | None = None,
+    payload: dict[str, Any] | None = None,
+    priority: int = 0,
+    cooldown_seconds: int = 0,
     status: NotificationStatus = NotificationStatus.pending,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     next_attempt_at: datetime | None = None,
     commit: bool = False,
-) -> Notification:
-    """ Persiste uma notificação pendente respeitando idempotência """
-    existing = get_notification_by_idempotency_key(db, idempotency_key)
-    if existing:
-        return existing
+) -> Notification | None:
+    """ Persiste uma notificação pendente respeitando idempotência e cooldown """
+    now = datetime.now(timezone.utc)
+    cooldown_key = _cooldown_key(
+        monitored_product_id=monitored_product_id,
+        channel=channel,
+        event_type=event_type,
+    )
+    if cooldown_seconds > 0 and _redis_has_key(cooldown_key):
+        return None
+    
+    if cooldown_seconds > 0 and _has_dedup_in_window(
+        db,
+        dedup_hash=dedup_hash,
+        cooldown_seconds=cooldown_seconds,
+        now=now,
+    ):
+        return None
+    
+    if cooldown_seconds > 0:
+        dedup_key = _dedup_key(dedup_hash)
+        dedup_result = set_key_with_ttl(
+            dedup_key,
+            "1",
+            cooldown_seconds,
+            only_if_absent=True,
+        )
+        if dedup_result is False:
+            return None
     
     notification = Notification(
         event_id=event_id,
@@ -151,7 +225,10 @@ def create_notification(
         subject=subject,
         message=message,
         status=status,
-        idempotency_key=idempotency_key,
+        dedup_hash=dedup_hash,
+        payload=payload,
+        priority=priority,
+        cooldown_seconds=cooldown_seconds,
         max_attempts=max_attempts,
         next_attempt_at=_normalize_datetime(next_attempt_at) if next_attempt_at else None,
     )
@@ -171,62 +248,132 @@ def create_notification(
     )
     return notification
 
-def update_notification_status(
+def get_pending_notifications(
+    db: Session,
+    *,
+    limit: int = 100,
+    now: datetime | None = None,
+    notification_ids: list[UUID] | None = None,
+) -> list[Notification]:
+    """ Recupera notificações pendentes com elegibilidade de retry """
+    reference = _normalize_datetime(now)
+    query = db.query(Notification).filter(
+        Notification.status.in_([NotificationStatus.pending, NotificationStatus.failed]),
+        Notification.attempts < Notification.max_attempts,
+    )
+    if notification_ids:
+        query = query.filter(Notification.id.in_(notification_ids))
+    query = query.filter(
+        or_(
+            and_(
+                Notification.next_attempt_at.is_(None),
+                Notification.created_at <= reference,
+            ),
+            Notification.next_attempt_at <= reference,
+        )
+    )
+    return query.order_by(Notification.created_at.asc()).limit(limit).all()
+
+def acquire_notification_for_processing(
+        db: Session,
+        *,
+        notification_id: UUID,
+) -> Notification | None:
+    """ Reserva uma notificação para processamento garantindo exclusão mútua """
+    notification = (
+        db.query(Notification)
+        .filter(Notification.id == notification_id)
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+    if notification is None:
+        return None
+    if notification.status not in {NotificationStatus.pending, NotificationStatus.failed}:
+        return None
+    if notification.attempts >= notification.max_attempts:
+        return None
+    
+    now = datetime.now(timezone.utc)
+    notification.status = NotificationStatus.processing
+    notification.attempts += 1
+    notification.last_attempt_at = now
+    notification.next_attempt_at = None
+    db.flush()
+    return notification
+
+def mark_notification_sent(
     db: Session,
     *,
     notification: Notification,
-    status: NotificationStatus,
-    attempts: int | None = None,
-    last_attempt_at: datetime | None = None,
-    next_attempt_at: datetime | None = None,
-    sent_at: datetime | None = None,
+    event_type: EventType,
+    cooldown_seconds: int,
     commit: bool = False,
 ) -> Notification:
-    """ Atualiza status e timestamps de uma notificação """
-    notification.status = status
-    if attempts is not None:
-        notification.attempts = attempts
-    if last_attempt_at is not None:
-        notification.last_attempt_at = _normalize_datetime(last_attempt_at)
-    if next_attempt_at is not None:
-        notification.next_attempt_at = _normalize_datetime(next_attempt_at)
-    if sent_at is not None:
-        notification.sent_at = _normalize_datetime(sent_at)
+    """ Marca a notificação como enviada e registra cooldown """
+    sent_at = datetime.now(timezone.utc)
+    notification.status = NotificationStatus.sent
+    notification.sent_at = sent_at
+    notification.cooldown_expires_at = (
+        sent_at + timedelta(seconds=cooldown_seconds)
+        if cooldown_seconds > 0
+        else None
+    )
+
+    if cooldown_seconds > 0:
+        cooldown_key = _cooldown_key(
+            monitored_product_id=notification.monitored_product_id,
+            channel=notification.channel,
+            event_type=event_type,
+        )
+        set_key_with_ttl(cooldown_key, "1", cooldown_seconds)
 
     if commit:
         db.commit()
         db.refresh(notification)
     else:
         db.flush()
-
-    logger.info(
-        "notification_status_updated",
-        notification_id=str(notification.id),
-        status=status,
-    )
     return notification
 
-def create_delivery_record(
+def mark_notification_failed(
+    db: Session,
+    *,
+    notification: Notification,
+    next_attempt_at: datetime | None = None,
+    commit: bool = False,
+) -> Notification:
+    """ Marca a notificação como falha para permitir nova tentativa """
+    notification.status = NotificationStatus.failed
+    notification.next_attempt_at = _normalize_datetime(next_attempt_at) if next_attempt_at else None
+    if commit:
+        db.commit()
+        db.refresh(notification)
+    else:
+        db.flush()
+    return notification
+
+def add_notification_attempt(
     db: Session,
     *,
     notification_id: UUID,
     attempt_number: int,
     status: DeliveryStatus,
     provider_response: dict[str, Any] | None = None,
+    error_code: str | None = None,
     error_message: str | None = None,
     latency_ms: int | None = None,
-    delivered_at: datetime | None = None,
+    attempted_at: datetime | None = None,
     commit: bool = False,
-) -> DeliveryRecord:
+) -> NotificationAttempt:
     """ Registra uma tentativa de entrega para auditoria """
-    record = DeliveryRecord(
+    record = NotificationAttempt(
         notification_id=notification_id,
         attempt_number=attempt_number,
         status=status,
         provider_response=provider_response,
+        error_code=error_code,
         error_message=error_message,
         latency_ms=latency_ms,
-        delivered_at=_normalize_datetime(delivered_at) if delivered_at else None,
+        attempted_at=_normalize_datetime(attempted_at) if attempted_at else None,
     )
     db.add(record)
     if commit:
@@ -236,8 +383,8 @@ def create_delivery_record(
         db.flush()
 
     logger.info(
-        "delivery_record_created",
-        delivery_record_id=str(record.id),
+        "notification_attempt_created",
+        notification_attempt_id=str(record.id),
         notification_id=str(notification_id),
         status=status,
     )
@@ -324,6 +471,24 @@ def list_notifications_for_user(
     )
     return items, total
 
+def list_alert_rules(
+    db: Session,
+    *,
+    user_id: UUID,
+    monitored_product_id: UUID | None = None,
+    alert_type: AlertType | None = None,
+) -> list[AlertRule]:
+    """ Lista regras de alerta ativas por usuário e contexto opcional """
+    query = db.query(AlertRule).filter(
+        AlertRule.user_id == user_id,
+        AlertRule.enabled.is_(True),
+    )
+    if monitored_product_id is not None:
+        query = query.filter(AlertRule.monitored_product_id == monitored_product_id)
+    if alert_type is not None:
+        query = query.filter(AlertRule.alert_type == alert_type)
+    return query.order_by(AlertRule.created_at.desc()).all()
+
 def list_user_notification_preferences(
     db: Session,
     *,
@@ -338,6 +503,23 @@ def list_user_notification_preferences(
     if alert_type is not None:
         query = query.filter(UserNotificationPreference.alert_type == alert_type)
     return query.order_by(UserNotificationPreference.created_at.desc()).all()
+
+def get_last_sent_at(
+    db: Session,
+    *,
+    monitored_product_id: UUID | None,
+    channel: NotificationChannel,
+) -> datetime | None:
+    """ Recupera o último envio registrado por produto e canal """
+    query = db.query(Notification.sent_at).filter(
+        Notification.channel == channel,
+        Notification.status == NotificationStatus.sent,
+    )
+    if monitored_product_id is None:
+        query = query.filter(Notification.monitored_product_id.is_(None))
+    else:
+        query = query.filter(Notification.monitored_product_id == monitored_product_id)
+    return query.order_by(Notification.sent_at.desc()).scalar()
 
 def update_alert_rule_last_triggered(
     db: Session,

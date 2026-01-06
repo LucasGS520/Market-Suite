@@ -1,0 +1,1 @@
+Preço alterado em "{{ monitored_name }}": {{ price_previous }} para {{ price_current }} ({{ price_delta_percent }}%).

@@ -171,6 +171,18 @@ class Settings(ConfigBase):
     NOTIFICATION_BACKOFF_MULTIPLIER: int = int(
         os.getenv("NOTIFICATION_BACKOFF_MULTIPLIER", "2")
     ) #Multiplicador do backoff exponencial
+    NOTIFICATION_EMAIL_PROVIDER: str = os.getenv(
+        "NOTIFICATION_EMAIL_PROVIDER", "mock"
+    ) #Provider de email configurado (smtp/sendgrid/mock)
+    NOTIFICATION_EMAIL_SENDER: str = os.getenv(
+        "NOTIFICATION_EMAIL_SENDER", "alerts@marketsuite.local"
+    ) #Remetente padrão de emails
+    NOTIFICATION_WHATSAPP_PROVIDER: str = os.getenv(
+        "NOTIFICATION_WHATSAPP_PROVIDER", "mock"
+    ) #Provider de WhatsApp configurado
+    NOTIFICATION_PUSH_PROVIDER: str = os.getenv(
+        "NOTIFICATION_PUSH_PROVIDER", "mock"
+    ) #Provider de push configurado
 
 #Instância única de settings para a aplicação
 settings = Settings()

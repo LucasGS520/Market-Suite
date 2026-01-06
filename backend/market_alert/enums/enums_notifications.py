@@ -21,6 +21,7 @@ class NotificationChannel(str, Enum):
     """ Canais suportados para entrega de notificações """
     email = "email" #Notificações via email
     sms = "sms" #Notificações via SMS
+    whatsapp = "whatsapp" #Notificações via WhatsApp
     push = "push" #Notificações via push
     webhook = "webhook" #Notificações via webhook
 

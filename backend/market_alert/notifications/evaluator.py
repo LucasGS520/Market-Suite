@@ -1,10 +1,12 @@
-""" Avaliador de eventos para gerar alertas e notificações idempotentes """
+""" Avaliador de eventos para geração de alertas e notificações idempotentes """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
+import json
 from typing import Any
 
 import structlog
@@ -15,56 +17,85 @@ from shared.metrics.metrics_notifications import (
 )
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_notifications import AlertType, EventType, NotificationChannel
-from market_alert.models import AlertRule, EventLog, MonitoredProduct, User, UserNotificationPreference
+from market_alert.models import AlertRule, MonitoredProduct, User, UserNotificationPreference
 from market_alert.notifications.template_renderer import render_notification
-from market_alert.utils.rate_limiter import allow_with_leaky_bucket
+from market_alert.crud.crud_notifications import get_last_sent_at
 
 
 logger = structlog.get_logger("notifications_evaluator")
 
 @dataclass(frozen=True)
-class AlertSpec:
-    """ Resultado de avaliação contendo dados prontos para persistência """
-    alert_type: AlertType
+class NotificationCandidate:
+    """ Representa uma notificação candidata pronta para persistência """
     channel: NotificationChannel
+    event_type: EventType
+    payload: dict[str, Any]
+    dedup_hash: str
+    priority: int
     recipient: str
     subject: str | None
     message: str | None
-    idempotency_key: str
     cooldown_seconds: int
     alert_rule: AlertRule | None = None
     preference: UserNotificationPreference | None = None
 
-def _map_event_type(event_type: EventType) -> AlertType | None:
-    """ Mapeia o tipo de evento para o tipo de alerta correspondente """
+def _resolve_event_types(
+    previous_snapshot: dict[str, Any] | None,
+    current_snapshot: dict[str, Any],
+) -> list[EventType]:
+    """ Determina os eventos a partir de mudanças nos snapshots """
+    previous_snapshot = previous_snapshot or {}
+    event_types: list[EventType] = []
+
+    previous_price = previous_snapshot.get("price")
+    current_price = current_snapshot.get("price")
+    if previous_price is not None and current_price is not None and previous_price != current_price:
+        event_types.append(EventType.price_change)
+
+    previous_availability = previous_snapshot.get("availability")
+    current_availability = current_snapshot.get("availability")
+    if (
+        previous_availability is not None
+        and current_availability is not None
+        and previous_availability != current_availability
+    ):
+        event_types.append(EventType.availability_change)
+
+    if current_snapshot.get("competitor_important"):
+        event_types.append(EventType.custom)
+
+    return event_types
+
+def _resolve_alert_type(event_type: EventType) -> AlertType | None:
+    """ Mapeia evento para tipo de alerta correspondente """
     mapping = {
         EventType.price_change: AlertType.price_change,
         EventType.availability_change: AlertType.availability_change,
-        EventType.scraping_error: AlertType.Scraping_error,
+        EventType.scraping_error: AlertType.scraping_error,
         EventType.custom: AlertType.custom,
     }
     return mapping.get(event_type)
 
-def _should_skip_due_to_delta(payload: dict[str, Any], alert_type: AlertType) -> bool:
-    """ Valida limiar de variação mínima para alertas de preço """
-    if alert_type != AlertType.price_change:
-        return False
-    
-    delta_value = payload.get("price_delta_percent")
-    if delta_value is None:
+def _price_delta_below_min(
+    previous_price: Any,
+    current_price: Any,
+) -> bool:
+    """ Valida o delta mínimo configurado para alertas de preço """
+    if previous_price is None or current_price is None:
         return False
     
     try:
-        delta_decimal = Decimal(str(delta_value))
+        previous_value = Decimal(str(previous_price))
+        current_value = Decimal(str(current_price))
     except (InvalidOperation, TypeError, ValueError):
         return False
     
+    if previous_value == 0:
+        return False
+
+    delta_percent = abs((current_value - previous_value) / previous_value * previous_value * 100)
     threshold = Decimal(str(settings.MIN_PRICE_DELTA_PERCENT))
-    if abs(delta_decimal) < threshold:
-        NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="delta_below_min").inc()
-        return True
-    
-    return False
+    return delta_percent < threshold
 
 def _resolve_channel_destination(
     preference: UserNotificationPreference | None,
@@ -78,7 +109,7 @@ def _resolve_channel_destination(
     
     if channel == NotificationChannel.email:
         return user.email
-    if channel == NotificationChannel.sms:
+    if channel in {NotificationChannel.sms, NotificationChannel.whatsapp}:
         return user.phone_number
     
     return None
@@ -88,7 +119,7 @@ def _cooldown_seconds(
     preference: UserNotificationPreference | None,
     alert_rule: AlertRule | None,
 ) -> int:
-    """ Resolve o cooldown final a partir de regra, preferência ou default """
+    """ Resolve o cooldown final com base em regra, preferência ou default """
     if alert_rule and alert_rule.cooldown_seconds:
         return alert_rule.cooldown_seconds
     if preference and preference.cooldown_seconds:
@@ -96,192 +127,170 @@ def _cooldown_seconds(
     return settings.DEFAULT_COOLDOWN_SECONDS
 
 def _within_cooldown(
-    last_notified_at: datetime | None,
+    last_sent_at: datetime | None,
     cooldown_seconds: int,
     *,
     now: datetime,
 ) -> bool:
-    """ Verifica se o cooldown ainda está ativo para o alerta atual """
-    if last_notified_at is None or cooldown_seconds <= 0:
+    """ Confirma se o cooldown está ativo com base no último envio """
+    if last_sent_at is None or cooldown_seconds <= 0:
         return False
-    elapsed = (now - last_notified_at).total_seconds()
+    elapsed = (now - last_sent_at).total_seconds()
     return elapsed < cooldown_seconds
 
-def _allow_throttle(
-    *,
-    monitored_id: str | None,
-    alert_type: AlertType,
-    cooldown_seconds: int,
-) -> bool:
-    """ Aplica throttle distribuído usando o *leaky bucket* do Redis """
-    if cooldown_seconds <= 0:
-        return True
-    bucket_key = f"notifications:cooldown:{monitored_id}:{alert_type.value}"
-    return allow_with_leaky_bucket(
-        bucket_key,
-        rate_limit=(1, cooldown_seconds),
-    )
+def _normalize_payload(payload: dict[str, Any]) -> str:
+    """ Normaliza o payload para gerar hash determinístico """
+    return json.dumps(payload, sort_keys=True, default=str)
 
-def _load_preferences(
-    db: Session,
+def _build_dedup_hash(
     *,
-    user_id: str,
-    monitored_id: str | None,
-    alert_type: AlertType,
-) -> list[UserNotificationPreference]:
-    """ Carrega preferências ativas de notificação do usuário """
-    query = db.query(UserNotificationPreference).filter(
-        UserNotificationPreference.user_id == user_id,
-        UserNotificationPreference.alert_type == alert_type,
-    )
-    if monitored_id:
-        query = query.filter(
-            UserNotificationPreference.monitored_product_id == monitored_id
-        )
-    return query.all()
+    monitored_id: str,
+    event_type: EventType,
+    channel: NotificationChannel,
+    payload: dict[str, Any],
+) -> str:
+    """ Gera hash de deduplicação para eventos equivalentes """
+    normalized = _normalize_payload(payload)
+    raw = f"{monitored_id}:{event_type.value}:{channel.value}:{normalized}"
+    return sha256(raw.encode("utf-8")).hexdigest()
 
-def _load_alert_rules(
-    db: Session,
-    *,
-    user_id: str,
-    monitored_id: str | None,
-    alert_type: AlertType,
-) -> list[AlertRule]:
-    """ Carrega regras de alerta configuradas para o usuário """
-    query = db.query(AlertRule).filter(
-        AlertRule.user_id == user_id,
-        AlertRule.alert_type == alert_type,
-        AlertRule.enabled_is_(True),
-    )
-    if monitored_id:
-        query = query.filter(
-            AlertRule.monitored_product_id == monitored_id
-        )
-    return query.all()
+def _resolve_priority(alert_rule: AlertRule | None) -> int:
+    """ Define prioridade com base em configuração opcional """
+    if alert_rule and isinstance(alert_rule.rule_config, dict):
+        priority = alert_rule.rule_config.get("priority")
+        if isinstance(priority, int):
+            return priority
+    return 0
 
-def evaluate_event(
-    db: Session,
+def evaluate(
+    monitored: MonitoredProduct,
+    previous_snapshot: dict[str, Any] | None,
+    current_snapshot: dict[str, Any],
+    user_prefs: list[UserNotificationPreference],
     *,
-    event: EventLog,
+    db: Session,
     user: User,
-    monitored: MonitoredProduct | None,
-) -> list[AlertSpec]:
-    """ Avalia um evento e retorna alertas prontos para persistência """
-    alert_type = _map_event_type(event.event_type)
-    if alert_type is None:
+    alert_rules: list[AlertRule],
+) -> list[NotificationCandidate]:
+    """ Avalia snapshots e retorna notificações candidatas por canal """
+    if monitored.paused:
+        NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type="paused", reason="monitored_paused").inc()
         return []
     
-    if monitored and monitored.paused:
-        NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="monitored_paused").inc()
+    event_types = _resolve_event_types(previous_snapshot, current_snapshot)
+    if not event_types:
         return []
-    
-    payload = event.payload if isinstance(event.payload, dict) else {}
-    if _should_skip_due_to_delta(payload, alert_type):
-        return []
-    
-    preferences = _load_preferences(
-        db,
-        user_id=str(user.id),
-        monitored_id=str(monitored.id) if monitored else None,
-        alert_type=alert_type,
-    )
-    rules = _load_alert_rules(
-        db,
-        user_id=str(user.id),
-        monitored_id=str(monitored.id) if monitored else None,
-        alert_type=alert_type,
-    )
-
-    preferences_by_channel = {pref.channel: pref for pref in preferences if pref.enabled}
-    rules_by_channel = {rule.channel: rule for rule in rules}
-
-    channels = set(preferences_by_channel.keys()) | set(rules_by_channel.keys())
-    if not channels:
-        #Fallback para camal email quando não existir configuração explicita
-        channels = {NotificationChannel.email}
 
     now = datetime.now(timezone.utc)
-    results: list[AlertSpec] = []
+    candidates: list[NotificationCandidate] = []
 
-    for channel in channels:
-        preference = preferences_by_channel.get(channel)
-        alert_rule = rules_by_channel.get(channel)
-        if preference and not preference.enabled:
-            NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="preference_disabled").inc()
+    for event_type in event_types:
+        alert_type = _resolve_alert_type(event_type)
+        if alert_type is None:
             continue
         
-        recipient = _resolve_channel_destination(
-            preference,
-            user=user,
-            channel=channel,
-        )
-        if not recipient:
-            NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="missing_destination").inc()
+        previous_price = (previous_snapshot or {}).get("price")
+        current_price = current_snapshot.get("price")
+        if event_type == EventType.price_change and _price_delta_below_min(previous_price, current_price):
+            NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="delta_below_min").inc()
             continue
         
-        cooldown_seconds = _cooldown_seconds(
-            preference=preference,
-            alert_rule=alert_rule,
-        )
-        last_notified_at = None
-        if preference and preference.last_notified_at:
-            last_notified_at = preference.last_notified_at
-        if alert_rule and alert_rule.last_triggered_at:
-            if last_notified_at is None or alert_rule.last_triggered_at > last_notified_at:
-                last_notified_at = alert_rule.last_triggered_at
-
-        if _within_cooldown(last_notified_at, cooldown_seconds, now=now):
-            NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="cooldown_active").inc()
-            continue
-        
-        if not _allow_throttle(
-            monitored_id=str(monitored.id) if monitored else None,
-            alert_type=alert_type,
-            cooldown_seconds=cooldown_seconds,
-        ):
-            NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="cooldown_throttle").inc()
-            continue
-        
-        context = {
-            "event_id": str(event.id),
-            "trace_id": event.trace_id,
-            "alert_type": alert_type.value,
-            "monitored_id": str(monitored.id) if monitored else None,
-            "monitored_name": monitored.display_name if monitored else None,
-            "monitored_url": payload.get("monitored_url"),
-            "price_current": payload.get("current_price"),
-            "price_previous": payload.get("previous_price"),
-            "price_delta_percent": payload.get("price_delta_percent"),
-            "availability": payload.get("availability"),
-            "availability_previous": payload.get("availability_previous"),
-            "summary": payload.get("summary"),
-            "user_name": user.name,
+        preferences_by_channel = {
+            pref.channel: pref
+            for pref in user_prefs
+            if pref.enabled and pref.alert_type == alert_type
         }
-        subject, message = render_notification(
-            channel=channel,
-            alert_type=alert_type,
-            context=context,
-        )
-        idempotency_key = f"{event.id}:{recipient}:{channel.value}"
+        rules_by_channel = {
+            rule.channel: rule
+            for rule in alert_rules
+            if rule.alert_type == alert_type
+        }
 
-        results.append(
-            AlertSpec(
-                alert_type=alert_type,
+        channels = set(preferences_by_channel.keys()) | set(rules_by_channel.keys())
+        if not channels:
+            #Fallback para canal email quando não existir configuração explícita
+            channels = {NotificationChannel.email}
+
+        for channel in channels:
+            preference = preferences_by_channel.get(channel)
+            alert_rule = rules_by_channel.get(channel)
+            if preference and not preference.enabled:
+                NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="preference_disabled").inc()
+                continue
+            
+            recipient = _resolve_channel_destination(
+                preference,
+                user=user,
                 channel=channel,
-                recipient=recipient,
-                subject=subject,
-                message=message,
-                idempotency_key=idempotency_key,
-                cooldown_seconds=cooldown_seconds,
-                alert_rule=alert_rule,
-                preference=preference,
             )
-        )
+            if not recipient:
+                NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="missing_destination").inc()
+                continue
+            
+            cooldown_seconds = _cooldown_seconds(
+                preference=preference,
+                alert_rule=alert_rule,
+            )
+            last_sent_at = get_last_sent_at(
+                db,
+                monitored_product_id=monitored.id,
+                channel=channel,
+            )
+            if _within_cooldown(last_sent_at, cooldown_seconds, now=now):
+                NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="cooldown_active").inc()
+                continue
+            
+            context = {
+                "alert_type": alert_type.value,
+                "event_type": event_type.value,
+                "monitored_id": str(monitored.id),
+                "monitored_name": monitored.display_name,
+                "monitored_url": monitored.product_url,
+                "price_current": current_snapshot.get("price"),
+                "price_previous": previous_snapshot.get("price") if previous_snapshot else None,
+                "price_delta_percent": current_snapshot.get("price_delta_percent"),
+                "availability": current_snapshot.get("availability"),
+                "availability_previous": previous_snapshot.get("availability") if previous_snapshot else None,
+                "summary": current_snapshot.get("summary"),
+                "user_name": user.name,
+            }
+            subject, message = render_notification(
+                channel=channel,
+                alert_type=alert_type,
+                context=context,
+            )
+            payload = {
+                "context": context,
+                "subject": subject,
+                "message": message,
+            }
+            dedup_hash = _build_dedup_hash(
+                monitored_id=str(monitored.id),
+                event_type=event_type,
+                channel=channel,
+                payload=payload,
+            )
+
+            candidates.append(
+                NotificationCandidate(
+                    channel=channel,
+                    event_type=event_type,
+                    payload=payload,
+                    dedup_hash=dedup_hash,
+                    priority=_resolve_priority(alert_rule),
+                    recipient=recipient,
+                    subject=subject,
+                    message=message,
+                    cooldown_seconds=cooldown_seconds,
+                    alert_rule=alert_rule,
+                    preference=preference,
+                )
+            )
 
     logger.info(
-        "alert_evaluated",
-        event_id=str(event.id),
-        alert_type=alert_type.value,
-        channels=[spec.channel.value for spec in results],
+        "alert_candidates_created",
+        monitored_id=str(monitored.id),
+        channels=[candidate.channel.value for candidate in candidates],
+        event_types=[candidate.event_type.value for candidate in candidates],
     )
-    return results
+    return candidates

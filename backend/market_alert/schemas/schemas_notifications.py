@@ -73,12 +73,15 @@ class NotificationCreate(BaseModel):
     recipient: str = Field(..., description="Destino do canal")
     subject: str | None = Field(None, description="Assunto da mensagem")
     message: str | None = Field(None, description="Conteúdo da notificação")
-    idempotency_key: str | None = Field(..., description="Chave única para evitar duplicidade")
+    dedup_hash: str = Field(..., description="Hash de deduplicação para evitar duplicidade")
+    payload: dict[str, Any] | None = Field(None, description="Payload estruturado para o canal")
+    priority: int = Field(0, description="Prioridade relativa da notificação")
+    cooldown_seconds: int = Field(0, description="Cooldown configurado em segundos")
     status: NotificationStatus = Field(NotificationStatus.pending, description="Status inicial da notificação")
     max_attempts: int = Field(3, description="Quantidade máxima de tentativas de entrega")
     next_attempt_at: datetime | None = Field(None, description="Momento sugerido para nova tentativa de entrega")
 
-class NotificationResponse(BaseModel):
+class NotificationRead(BaseModel):
     """ Representação serializada da notificação persistida """
     model_config = ConfigDict(from_attributes=True)
 
@@ -91,27 +94,32 @@ class NotificationResponse(BaseModel):
     recipient: str
     subject: str | None = None
     message: str | None = None
+    dedup_hash: str
+    payload: dict[str, Any] | None = None
+    priority: int
+    cooldown_seconds: int
     status: NotificationStatus
-    idempotency_key: str
     attempts: int
     max_attempts: int
     next_attempt_at: datetime | None = None
     last_attempt_at: datetime | None = None
     sent_at: datetime | None = None
+    cooldown_expires_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
-class DeliveryRecordCreate(BaseModel):
+class NotificationAttemptCreate(BaseModel):
     """ Payload para registrar tentativa de entrega """
     notification_id: UUID = Field(..., description="Identificador da notificação")
     attempt_number: int = Field(..., description="Número sequencial da tentativa")
     status: DeliveryStatus = Field(..., description="Resultado da tentativa")
     provider_response: dict[str, Any] | None = Field(None, description="Resposta do provedor")
+    error_code: str | None = Field(None, description="Código de erro do provedor")
     error_message: str | None = Field(None, description="Mensagem de erro quando houver")
     latency_ms: int | None = Field(None, description="Latência observada na entrega")
-    delivered_at: datetime | None = Field(None, description="Momento da entrega")
+    attempted_at: datetime | None = Field(None, description="Momento da tentativa de entrega")
 
-class DeliveryRecordResponse(BaseModel):
+class NotificationAttemptRead(BaseModel):
     """ Representação serializada do registro de entrega """
     model_config = ConfigDict(from_attributes=True)
 
@@ -120,9 +128,10 @@ class DeliveryRecordResponse(BaseModel):
     attempt_number: int
     status: DeliveryStatus
     provider_response: dict[str, Any] | None = None
+    error_code: str | None = None
     error_message: str | None = None
     latency_ms: int | None = None
-    delivered_at: datetime | None = None
+    attempted_at: datetime | None = None
     created_at: datetime
 
 class UserNotificationPreferenceCreate(BaseModel):
@@ -165,6 +174,6 @@ class NotificationPaginationMeta(BaseModel):
 
 class PaginatedNotificationResponse(BaseModel):
     """ Envelope paginado com notificações """
-    items: list[NotificationResponse]
+    items: list[NotificationRead]
     meta: NotificationPaginationMeta
     
