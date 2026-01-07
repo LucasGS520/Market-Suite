@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 import structlog
 
 from shared.utils.redis_client import get_redis_client, set_key_with_ttl
+from shared.utils.redis_locks import acquire_notification_lock, release_notification_lock
+from shared.metrics.metrics_notifications import NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL
 
+from market_alert.core.config_alert import settings
 from market_alert.enums.enums_notifications import (
     AlertType,
     DeliveryStatus,
@@ -26,8 +29,10 @@ from market_alert.models.models_notifications import (
 )
 
 
+
 logger = structlog.get_logger("crud_notifications")
 DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_DEDUPE_SENT_WINDOW_SECONDS = 60 * 10
 
 def _normalize_datetime(value: datetime | None) -> datetime:
     """ Normaliza datas para UTC garantindo tzinfo """
@@ -141,6 +146,27 @@ def _redis_has_key(key: str) -> bool:
     except Exception:
         return False
     
+def _has_recent_sent_notification(
+    db: Session,
+    *,
+    dedup_hash: str,
+    now: datetime,
+) -> bool:
+    """ Verifica se houve envio recente com o mesmo dedup_hash """
+    window_seconds = max(settings.NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS, DEFAULT_DEDUPE_SENT_WINDOW_SECONDS)
+    window_start = now - timedelta(seconds=window_seconds)
+    existing = (
+        db.query(Notification.id)
+        .filter(
+            Notification.dedup_hash == dedup_hash,
+            Notification.status == NotificationStatus.sent,
+            Notification.sent_at.is_not(None),
+            Notification.sent_at >= window_start,
+        )
+        .first()
+    )
+    return existing is not None
+    
 def _has_dedup_in_window(
     db: Session,
     *,
@@ -188,12 +214,20 @@ def create_notification(
 ) -> Notification | None:
     """ Persiste uma notificação pendente respeitando idempotência e cooldown """
     now = datetime.now(timezone.utc)
+    lock_owner: str | None = None
     cooldown_key = _cooldown_key(
         monitored_product_id=monitored_product_id,
         channel=channel,
         event_type=event_type,
     )
+    lock_acquired, lock_owner = acquire_notification_lock(dedup_hash, ttl_seconds=60)
+    if not lock_acquired:
+        NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="lock_unavailable").inc()
+        return None
+
     if cooldown_seconds > 0 and _redis_has_key(cooldown_key):
+        NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="cooldown_redis").inc()
+        release_notification_lock(dedup_hash, lock_owner)
         return None
     
     if cooldown_seconds > 0 and _has_dedup_in_window(
@@ -202,6 +236,13 @@ def create_notification(
         cooldown_seconds=cooldown_seconds,
         now=now,
     ):
+        NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="cooldown_db").inc()
+        release_notification_lock(dedup_hash, lock_owner)
+        return None
+    
+    if _has_recent_sent_notification(db, dedup_hash=dedup_hash, now=now):
+        NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="sent_window").inc()
+        release_notification_lock(dedup_hash, lock_owner)
         return None
     
     if cooldown_seconds > 0:
@@ -213,6 +254,8 @@ def create_notification(
             only_if_absent=True,
         )
         if dedup_result is False:
+            NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="dedup_key").inc()
+            release_notification_lock(dedup_hash, lock_owner)
             return None
     
     notification = Notification(
@@ -246,6 +289,7 @@ def create_notification(
         channel=channel,
         recipient=recipient,
     )
+    release_notification_lock(dedup_hash, lock_owner)
     return notification
 
 def get_pending_notifications(
@@ -351,12 +395,29 @@ def mark_notification_failed(
         db.flush()
     return notification
 
+def mark_notification_dead_letter(
+    db: Session,
+    *,
+    notification: Notification,
+    commit: bool = False,
+) -> Notification:
+    """ Marca a notificação como falha permanente para inspeção """
+    notification.status = NotificationStatus.dead_letter
+    notification.dead_lettered_at = datetime.now(timezone.utc)
+    if commit:
+        db.commit()
+        db.refresh(notification)
+    else:
+        db.flush()
+    return notification
+
 def add_notification_attempt(
     db: Session,
     *,
     notification_id: UUID,
     attempt_number: int,
     status: DeliveryStatus,
+    provider_message_id: str | None = None,
     provider_response: dict[str, Any] | None = None,
     error_code: str | None = None,
     error_message: str | None = None,
@@ -369,6 +430,7 @@ def add_notification_attempt(
         notification_id=notification_id,
         attempt_number=attempt_number,
         status=status,
+        provider_message_id=provider_message_id,
         provider_response=provider_response,
         error_code=error_code,
         error_message=error_message,

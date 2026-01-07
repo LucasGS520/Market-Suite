@@ -32,6 +32,7 @@ class NotificationStatus(str, Enum):
     sent = "sent" #Entregue com sucesso
     failed = "failed" #Falha na entrega
     skipped = "skipped" #Ignorada por cooldown ou duplicidade
+    dead_letter = "dead_letter" #Falha definitiva após tentativas
 
 class DeliveryStatus(str, Enum):
     """ Resultado de uma tentativa de entrega """

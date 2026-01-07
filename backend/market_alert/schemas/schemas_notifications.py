@@ -105,6 +105,7 @@ class NotificationRead(BaseModel):
     last_attempt_at: datetime | None = None
     sent_at: datetime | None = None
     cooldown_expires_at: datetime | None = None
+    dead_lettered_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -113,6 +114,7 @@ class NotificationAttemptCreate(BaseModel):
     notification_id: UUID = Field(..., description="Identificador da notificação")
     attempt_number: int = Field(..., description="Número sequencial da tentativa")
     status: DeliveryStatus = Field(..., description="Resultado da tentativa")
+    provider_message_id: str | None = Field(None, description="Identificador do provedor")
     provider_response: dict[str, Any] | None = Field(None, description="Resposta do provedor")
     error_code: str | None = Field(None, description="Código de erro do provedor")
     error_message: str | None = Field(None, description="Mensagem de erro quando houver")
@@ -127,6 +129,7 @@ class NotificationAttemptRead(BaseModel):
     notification_id: UUID
     attempt_number: int
     status: DeliveryStatus
+    provider_message_id: str | None = None
     provider_response: dict[str, Any] | None = None
     error_code: str | None = None
     error_message: str | None = None

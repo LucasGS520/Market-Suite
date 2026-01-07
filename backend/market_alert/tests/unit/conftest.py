@@ -70,6 +70,13 @@ class FakeRedis:
 
     def zcard(self, redis_key):
         return len(self.data.get(redis_key, []))
+    
+    def eval(self, script, num_keys, redis_key, owner_id):
+        current_value = self.data.get(redis_key)
+        if current_value == owner_id:
+            del self.data[redis_key]
+            return 1
+        return 0
 
     def delete(self, redis_key):
         if redis_key in self.data:

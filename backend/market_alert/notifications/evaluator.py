@@ -6,10 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
-import json
+import re
 from typing import Any
 
 import structlog
+from email_validator import EmailNotValidError, validate_email
 from sqlalchemy.orm import Session
 
 from shared.metrics.metrics_notifications import (
@@ -114,6 +115,37 @@ def _resolve_channel_destination(
     
     return None
 
+def _is_valid_email(value: str | None) -> bool:
+    """ Valida se email segue formato correto e parseável """
+    if not value:
+        return False
+    try:
+        validate_email(value, check_deliverability=False)
+    except EmailNotValidError:
+        return False
+    return True
+
+def _is_valid_phone_number(value: str | None) -> bool:
+    """ Valida se o telefone segue o padrão E.164 básico """
+    if not value:
+        return False
+    return re.fullmatch(r"^\+\d{10,15}$", value) is not None
+
+def _is_channel_confirmed(
+    *,
+    channel: NotificationChannel,
+    user: User,
+    preference: UserNotificationPreference | None,
+) -> bool:
+    """ Confirma se o contato do canal está validado para envio """
+    if channel == NotificationChannel.email:
+        return user.is_email_verified
+    if channel in {NotificationChannel.sms, NotificationChannel.whatsapp}:
+        if preference and isinstance(preference.channel_metadata, dict):
+            return bool(preference.channel_metadata.get("confirmed"))
+        return False
+    return True
+
 def _cooldown_seconds(
     *,
     preference: UserNotificationPreference | None,
@@ -138,20 +170,14 @@ def _within_cooldown(
     elapsed = (now - last_sent_at).total_seconds()
     return elapsed < cooldown_seconds
 
-def _normalize_payload(payload: dict[str, Any]) -> str:
-    """ Normaliza o payload para gerar hash determinístico """
-    return json.dumps(payload, sort_keys=True, default=str)
-
 def _build_dedup_hash(
     *,
+    user_id: str,
     monitored_id: str,
     event_type: EventType,
-    channel: NotificationChannel,
-    payload: dict[str, Any],
 ) -> str:
     """ Gera hash de deduplicação para eventos equivalentes """
-    normalized = _normalize_payload(payload)
-    raw = f"{monitored_id}:{event_type.value}:{channel.value}:{normalized}"
+    raw = f"{user_id}:{monitored_id}:{event_type.value}"
     return sha256(raw.encode("utf-8")).hexdigest()
 
 def _resolve_priority(alert_rule: AlertRule | None) -> int:
@@ -227,6 +253,23 @@ def evaluate(
                 NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="missing_destination").inc()
                 continue
             
+            if channel == NotificationChannel.email:
+                if not user.is_email_verified:
+                    NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="email_unverified").inc()
+                    continue
+                if not _is_valid_email(recipient):
+                    NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="email_invalid").inc()
+                    continue
+                
+            if channel in {NotificationChannel.sms, NotificationChannel.whatsapp}:
+                if not _is_valid_phone_number(recipient):
+                    NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="phone_invalid").inc()
+                    continue
+                
+                if not _is_channel_confirmed(channel=channel, user=user, preference=preference):
+                    NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="phone_unverified").inc()
+                    continue
+            
             cooldown_seconds = _cooldown_seconds(
                 preference=preference,
                 alert_rule=alert_rule,
@@ -265,10 +308,9 @@ def evaluate(
                 "message": message,
             }
             dedup_hash = _build_dedup_hash(
+                user_id=str(user.id),
                 monitored_id=str(monitored.id),
                 event_type=event_type,
-                channel=channel,
-                payload=payload,
             )
 
             candidates.append(

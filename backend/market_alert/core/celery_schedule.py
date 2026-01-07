@@ -18,6 +18,7 @@ TASK_MODULES = [
     "market_alert.tasks.compare_prices_task",
     "market_alert.tasks.recheck_scheduler_task",
     "market_alert.tasks.notifications_enqueue_task",
+    "market_alert.tasks.send_notifications_task",
 ]
 
 #Exchanges separados para scraping e monitoramento
@@ -43,6 +44,10 @@ TASK_ROUTES = {
         "routing_key": "monitor",
     },
     "market_alert.tasks.notifications_enqueue_task.enqueue_notifications_task": {
+        "queue": "notifications",
+        "routing_key": "notifications",
+    },
+    "market_alert.tasks.send_notifications_task.send_notifications_task": {
         "queue": "notifications",
         "routing_key": "notifications",
     },

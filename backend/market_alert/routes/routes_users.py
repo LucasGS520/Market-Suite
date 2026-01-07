@@ -1,5 +1,6 @@
 """ Rotas HTTP para gerenciamento de usuários com autenticação e autorização """
 
+import re
 import structlog
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -26,6 +27,14 @@ def _validate_admin_permission(current_user: User) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permissão negada: apenas administradores"
         )
+    
+def _validate_phone_number(phone_number: str | None) -> None:
+    """ Confirma se o telefone foi informado no padrão E.164 """
+    if phone_number and not re.fullmatch(r"\+\d{10,15}", phone_number):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Número de telefone inválido, use o padrão E.164 (ex: +5511999999999)"
+        )
 
 #Valida se o email já existe, cria o usuário e retorna os dados
 @router.post("/", response_model=UserResponse)
@@ -36,6 +45,7 @@ def add_user(
 ):
     """ Endpoint público para criar um usuário """
     # Esta rota permanece aberta para permitir o cadastro inicial de usuários antes de qualquer autenticação
+    _validate_phone_number(user_data.phone_number)
     logger.info(
         "route_called",
         path=request.url.path,
@@ -78,6 +88,7 @@ def update_user(
 ):
     """ Endpoint para atualizar usuário """
     _validate_admin_permission(current_user)
+    _validate_phone_number(updates.phone_number)
     logger.info(
         "route_called",
         path=request.url.path,

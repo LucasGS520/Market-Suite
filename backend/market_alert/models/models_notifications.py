@@ -149,6 +149,7 @@ class Notification(Base):
     last_attempt_at = Column(DateTime(timezone=True), nullable=True)
     sent_at = Column(DateTime(timezone=True), nullable=True)
     cooldown_expires_at = Column(DateTime(timezone=True), nullable=True)
+    dead_lettered_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -173,6 +174,7 @@ class NotificationAttempt(Base):
     )
     attempt_number = Column(Integer, nullable=False)
     status = Column(PgEnum(DeliveryStatus, name="delivery_status_enum"), nullable=False)
+    provider_message_id = Column(String(255), nullable=True)
     provider_response = Column(JSON, nullable=True)
     error_code = Column(String(120), nullable=True)
     error_message = Column(Text, nullable=True)

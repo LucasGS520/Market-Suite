@@ -1,6 +1,6 @@
 """ Métricas Prometheus para fluxos de notificações e alertas. """
 
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
 
 
 NOTIFICATION_EVENTS_TOTAL = Counter(
@@ -34,9 +34,40 @@ NOTIFICATION_DISPATCH_TOTAL = Counter(
 )
 
 NOTIFICATION_ATTEMPTS_TOTAL = Counter(
-    "notification_attempts_total",
+    "notification_attempts_total",  
     "Total de tentativas de envio por canal e resultado",
     ["channel", "outcome"],
+)
+
+NOTIFICATIONS_SENT_TOTAL = Counter(
+    "notifications_sent_total",
+    "Total de notificações enviadas com sucesso",
+    ["channel"],
+)
+
+NOTIFICATIONS_FAILED_TOTAL = Counter(
+    "notifications_failed_total",
+    "Total de notificações com falha permanente",
+    ["channel", "reason"],
+)
+
+NOTIFICATIONS_RETRIED_TOTAL = Counter(
+    "notifications_retried_total",
+    "Total de notificações reenfileiradas para retry",
+    ["channel"],
+)
+
+NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL = Counter(
+    "notifications_dedupe_skipped_total",
+    "Total de notificações ignoradas por dedupe/cooldown",
+    ["reason"],
+)
+
+NOTIFICATIONS_SEND_LATENCY_SECONDS = Histogram(
+    "notifications_send_latency_seconds",
+    "Latência de envio de notificações em segundos",
+    ["channel", "outcome"],
+    buckets=(0.1, 0.25, 0.5, 1, 2, 5, 10),
 )
 
 __all__ = [
@@ -46,4 +77,9 @@ __all__ = [
     "NOTIFICATION_IDEMPOTENCY_HITS_TOTAL",
     "NOTIFICATION_DISPATCH_TOTAL",
     "NOTIFICATION_ATTEMPTS_TOTAL",
+    "NOTIFICATIONS_SENT_TOTAL",
+    "NOTIFICATIONS_FAILED_TOTAL",
+    "NOTIFICATIONS_RETRIED_TOTAL",
+    "NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL",
+    "NOTIFICATIONS_SEND_LATENCY_SECONDS",
 ]

@@ -67,13 +67,13 @@ class UserUpdate(BaseModel):
             raise ValueError("O nome não pode conter números.")
         return value
 
-    #Valida o telefone (aceita DDD e 8 ou 9 dígitos)
+    #Valida o telefone no padrão E.164
     @field_validator("phone_number")
     @classmethod
     def validate_phone(cls, value):
-        """ Valida se o número de telefone tem entre 10 e 11 dígitos numéricos """
-        if value and not re.fullmatch(r"\d{10,11}", value):
-            raise ValueError("Número de telefone inválido, use apenas números")
+        """ Valida se o número de telefone segue o padrão E.164 """
+        if value and not re.fullmatch(r"\+\d{10,15}", value):
+            raise ValueError("Número de telefone inválido.")
         return value
 
     model_config = ConfigDict(from_attributes=True)

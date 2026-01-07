@@ -26,6 +26,8 @@ services:
         condition: service_started
       celery-worker:
         condition: service_started
+      celery-worker-notifications:
+        condition: service_started
     networks:
       - monitoring-net
 
@@ -206,7 +208,7 @@ services:
       - "market_alert.core.celery_app:celery_app"
       - "worker"
       - "--loglevel=info"
-      - "--pool=threads"
+      - "--pool=prefork"
       - "--concurrency=4"
       - "-Q"
       - "celery,scraping,monitor"
@@ -230,6 +232,45 @@ services:
     networks:
       - monitoring-net
 
+  #Worker do Celery dedicado ao envio de notificações
+  celery-worker-notifications:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
+    command:
+      - celery
+      - "-A"
+      - "market_alert.core.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=2"
+      - "-Q"
+      - "notifications"
+    user:
+      "1000:1000"
+    ports:
+      - "8003:8002"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro
+    networks:
+      - monitoring-net
 
   #Serviço dedicado ao scraping de produtos
   market_scraper:
