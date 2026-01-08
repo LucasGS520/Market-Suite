@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Integer,
+    Enum,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID #UUID e uuid.uuid4 gera identificadores unicos (id)
 from sqlalchemy.orm import relationship
@@ -17,6 +18,7 @@ from sqlalchemy.orm import relationship
 from shared.infra.db import Base
 from market_alert.core.password import hash_password, verify_password
 from market_alert.models.models_refresh_token import RefreshToken
+from market_alert.enums.enums_users import UserStatus
 
 
 class User(Base):
@@ -31,11 +33,15 @@ class User(Base):
     name = Column(String(70), nullable=False) #Nome do usuário com até 70 caracteres e sendo um campo obrigatório
     email = Column(String(255), unique=True, index=True, nullable=False) #Email do usuário com até 255 caracteres, sendo um campo obrigatório e unico
     password = Column(LargeBinary, nullable=False) #Senha do usuário armazenado em formato binario
-
-    #Segurança
     phone_number = Column(String(20), unique=True) #Numero de telefone do usuário ate 20 caracteres e unico
+    
+    #Segurança e Verificação
+    phone_number_verified = Column(Boolean, default=False) #Verificação do telefone
+    phone_verified_at = Column(DateTime(timezone=True), nullable=True) #Data de verificação do telefone
+    email_verified = Column(Boolean, default=False) #Verificação do email
+    email_verified_at = Column(DateTime(timezone=True), nullable=True) #Data de verificação do email
+    status = Column(Enum(UserStatus, name="user_status"), default=UserStatus.pending, nullable=False) #Status de verificação
     is_active = Column(Boolean, default=True) #Usuario ativo ou bloqueado
-    is_email_verified = Column(Boolean, default=False) #Verificação do email
     role = Column(String(20), default="user") #Função do usuário
     updated_by = Column(PG_UUID(as_uuid=True), nullable=True) #ID de quem atualizou o usuário
 

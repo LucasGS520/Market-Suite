@@ -19,6 +19,7 @@ TASK_MODULES = [
     "market_alert.tasks.recheck_scheduler_task",
     "market_alert.tasks.notifications_enqueue_task",
     "market_alert.tasks.send_notification_task",
+    "market_alert.tasks.verification_tasks",
 ]
 
 #Exchanges separados para scraping e monitoramento
@@ -51,8 +52,15 @@ TASK_ROUTES = {
         "queue": "notifications",
         "routing_key": "notifications",
     },
+    "market_alert.tasks.verification_tasks.send_email_verification": {
+        "queue": "notifications",
+        "routing_key": "notifications",
+    },
+    "market_alert.tasks.verification_tasks.send_phone_otp": {
+        "queue": "notifications",
+        "routing_key": "notifications",
+    },
 }
-
 
 def _schedule_entry(task: str, schedule, *, queue: str = "monitor", routing_key: str | None = None) -> dict:
     """Cria uma entrada de agendamento consistente para o Beat."""

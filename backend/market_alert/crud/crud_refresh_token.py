@@ -1,6 +1,5 @@
 """ Operações de CRUD para gerenciamento de Refresh Tokens """
 
-import hashlib
 import secrets
 import structlog
 
@@ -10,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
+from market_alert.core.tokens import hash_token
 from market_alert.models.models_refresh_token import RefreshToken
 
 
@@ -19,12 +19,18 @@ def create_refresh_token(db: Session, user_id: str, ip: str, user_agent: str) ->
     """ Gera e salva um novo Refresh Token para o usuário """
     #Gera o token hasheado
     raw_token = secrets.token_urlsafe(32)
-    hashed = hashlib.sha256(raw_token.encode()).hexdigest()
+    hashed = hash_token(raw_token)
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
     #Cria instância e salva
-    refresh = RefreshToken(user_id=user_id, hashed_token=hashed, ip_address=ip, user_agent=user_agent, expires_at=expires)
+    refresh = RefreshToken(
+        user_id=user_id,
+        token_hash=hashed,
+        ip_address=ip,
+        user_agent=user_agent,
+        expires_at=expires,
+    )
     db.add(refresh)
     db.commit()
     db.refresh(refresh)
@@ -34,10 +40,10 @@ def create_refresh_token(db: Session, user_id: str, ip: str, user_agent: str) ->
 
 def get_refresh_token(db: Session, raw_token: str) -> Optional[RefreshToken]:
     """ Recupera um Refresh Token a partir do valor informado """
-    hashed = hashlib.sha256(raw_token.encode()).hexdigest()
+    hashed = hash_token(raw_token)
     refresh = (
         db.query(RefreshToken)
-        .filter(RefreshToken.hashed_token == hashed)
+        .filter(RefreshToken.token_hash == hashed)
         .filter(RefreshToken.revoked.is_(False))
         .first()
     )
@@ -57,6 +63,7 @@ def revoke_refresh_token(db: Session, refresh: RefreshToken) -> None:
         return
 
     refresh.revoked = True
+    refresh.revoked_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("refresh_token_revoked", token_id=str(refresh.id), user_id=str(refresh.user_id))
 

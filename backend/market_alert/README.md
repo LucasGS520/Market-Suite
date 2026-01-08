@@ -32,8 +32,13 @@ market_alert/
 ## Endpoints e Fluxos Relevantes
 | Método | Rota / Fluxo | Descrição |
 |--------|--------------|-----------|
-| `POST` | `/auth` | Autenticação via formulário e emissão de JWT. |
+| `POST` | `/auth/login` | Autenticação via formulário e emissão de JWT. |
 | `POST` | `/auth/refresh` | Renova token de acesso ativo. |
+| `POST` | `/auth/verify-email` | Confirma verificação de email via token. |
+| `POST` | `/auth/verify-phone` | Confirma OTP de telefone. |
+| `POST` | `/auth/logout` | Revoga o refresh token informado. |
+| `POST` | `/users` | Cadastro de usuário pendente com verificação. |
+| `POST` | `/users/resend-verification` | Reenvia verificação de email ou telefone. |
 | `GET` | `/monitored` | Lista monitorados usando envelope `{ items, meta }` com filtros `page`, `per_page`, `query` e `status`. O parâmetro `per_page` é opcional e, quando omitido, retorna todos os itens dentro do limite defensivo aplicado pela API.  |
 | `GET` | `/monitored/{id}` | Retorna detalhes do monitorado com `owner_id`, `thumbnail`, `current_price` (`Decimal` serializado) e datas derivadas (`created_at`, `last_price_change_at`). |
 | `GET` | `/monitored/featured` | Retorna até 3 monitorados em destaque respeitando `is_featured` e ordenação configurada. |
@@ -82,6 +87,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 |-----------|----------------------|
 | Banco de dados | `DATABASE_URL` |
 | Autenticação | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` |
+| Verificação | `EMAIL_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_MAX_ATTEMPTS`, `VERIFICATION_RESEND_INTERVAL_SECONDS`, `VERIFICATION_RESEND_MAX_PER_HOUR`, `REGISTRATION_MAX_PER_HOUR` |
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |

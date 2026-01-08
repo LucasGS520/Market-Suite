@@ -7,12 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
-from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpdate
+from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpdate, VerificationResendRequest
 from market_alert.models.models_users import User
 from market_alert.core.security import get_current_user
 from market_alert.services.services_users import (
     change_user_status,
-    create_user,
+    register_user,
+    resend_verification,
     update_user as service_update_user,
 )
 
@@ -30,10 +31,10 @@ def _validate_admin_permission(current_user: User) -> None:
     
 def _validate_phone_number(phone_number: str | None) -> None:
     """ Confirma se o telefone foi informado no padrão E.164 """
-    if phone_number and not re.fullmatch(r"\+\d{10,15}", phone_number):
+    if phone_number and not re.fullmatch(r"\+?\d{10,15}", phone_number):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Número de telefone inválido, use o padrão E.164 (ex: +5511999999999)"
+            detail="Número de telefone inválido"
         )
 
 #Valida se o email já existe, cria o usuário e retorna os dados
@@ -52,7 +53,7 @@ def add_user(
         method=request.method,
         email=user_data.email,
     )
-    user = create_user(db, user_data)
+    user = register_user(db, user_data, request)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(user.id))
     return user
 
@@ -106,3 +107,16 @@ def read_my_profile(request: Request, current_user: User = Depends(get_current_u
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(current_user.id))
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(current_user.id))
     return current_user
+
+@router.post("/resend-verification")
+def resend_verification_tokens(
+    request: Request,
+    payload: VerificationResendRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """ Endpoint para reenviar tokens de verificação """
+    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(current_user.id))
+    resend_verification(db, current_user, payload, request)
+    logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(current_user.id))
+    return {"msg": "Verificação reenviada com sucesso."}

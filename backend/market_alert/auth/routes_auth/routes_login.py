@@ -14,7 +14,7 @@ from market_alert.auth.services_auth import login_user
 logger = structlog.get_logger("route.auth.login")
 router = APIRouter(prefix="/auth", tags=["Autenticação"])
 
-@router.post("/", response_model=TokenPairResponse)
+@router.post("/login", response_model=TokenPairResponse)
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """ Autentica o usuário e retorna um JWT. Aplica bloqueio de IP e registro de tentativas """
     logger.info("login_route_called", ip=request.client.host, email=form_data.username)

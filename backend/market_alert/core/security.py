@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from market_alert.core.jwt import verify_access_token
 from shared.infra.db import get_db
 from market_alert.models.models_users import User
+from market_alert.enums.enums_users import UserStatus
 
 
 logger = structlog.get_logger("core.security")
@@ -57,6 +58,12 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(o
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuário inativo"
+        )
+    if getattr(user, "status", None) == UserStatus.suspended:
+        logger.warning("user_suspended", user_id=user_uuid)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuário suspenso"
         )
     return user
 

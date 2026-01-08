@@ -139,7 +139,7 @@ def _is_channel_confirmed(
 ) -> bool:
     """ Confirma se o contato do canal está validado para envio """
     if channel == NotificationChannel.email:
-        return user.is_email_verified
+        return user.email_verified
     if channel in {NotificationChannel.sms, NotificationChannel.whatsapp}:
         if preference and isinstance(preference.channel_metadata, dict):
             return bool(preference.channel_metadata.get("confirmed"))
@@ -254,7 +254,7 @@ def evaluate(
                 continue
             
             if channel == NotificationChannel.email:
-                if not user.is_email_verified:
+                if not user.email_verified:
                     NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="email_unverified").inc()
                     continue
                 if not _is_valid_email(recipient):

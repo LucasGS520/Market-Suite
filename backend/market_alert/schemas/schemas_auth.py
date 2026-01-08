@@ -48,6 +48,12 @@ class EmailTokenRequest(BaseModel):
 
     token: str = Field(..., min_length=6, description="Token gerado para verificação ou reset")
 
+class PhoneOtpRequest(BaseModel):
+    """ Esquema para confirmar OTP de telefone """
+    model_config = ConfigDict()
+
+    user_id: str = Field(..., description="Identificador do usuário")
+    otp: str = Field(..., min_length=6, max_length=6, description="Código OTP enviado por SMS")
 
 class ResetPasswordRequest(BaseModel):
     """ Esquema para solicitar reset da senha """

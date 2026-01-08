@@ -7,7 +7,7 @@ from fastapi import HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from market_alert.crud.crud_refresh_token import create_refresh_token, get_refresh_token, revoke_refresh_token
-from market_alert.crud.crud_user import get_user_by_email
+from market_alert.crud.crud_user import get_user_by_email, get_user_by_phone, get_user_by_id
 from market_alert.core.bruteforce import block_ip, reset_failed_attempts, record_failed_attempt
 from market_alert.core.jwt import create_access_token
 from market_alert.core.tokens import generate_verification_token, generate_reset_token, token_expiry
@@ -20,13 +20,16 @@ from market_alert.schemas.schemas_auth import (
 )
 from market_alert.schemas.schemas_auth import TokenPairResponse, RefreshRequest
 from market_alert.models.models_users import User
+from market_alert.enums.enums_users import UserStatus
 
 
 logger = structlog.get_logger("service.auth")
 
-def authenticate_user(db: Session, email: str, password: str) -> User | None:
+def authenticate_user(db: Session, identifier: str, password: str) -> User | None:
     """ Verifica credenciais e retorna o usuário se forem válidas """
-    user = get_user_by_email(db, email)
+    user = get_user_by_email(db, identifier)
+    if not user:
+        user = get_user_by_phone(db, identifier)
     if user and user.check_password(password):
         return user
     return None
@@ -45,7 +48,7 @@ def login_user(request: Request, db: Session, username: str, password: str) -> T
         record_failed_attempt(request)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail ou senha inválidos", headers={"WWW-Authenticate": "Bearer"})
 
-    if not user.is_active:
+    if not user.is_active or user.status == UserStatus.suspended:
         logger.warning("login_inactive", ip=ip, email=email)
         record_failed_attempt(request)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário desativado. Contate o administrador")
@@ -59,7 +62,16 @@ def login_user(request: Request, db: Session, username: str, password: str) -> T
 
     logger.info("login_success", user_id=str(user.id), ip=ip)
 
-    token = create_access_token({"sub": str(user.id), "jti": str(uuid4())})
+    token = create_access_token(
+        {
+            "sub": str(user.id),
+            "jti": str(uuid4()),
+            "email_verified": user.email_verified,
+            "phone_verified": user.phone_number_verified,
+            "roles": [user.role],
+            "status": user.status.value,
+        }
+    )
     raw_refresh, refresh = create_refresh_token(
         db, str(user.id), request.client.host, request.headers.get("user-agent", "")
     )
@@ -82,7 +94,8 @@ def confirm_email_verification_service(db: Session, request_model: EmailTokenReq
         logger.warning("verification_failed", token=token)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token inválido")
 
-    user.is_email_verified = True
+    user.email_verified = True
+    user.email_verified_at = datetime.now(timezone.utc)
     user.verification_token = None
     db.commit()
     logger.info("verification_success", user_id=str(user.id))
@@ -139,7 +152,8 @@ def change_email_service(db: Session, current_user: User, request_model: ChangeE
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Este e-mail já está em uso")
 
     current_user.email = new_email
-    current_user.is_email_verified = False
+    current_user.email_verified = False
+    current_user.email_verified_at = None
     db.commit()
     logger.info("change_email_success", user_id=str(current_user.id), email=new_email)
 
@@ -159,7 +173,17 @@ def refresh_token_service(db: Session, payload: RefreshRequest, request: Request
     new_raw, new_refresh = create_refresh_token(db, str(refresh.user_id), request.client.host, request.headers.get("user-agent", ""))
 
     #Gera novo access token com jti unico
-    access_token = create_access_token({"sub": str(refresh.user_id), "jti": str(uuid4())})
+    user = get_user_by_id(db, refresh.user_id)
+    access_token = create_access_token(
+        {
+            "sub": str(refresh.user_id),
+            "jti": str(uuid4()),
+            "email_verified": user.email_verified,
+            "phone_verified": user.phone_number_verified,
+            "roles": [user.role],
+            "status": user.status.value,
+        }
+    )
 
     logger.info("refresh_success", user_id=str(refresh.user_id), old_id=str(refresh.id), new_token_id=str(new_refresh.id), ip=request.client.host)
 

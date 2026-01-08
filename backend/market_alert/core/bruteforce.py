@@ -61,3 +61,26 @@ def reset_failed_attempts(request: Request) -> None:
     except Exception:
         #Falha de comunicação torna a limpeza impossível
         logger.exception("redis_unavailable_in_reset", ip=ip)
+
+def enforce_rate_limit(
+    *,
+    key: str,
+    max_attempts: int,
+    window_seconds: int,
+    error_message: str,
+) -> None:
+    """ Aplica limite de requisições usando contadores Redis """
+    try:
+        attempts = redis_client.incr(key)
+        if attempts == 1:
+            redis_client.expire(key, window_seconds)
+        if attempts > max_attempts:
+            logger.warning("rate_limit_exceeded", key=key, attempts=attempts)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=error_message,
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("redis_unavailable_in_rate_limit", key=key)

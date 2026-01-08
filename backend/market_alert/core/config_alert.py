@@ -174,6 +174,9 @@ class Settings(ConfigBase):
     NOTIFICATION_EMAIL_PROVIDER: str = os.getenv(
         "NOTIFICATION_EMAIL_PROVIDER", "mock"
     ) #Provider de email configurado (smtp/sendgrid/mock)
+    NOTIFICATION_SMS_PROVIDER: str = os.getenv(
+        "NOTIFICATION_SMS_PROVIDER", "mock"
+    ) #Provider de SMS configurado
     NOTIFICATION_EMAIL_SENDER: str = os.getenv(
         "NOTIFICATION_EMAIL_SENDER", "alerts@marketsuite.local"
     ) #Remetente padrão de emails
@@ -183,6 +186,26 @@ class Settings(ConfigBase):
     NOTIFICATION_PUSH_PROVIDER: str = os.getenv(
         "NOTIFICATION_PUSH_PROVIDER", "mock"
     ) #Provider de push configurado
+
+    #Verificação de cadastro
+    EMAIL_VERIFICATION_EXPIRE_MINUTES: int = int(
+        os.getenv("EMAIL_VERIFICATION_EXPIRE_MINUTES", "60")
+    ) #Validade do token de email em minutos
+    PHONE_VERIFICATION_EXPIRE_MINUTES: int = int(
+        os.getenv("PHONE_VERIFICATION_EXPIRE_MINUTES", "10")
+    ) #Validade do OTP do telefone em minutos
+    PHONE_VERIFICATION_MAX_ATTEMPTS: int = int(
+        os.getenv("PHONE_VERIFICATION_MAX_ATTEMPTS", "5")
+    ) #Tentativas permitidas para OTP
+    VERIFICATION_RESEND_INTERVAL_SECONDS: int = int(
+        os.getenv("VERIFICATION_RESEND_INTERVAL_SECONDS", "60")
+    ) #Intervalo mínimo entre reenvios
+    VERIFICATION_RESEND_MAX_PER_HOUR: int = int(
+        os.getenv("VERIFICATION_RESEND_MAX_PER_HOUR", "5")
+    ) #Limite de reenvios por hora
+    REGISTRATION_MAX_PER_HOUR: int = int(
+        os.getenv("REGISTRATION_MAX_PER_HOUR", "5")
+    ) #Limite de cadastros por hora por IP
 
 #Instância única de settings para a aplicação
 settings = Settings()

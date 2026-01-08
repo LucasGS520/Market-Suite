@@ -26,11 +26,12 @@ class RefreshToken(Base):
     user_id = Column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     ip_address = Column(String(45), nullable=False)
     user_agent = Column(String(512), nullable=False)
-    hashed_token = Column(String(128), nullable=False, unique=True, index=True)
+    token_hash = Column(String(128), nullable=False, unique=True, index=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     revoked = Column(Boolean, default=False, nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
 
     #Relacionamento de volta para usuário
     user = relationship("User", back_populates="refresh_tokens", lazy="joined")
