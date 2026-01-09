@@ -1,5 +1,6 @@
 """ Aplicação principal FastAPI com configuração de métricas e rotas """
 
+import os
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 try:
@@ -98,19 +99,27 @@ logger = structlog.get_logger("marketalert")
 #Rate limiter configurado por IP
 limiter = Limiter(key_func=get_remote_address)
 
+def _get_dev_allowed_origins() -> list[str]:
+    """ Retorna origens permitidas em dev alinhadas ao frontend em uso """
+    env_origins = os.getenv("DEV_ALLOWED_ORIGINS")
+    if env_origins:
+        #Permite alinhar exatamente com o host/porta do frontend via .env
+        return [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+    return [
+        #URL do servidor Vite em modo desenvolvimento
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        # IP da máquina que serve o frontend na rede local (ex.: seu servidor)
+        "http://192.168.15.150:5173",
+        #URL do servidor Express utilizado no build de produção local
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        # Frontend servido a partir do IP (possível variação de porta)
+        "http://192.168.15.150:3000",
+    ]
+
 #Origens liberadas em desenvolviemento para permitir cominicação frontend/backend
-DEV_ALLOWED_ORIGINS = [
-    #URL do servidor Vite em modo desenvolvimento
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    # IP da máquina que serve o frontend na rede local (ex.: seu servidor)
-    "http://192.168.15.150:5173",
-    #URL do servidor Express utilizado no build de produção local
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    # Frontend servido a partir do IP (possível variação de porta)
-    "http://192.168.15.150:3000",
-]
+DEV_ALLOWED_ORIGINS = _get_dev_allowed_origins()
 
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """ Handler global para requisição excessiva """

@@ -56,10 +56,13 @@ class Settings(ConfigBase):
     REFRESH_TOKEN_COOKIE_SECURE: bool = os.getenv(
         "REFRESH_TOKEN_COOKIE_SECURE",
         "1",
-    ) == "1" #Marca Secure habilitada por padrão
-    REFRESH_TOKEN_COOKIE_SAMESITE: str = os.getenv(
-        "REFRESH_TOKEN_COOKIE_SAMESITE",
-        "strict",
+    ).lower() in {"1", "true", "yes", "on"} #Marca Secure habilitada por padrão
+    _refresh_cookie_samesite_env = os.getenv("REFRESH_TOKEN_COOKIE_SAMESITE")
+    #Mantém SameSite alinhado ao ambiente quando a variável não estiver declarada
+    REFRESH_TOKEN_COOKIE_SAMESITE: str = (
+        _refresh_cookie_samesite_env.strip().lower()
+        if _refresh_cookie_samesite_env
+        else ("none" if not REFRESH_TOKEN_COOKIE_SECURE else "strict")
     ) #Política SameSite do cookie de refresh
 
     #Intervalo base utilizado pelo AdaptiveRecheckManager

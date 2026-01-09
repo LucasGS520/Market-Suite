@@ -83,10 +83,14 @@ market_alert/
 ## Configuração
 Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e podem ser sobrescritas via `market_alert/.env.market_alert`.
 
+### Cookies de refresh em ambiente local
+- Para frontend rodando em outro host/porta HTTP, defina `REFRESH_TOKEN_COOKIE_SECURE=0` e `REFRESH_TOKEN_COOKIE_SAMESITE=none`.
+- Ajuste `REFRESH_TOKEN_COOKIE_NAME` e `REFRESH_TOKEN_COOKIE_PATH` apenas se houver necessidade de múltiplos ambientes ou rotas específicas.
+
 | Categoria | Variáveis relevantes |
 |-----------|----------------------|
 | Banco de dados | `DATABASE_URL` |
-| Autenticação | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS` |
+| Autenticação | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `REFRESH_TOKEN_COOKIE_NAME`, `REFRESH_TOKEN_COOKIE_PATH`, `REFRESH_TOKEN_COOKIE_SECURE`, `REFRESH_TOKEN_COOKIE_SAMESITE` |
 | Verificação | `EMAIL_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_MAX_ATTEMPTS`, `VERIFICATION_RESEND_INTERVAL_SECONDS`, `VERIFICATION_RESEND_MAX_PER_HOUR`, `REGISTRATION_MAX_PER_HOUR` |
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
@@ -148,6 +152,11 @@ TWILIO_WHATSAPP_FROM=whats_twilio
 FCM_SERVER_KEY=chave_fcm
 SLACK_WEBHOOK_URL=url_slack
 SECRET_KEY=chave_secreta_jwt
+
+REFRESH_TOKEN_COOKIE_NAME=refresh_token
+REFRESH_TOKEN_COOKIE_PATH=/auth/refresh
+REFRESH_TOKEN_COOKIE_SECURE=0
+REFRESH_TOKEN_COOKIE_SAMESITE=none
 
 ADAPTIVE_RECHECK_BASE_INTERVAL=7200
 SCRAPER_SERVICE_URL=url_servico_scraping

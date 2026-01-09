@@ -82,7 +82,7 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
   - `frontend/.env`
  Em Docker, a variável `ENV_FILE` já aponta para o arquivo correto de cada serviço.
 - Boas práticas: não commitar segredos; use valores dummy em exemplos; evite imprimir variáveis sensíveis em logs.
-- Auth cookies: ajuste `REFRESH_TOKEN_COOKIE_SECURE=0` em ambientes HTTP locais. Para fallback sem cookie HttpOnly, defina `VITE_AUTH_REFRESH_STORAGE=cookie` no frontend.
+- Auth cookies: em HTTP local com frontend em outro host/porta, ajuste `REFRESH_TOKEN_COOKIE_SECURE=0` e `REFRESH_TOKEN_COOKIE_SAMESITE=none`. Para fallback sem cookie HttpOnly, defina `VITE_AUTH_REFRESH_STORAGE=cookie` no frontend.
 
 ## Testes e qualidade
 - Backend: `pytest backend/market_alert -q`, `pytest backend/market_scraper -q` e demais testes em `backend/shared/tests`.

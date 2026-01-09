@@ -44,6 +44,7 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Mantém cookies HttpOnly ativos para refresh; fallback usa storage quando configurado
   withCredentials: true,
 });
 
