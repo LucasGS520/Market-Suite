@@ -13,6 +13,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 // Páginas
 import Login from './pages/Login';
 import Register from './pages/Register';
+import VerifyEmail from './pages/VerifyEmail';
+import VerifyPhone from './pages/VerifyPhone';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
 import ProductDetail from './pages/ProductDetail';
@@ -92,6 +94,8 @@ const App: React.FC = () => {
                 {/* Rotas públicas (acesso sem autenticação) */}
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                <Route path="/verify-email" element={<VerifyEmail />} />
+                <Route path="/verify-phone" element={<VerifyPhone />} />
 
                 {/* Rotas protegidas (requerem autenticação) */}
                 <Route

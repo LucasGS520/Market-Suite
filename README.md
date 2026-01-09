@@ -74,13 +74,13 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 
 | Componente | Responsabilidade |
 |------------|------------------|
-| **Aplicação React 18** (`frontend/client/`) | constrói telas, gerencia rotas e estado global via Context API, `@tanstack/react-query` e `react-hook-form` |
-| **Camada de API** (`frontend/client/src/lib/api.ts`) | centraliza chamadas HTTP, tratamento de erros e renovação de tokens |
+| **Aplicação React 18** (`frontend/src/`) | constrói telas, gerencia rotas e estado global via Context API e `@tanstack/react-query` |
+| **Camada de API** (`frontend/src/lib/api.ts`) | centraliza chamadas HTTP, tratamento de erros e renovação de tokens |
 | **Servidor Express** (`frontend/server/index.ts`) | serve os artefatos estáticos gerados pelo Vite em ambientes de produção |
 
 #### Fluxo interno do frontend
-1. **Bootstrap**: o Vite carrega a aplicação React, inicializa `AuthContext` e restaura sessão usando `localStorage`.
-2. **Autenticação**: formulários de login utilizam `react-hook-form` + `zod`; em caso de sucesso, o token JWT é salvo e utilizado pelo cliente HTTP padrão.
+1. **Bootstrap**: o Vite carrega a aplicação React, inicializa `AuthContext` e tenta renovar sessão via `/auth/refresh` usando cookie HttpOnly quando disponível.
+2. **Autenticação**: formulários de login geram `access_token` em memória; o refresh token fica preferencialmente em cookie HttpOnly para reduzir exposição local.
 3. **Consumo de dados**: hooks do `react-query` buscam produtos monitorados, concorrentes e comparações via endpoints do backend, mantendo cache e estados de carregamento.
 4. **Ações do usuário**: interações como cadastro de monitoramentos, disparo de coletas e atualização de perfil chamam serviços da API e exibem feedback em toasts/modal.
 5. **Dashboard de indicadores**: com indicadores consolidados, utilizando componentes responsivos baseados em Radix UI.
@@ -92,13 +92,16 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 - **Isolamento de mock**: a aplicação pode rodar com mocks locais para demonstração sem depender do backend, útil para testes de UI.
 - **Paginação ajustável na listagem de produtos**: a tela de Produtos controla paginação no cliente, oferecendo 5/10/25 itens por página ou carregamento total (200 itens) em modo tabela; o backend apenas responde aos parâmetros `page` e `per_page` sem impor lógicas adicionais.
 - **Prioridades de status e competitividade**: anúncios indisponíveis são tratados como `Inativo` (incluindo sinais em `last_status`), `Pausado` só aparece quando o monitoramento foi suspenso manualmente com anúncio disponível e estados competitivos (`Competitivo`/`Atenção`/`Urgente`) só são exibidos quando há pelo menos um concorrente com preço. Na ausência de concorrentes, a UI exibe `Sem concorrentes`.
+- **Tokens em memória**: `access_token` fica somente em memória. Para fallback sem cookie HttpOnly, configure `VITE_AUTH_REFRESH_STORAGE=cookie`.
 
 
 ## Integração frontend ⇄ backend
-- **Protocolos**: comunicação ocorre via HTTP/JSON sobre HTTPS (em produção). O cliente padrão (`frontend/client/src/lib/api.ts`) injeta o token JWT no header `Authorization`.
-- **Configuração de endpoints**: a variável `VITE_FRONTEND_FORGE_API_URL` define a URL base; em desenvolvimento local, o padrão é `http://localhost:8000/` (API do `market_alert`).
-- **Fluxos suportados**: autenticação, CRUD de produtos monitorados, listagem de concorrentes, disparo manual de coletas e consulta de comparações consolidadas.
-- **Tratamento de sessões**: o frontend revalida tokens ao carregar (`/users/me`) e redireciona para login quando recebe `401`.
+- **Protocolos**: comunicação ocorre via HTTP/JSON sobre HTTPS (em produção). O cliente padrão (`frontend/src/lib/api.ts`) injeta o token JWT no header `Authorization`.
+- **Configuração de endpoints**: a variável `VITE_API_URL` define a URL base; em desenvolvimento local, o padrão é `http://localhost:8000/` (API do `market_alert`).
+- **Fluxos suportados**: autenticação, verificação de email/telefone, CRUD de produtos monitorados, listagem de concorrentes, disparo manual de coletas e consulta de comparações consolidadas.
+- **Tratamento de sessões**: o frontend tenta refresh ao receber `401` e reutiliza o cookie HttpOnly de refresh quando configurado.
+- **CORS/credenciais**: para usar cookie HttpOnly, o backend precisa permitir `Access-Control-Allow-Credentials` e o frontend envia `credentials: include`.
+- **Cookies de refresh**: parâmetros do backend são configuráveis via `REFRESH_TOKEN_COOKIE_NAME`, `REFRESH_TOKEN_COOKIE_PATH`, `REFRESH_TOKEN_COOKIE_SECURE` e `REFRESH_TOKEN_COOKIE_SAMESITE`.
 - **Fallbacks**: componentes sem endpoint definitivo utilizam dados mock; a integração deve ser atualizada quando novos recursos REST forem publicados.
 
 ---

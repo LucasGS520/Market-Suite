@@ -1,7 +1,8 @@
-import React, { useState, useEffect, ReactNode } from 'react';
+import React, { useEffect, useRef, useState, ReactNode } from 'react';
 import { authService } from '../services/authService';
 import { AuthContext, AuthContextType } from './AuthContext';
 import { User } from '../types';
+import { clearAccessToken, getAccessToken } from '../utils/authTokens';
 
 /**
  * Provider responsável por manter o estado de autenticação da aplicação.
@@ -15,9 +16,78 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Estado do usuário atualmente autenticado (ou null se não houver)
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof sessionStorage === 'undefined') {
+      return null;
+    }
+    const cached = sessionStorage.getItem('auth_user');
+    if (!cached) {
+      return null;
+    }
+    try {
+      return JSON.parse(cached) as User;
+    } catch {
+      return null;
+    }
+  });
+  // Access token mantido em memória para evitar persistência insegura
+  const [accessToken, setAccessTokenState] = useState<string | null>(getAccessToken());
   // Indica se alguma operação de autenticação/recuperação está em andamento
   const [isLoading, setIsLoading] = useState(true);
+  const refreshTimeoutRef = useRef<number | null>(null);
+
+  /**
+   * Atualiza o cache local do usuário sem persistir tokens
+   */
+  const persistUser = (nextUser: User | null) => {
+    setUser(nextUser);
+    if (typeof sessionStorage === 'undefined') {
+      return;
+    }
+    if (nextUser) {
+      sessionStorage.setItem('auth_user', JSON.stringify(nextUser));
+    } else {
+      sessionStorage.removeItem('auth_user');
+    }
+  };
+
+  /**
+   * Decodifica o payload do JWT para extrair a data de expiração
+   */
+  const parseJwtPayload = (token: string): { exp?: number } | null => {
+    const [, payload] = token.split('.');
+    if (!payload) {
+      return null;
+    }
+    try {
+      const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+      return JSON.parse(decoded) as { exp?: number };
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Agenda refresh automático do token com base no exp do JWT
+   */
+  const scheduleTokenRefresh = (token: string | null) => {
+    if (refreshTimeoutRef.current) {
+      window.clearTimeout(refreshTimeoutRef.current);
+      refreshTimeoutRef.current = null;
+    }
+    if (!token) {
+      return;
+    }
+    const payload = parseJwtPayload(token);
+    if (!payload?.exp) {
+      return;
+    }
+    const refreshAt = payload.exp * 1000 - 60 * 1000;
+    const delay = Math.max(refreshAt - Date.now(), 5 * 1000);
+    refreshTimeoutRef.current = window.setTimeout(() => {
+      void handleRefreshToken();
+    }, delay);
+  };
 
   /**
    * Atualiza o estado do usuário consultando o authService.
@@ -29,17 +99,43 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Verifica sessão/token local antes de chamar a API
       if (authService.isAuthenticated()) {
         const userData = await authService.getCurrentUser();
-        setUser(userData);
+        persistUser(userData);
       } else {
-        setUser(null);
+        persistUser(null);
       }
     } catch (error) {
       // Log de erro em PT-BR para facilitar debugging em ambiente local
       console.error('Erro ao carregar usuário:', error);
-      setUser(null);
-      // Remove possíveis tokens inválidos/corrompidos do localStorage
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
+      persistUser(null);
+      // Remove possíveis tokens inválidos/corrompidos da memória
+      clearAccessToken();
+      setAccessTokenState(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Atualiza o token acessível ao contexto a partir de authService
+   */
+  const syncAccessToken = () => {
+    const token = getAccessToken();
+    setAccessTokenState(token);
+    scheduleTokenRefresh(token);
+  };
+
+  /**
+   * Tenta renovar a sessão ao iniciar o app, utilizando cookie HttpOnly se existir
+   */
+  const bootstrapSession = async () => {
+    setIsLoading(true);
+    try {
+      await authService.refresh();
+      syncAccessToken();
+      await refreshUser();
+    } catch {
+      syncAccessToken();
+      persistUser(null);
     } finally {
       setIsLoading(false);
     }
@@ -47,8 +143,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Ao montar o provider, tenta recuperar o usuário atual
   useEffect(() => {
-    refreshUser();
+    void bootstrapSession();
+    return () => {
+      if (refreshTimeoutRef.current) {
+        window.clearTimeout(refreshTimeoutRef.current);
+      }
+    };
   }, []);
+
+  useEffect(() => {
+    scheduleTokenRefresh(accessToken);
+  }, [accessToken]);
+
+  /**
+   * Renova o token automaticamente quando estiver perto de expirar
+   */
+  const handleRefreshToken = async () => {
+    try {
+      await authService.refresh();
+      syncAccessToken();
+      await refreshUser();
+    } catch (error) {
+      console.error('Erro ao renovar sessão:', error);
+      await logout();
+    }
+  };
 
   /**
    * Realiza o fluxo de login:
@@ -62,10 +181,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setIsLoading(true);
     try {
       await authService.login(email, password);
-      await refreshUser();
+      syncAccessToken();
+      const userData = await authService.getCurrentUser();
+      persistUser(userData);
+      return userData;
     } catch (error) {
       setIsLoading(false);
       throw error;
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -79,7 +203,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setIsLoading(true);
     try {
       await authService.logout();
-      setUser(null);
+      persistUser(null);
+      setAccessTokenState(null);
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
     } finally {
@@ -91,15 +216,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    * Registra um novo usuário e realiza login automático após o registro.
    * Obs: em caso de falha no registro, o erro é propagado para o consumidor.
    */
-  const register = async (email: string, password: string, name?: string) => {
+  const register = async (payload: {
+    name: string;
+    email: string;
+    password: string;
+    phone_number?: string;
+  }) => {
     setIsLoading(true);
     try {
-      await authService.register(email, password, name);
-      // Após registro bem-sucedido, faz login automático
-      await login(email, password);
+      const registeredUser = await authService.register(payload);
+      // Após registro bem-sucedido, faz login automático para habilitar reenvios
+      await authService.login(payload.email, payload.password);
+      syncAccessToken();
+      await refreshUser();
+      return registeredUser;
     } catch (error) {
       setIsLoading(false);
       throw error;
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -107,11 +242,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const value: AuthContextType = {
     user,
     isLoading,
-    isAuthenticated: !!user,
+    isAuthenticated: !!accessToken,
     login,
     logout,
     register,
     refreshUser,
+    requestEmailVerify: authService.requestEmailVerification,
+    requestPhoneOtp: authService.requestPhoneOtp,
+    verifyPhoneOtp: authService.verifyPhoneOtp,
+    resendVerification: authService.resendVerification,
   };
 
   // Provider encapsula a árvore de componentes e fornece o estado de autenticação

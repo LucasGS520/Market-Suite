@@ -22,6 +22,7 @@ import {
 import { AxiosError } from 'axios';
 import { useAuth } from '../hooks/useAuth';
 import { ApiErrorResponse } from '../types';
+import VerificationPrompt from '../components/VerificationPrompt';
 
 /**
  * Componente de tela de Login.
@@ -29,7 +30,7 @@ import { ApiErrorResponse } from '../types';
  */
 const Login: React.FC = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, requestEmailVerify, requestPhoneOtp } = useAuth();
 
   // Estado para o campo de email (string)
   const [email, setEmail] = useState('');
@@ -42,6 +43,9 @@ const Login: React.FC = () => {
 
   // Flag de carregamento para desabilitar inputs e mostrar spinner
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [pendingEmail, setPendingEmail] = useState<string>('');
+  const [pendingPhone, setPendingPhone] = useState<string | null>(null);
 
   /**
    * Manipulador de submit do formulário.
@@ -54,10 +58,26 @@ const Login: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setPendingUserId(null);
+    setPendingEmail('');
+    setPendingPhone(null);
     setIsLoading(true);
 
     try {
-      await login(email, password);
+      const user = await login(email, password);
+      const isPending =
+        !!user &&
+        (user.status === 'pending' ||
+          !user.email_verified ||
+          (!!user.phone_number && !user.phone_number_verified));
+
+      if (user && isPending) {
+        setPendingUserId(user.id);
+        setPendingEmail(user.email);
+        setPendingPhone(user.phone_number ?? null);
+        return;
+      }
+
       // Redireciona para dashboard após login bem-sucedido
       navigate('/dashboard');
     } catch (err: unknown) {
@@ -98,54 +118,76 @@ const Login: React.FC = () => {
             </Alert>
           )}
 
-          {/* Formulário controlado */}
-          <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1 }}>
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              id="email"
-              label="Email"
-              name="email"
-              autoComplete="email"
-              autoFocus
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={isLoading} // desabilita enquanto carrega
+          {pendingUserId && (
+            <VerificationPrompt
+              email={pendingEmail}
+              userId={pendingUserId}
+              phoneNumber={pendingPhone}
+              onResendEmail={requestEmailVerify}
+              onResendPhone={requestPhoneOtp}
             />
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              name="password"
-              label="Senha"
-              type="password"
-              id="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading} // desabilita enquanto carrega
-            />
+          )}
+          {pendingUserId && (
             <Button
-              type="submit"
               fullWidth
-              variant="contained"
-              sx={{ mt: 3, mb: 2 }}
-              disabled={isLoading}
+              variant="outlined"
+              sx={{ mt: 2 }}
+              onClick={() => navigate('/dashboard')}
             >
-              {/* Mostra spinner durante a operação de login */}
-              {isLoading ? <CircularProgress size={24} /> : 'Entrar'}
+              Continuar para o Dashboard
             </Button>
+          )}
 
-            {/* Link para a tela de registro */}
-            <Box sx={{ textAlign: 'center' }}>
-              <Link to="/register" style={{ textDecoration: 'none' }}>
-                <Typography variant="body2" color="primary">
-                  Não tem uma conta? Registre-se
-                </Typography>
-              </Link>
+          {/* Formulário controlado */}
+          {!pendingUserId && (
+            <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1 }}>
+              <TextField
+                margin="normal"
+                required
+                fullWidth
+                id="email"
+                label="Email"
+                name="email"
+                autoComplete="email"
+                autoFocus
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading} // Desabilita durante loading
+              />
+              <TextField
+                margin="normal"
+                required
+                fullWidth
+                name="password"
+                label="Senha"
+                type="password"
+                id="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading} // Desabilita durante loading
+              />
+              <Button
+                type="submit"
+                fullWidth
+                variant="contained"
+                sx={{ mt: 3, mb: 2 }}
+                disabled={isLoading}
+              >
+                {/* Mostra spinner durante operação de login */}
+                {isLoading ? <CircularProgress size={24} /> : 'Entrar'}
+              </Button>
+
+              {/* Link para a tela de registro */}
+              <Box sx={{ textAlign: 'center' }}>
+                <Link to="/register" style={{ textDecoration: 'none' }}>
+                  <Typography variant="body2" color="primary">
+                    Não tem uma conta? Registre-se
+                  </Typography>
+                </Link>
+              </Box>
             </Box>
-          </Box>
+          )}
         </Paper>
       </Box>
     </Container>

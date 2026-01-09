@@ -59,10 +59,18 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Scraper**: a inferência de disponibilidade ocorre antes do validador e deve propagar `last_status` em ordem de precedência (payload > inferência > validador). A rota `GET /monitored/` lista itens sem preço para indicar indisponibilidade.
 
 ## Interação entre serviços
-- Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/client/src/lib/api.ts`) injeta JWT no header `Authorization`.
+- Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/src/lib/api.ts`) injeta JWT no header `Authorization` e tenta renovar a sessão via `/auth/refresh` quando recebe `401`.
 - Workers Celery consomem filas `celery`, `scraping`, `monitor` e `notifications`, armazenando resultados no PostgreSQL, reprocessando comparações e enfileirando entregas de alertas.
 - O `ScraperClient` (`backend/market_alert/services/scraper_client.py`) envia requisições `POST /scraper/parse` ao `market_scraper`, que executa pipeline `FetchHTML → DomainSpecificParser → JsonLdParser → HtmlMetadataParser → GenericFallbackParser`.
 - Resultados de scraping são persistidos e utilizados para calcular difusão de preços e atualizar dashboards.
+
+### Autenticação e verificação
+- O login (`POST /auth/login`) retorna `access_token`/`refresh_token` e também define cookie HttpOnly para refresh com `SameSite=Strict` e `Path=/auth/refresh`.
+- O refresh (`POST /auth/refresh`) aceita refresh token via cookie HttpOnly ou payload JSON opcional.
+- O logout (`POST /auth/logout`) revoga o refresh token e remove o cookie HttpOnly quando presente.
+- Verificações: `POST /auth/verify-email?token=...` e `POST /auth/verify-phone` com `{ user_id, otp }`.
+- Reenvio: `POST /users/resend-verification` com `{ channel: "email" | "phone_number" }`, respeitando cooldown do backend.
+- Métricas de verificação ficam em `backend/shared/metrics/metrics_auth.py` (`verification_sent_total`, `verification_resend_attempts_total`, `verification_success_total`, `verification_failure_total`).
 
 ### Arquivos de ambiente (.env)
 - O projeto utiliza três arquivos de configuração no `backend`:
@@ -74,6 +82,7 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
   - `frontend/.env`
  Em Docker, a variável `ENV_FILE` já aponta para o arquivo correto de cada serviço.
 - Boas práticas: não commitar segredos; use valores dummy em exemplos; evite imprimir variáveis sensíveis em logs.
+- Auth cookies: ajuste `REFRESH_TOKEN_COOKIE_SECURE=0` em ambientes HTTP locais. Para fallback sem cookie HttpOnly, defina `VITE_AUTH_REFRESH_STORAGE=cookie` no frontend.
 
 ## Testes e qualidade
 - Backend: `pytest backend/market_alert -q`, `pytest backend/market_scraper -q` e demais testes em `backend/shared/tests`.

@@ -9,10 +9,19 @@ export interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User | null>;
   logout: () => Promise<void>;
-  register: (email: string, password: string, name?: string) => Promise<void>;
+  register: (payload: {
+    name: string;
+    email: string;
+    password: string;
+    phone_number?: string;
+  }) => Promise<User>;
   refreshUser: () => Promise<void>;
+  requestEmailVerify: () => Promise<void>;
+  requestPhoneOtp: () => Promise<void>;
+  verifyPhoneOtp: (userId: string, otp: string) => Promise<void>;
+  resendVerification: (channel: 'email' | 'phone_number') => Promise<void>;
 }
 
 // Contexto isolado do componente para atender a regra do react-refresh

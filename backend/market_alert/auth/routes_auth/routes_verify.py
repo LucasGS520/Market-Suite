@@ -16,7 +16,7 @@ router = APIRouter(prefix="/auth", tags=["Verificação"])
 @router.post("/verify-email")
 def confirm_email(token: str = Query(...), db: Session = Depends(get_db)):
     """ Confirma o token de verificação de email """
-    logger.info("verify_email_called", token=token)
+    logger.info("verify_email_called", current_token=bool(token))
     verify_email(db, token)
     return {"msg": "E-mail verificado com sucesso."}
 

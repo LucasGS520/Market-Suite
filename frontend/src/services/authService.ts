@@ -1,4 +1,12 @@
 import apiClient from '../lib/api';
+import {
+  clearAccessToken,
+  clearRefreshTokenCookie,
+  getRefreshTokenFromCookie,
+  setAccessToken,
+  setRefreshTokenCookie,
+  shouldStoreRefreshCookie,
+} from '../utils/authTokens';
 import { TokenPair, User } from '../types';
 
 /**
@@ -6,14 +14,15 @@ import { TokenPair, User } from '../types';
  *
  * Este módulo encapsula chamadas à API relacionadas à autenticação
  * (login, logout, registro, recuperação de senha, verificação de email, etc.)
- * e também gerencia o armazenamento simples de tokens no localStorage.
+ * e mantém o access_token em memória para reduzir exposição local.
  */
 export const authService = {
   /**
    * Realiza login com email (username) e senha.
    *
    * Envia um form-url-encoded para a rota /auth e, em caso de sucesso,
-   * persiste os tokens retornados no localStorage.
+   * armazena o access_token em memória e define o refresh token no cookie
+   * quando o fallback estiver habilitado.
    */
   async login(email: string, password: string): Promise<TokenPair> {
     // Usamos FormData para simular body x-www-form-urlencoded requisitado pelo backend.
@@ -21,54 +30,71 @@ export const authService = {
     formData.append('username', email);
     formData.append('password', password);
 
-    const response = await apiClient.post<TokenPair>('/auth', formData, {
+    const response = await apiClient.post<TokenPair>('/auth/login', formData, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
 
-    // Salvar tokens no localStorage para uso nas próximas requisições.
-    localStorage.setItem('access_token', response.data.access_token);
-    localStorage.setItem('refresh_token', response.data.refresh_token);
+    // Salvar access token somente em memória para reduzir exposição local.
+    setAccessToken(response.data.access_token);
+    if (shouldStoreRefreshCookie()) {
+      setRefreshTokenCookie(response.data.refresh_token);
+    }
 
     return response.data;
   },
 
   /**
    * Realiza logout do usuário e tenta revogar o refresh token no backend.
-   * - Se houver um refresh_token em localStorage, envia uma requisição para /auth/logout.
-   * - Independentemente do resultado da revogação, remove os tokens do localStorage.
+   * - Se houver um refresh_token disponível (cookie fallback), envia uma requisição para /auth/logout.
+   * - Independentemente do resultado da revogação, remove tokens mantidos no frontend.
    */
   async logout(): Promise<void> {
-    const refreshToken = localStorage.getItem('refresh_token');
+    const refreshToken = getRefreshTokenFromCookie();
 
-    if (refreshToken) {
-      try {
-        await apiClient.post('/auth/logout', {
-          refresh_token: refreshToken,
-        });
-      } catch (error) {
-        // Log de erro não-bloqueante: a limpeza local ainda é realizada.
-        // Preferir logger estruturado (ex: structlog) em produção.
-        console.error('Erro ao revogar token:', error);
-      }
+    try {
+      await apiClient.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : {});
+    } catch (error) {
+      // Log de erro não-bloqeuante: limpeza local ainda é realizada
+      // Preferir logger estruturado (ex.: structlog) em produção
+      console.error('Erro ao revogar token:', error);
     }
 
     // Limpar tokens localmente para efetivar logout no frontend.
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    clearAccessToken();
+    clearRefreshTokenCookie();
   },
 
   /**
    * Registra um novo usuário no sistema.
    */
-  async register(email: string, password: string, name?: string): Promise<User> {
+  async register(payload: {
+    email: string;
+    password: string;
+    name: string;
+    phone_number?: string;
+  }): Promise<User> {
     const response = await apiClient.post<User>('/users', {
-      email,
-      password,
-      name,
+      email: payload.email,
+      password: payload.password,
+      name: payload.name,
+      phone_number: payload.phone_number,
     });
 
+    return response.data;
+  },
+
+  /**
+   * Solicita um novo access_token usando refresh token (cookie ou payload)
+   */
+  async refresh(): Promise<TokenPair> {
+    const refreshToken = getRefreshTokenFromCookie();
+    const response = await apiClient.post<TokenPair>('/auth/refresh', refreshToken ? { refresh_token: refreshToken } : {});
+    setAccessToken(response.data.access_token);
+    if (shouldStoreRefreshCookie()) {
+      setRefreshTokenCookie(response.data.refresh_token);
+    }
     return response.data;
   },
 
@@ -114,14 +140,14 @@ export const authService = {
    * O backend deve enviar o email contendo o token/URL de verificação.
    */
   async requestEmailVerification(): Promise<void> {
-    await apiClient.post('/auth/verify/request');
+    await apiClient.post('/users/resend-verification', { channel: 'email' });
   },
 
   /**
    * Confirma a verificação de email utilizando o token recebido.
    */
   async confirmEmailVerification(token: string): Promise<void> {
-    await apiClient.post('/auth/verify/confirm', { token });
+    await apiClient.post('/auth/verify-email', null, { params: { token } });
   },
 
   /**
@@ -132,6 +158,27 @@ export const authService = {
    * de validação/refresh ou inspecionar o JWT.
    */
   isAuthenticated(): boolean {
-    return !!localStorage.getItem('access_token');
+    return !!getAccessToken();
+  },
+
+  /**
+   * Solicita o envio de OTP por telefone para o usuário autenticado.
+   */
+  async requestPhoneOtp(): Promise<void> {
+    await apiClient.post('/users/resend-verification', { channel: 'phone_number' });
+  },
+
+  /**
+   * Confirma o OTP de telefone utilizando user_id e otp.
+   */
+  async verifyPhoneOtp(userId: string, otp: string): Promise<void> {
+    await apiClient.post('/auth/verify-phone', { user_id: userId, otp });
+  },
+
+  /**
+   * Reenvia tokens de verificação com base no canal informado.
+   */
+  async resendVerification(channel: 'email' | 'phone_number'): Promise<void> {
+    await apiClient.post('/users/resend-verification', { channel });
   },
 };

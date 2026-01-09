@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from market_alert.crud.crud_refresh_token import create_refresh_token, get_refresh_token, revoke_refresh_token
 from market_alert.crud.crud_user import get_user_by_email, get_user_by_phone, get_user_by_id
 from market_alert.core.bruteforce import block_ip, reset_failed_attempts, record_failed_attempt
+from market_alert.core.config_alert import settings
 from market_alert.core.jwt import create_access_token
 from market_alert.core.tokens import generate_verification_token, generate_reset_token, token_expiry
 from market_alert.schemas.schemas_auth import (
@@ -24,6 +25,12 @@ from market_alert.enums.enums_users import UserStatus
 
 
 logger = structlog.get_logger("service.auth")
+
+def _resolve_refresh_token(payload: RefreshRequest | None, request: Request) -> str | None:
+    """ Obtém o refresh token via payload ou cookie HttpOnly """
+    if payload and payload.refresh_token:
+        return payload.refresh_token
+    return request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
 
 def authenticate_user(db: Session, identifier: str, password: str) -> User | None:
     """ Verifica credenciais e retorna o usuário se forem válidas """
@@ -158,12 +165,15 @@ def change_email_service(db: Session, current_user: User, request_model: ChangeE
     logger.info("change_email_success", user_id=str(current_user.id), email=new_email)
 
 # ---------- REFRESH TOKENS ----------
-def refresh_token_service(db: Session, payload: RefreshRequest, request: Request) -> TokenPairResponse:
+def refresh_token_service(db: Session, payload: RefreshRequest | None, request: Request) -> TokenPairResponse:
     """ Troca um Refresh Token válido por um novo Access Token e novo Refresh Token (rotacionando) """
-    raw_token = payload.refresh_token
+    raw_token = _resolve_refresh_token(payload, request)
+    if not raw_token:
+        logger.warning("refresh_failed_missing", ip=request.client.host)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token ausente")
     refresh = get_refresh_token(db, raw_token)
     if not refresh:
-        logger.warning("refresh_failed_invalid", token=raw_token, ip=request.client.host)
+        logger.warning("refresh_failed_invalid", ip=request.client.host)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token inválido ou expirado")
 
     #Revoga o token antigo
@@ -189,12 +199,15 @@ def refresh_token_service(db: Session, payload: RefreshRequest, request: Request
 
     return TokenPairResponse(access_token=access_token, refresh_token=new_raw, token_type="bearer")
 
-def logout_service(db: Session, payload: RefreshRequest, request: Request) -> None:
+def logout_service(db: Session, payload: RefreshRequest | None, request: Request) -> None:
     """ Logout de sessão: revoga apenas o Refresh Token fornecido """
-    raw_token = payload.refresh_token
+    raw_token = _resolve_refresh_token(payload, request)
+    if not raw_token:
+        logger.warning("logout_missing_token", ip=request.client.host)
+        return
     refresh = get_refresh_token(db, raw_token)
     if not refresh:
-        logger.warning("logout_invalid_token", token=raw_token, ip=request.client.host)
+        logger.warning("logout_invalid_token", ip=request.client.host)
         return
 
     revoke_refresh_token(db, refresh)

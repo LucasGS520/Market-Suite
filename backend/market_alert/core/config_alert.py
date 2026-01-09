@@ -45,6 +45,22 @@ class Settings(ConfigBase):
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60)
     )
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7)) #Validade do refresh Token
+    REFRESH_TOKEN_COOKIE_NAME: str = os.getenv(
+        "REFRESH_TOKEN_COOKIE_NAME",
+        "refresh_token",
+    ) #Nome do cookie utilizado para refresh token
+    REFRESH_TOKEN_COOKIE_PATH: str = os.getenv(
+        "REFRESH_TOKEN_COOKIE_PATH",
+        "/auth/refresh",
+    ) #Path restrito para envio do cookie de refresh
+    REFRESH_TOKEN_COOKIE_SECURE: bool = os.getenv(
+        "REFRESH_TOKEN_COOKIE_SECURE",
+        "1",
+    ) == "1" #Marca Secure habilitada por padrão
+    REFRESH_TOKEN_COOKIE_SAMESITE: str = os.getenv(
+        "REFRESH_TOKEN_COOKIE_SAMESITE",
+        "strict",
+    ) #Política SameSite do cookie de refresh
 
     #Intervalo base utilizado pelo AdaptiveRecheckManager
     ADAPTIVE_RECHECK_BASE_INTERVAL: int = int(

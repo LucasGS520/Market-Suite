@@ -37,7 +37,7 @@ class RefreshRequest(BaseModel):
     """ Payload para trocar um Refresh Token por um novo par de tokens """
     model_config = ConfigDict()
 
-    refresh_token: str = Field(..., description="Refresh Token previamente emitido")
+    refresh_token: str | None = Field(None, description="Refresh Token previamente emitido (pode vir via cookie HttpOnly)")
 
 
 # ---------- FLUXOS DE E-MAIL & SENHA ----------

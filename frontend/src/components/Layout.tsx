@@ -1,6 +1,8 @@
 import React from 'react';
-import { Box, Container } from '@mui/material';
+import { Alert, Box, Button, Container, Stack } from '@mui/material';
+import { Link as RouterLink } from 'react-router-dom';
 import Header from './Header';
+import { useAuth } from '../hooks/useAuth';
 
 /**
  * Interface de propriedades do Layout
@@ -19,6 +21,14 @@ interface LayoutProps {
  * - Container centralizado com largura máxima definida para conteúdo
  */
 const Layout: React.FC<LayoutProps> = ({ children }) => {
+  const { user } = useAuth();
+  const shouldShowPendingBanner = 
+    !!user &&
+    (user.status === 'pending' ||
+      !user.email_verified ||
+      (!!user.phone_number && !user.phone_number_verified)
+    );
+
   return (
     // Box principal que organiza o layout em coluna e garante altura mínima da tela
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -29,6 +39,36 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <Box component="main" sx={{ flexGrow: 1, py: 3, backgroundColor: 'background.default' }}>
         {/* Container centralizado para limitar a largura do conteúdo e manter responsividade */}
         <Container maxWidth="xl">
+          {shouldShowPendingBanner && (
+            <Alert
+              severity="warning"
+              sx={{ mb: 3 }}
+              action={
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    size="small"
+                    color="inherit"
+                    component={RouterLink}
+                    to="/verify-email"
+                  >
+                    Verificar Email
+                  </Button>
+                  {user.phone_number && (
+                    <Button
+                      size="small"
+                      color="inherit"
+                      component={RouterLink}
+                      to={`/verify-phone?userId=${user.id}`}
+                    >
+                      Verificar Telefone
+                    </Button>
+                  )}
+                </Stack>
+              }
+            >
+              Conta pendente - finalize a verificação para utilizar todos os recursos disponíveis.
+            </Alert>
+          )}
           {children}
         </Container>
       </Box>
