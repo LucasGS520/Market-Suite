@@ -74,6 +74,11 @@ def create_user(db: Session, user_data: UserCreate) -> UserResponse:
         logger.info("user_created", user_id=str(new_user.id))
         return UserResponse.model_validate(new_user)
 
+    except HTTPException as exc:
+        db.rollback()
+        #Preserva a semântica de validação para evitar mascarar erros HTTP esperados
+        raise exc
+
     except IntegrityError:
         db.rollback()  #Reverte a transação caso haja erro de integridade
         logger.exception("integrity_error_create_user", email=user_data.email)
