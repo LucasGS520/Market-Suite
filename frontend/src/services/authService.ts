@@ -2,6 +2,7 @@ import apiClient from '../lib/api';
 import {
   clearAccessToken,
   clearRefreshTokenCookie,
+  getAccessToken,
   getRefreshTokenFromCookie,
   setAccessToken,
   setRefreshTokenCookie,
@@ -90,6 +91,7 @@ export const authService = {
    */
   async refresh(): Promise<TokenPair> {
     const refreshToken = getRefreshTokenFromCookie();
+    // A rota /auth/refresh aceita apenas POST; evitar GET preserva o contrato do backend
     const response = await apiClient.post<TokenPair>('/auth/refresh', refreshToken ? { refresh_token: refreshToken } : {});
     setAccessToken(response.data.access_token);
     if (shouldStoreRefreshCookie()) {
@@ -153,6 +155,8 @@ export const authService = {
   /**
    * Indica se existe um token de acesso armazenado localmente.
    *
+   * Esta checagem depende do token em memória gerenciado pelos utilitários
+   * de autenticação, mantendo o acesso fora do armazenamento persistente.
    * Nota: Esta verificação é apenas local (presença do token) e não valida
    * se o token expirou. Verificações mais robustas devem chamar uma rota
    * de validação/refresh ou inspecionar o JWT.

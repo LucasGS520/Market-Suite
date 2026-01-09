@@ -28,9 +28,31 @@ const VerificationPrompt: React.FC<VerificationPromptProps> = ({
 }) => {
   const [feedback, setFeedback] = useState<{ severity: 'success' | 'error'; message: string } | null>(null);
 
+  /** 
+   * Desencadeia o reenvio do email e atualiza o feedback apresentado ao usuário
+   */
   const handleResendEmail = async () => {
     try {
       await onResendEmail();
+      // Mantém a confirmação de envio para orientar o usuário após a ação
+      setFeedback({ severity: 'success', message: 'Código enviado com sucesso.' });
+    } catch (error) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      setFeedback({
+        severity: 'error',
+        message: axiosError.response?.data?.detail || 'Não foi possível enviar o código.',
+      });
+      throw error;
+    }
+  };
+
+  /**
+   * Desencadeia o reenvio do SMS e atualiza o feedback apresentado ao usuário
+   */
+  const handleResendPhone = async () => {
+    try {
+      await onResendPhone();
+      // Mantém a confirmação de envio para orientar o usuário após a ação
       setFeedback({ severity: 'success', message: 'Código enviado com sucesso.' });
     } catch (error) {
       const axiosError = error as AxiosError<ApiErrorResponse>;

@@ -97,6 +97,7 @@ const refreshAccessToken = async (): Promise<string> => {
   refreshPromise = (async () => {
     const refreshToken = getRefreshTokenFromCookie();
     const payload = refreshToken ? { refresh_token: refreshToken } : {};
+    // A rota /auth/refresh aceita apenas POST; manter explícito evita regressões.
     const response = await axios.post<RefreshResponse>(`${RESOLVED_API_BASE}/auth/refresh`, payload, {
       withCredentials: true,
       headers: {
