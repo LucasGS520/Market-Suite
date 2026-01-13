@@ -60,6 +60,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 
 ## Interação entre serviços
 - Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/src/lib/api.ts`) injeta JWT no header `Authorization` e tenta renovar a sessão via `/auth/refresh` quando recebe `401`.
+- A tela `/settings` consome endpoints protegidos `/settings`, `/settings/profile` e `/settings/notifications`, separando preferências persistidas (perfil/canais) de ajustes visuais locais.
 - Workers Celery consomem filas `celery`, `scraping`, `monitor` e `notifications`, armazenando resultados no PostgreSQL, reprocessando comparações e enfileirando entregas de alertas.
 - O `ScraperClient` (`backend/market_alert/services/scraper_client.py`) envia requisições `POST /scraper/parse` ao `market_scraper`, que executa pipeline `FetchHTML → DomainSpecificParser → JsonLdParser → HtmlMetadataParser → GenericFallbackParser`.
 - Resultados de scraping são persistidos e utilizados para calcular difusão de preços e atualizar dashboards.

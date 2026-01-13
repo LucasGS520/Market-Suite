@@ -20,6 +20,7 @@ from . import (
     metrics_redis,
     metrics_products,
     metrics_notifications,
+    metrics_settings,
 )
 
 from .metrics_celery import *
@@ -37,6 +38,7 @@ from .metrics_api import *
 from .metrics_redis import *
 from .metrics_products import *
 from .metrics_notifications import *
+from .metrics_settings import *
 
 __all__ = (
     metrics_celery.__all__
@@ -54,4 +56,5 @@ __all__ = (
     + metrics_redis.__all__
     + metrics_products.__all__
     + metrics_notifications.__all__
+    + metrics_settings.__all__
 )

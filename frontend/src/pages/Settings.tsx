@@ -1,97 +1,101 @@
 /**
  * Página de configurações do usuário do frontend.
- *
- *  Contém seções para exibição de informações do perfil e ações de segurança.
  */
 
-import React from 'react';
-import { Box, Typography, Card, CardContent, TextField, Button } from '@mui/material';
-import Grid from '@mui/material/Grid';
-import { useAuth } from '../hooks/useAuth';
-import Layout from '../components/Layout';
+import React, { useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import SettingsLayout from '../components/settings/SettingsLayout';
+import SettingsMenu, { SettingsMenuItem } from '../components/settings/SettingsMenu';
+import ProfileSection from './settings/ProfileSection';
+import NotificationsSection from './settings/NotificationsSection';
+import LanguageAccessibilitySection from './settings/LanguageAccessibilitySection';
+import PlaceholderSection from './settings/PlaceholderSection';
+
+const SETTINGS_SECTIONS: SettingsMenuItem[] = [
+  {
+    id: 'profile',
+    label: 'Perfil',
+    description: 'Dados pessoais, email e telefone',
+  },
+  {
+    id: 'notifications',
+    label: 'Notificações',
+    description: 'Canais habilitados e alertas.',
+  },
+  {
+    id: 'language',
+    label: 'Idioma e Acessibilidade',
+    description: 'Preferências visuais, de idioma e acessibilidade',
+    visualOnly: true,
+  },
+  {
+    id: 'billing',
+    label: 'Pagamento e Assinaturas',
+    description: 'Planos e histórico de cobrança',
+    visualOnly: true,
+  },
+  {
+    id: 'help',
+    label: 'Ajuda e Suporte',
+    description: 'Central de suporte e artigos.',
+    visualOnly: true,
+  },
+];
 
 /**
  * Componente de página de Configurações do usuário.
  *
- * Exibe informações básicas do perfil (email e nome) e ações relacionadas à segurança.
- * Os campos atuais estão desabilitados (somente leitura). Implementar handlers
- * para editar perfil, alterar senha e verificar email conforme necessidade.
+ * Organiza a navegação entre seções de configurações sem recarregar a página.
  */
 const Settings: React.FC = () => {
-  // Recupera informações do usuário a partir do contexto de autenticação
-  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeSection = searchParams.get('section') ?? 'profile';
+
+  const sectionContent = useMemo(() => {
+    switch (activeSection) {
+      case 'notifications':
+        return <NotificationsSection />;
+      case 'language':
+        return <LanguageAccessibilitySection />;
+      case 'billing':
+        return (
+          <PlaceholderSection
+            title="Pagamentos & Assinaturas"
+            description="Gerencie planos, métodos de pagamento e recibos em breve."
+          />
+        );
+      case 'help':
+        return (
+          <PlaceholderSection
+            title="Ajuda"
+            description="Conteúdo de suporte e canais de atendimento estarão disponíveis em breve."
+          />
+        );
+      case 'about':
+        return (
+          <PlaceholderSection
+            title="Sobre"
+            description="Informações institucionais e versão do produto estarão aqui."
+          />
+        );
+      case 'profile':
+      default:
+        return <ProfileSection />;
+    }
+  }, [activeSection]);
+
+  const handleSelect = (id: string) => {
+    setSearchParams({ section: id });
+  };
 
   return (
-    // Layout padrão que envolve o conteúdo da página (barra, navegação, etc.)
-    <Layout>
-      {/* Cabeçalho da página com título e descrição */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom>
-          Configurações
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Gerenciamento de dados do usuário e preferências
-        </Typography>
-      </Box>
-
-      {/* Grid responsivo para organizar cartões de perfil e segurança */}
-      <Grid container spacing={3}>
-        {/* Cartão com informações do perfil do usuário */}
-        <Grid item xs={12} md={6}>
-          <Card elevation={2}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Informações do Perfil
-              </Typography>
-
-              {/* Campo somente leitura para o email do usuário */}
-              <TextField
-                fullWidth
-                label="Email"
-                value={user?.email || ''}
-                disabled
-                margin="normal"
-              />
-
-              {/* Campo somente leitura para o nome do usuário */}
-              <TextField
-                fullWidth
-                label="Nome"
-                value={user?.name || ''}
-                disabled
-                margin="normal"
-              />
-
-              {/* Botão placeholder para fluxo de edição de perfil */}
-              <Button variant="outlined" sx={{ mt: 2 }}>
-                Editar Perfil
-              </Button>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Cartão com ações relacionadas à segurança da conta */}
-        <Grid item xs={12} md={6}>
-          <Card elevation={2}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Segurança
-              </Typography>
-
-              {/* Botão placeholder para fluxo de alteração de senha */}
-              <Button variant="outlined" fullWidth sx={{ mt: 2 }}>
-                Alterar Senha
-              </Button>
-
-              {/* Botão placeholder para fluxo de verificação de email */}
-              <Button variant="outlined" fullWidth sx={{ mt: 2 }}>
-                Verificar Email
-              </Button>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-    </Layout>
+    <SettingsLayout
+      title="Configurações"
+      subtitle="Gerencie preferências sincronizadas e ajustes visuais locais."
+      menu={<SettingsMenu items={SETTINGS_SECTIONS} activeId={activeSection} onSelect={handleSelect} />}
+    >
+      {sectionContent}
+    </SettingsLayout>            
   );
 };
 

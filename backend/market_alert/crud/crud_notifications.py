@@ -33,6 +33,12 @@ from market_alert.models.models_notifications import (
 logger = structlog.get_logger("crud_notifications")
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_DEDUPE_SENT_WINDOW_SECONDS = 60 * 10
+DEFAULT_CHANNEL_SETTINGS = {
+    NotificationChannel.email: True,
+    NotificationChannel.push: False,
+    NotificationChannel.sms: False,
+    NotificationChannel.whatsapp: False,
+}
 
 def _normalize_datetime(value: datetime | None) -> datetime:
     """ Normaliza datas para UTC garantindo tzinfo """
@@ -614,3 +620,61 @@ def update_preference_last_notified(
     else:
         db.flush()
     return preference
+
+def get_notification_settings(
+    db: Session,
+    *,
+    user_id: UUID,
+) -> dict[NotificationChannel, bool]:
+    """ Obtém o resumo de habilitação por canal para o usuário """
+    preferences = list_user_notification_preferences(db, user_id=user_id, monitored_product_id=None)
+    settings = {channel: DEFAULT_CHANNEL_SETTINGS.get(channel, False) for channel in DEFAULT_CHANNEL_SETTINGS}
+
+    for channel in settings:
+        channel_prefs = [pref for pref in preferences if pref.channel == channel]
+        if not channel_prefs:
+            continue
+        enabled_values = {pref.enabled for pref in channel_prefs}
+        if len(enabled_values) > 1:
+            logger.warning(
+                "notification_settings_inconsistent",
+                user_id=str(user_id),
+                channel=channel.value,
+                enabled=list(enabled_values),
+            )
+        settings[channel] = any(enabled_values)
+
+    logger.info(
+        "notification_settings_loaded",
+        user_id=str(user_id),
+        settings={channel.value: enabled for channel, enabled in settings.items()},
+    )
+    return settings
+
+def update_notification_settings(
+    db: Session,
+    *,
+    user_id: UUID,
+    settings: dict[NotificationChannel, bool],
+) -> dict[NotificationChannel, bool]:
+    """ Atualiza as preferências globais de notificação por canal """
+    for channel, enabled in settings.items():
+        for alert_type in AlertType:
+            upsert_user_notification_preference(
+                db,
+                user_id=user_id,
+                monitored_product_id=None,
+                alert_type=alert_type,
+                channel=channel,
+                enabled=enabled,
+                channel_metadata={"source": "settings"},
+                commit=False,
+            )
+
+    db.commit()
+    logger.info(
+        "notification_settings_updated",
+        user_id=str(user_id),
+        settings={channel.value: enabled for channel, enabled in settings.items()},
+    )
+    return settings

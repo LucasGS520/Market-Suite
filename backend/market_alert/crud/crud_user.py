@@ -106,6 +106,52 @@ def update_user(db: Session, user_id: UUID, updates: UserUpdate) -> UserResponse
     logger.info("user_update", user_id=str(user.id))
     return UserResponse.model_validate(user)
 
+def update_user_profile(
+    db: Session,
+    user: User,
+    *,
+    name: str | None = None,
+    email: str | None = None,
+    phone_number: str | None = None,
+    email_verified: bool | None = None,
+    phone_number_verified: bool | None = None,
+    updated_by: UUID | None = None,
+) -> User:
+    """ Atualiza o perfil do usuário autenticado com auditoria de campos """
+    changes: dict[str, object] = {}
+
+    if name is not None and name != user.name:
+        changes["name"] = name
+        user.name = name
+    
+    if email is not None and email != user.email:
+        changes["email"] = {"from": user.email, "to": email}
+        user.email = email
+
+    if phone_number is not None and phone_number != user.phone_number:
+        changes["phone_number"] = {"from": user.phone_number, "to": phone_number}
+        user.phone_number = phone_number
+
+    if email_verified is not None and email_verified != user.email_verified:
+        changes["email_verified"] = {"from": user.email_verified, "to": email_verified}
+        user.email_verified = email_verified
+
+    if phone_number_verified is not None and phone_number_verified != user.phone_number_verified:
+        changes["phone_number_verified"] = {"from": user.phone_number_verified, "to": phone_number_verified}
+        user.phone_number_verified = phone_number_verified
+
+    if updated_by:
+        user.updated_by = updated_by
+
+    if changes:
+        db.commit()
+        db.refresh(user)
+        logger.info("user_profile_updated", user_id=str(user.id), changes=changes)
+    else:
+        logger.info("user_profile_update_skipped", user_id=str(user.id))
+
+    return user
+
 def toggle_user_active(db: Session, user_id: UUID, active: bool) -> UserResponse:
     """ Ativa ou Desativa um usuário """
     user = get_user_by_id(db, user_id)

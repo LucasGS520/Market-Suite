@@ -19,8 +19,24 @@ from .schemas_products import (
     PaginationMeta,
 )
 from .schemas_users import UserCreate, UserLogin, UserUpdate, UserResponse
-from .schemas_auth import TokenResponse, TokenPairResponse, RefreshRequest, EmailTokenRequest, ResetPasswordRequest, ResetPasswordConfirmRequest, ChangePasswordRequest, ChangeEmailRequest
+from .schemas_auth import (
+    TokenResponse,
+    TokenPairResponse,
+    RefreshRequest,
+    EmailTokenRequest,
+    ResetPasswordRequest,
+    ResetPasswordConfirmRequest,
+    ChangePasswordRequest,
+    ChangeEmailRequest,
+)
 from .schemas_comparisons import PriceComparisonCreate, PriceComparisonResponse
+from .schemas_settings import (
+    SettingsOverviewResponse,
+    SettingsProfileResponse,
+    SettingsProfileUpdate,
+    SettingsProfileUpdateResponse,
+    NotificationSettings,
+)
 from .schemas_notifications import (
     EventLogCreate,
     EventLogResponse,
@@ -63,6 +79,11 @@ __all__ = [
     "ChangeEmailRequest",
     "PriceComparisonCreate",
     "PriceComparisonResponse",
+    "SettingsOverviewResponse",
+    "SettingsProfileResponse",
+    "SettingsProfileUpdate",
+    "SettingsProfileUpdateResponse",
+    "NotificationSettings",
     "EventLogCreate",
     "EventLogResponse",
     "AlertRuleCreate",

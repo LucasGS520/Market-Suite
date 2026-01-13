@@ -99,6 +99,7 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 - **Protocolos**: comunicação ocorre via HTTP/JSON sobre HTTPS (em produção). O cliente padrão (`frontend/src/lib/api.ts`) injeta o token JWT no header `Authorization`.
 - **Configuração de endpoints**: a variável `VITE_API_URL` define a URL base; em desenvolvimento local, o padrão é `http://localhost:8000/` (API do `market_alert`).
 - **Fluxos suportados**: autenticação, verificação de email/telefone, CRUD de produtos monitorados, listagem de concorrentes, disparo manual de coletas e consulta de comparações consolidadas.
+- **Configurações unificadas**: endpoints `/settings`, `/settings/profile` e `/settings/notifications` atendem a tela de configurações com atualização de perfil e preferências de notificação.
 - **Tratamento de sessões**: o frontend tenta refresh ao receber `401` e reutiliza o cookie HttpOnly de refresh quando configurado.
 - **CORS/credenciais**: para usar cookie HttpOnly, o backend precisa permitir `Access-Control-Allow-Credentials` e o frontend envia `credentials: include`.
 - **Cookies de refresh**: parâmetros do backend são configuráveis via `REFRESH_TOKEN_COOKIE_NAME`, `REFRESH_TOKEN_COOKIE_PATH`, `REFRESH_TOKEN_COOKIE_SECURE` e `REFRESH_TOKEN_COOKIE_SAMESITE`.
