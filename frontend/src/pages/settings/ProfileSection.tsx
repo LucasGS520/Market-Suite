@@ -16,7 +16,7 @@ import {
   Chip,
 } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import SaveBar from '../../components/SaveBar';
+import SaveBar from '../../components/settings/SaveBar';
 import { useToastContext } from '../../contexts/ToastContext';
 import {
   getProfile,
@@ -43,7 +43,7 @@ const emptyFormState: ProfileFormState = {
   phone_number: '',
 };
 
-const phoneRegex = /^\+?\d{10, 15}$/;
+const phoneRegex = /^\+?\d{10,15}$/;
 
 /**
  * Seção de perfil
@@ -55,6 +55,7 @@ const ProfileSection: React.FC = () => {
   const { data, isLoading } = useQuery({ queryKey: ['settings-profile'], queryFn: getProfile });
   const [formState, setFormState] = useState<ProfileFormState>(emptyFormState);
   const [errors, setErrors] = useState<ProfileFormErrors>({});
+  const hasInitializedRef = React.useRef(false);
 
   const mutation = useMutation({
     mutationFn: (payload: ProfileUpdatePayload) => updateProfile(payload),
@@ -92,14 +93,27 @@ const ProfileSection: React.FC = () => {
   });
 
   useEffect(() => {
-    if (data) {
-      setFormState({
+    if (!data) {
+      return;
+    }
+    // Evita sincronizações redundantes que podem causar renderizações em cascata
+    setFormState((prev) => {
+      const nextState = {
         name: data.name,
         email: data.email,
         phone_number: data.phone_number ?? '',
-      });
-      setErrors({});
-    }
+      };
+      const isSame =
+        prev.name === nextState.name &&
+        prev.email === nextState.email &&
+        prev.phone_number === nextState.phone_number;
+      if (isSame && hasInitializedRef.current) {
+        return prev;
+      }
+      hasInitializedRef.current = true;
+      return nextState;
+    });
+    setErrors((prev) => (Object.keys(prev).length > 0 ? {} : prev));
   }, [data]);
 
   const hasChanges = useMemo(() => {
@@ -132,13 +146,33 @@ const ProfileSection: React.FC = () => {
     if (!formState.name.trim()) {
       nextErrors.name = 'Informe o nome completo.';
     }
-    if (!formState.name.trim()) {
+    if (!formState.email.trim()) {
       nextErrors.email = 'Informe um email válido.';
     }
-    if ((data.phone_number ?? '') !== formState.phone_number) {
-      payload.phone_number = formState.phone_number.trim() === '' ? null : formState.phone_number;
+    if (formState.phone_number.trim() && !phoneRegex.test(formState.phone_number.trim())) {
+      nextErrors.phone_number = 'Informe um telefone válido um código do país.';
+    }
+    return nextErrors;
+  };
+
+  const handleSave = () => {
+    const nextErrors = validate();
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0 || !data) {
+      return;
     }
 
+    const payload: ProfileUpdatePayload = {};
+    if (data.name !== formState.name.trim()) {
+      payload.name = formState.name.trim();
+    }
+    if (data.email !== formState.email.trim()) {
+      payload.email = formState.email.trim();
+    }
+    if ((data.phone_number ?? '') !== formState.phone_number.trim()) {
+      payload.phone_number = formState.phone_number.trim() === '' ? null : formState.phone_number.trim();
+    }
+  
     mutation.mutate(payload);
   };
 
@@ -200,7 +234,7 @@ const ProfileSection: React.FC = () => {
                 value={formState.phone_number}
                 onChange={handleFieldChange('phone_number')}
                 error={!!errors.phone_number}
-                halperText={errors.phone_number ?? 'Opcional, formato internacional com código de país.'}
+                helperText={errors.phone_number ?? 'Opcional, formato internacional com código de país.'}
                 fullWidth
               />
             </Stack>

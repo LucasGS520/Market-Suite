@@ -38,7 +38,7 @@ DEFAULT_NOTIFICATION_CHANNELS = {
 
 
 def _normalize_email(value: str) -> str:
-    """ Normaliza email graantindo letras minúsculas """
+    """ Normaliza email garantindo letras minúsculas """
     return value.strip().lower()
 
 def _normalize_phone(value: str | None) -> str | None:
@@ -88,60 +88,26 @@ def update_profile_settings(
     request: Request,
 ) -> SettingsProfileUpdateResponse:
     """ Atualiza o perfil do usuário e dispara verificações quando necessário """
-    update_data = payload.model_dump(exclude_unset=True)
-    if not update_data:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nenhuma alteração informada")
-    
-    normalized_email = user.email
-    email_changed = False
-    if "email" in update_data and payload.email:
-        normalized_email = _normalize_email(payload.email)
-        if normalized_email != user.email:
-            if crud_user.get_user_by_email(db, normalized_email):
-                SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="failure").inc()
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "E-mail já cadastrado")
-            email_changed = True
+    try:
+        update_data = payload.model_dump(exclude_unset=True)
+        if not update_data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nenhuma alteração informada")
 
-    phone_value = _resolve_phone_for_update(payload, user)
-    phone_changed = False
-    if phone_value != user.phone_number:
-        if phone_value:
-            normalized_phone = _normalize_phone(phone_value)
-            phone_value = normalized_phone
-            if crud_user.get_user_by_phone(db, phone_value):
-                SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="failure").inc()
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Telefone já cadastrado")
-        phone_changed = True
+        normalized_email = user.email
+        email_changed = False
+        if "email" in update_data and payload.email:
+            normalized_email = _normalize_email(payload.email)
+            if normalized_email != user.email:
+                if crud_user.get_user_by_email(db, normalized_email):
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, "E-mail já cadastrado")
+                email_changed = True
 
-    name_value = user.name
-    if "name" in update_data and payload.name:
-        name_value = payload.name
+        phone_value = _resolve_phone_for_update(payload, user)
+        phone_changed = False
+        if phone_value != user.phone_number:
+            
 
-    if not (email_changed or phone_changed or name_value != user.name):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nenhuma alteração aplicável")
-    
-    if email_changed:
-        user.email_verified = False
-        user.phone_verified_at = None
 
-    crud_user.update_user_profile(
-        db,
-        user,
-        name=name_value,
-        email=normalized_email,
-        phone_number=phone_value,
-        email_verified=user.email_verified,
-        phone_number_verified=user.phone_number_verified,
-        updated_by=user.id,
-    )
-
-    email_verification_required = False
-    phone_verification_required = False
-
-    if email_changed:
-        token = generate_verification_token()
-        expires_at = token_expiry(settings.EMAIL_VERIFICATION_EXPIRE_MINUTES)
-        crud_verification.create_verification(
             db,
             user_id=user.id,
             kind=VerificationKind.email,

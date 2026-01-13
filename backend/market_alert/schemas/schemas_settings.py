@@ -44,7 +44,7 @@ class SettingsProfileUpdate(BaseModel):
         """ Valida se o telefone possui dígitos suficientes """
         if value is None or value == "":
             return None
-        if not re.fullmatch(r"\+?\d{10, 15}", value):
+        if not re.fullmatch(r"\+?\d{10,15}", value):
             raise ValueError("Número de telefone inválido.")
         return value
     

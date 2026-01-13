@@ -17,7 +17,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import SaveBar from '../../components/SaveBar';
+import SaveBar from '../../components/settings/SaveBar';
 import { useToastContext } from '../../contexts/ToastContext';
 import {
     getNotificationSettings,
@@ -38,6 +38,9 @@ const NotificationsSection: React.FC = () => {
   });
   const [formState, setFormState] = useState<NotificationSettings | null>(null);
 
+  // Mantém uma referência para evitar setState redundante quando o dado já está sincronizado
+  const hasInitializedRef = React.useRef(false);
+
   const mutation = useMutation({
     mutationFn: (payload: NotificationSettings) => updateNotificationSettings(payload),
     onSuccess: (response) => {
@@ -48,12 +51,35 @@ const NotificationsSection: React.FC = () => {
         severity: 'success',
       });
     },
+    onError: () => {
+      showToast({
+        message: 'Não foi possível atualizar as notificações. Tente novamente.',
+        severity: 'error',
+      });
+    },
   });
 
   useEffect(() => {
-    if (data) {
-      setFormState(data);
+    if (!data) {
+      return;
     }
+    // Evita renderizações em cascata ai só sincronizar quando há mudança real
+    setFormState((prev) => {
+      if (!prev) {
+        hasInitializedRef.current = true;
+        return data;
+      }
+      const isSame =
+        prev.email === data.email &&
+        prev.push === data.push &&
+        prev.sms === data.sms &&
+        prev.whatsapp === data.whatsapp;
+      if (isSame && hasInitializedRef.current) {
+        return prev;
+      }
+      hasInitializedRef.current = true;
+      return data;
+    });
   }, [data]);
 
   const hasChanges = useMemo(() => {
