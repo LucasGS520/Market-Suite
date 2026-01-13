@@ -3,12 +3,12 @@
  */
 
 import React from 'react';
-import { Box, Chip, List, ListItemButton, ListItemText, Typography } from '@mui/material';
+import { Box, List, ListItemButton, ListItemIcon, ListItemText, Typography } from '@mui/material';
 
 export interface SettingsMenuItem {
   id: string;
   label: string;
-  description: string;
+  icon?: React.ReactNode;
   visualOnly?: boolean;
 }
 
@@ -44,22 +44,17 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ items, activeId, onSelect }
             key={item.id}
             selected={item.id === activeId}
             onClick={() => onSelect(item.id)}
-            sx={{ alignItems: 'flex-start' }}
+            sx={{ alignItems: 'center', gap: 1.5, py: 1.5 }}
           >
+            {item.icon && (
+              <ListItemIcon sx={{ minWidth: 'auto', color: 'text.secondary' }}>
+                {item.icon}
+              </ListItemIcon>
+            )}
             <ListItemText
               primary={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="subtitle1" fontWeight={600}>
-                    {item.label}
-                  </Typography>
-                  {item.visualOnly && (
-                    <Chip size="small" label="Visual" color="default" />
-                  )}
-                </Box>
-              }
-              secondary={
-                <Typography variant="body2" color="text.secondary">
-                  {item.description}
+                <Typography variant="subtitle1" fontWeight={600}>
+                  {item.label}
                 </Typography>
               }
             />

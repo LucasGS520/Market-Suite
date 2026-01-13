@@ -4,6 +4,12 @@
 
 import React, { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import LanguageIcon from '@mui/icons-material/Language';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
+import PaymentIcon from '@mui/icons-material/Payment';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import SettingsLayout from '../components/settings/SettingsLayout';
 import SettingsMenu, { SettingsMenuItem } from '../components/settings/SettingsMenu';
 import ProfileSection from './settings/ProfileSection';
@@ -15,31 +21,37 @@ const SETTINGS_SECTIONS: SettingsMenuItem[] = [
   {
     id: 'profile',
     label: 'Perfil',
-    description: 'Dados pessoais, email e telefone',
+    icon: <PersonOutlineIcon fontSize="small" />,
   },
   {
     id: 'notifications',
     label: 'Notificações',
-    description: 'Canais habilitados e alertas.',
+    icon: <NotificationsNoneIcon fontSize="small" />,
   },
   {
     id: 'language',
-    label: 'Idioma e Acessibilidade',
-    description: 'Preferências visuais, de idioma e acessibilidade',
+    label: 'Idioma & Acessibilidade',
+    icon: <LanguageIcon fontSize="small" />,
     visualOnly: true,
   },
   {
     id: 'billing',
-    label: 'Pagamento e Assinaturas',
-    description: 'Planos e histórico de cobrança',
+    label: 'Pagamento & Assinaturas',
+    icon: <PaymentIcon fontSize="small" />,
     visualOnly: true,
   },
   {
     id: 'help',
-    label: 'Ajuda e Suporte',
-    description: 'Central de suporte e artigos.',
+    label: 'Ajuda',
+    icon: <HelpOutlineIcon fontSize="small" />,
     visualOnly: true,
   },
+  {
+    id: 'about',
+    label: 'Sobre',
+    icon: <InfoOutlinedIcon fontSize="small" />,
+    visualOnly: true,
+  }
 ];
 
 /**

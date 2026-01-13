@@ -4,19 +4,21 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Box,
+  Button,
   Card,
   CardContent,
   CircularProgress,
   Divider,
+  InputAdornment,
+  ListItemIcon,
   Stack,
   TextField,
   Typography,
   Chip,
 } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import SaveBar from '../../components/settings/SaveBar';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import { useToastContext } from '../../contexts/ToastContext';
 import {
   getProfile,
@@ -24,6 +26,7 @@ import {
   ProfileUpdatePayload,
   ProfileUpdateResponse,
 } from '../../services/settingsService';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 
 interface ProfileFormState {
   name: string;
@@ -44,6 +47,7 @@ const emptyFormState: ProfileFormState = {
 };
 
 const phoneRegex = /^\+?\d{10,15}$/;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Seção de perfil
@@ -56,33 +60,52 @@ const ProfileSection: React.FC = () => {
   const [formState, setFormState] = useState<ProfileFormState>(emptyFormState);
   const [errors, setErrors] = useState<ProfileFormErrors>({});
   const hasInitializedRef = React.useRef(false);
+  const { debouncedValue: debouncedName, isDebouncing: isNameDebouncing } = useDebouncedValue(formState.name, 800);
 
-  const mutation = useMutation({
+  // Centraliza atualização local após mudanças no perfil para manter UI consistente.
+  const handleProfileSuccess = (response: ProfileUpdateResponse, message: string) => {
+    queryClient.setQueryData(['settings-profile'], response.profile);
+    setFormState({
+      name: response.profile.name,
+      email: response.profile.email,
+      phone_number: response.profile.phone_number ?? '',
+    });
+    setErrors({});
+    showToast({
+      message,
+      severity: 'success',
+    });
+    if (response.email_verification_required) {
+      showToast({
+        message: 'Enviamos um novo email de verificação para o endereço atualizado.',
+        severity: 'warning',
+      });
+    }
+    if (response.phone_verification_required) {
+      showToast({
+        message: 'Enviamos um novo OTP para confirmar o telefone atualizado.',
+        severity: 'warning',
+      });
+    }
+  };
+
+  const nameMutation = useMutation({
     mutationFn: (payload: ProfileUpdatePayload) => updateProfile(payload),
     onSuccess: (response: ProfileUpdateResponse) => {
-      queryClient.setQueryData(['settings-profile'], response.profile);
-      setFormState({
-        name: response.profile.name,
-        email: response.profile.email,
-        phone_number: response.profile.phone_number ?? '',
-      });
-      setErrors({});
+      handleProfileSuccess(response, 'Nome atualizado com sucesso.');
+    },
+    onError: () => {
       showToast({
-        message: 'Perfil atualizado com sucesso.',
-        severity: 'success',
+        message: 'Não foi possível atualizar o nome. Tente novamente.',
+        severity: 'error',
       });
-      if (response.email_verification_required) {
-        showToast({
-          message: 'Enviamos um novo email de verificação para o endereço atualizado.',
-          severity: 'warning',
-        });
-      }
-      if (response.phone_verification_required) {
-        showToast({
-          message: 'Enviamos um novo OTP para confirmar o telefone atualizado.',
-          severity: 'warning',
-        });
-      }
+    },
+  });
+
+  const contactMutation = useMutation({
+    mutationFn: (payload: ProfileUpdatePayload) => updateProfile(payload),
+    onSuccess: (response: ProfileUpdateResponse) => {
+      handleProfileSuccess(response, 'Dados de contato atualizados com sucesso.');
     },
     onError: () => {
       showToast({
@@ -116,16 +139,34 @@ const ProfileSection: React.FC = () => {
     setErrors((prev) => (Object.keys(prev).length > 0 ? {} : prev));
   }, [data]);
 
-  const hasChanges = useMemo(() => {
-    if (!data) {
-        return false;
+  useEffect(() => {
+    if (!hasInitializedRef.current) {
+      return;
     }
-    return (
-      data.name !== formState.name ||
-      data.email !== formState.email ||
-      (data.phone_number ?? '') !== formState.phone_number
-    );
-  }, [data, formState]);
+    const trimmedName = formState.name.trim();
+    setErrors((prev) => {
+      if (!trimmedName) {
+        return { ...prev, name: 'Informe o nome completo.' };
+      }
+      if (!prev.name) {
+        return prev;
+      }
+      const { name, ...rest } = prev;
+      return rest;
+    });
+  }, [formState.name]);
+
+  useEffect(() => {
+    if (!data || !hasInitializedRef.current) {
+      return;
+    }
+    const trimmedName = debouncedName.trim();
+    if (!trimmedName || trimmedName === data.name || errors.name) {
+      return;
+    }
+    // Usa autosave com debounce para evitar mutações em cada tecla pressionada.
+    nameMutation.mutate({ name: trimmedName });
+  }, [data, debouncedName, errors.name, nameMutation]);
 
   const phoneStatus = useMemo(() => {
     if (!data?.phone_number) {
@@ -138,53 +179,40 @@ const ProfileSection: React.FC = () => {
   }, [data]);
 
   const handleFieldChange = (field: keyof ProfileFormState) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    setFormState((prev) => ({ ...prev, [field]: event.target.value }));
+    const nextValue = event.target.value;
+    setFormState((prev) => ({ ...prev, [field]: nextValue }));
+    setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
   };
 
-  const validate = (): ProfileFormErrors => {
+  const validateContact = (): ProfileFormErrors => {
     const nextErrors: ProfileFormErrors = {};
-    if (!formState.name.trim()) {
-      nextErrors.name = 'Informe o nome completo.';
-    }
-    if (!formState.email.trim()) {
+    if (!formState.email.trim() || !emailRegex.test(formState.email.trim())) {}
       nextErrors.email = 'Informe um email válido.';
     }
     if (formState.phone_number.trim() && !phoneRegex.test(formState.phone_number.trim())) {
-      nextErrors.phone_number = 'Informe um telefone válido um código do país.';
+      nextErrors.phone_number = 'Informe um telefone válido com código do país.';
     }
     return nextErrors;
   };
 
-  const handleSave = () => {
-    const nextErrors = validate();
+  const handleContactSave = () => {
+    const nextErrors = validateContact();
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0 || !data) {
       return;
     }
 
     const payload: ProfileUpdatePayload = {};
-    if (data.name !== formState.name.trim()) {
-      payload.name = formState.name.trim();
-    }
     if (data.email !== formState.email.trim()) {
       payload.email = formState.email.trim();
     }
     if ((data.phone_number ?? '') !== formState.phone_number.trim()) {
       payload.phone_number = formState.phone_number.trim() === '' ? null : formState.phone_number.trim();
     }
-  
-    mutation.mutate(payload);
-  };
-
-  const handleCancel = () => {
-    if (data) {
-      setFormState({
-        name: data.name,
-        email: data.email,
-        phone_number: data.phone_number ?? '',
-      });
-      setErrors({});
+    if (Object.keys(payload).length === 0) {
+      return;
     }
+    contactMutation.mutate(payload);
   };
 
   if (isLoading) {
@@ -195,21 +223,23 @@ const ProfileSection: React.FC = () => {
     );
   }
 
+  const hasContactChanges =
+    data &&
+    (data.email !== formState.email.trim() || (data.phone_number ?? '') !== formState.phone_number.trim());
+  const isNameSaving = isNameDebouncing || nameMutation.isPending;
+
   return (
     <Stack spacing={3}>
-      <Alert severity="info">
-        Dados de perfil são sincronizados com sua conta e validados no backend.
-      </Alert>
       <Card elevation={2}>
         <CardContent>
           <Stack spacing={3}>
             <Box>
-              <Typography variant="h6" gutterBottom>
-                Perfil
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Atualize seus dados pessoais e confira o status de verificação.
-              </Typography>
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <ListItemIcon sx={{ minWidth: 'auto', color: 'text.secondary' }}>
+                  <PersonOutlineIcon fontSize="small" />
+                </ListItemIcon>
+                <Typography variant="h6">Perfil</Typography>
+              </Stack>
             </Box>
             <Divider />
             <Stack spacing={2}>
@@ -219,6 +249,13 @@ const ProfileSection: React.FC = () => {
                 onChange={handleFieldChange('name')}
                 error={!!errors.name}
                 helperText={errors.name}
+                InputProps={{
+                  endAdornment: isNameSaving ? (
+                    <InputAdornment position="end">
+                      <CircularProgress size={16} />
+                    </InputAdornment>
+                  ) : undefined,
+                }}
                 fullWidth
               />
               <TextField
@@ -237,6 +274,16 @@ const ProfileSection: React.FC = () => {
                 helperText={errors.phone_number ?? 'Opcional, formato internacional com código de país.'}
                 fullWidth
               />
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  size="small"
+                  variant="contained"
+                  onClick={handleContactSave}
+                  disabled={!hasContactChanges || contactMutation.isPending}
+                >
+                  {contactMutation.isPending ? 'Salvando...' : 'Salvar contato'}
+                </Button>
+              </Box>
             </Stack>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
               <Chip
@@ -251,13 +298,6 @@ const ProfileSection: React.FC = () => {
           </Stack>
         </CardContent>
       </Card>
-      <SaveBar
-        open={hasChanges}
-        onSave={handleSave}
-        onCancel={handleCancel}
-        isSaving={mutation.isPending}
-        label="Você tem alterações não salvas no perfil"
-      />
     </Stack>
   );
 };

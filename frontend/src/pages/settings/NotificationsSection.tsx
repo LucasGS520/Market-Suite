@@ -2,9 +2,8 @@
  * Seção de notificações dentro da página de configurações
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Alert,
   Box,
   Card,
   CardContent,
@@ -12,17 +11,18 @@ import {
   Divider,
   FormControlLabel,
   FormGroup,
+  ListItemIcon,
   Stack,
   Switch,
   Typography,
 } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import SaveBar from '../../components/settings/SaveBar';
+import NotificationsNoneIcon from '@mui/icons-material/NotificationsNone';
 import { useToastContext } from '../../contexts/ToastContext';
 import {
-    getNotificationSettings,
-    updateNotificationSettings,
-    NotificationSettings,
+  getNotificationSettings,
+  updateNotificationSettings,
+  NotificationSettings,
 } from '../../services/settingsService';
 
 /**
@@ -43,6 +43,23 @@ const NotificationsSection: React.FC = () => {
 
   const mutation = useMutation({
     mutationFn: (payload: NotificationSettings) => updateNotificationSettings(payload),
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: ['settings-notifications'] });
+      const previous = queryClient.getQueryData<NotificationSettings>(['settings-notifications']);
+      queryClient.setQueryData(['settings-notifications'], payload);
+      setFormState(payload);
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['settings-notifications'], context.previous);
+        setFormState(context.previous);
+      }
+      showToast({
+        message: 'Não foi possível atualizar as notificações. Tente novamente.',
+        severity: 'error',
+      });
+    },
     onSuccess: (response) => {
       queryClient.setQueryData(['settings-notifications'], response);
       setFormState(response);
@@ -51,19 +68,13 @@ const NotificationsSection: React.FC = () => {
         severity: 'success',
       });
     },
-    onError: () => {
-      showToast({
-        message: 'Não foi possível atualizar as notificações. Tente novamente.',
-        severity: 'error',
-      });
-    },
   });
 
   useEffect(() => {
     if (!data) {
       return;
     }
-    // Evita renderizações em cascata ai só sincronizar quando há mudança real
+    // Evita renderizações em cascata ao só sincronizar quando há mudança real
     setFormState((prev) => {
       if (!prev) {
         hasInitializedRef.current = true;
@@ -82,33 +93,15 @@ const NotificationsSection: React.FC = () => {
     });
   }, [data]);
 
-  const hasChanges = useMemo(() => {
-    if (!data || !formState) {
-      return false;
-    }
-    return (
-      data.email !== formState.email ||
-      data.push !== formState.push ||
-      data.sms !== formState.sms ||
-      data.whatsapp !== formState.whatsapp
-    );
-  }, [data, formState]);
-
   const handleToggle = (field: keyof NotificationSettings) => (_: React.ChangeEvent<HTMLInputElement>, checked: boolean) => {
-    setFormState((prev) => (prev ? { ...prev, [field]: checked } : prev));
-  };
-
-  const handleSave = () => {
-    if (!formState) {
-      return;
-    }
-    mutation.mutate(formState);
-  };
-
-  const handleCancel = () => {
-    if (data) {
-      setFormState(data);
-    }
+    setFormState((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      const nextState = { ...prev, [field]: checked };
+      mutation.mutate(nextState);
+      return nextState;
+    });
   };
 
   if (isLoading || !formState) {
@@ -121,19 +114,17 @@ const NotificationsSection: React.FC = () => {
 
   return (
     <Stack spacing={3}>
-      <Alert severity="info">
-        Estes canais são persistidos no backend e impactam os alertas enviados automaticamente.
-      </Alert>
       <Card elevation={2}>
         <CardContent>
           <Stack spacing={3}>
             <Box>
-              <Typography variant="h6" gutterBottom>
-                Notificações
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Escolha os canais que deseja receber alertas sobre mudanças de preço e disponibilidade.
-              </Typography>
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <ListItemIcon sx={{ minWidth: 'auto', color: 'text.secondary' }}>
+                  <NotificationsNoneIcon fontSize="small" />
+                </ListItemIcon>
+                <Typography variant="h6">Notificações</Typography>
+                {mutation.isPending && <CircularProgress size={16} />}
+              </Stack>
             </Box>
             <Divider />
             <FormGroup>
@@ -157,13 +148,6 @@ const NotificationsSection: React.FC = () => {
           </Stack>
         </CardContent>
       </Card>
-      <SaveBar
-        open={hasChanges}
-        onSave={handleSave}
-        onCancel={handleCancel}
-        isSaving={mutation.isPending}
-        label="Você tem alterações não salvas em notificações"
-      />
     </Stack>
   );
 };

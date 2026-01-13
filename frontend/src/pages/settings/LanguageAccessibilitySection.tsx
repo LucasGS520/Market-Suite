@@ -2,37 +2,44 @@
  * Seção de idioma e acessibilidade com preferências locais
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Alert,
   Box,
   Card,
   CardContent,
+  CircularProgress,
   Divider,
   FormControl,
   InputLabel,
+  ListItemIcon,
   MenuItem,
   Select,
   Stack,
   Typography,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material/Select';
-import SaveBar from '../../components/settings/SaveBar';
+import LanguageIcon from '@mui/icons-material/Language';
 import { useToastContext } from '../../contexts/ToastContext';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
 
 interface LocalPreferences {
-    language: string;
-    theme: string;
-    reduce_motion: boolean;
+  language: string;
+  theme: string;
+  reduce_motion: boolean;
 }
 
 const STORAGE_KEY = 'market-suite.settings.ui';
 
 const defaultPreferences: LocalPreferences = {
-    language: 'pt-BR',
-    theme: 'light',
-    reduce_motion: false,
+  language: 'pt-BR',
+  theme: 'light',
+  reduce_motion: false,
 };
+
+// Comparação explícita para evitar serialização repetidas ao salvar preferências
+const arePreferencesEqual = (a: LocalPreferences, b: LocalPreferences): boolean => {
+  return a.language === b.language && a.theme === b.theme && a.reduce_motion === b.reduce_motion;
+}
 
 /**
  * Seção de idioma e acessibilidade
@@ -42,6 +49,9 @@ const LanguageAccessibilitySection: React.FC = () => {
   const { showToast } = useToastContext();
   const [savedPreferences, setSavedPreferences] = useState<LocalPreferences>(defaultPreferences);
   const [formState, setFormState] = useState<LocalPreferences>(defaultPreferences);
+  const [isSaving, setIsSaving] = useState(false);
+  const hasLoadedRef = React.useRef(false);
+  const { debouncedValue: debouncedPreferences, isDebouncing } = useDebouncedValue(formState, 800);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -55,44 +65,49 @@ const LanguageAccessibilitySection: React.FC = () => {
         setFormState(defaultPreferences);
       }
     }
+    hasLoadedRef.current = true;
   }, []);
 
-  const hasChanges = useMemo(() => {
-    return JSON.stringify(savedPreferences) !== JSON.stringify(formState);
-  }, [savedPreferences, formState]);
+  useEffect(() => {
+    if (!hasLoadedRef.current) {
+      return;
+    }
+    setIsSaving(!arePreferencesEqual(savedPreferences, formState));
+  }, [formState, savedPreferences]);
 
-  const handleSelectChange = (field: keyof LocalPreferences) => (event: SelectChangeEvent<string>) => {
-    setFormState((prev) => ({...prev, [field]: event.target.value }));
-  };
-
-  const handleSave = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(formState));
-    setSavedPreferences(formState);
+  useEffect(() => {
+    if (!hasLoadedRef.current) {
+      return;
+    }
+    if (arePreferencesEqual(savedPreferences, debouncedPreferences)) {
+      return;
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(debouncedPreferences));
+    setSavedPreferences(debouncedPreferences);
+    setIsSaving(false);
     showToast({
       message: 'Preferências visuais salvas neste navegador.',
       severity: 'success',
     });
-  };
+  }, [debouncedPreferences, savedPreferences, showToast]);
 
-  const handleCancel = () => {
-    setFormState(savedPreferences);
+  const handleSelectChange = (field: keyof LocalPreferences) => (event: SelectChangeEvent<string>) => {
+    setFormState(prev => ({...prev, [field]: event.target.value }));
   };
 
   return (
     <Stack spacing={3}>
-      <Alert severity="info">
-        Preferências de idioma e acessibilidade são visuais e ficam salvas apenas neste navegador.
-      </Alert>
       <Card elevation={2}>
         <CardContent>
           <Stack spacing={3}>
             <Box>
-              <Typography variant="h6" gutterBottom>
-                Idioma & Acessibilidade
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Ajustes locais para personalizar experiência visual.
-              </Typography>
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <ListItemIcon sx={{ minWidth: 'auto', color: 'text.secondary' }}>
+                  <LanguageIcon fontSize="small" />
+                </ListItemIcon>
+                <Typography variant="h6">Idioma & Acessibilidade</Typography>
+                {(isSaving || isDebouncing) && <CircularProgress size={16} />}
+              </Stack>
             </Box>
             <Divider />
             <Stack spacing={2}>
@@ -125,12 +140,6 @@ const LanguageAccessibilitySection: React.FC = () => {
           </Stack>
         </CardContent>
       </Card>
-      <SaveBar
-        open={hasChanges}
-        onSave={handleSave}
-        onCancel={handleCancel}
-        label="Você tem ajustes visuais pendentes"
-      />
     </Stack>
   );
 };
