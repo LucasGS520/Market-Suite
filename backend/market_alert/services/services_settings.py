@@ -105,48 +105,94 @@ def update_profile_settings(
         phone_value = _resolve_phone_for_update(payload, user)
         phone_changed = False
         if phone_value != user.phone_number:
+            if phone_value:
+                normalized_phone = _normalize_phone(phone_value)
+                phone_value = normalized_phone
+                if crud_user.get_user_by_phone(db, phone_value):
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Telefone já cadastrado")
+            phone_changed = True
+
+        name_value = user.name
+        if "name" in update_data and payload.name:
+            name_value = payload.name
+
+        if not (email_changed or phone_changed or name_value != user.name):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nenhuma alteração aplicável")
+        
+        email_verified_value = user.email_verified
+        phone_verified_value = user.phone_number_verified
+        if email_changed:
+            email_verified_value = False
+            #Zera a verificação do email para garantir novo fluxo de confirmação
+            user.email_verified_at = None
+        if phone_changed:
+            phone_verified_value = False
+            #Reseta o status do telefone ao alterar o número informado
+            user.phone_verified_at = None
             
-
-
+        crud_user.update_user_profile(
             db,
-            user_id=user.id,
-            kind=VerificationKind.email,
-            raw_token=token,
-            expires_at=expires_at,
-            metadata={"ip": request.client.host if request.client else "unknown"},
+            user,
+            name=name_value,
+            email=normalized_email,
+            phone_number=phone_value,
+            email_verified=email_verified_value,
+            phone_number_verified=phone_verified_value,
+            updated_by=user.id,
         )
-        send_email_verification.delay(str(user.id), token)
-        email_verification_required = True
+        email_verification_required = False
+        phone_verification_required = False
 
-    if phone_changed and phone_value:
-        otp = generate_phone_otp()
-        expires_at = token_expiry(settings.PHONE_VERIFICATION_EXPIRE_MINUTES)
-        crud_verification.create_verification(
-            db,
-            user_id=user.id,
-            kind=VerificationKind.phone_number,
-            raw_token=otp,
-            expires_at=expires_at,
-            attempts_remaining=settings.PHONE_VERIFICATION_MAX_ATTEMPTS,
-            metadata={"ip": request.client.host if request.client else "unknown"},
+        if email_changed:
+            token = generate_verification_token()
+            expires_at = token_expiry(settings.EMAIL_VERIFICATION_EXPIRE_MINUTES)
+            crud_verification.create_verification(
+                db,
+                user_id=user.id,
+                kind=VerificationKind.email,
+                raw_token=token,
+                expires_at=expires_at,
+                metadata={"ip": request.client.host if request.client else "unknown"},
+            )
+            send_email_verification.delay(str(user.id), token)
+            email_verification_required = True
+
+        if phone_changed and phone_value:
+            otp = generate_phone_otp()
+            expires_at = token_expiry(settings.PHONE_VERIFICATION_EXPIRE_MINUTES)
+            crud_verification.create_verification(
+                db,
+                user_id=user.id,
+                kind=VerificationKind.phone_number,
+                raw_token=otp,
+                expires_at=expires_at,
+                attempts_remaining=settings.PHONE_VERIFICATION_MAX_ATTEMPTS,
+                metadata={"ip": request.client.host if request.client else "unknown"},
+            )
+            send_phone_otp.delay(str(user.id), otp)
+            phone_verification_required = True
+
+        SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="success").inc()
+        logger.info(
+            "settings_profile_updated",
+            user_id=str(user.id),
+            email_changed=email_changed,
+            phone_changed=phone_changed,
         )
-        send_phone_otp.delay(str(user.id), otp)
-        phone_verification_required = True
 
-    SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="success").inc()
-    logger.info(
-        "settings_profile_updated",
-        user_id=str(user.id),
-        email_changed=email_changed,
-        phone_changed=phone_changed,
-    )
-
-    profile = SettingsProfileResponse.model_validate(user)
-    return SettingsProfileUpdateResponse(
-        profile=profile,
-        email_verification_required=email_verification_required,
-        phone_verification_required=phone_verification_required,
-    )
+        profile = SettingsProfileResponse.model_validate(user)
+        return SettingsProfileUpdateResponse(
+            profile=profile,
+            email_verification_required=email_verification_required,
+            phone_verification_required=phone_verification_required,
+        )
+    except HTTPException:
+        SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="failure").inc()
+        raise
+    except Exception:
+        SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="failure").inc()
+        logger.exception("settings_profile_update_failed", user_id=str(user.id))
+        raise
 
 def update_notification_settings(
     db: Session,
@@ -154,32 +200,39 @@ def update_notification_settings(
     payload: NotificationSettings,
 ) -> NotificationSettings:
     """ Atualiza as preferências de canais de notificação """
-    settings_payload = {
-        NotificationChannel.email: payload.email,
-        NotificationChannel.push: payload.push,
-        NotificationChannel.sms: payload.sms,
-        NotificationChannel.whatsapp: payload.whatsapp,
-    }
+    try:
+        settings_payload = {
+            NotificationChannel.email: payload.email,
+            NotificationChannel.push: payload.push,
+            NotificationChannel.sms: payload.sms,
+            NotificationChannel.whatsapp: payload.whatsapp,
+        }
 
-    invalid_channels = set(settings_payload.keys()) - DEFAULT_NOTIFICATION_CHANNELS
-    if invalid_channels:
+        invalid_channels = set(settings_payload.keys()) - DEFAULT_NOTIFICATION_CHANNELS
+        if invalid_channels:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Canal de notificação inválido")
+        
+        crud_notifications.update_notification_settings(
+            db,
+            user_id=user.id,
+            settings=settings_payload,
+        )
+        SETTINGS_NOTIFICATION_UPDATES_TOTAL.labels(result="success").inc()
+        logger.info(
+            "settings_notification_updated",
+            user_id=str(user.id),
+            channels={channel.value: enabled for channel, enabled in settings_payload.items()},
+        )
+        return NotificationSettings(
+            email=payload.email,
+            push=payload.push,
+            sms=payload.sms,
+            whatsapp=payload.whatsapp,
+        )
+    except HTTPException:
         SETTINGS_NOTIFICATION_UPDATES_TOTAL.labels(result="failure").inc()
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Canal de notificação inválido")
-    
-    crud_notifications.update_notification_settings(
-        db,
-        user_id=user.id,
-        settings=settings_payload,
-    )
-    SETTINGS_NOTIFICATION_UPDATES_TOTAL.labels(result="success").inc()
-    logger.info(
-        "settings_notification_updated",
-        user_id=str(user.id),
-        channels={channel.value: enabled for channel, enabled in settings_payload.items()},
-    )
-    return NotificationSettings(
-        email=payload.email,
-        push=payload.push,
-        sms=payload.sms,
-        whatsapp=payload.whatsapp,
-    )
+        raise
+    except Exception:
+        SETTINGS_NOTIFICATION_UPDATES_TOTAL.labels(result="failure").inc()
+        logger.exception("settings_notification_update_failed", user_id=str(user.id))
+        raise
