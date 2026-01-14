@@ -2,7 +2,7 @@
  * Seção de idioma e acessibilidade com preferências locais
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Card,
@@ -36,10 +36,30 @@ const defaultPreferences: LocalPreferences = {
   reduce_motion: false,
 };
 
+type SelectablePreferenceField = 'language' | 'theme';
+
 // Comparação explícita para evitar serialização repetidas ao salvar preferências
 const arePreferencesEqual = (a: LocalPreferences, b: LocalPreferences): boolean => {
   return a.language === b.language && a.theme === b.theme && a.reduce_motion === b.reduce_motion;
-}
+};
+
+/**
+ * Lê preferências salvas do localStorage durante a criação do estado.
+ */
+const loadStoredPreferences = (): LocalPreferences => {
+  if (typeof window === 'undefined') {
+    return defaultPreferences;
+  }
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (!stored) {
+    return defaultPreferences;
+  }
+  try {
+    return JSON.parse(stored) as LocalPreferences;
+  } catch {
+    return defaultPreferences;
+  }
+};
 
 /**
  * Seção de idioma e acessibilidade
@@ -47,33 +67,19 @@ const arePreferencesEqual = (a: LocalPreferences, b: LocalPreferences): boolean 
  */
 const LanguageAccessibilitySection: React.FC = () => {
   const { showToast } = useToastContext();
-  const [savedPreferences, setSavedPreferences] = useState<LocalPreferences>(defaultPreferences);
-  const [formState, setFormState] = useState<LocalPreferences>(defaultPreferences);
-  const [isSaving, setIsSaving] = useState(false);
+  const [savedPreferences, setSavedPreferences] = useState<LocalPreferences>(() => loadStoredPreferences());
+  const [formState, setFormState] = useState<LocalPreferences>(() => loadStoredPreferences());
   const hasLoadedRef = React.useRef(false);
   const { debouncedValue: debouncedPreferences, isDebouncing } = useDebouncedValue(formState, 800);
+  const isSaving = useMemo(
+    () => !arePreferencesEqual(savedPreferences, formState),
+    [formState, savedPreferences],
+  );
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as LocalPreferences;
-        setSavedPreferences(parsed);
-        setFormState(parsed);
-      } catch {
-        setSavedPreferences(defaultPreferences);
-        setFormState(defaultPreferences);
-      }
-    }
+    // Evita exibir toast no primeiro render, já que o estado inicial já reflete o armazenamento.
     hasLoadedRef.current = true;
   }, []);
-
-  useEffect(() => {
-    if (!hasLoadedRef.current) {
-      return;
-    }
-    setIsSaving(!arePreferencesEqual(savedPreferences, formState));
-  }, [formState, savedPreferences]);
 
   useEffect(() => {
     if (!hasLoadedRef.current) {
@@ -83,16 +89,20 @@ const LanguageAccessibilitySection: React.FC = () => {
       return;
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(debouncedPreferences));
-    setSavedPreferences(debouncedPreferences);
-    setIsSaving(false);
-    showToast({
-      message: 'Preferências visuais salvas neste navegador.',
-      severity: 'success',
-    });
+    const timeoutId = window.setTimeout(() => {
+      setSavedPreferences(debouncedPreferences);
+      showToast({
+        message: 'Preferências visuais salvas neste navegador.',
+        severity: 'success',
+      });
+    }, 0);
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [debouncedPreferences, savedPreferences, showToast]);
 
-  const handleSelectChange = (field: keyof LocalPreferences) => (event: SelectChangeEvent<string>) => {
-    setFormState(prev => ({...prev, [field]: event.target.value }));
+  const handleSelectChange = (field: SelectablePreferenceField) => (event: SelectChangeEvent<string>) => {
+    setFormState((prev) => ({ ...prev, [field]: event.target.value }));
   };
 
   return (

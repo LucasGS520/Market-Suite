@@ -2,7 +2,7 @@
  * Hook que retorna um valor com debounce para reduzir chamadas de atualização.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface DebouncedState<T> {
   debouncedValue: T;
@@ -15,21 +15,22 @@ interface DebouncedState<T> {
  */
 const useDebouncedValue = <T,>(value: T, delay = 800): DebouncedState<T> => {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
-  const [isDebouncing, setIsDebouncing] = useState(false);
+  const previousValueRef = useRef(value);
+  const isDebouncing = !Object.is(value, debouncedValue);
 
   useEffect(() => {
-    if (Object.is(value, debouncedValue)) {
+    if (Object.is(previousValueRef.current, value)) {
       return;
     }
-    // Evita chamadas repetidas enquanto o usuário ainda está digitando
-    setIsDebouncing(true);
+    // Garante debounce apenas quando o valor realmente mudou desde o último ciclo.
+    previousValueRef.current = value;
+    // Evita chamadas repetidas enquanto o usuário ainda está digitando.
     const timer = window.setTimeout(() => {
       setDebouncedValue(value);
-      setIsDebouncing(false);
     }, delay);
 
     return () => window.clearTimeout(timer);
-  }, [value, delay, debouncedValue]);
+  }, [value, delay]);
 
   return { debouncedValue, isDebouncing };
 };

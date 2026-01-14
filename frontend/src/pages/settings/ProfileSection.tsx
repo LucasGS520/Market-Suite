@@ -50,6 +50,16 @@ const phoneRegex = /^\+?\d{10,15}$/;
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
+ * Valida o nome informado para evitar atualizações incompletas
+ */
+const getNameError = (value: string): string | undefined => {
+  if (!value.trim()) {
+    return 'Informe o nome completo.';
+  }
+  return undefined;
+};
+
+/**
  * Seção de perfil
  * Permite ao usuário atualizar dados básicos e observar status de verificação
  */
@@ -140,33 +150,16 @@ const ProfileSection: React.FC = () => {
   }, [data]);
 
   useEffect(() => {
-    if (!hasInitializedRef.current) {
-      return;
-    }
-    const trimmedName = formState.name.trim();
-    setErrors((prev) => {
-      if (!trimmedName) {
-        return { ...prev, name: 'Informe o nome completo.' };
-      }
-      if (!prev.name) {
-        return prev;
-      }
-      const { name, ...rest } = prev;
-      return rest;
-    });
-  }, [formState.name]);
-
-  useEffect(() => {
     if (!data || !hasInitializedRef.current) {
       return;
     }
     const trimmedName = debouncedName.trim();
-    if (!trimmedName || trimmedName === data.name || errors.name) {
+    if (!trimmedName || trimmedName === data.name || getNameError(trimmedName)) {
       return;
     }
     // Usa autosave com debounce para evitar mutações em cada tecla pressionada.
     nameMutation.mutate({ name: trimmedName });
-  }, [data, debouncedName, errors.name, nameMutation]);
+  }, [data, debouncedName, nameMutation]);
 
   const phoneStatus = useMemo(() => {
     if (!data?.phone_number) {
@@ -181,12 +174,17 @@ const ProfileSection: React.FC = () => {
   const handleFieldChange = (field: keyof ProfileFormState) => (event: React.ChangeEvent<HTMLInputElement>) => {
     const nextValue = event.target.value;
     setFormState((prev) => ({ ...prev, [field]: nextValue }));
+    if (field === 'name') {
+      const nameError = getNameError(nextValue);
+      setErrors((prev) => ({ ...prev, name: nameError }));
+      return;
+    }
     setErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
   };
 
   const validateContact = (): ProfileFormErrors => {
     const nextErrors: ProfileFormErrors = {};
-    if (!formState.email.trim() || !emailRegex.test(formState.email.trim())) {}
+    if (!formState.email.trim() || !emailRegex.test(formState.email.trim())) {
       nextErrors.email = 'Informe um email válido.';
     }
     if (formState.phone_number.trim() && !phoneRegex.test(formState.phone_number.trim())) {
