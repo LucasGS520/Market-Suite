@@ -26,7 +26,7 @@ def login(
     logger.info("login_route_called", ip=request.client.host, email=form_data.username)
     try:
         token_pair = login_user(request, db, form_data.username, form_data.password)
-        set_refresh_cookie(response, token_pair.refresh_token)
+        set_refresh_cookie(response, token_pair.refresh_token, request)
         return token_pair
     except HTTPException as exc:
         #Conta apenas falhas de credenciais inválidas

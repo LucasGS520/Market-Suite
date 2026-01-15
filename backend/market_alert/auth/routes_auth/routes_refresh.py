@@ -28,5 +28,5 @@ def refresh_tokens(
         token_presente=bool(payload and payload.refresh_token),
     )
     token_pair = refresh_token_service(db, payload, request)
-    set_refresh_cookie(response, token_pair.refresh_token)
+    set_refresh_cookie(response, token_pair.refresh_token, request)
     return token_pair
