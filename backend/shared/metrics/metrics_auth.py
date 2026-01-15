@@ -27,6 +27,19 @@ VERIFICATION_FAILURE_TOTAL = Counter(
     "Total de falhas no fluxo de verificação",
     ["channel", "reason"],
 )
+REFRESH_MISSING_TOTAL = Counter(
+    "refresh_missing_total",
+    "Total de refresh tokens ausentes nas requisições de renovação",
+)
+REFRESH_SUCCESS_TOTAL = Counter(
+    "refresh_success_total",
+    "Total de renovações de access token com sucesso",
+)
+REFRESH_FAILURE_TOTAL = Counter(
+    "refresh_failure_total",
+    "Total de falhas ao renovar tokens de acesso",
+    ["reason"],
+)
 
 __all__ = [
     "LOGIN_ERRORS_TOTAL",
@@ -34,4 +47,7 @@ __all__ = [
     "VERIFICATION_RESEND_ATTEMPTS_TOTAL",
     "VERIFICATION_SUCCESS_TOTAL",
     "VERIFICATION_FAILURE_TOTAL",
+    "REFRESH_MISSING_TOTAL",
+    "REFRESH_SUCCESS_TOTAL",
+    "REFRESH_FAILURE_TOTAL",
 ]

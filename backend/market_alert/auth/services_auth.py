@@ -22,15 +22,23 @@ from market_alert.schemas.schemas_auth import (
 from market_alert.schemas.schemas_auth import TokenPairResponse, RefreshRequest
 from market_alert.models.models_users import User
 from market_alert.enums.enums_users import UserStatus
+from shared.metrics.metrics_auth import (
+    REFRESH_FAILURE_TOTAL,
+    REFRESH_MISSING_TOTAL,
+    REFRESH_SUCCESS_TOTAL,
+)
 
 
 logger = structlog.get_logger("service.auth")
 
 def _resolve_refresh_token(payload: RefreshRequest | None, request: Request) -> str | None:
-    """ Obtém o refresh token via payload ou cookie HttpOnly """
+    """ Obtém o refresh token via payload ou cookie HttpOnly, com fallback opcional no payload """
+    cookie_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
     if payload and payload.refresh_token:
         return payload.refresh_token
-    return request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
+    return None
 
 def authenticate_user(db: Session, identifier: str, password: str) -> User | None:
     """ Verifica credenciais e retorna o usuário se forem válidas """
@@ -167,14 +175,18 @@ def change_email_service(db: Session, current_user: User, request_model: ChangeE
 # ---------- REFRESH TOKENS ----------
 def refresh_token_service(db: Session, payload: RefreshRequest | None, request: Request) -> TokenPairResponse:
     """ Troca um Refresh Token válido por um novo Access Token e novo Refresh Token (rotacionando) """
+    request_id = request.headers.get("x-request-id") or request.headers.get("x-requestid")
     raw_token = _resolve_refresh_token(payload, request)
     if not raw_token:
-        logger.warning("refresh_failed_missing", ip=request.client.host)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token ausente")
+        logger.warning("refresh_failed_missing", ip=request.client.host, request_id=request_id)
+        REFRESH_MISSING_TOTAL.inc()
+        REFRESH_FAILURE_TOTAL.labels(reason="missing").inc()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autorizado")
     refresh = get_refresh_token(db, raw_token)
     if not refresh:
-        logger.warning("refresh_failed_invalid", ip=request.client.host)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token inválido ou expirado")
+        logger.warning("refresh_failed_invalid", ip=request.client.host, request_id=request_id)
+        REFRESH_FAILURE_TOTAL.labels(reason="invalid").inc()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autorizado")
 
     #Revoga o token antigo
     revoke_refresh_token(db, refresh)
@@ -194,9 +206,15 @@ def refresh_token_service(db: Session, payload: RefreshRequest | None, request: 
             "status": user.status.value,
         }
     )
-
-    logger.info("refresh_success", user_id=str(refresh.user_id), old_id=str(refresh.id), new_token_id=str(new_refresh.id), ip=request.client.host)
-
+    logger.info(
+        "refresh_success",
+        user_id=str(refresh.user_id),
+        old_id=str(refresh.id),
+        new_token_id=str(new_refresh.id),
+        ip=request.client.host,
+        request_id=request_id,
+    )
+    REFRESH_SUCCESS_TOTAL.inc()
     return TokenPairResponse(access_token=access_token, refresh_token=new_raw, token_type="bearer")
 
 def logout_service(db: Session, payload: RefreshRequest | None, request: Request) -> None:

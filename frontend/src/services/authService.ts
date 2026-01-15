@@ -1,12 +1,8 @@
 import apiClient from '../lib/api';
 import {
   clearAccessToken,
-  clearRefreshTokenCookie,
   getAccessToken,
-  getRefreshTokenFromCookie,
   setAccessToken,
-  setRefreshTokenCookie,
-  shouldStoreRefreshCookie,
 } from '../utils/authTokens';
 import { TokenPair, User } from '../types';
 
@@ -22,8 +18,7 @@ export const authService = {
    * Realiza login com email (username) e senha.
    *
    * Envia um form-url-encoded para a rota /auth e, em caso de sucesso,
-   * armazena o access_token em memória e define o refresh token no cookie
-   * quando o fallback estiver habilitado.
+   * armazena o access_token em memória e confia no cookie HttpOnly do backend.
    */
   async login(email: string, password: string): Promise<TokenPair> {
     // Usamos FormData para simular body x-www-form-urlencoded requisitado pelo backend.
@@ -39,23 +34,17 @@ export const authService = {
 
     // Salvar access token somente em memória para reduzir exposição local.
     setAccessToken(response.data.access_token);
-    if (shouldStoreRefreshCookie()) {
-      setRefreshTokenCookie(response.data.refresh_token);
-    }
-
-    return response.data;
+     return response.data;
   },
 
   /**
    * Realiza logout do usuário e tenta revogar o refresh token no backend.
-   * - Se houver um refresh_token disponível (cookie fallback), envia uma requisição para /auth/logout.
-   * - Independentemente do resultado da revogação, remove tokens mantidos no frontend.
+   * - Envia requisição para /auth/logout para revogar o cookie HttpOnly no backend.
+   * - Independentemente do resultado, remove tokens mantidos em memória.
    */
   async logout(): Promise<void> {
-    const refreshToken = getRefreshTokenFromCookie();
-
     try {
-      await apiClient.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : {});
+      await apiClient.post('/auth/logout');
     } catch (error) {
       // Log de erro não-bloqeuante: limpeza local ainda é realizada
       // Preferir logger estruturado (ex.: structlog) em produção
@@ -64,7 +53,6 @@ export const authService = {
 
     // Limpar tokens localmente para efetivar logout no frontend.
     clearAccessToken();
-    clearRefreshTokenCookie();
   },
 
   /**
@@ -87,16 +75,12 @@ export const authService = {
   },
 
   /**
-   * Solicita um novo access_token usando refresh token (cookie ou payload)
+   * Solicita um novo access_token usando refresh token via cookie HttpOnly.
    */
   async refresh(): Promise<TokenPair> {
-    const refreshToken = getRefreshTokenFromCookie();
     // A rota /auth/refresh aceita apenas POST; evitar GET preserva o contrato do backend
-    const response = await apiClient.post<TokenPair>('/auth/refresh', refreshToken ? { refresh_token: refreshToken } : {});
+    const response = await apiClient.post<TokenPair>('/auth/refresh');
     setAccessToken(response.data.access_token);
-    if (shouldStoreRefreshCookie()) {
-      setRefreshTokenCookie(response.data.refresh_token);
-    }
     return response.data;
   },
 

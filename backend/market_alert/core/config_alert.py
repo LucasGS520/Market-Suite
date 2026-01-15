@@ -11,6 +11,26 @@ __all__ = ["Settings", "settings"]
 class Settings(ConfigBase):
     """ Configurações específicas do serviço market_alert """
 
+    #Origens permitidas para CORS no frontend
+    _frontend_origins_env = os.getenv("FRONTEND_ORIGINS", "")
+    FRONTEND_ORIGINS: list[str] = [
+        origin.strip()
+        for origin in _frontend_origins_env.split(",")
+        if origin.strip()
+    ] or [
+        #Fallback para ambiente local quando nenhuma origem foi declarada
+        #URL do servidor Vite em modo desenvolvimento
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        # IP da máquina que serve o frontend na rede local (ex.: seu servidor)
+        "http://192.168.15.150:5173",
+        #URL do servidor Express utilizado no build de produção local
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        # Frontend servido a partir do IP (possível variação de porta)
+        "http://192.168.15.150:3000",
+    ]
+
     #Configuração do banco de dados
     DATABASE_URL: str = os.getenv("DATABASE_URL")  # URL de conexão do Postgres
     if not DATABASE_URL:
@@ -51,7 +71,7 @@ class Settings(ConfigBase):
     ) #Nome do cookie utilizado para refresh token
     REFRESH_TOKEN_COOKIE_PATH: str = os.getenv(
         "REFRESH_TOKEN_COOKIE_PATH",
-        "/auth/refresh",
+        "/",
     ) #Path restrito para envio do cookie de refresh
     REFRESH_TOKEN_COOKIE_SECURE: bool = os.getenv(
         "REFRESH_TOKEN_COOKIE_SECURE",
@@ -62,7 +82,7 @@ class Settings(ConfigBase):
     REFRESH_TOKEN_COOKIE_SAMESITE: str = (
         _refresh_cookie_samesite_env.strip().lower()
         if _refresh_cookie_samesite_env
-        else ("none" if not REFRESH_TOKEN_COOKIE_SECURE else "strict")
+        else "none"
     ) #Política SameSite do cookie de refresh
 
     #Intervalo base utilizado pelo AdaptiveRecheckManager

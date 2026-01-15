@@ -8,6 +8,7 @@ from shared.infra.db import get_db
 from market_alert.schemas.schemas_auth import RefreshRequest, TokenPairResponse
 from market_alert.auth.services_auth import refresh_token_service
 from market_alert.auth.cookies_auth import set_refresh_cookie
+from market_alert.core.config_alert import settings
 
 
 logger = structlog.get_logger("route.auth.refresh")
@@ -22,10 +23,14 @@ def refresh_tokens(
 ):
     """ Troca um Refresh Token válido por um novo par de tokens (access + refresh) """
     #Evitamos registrar o valor do refresh token para não expor segredos em logs.
+    request_id = request.headers.get("x-request-id") or request.headers.get("x-requestid")
+    cookie_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
     logger.info(
         "refresh_route_called",
         ip=request.client.host,
-        token_presente=bool(payload and payload.refresh_token),
+        request_id=request_id,
+        cookie_current=bool(cookie_token),
+        payload_current=bool(payload and payload.refresh_token),
     )
     token_pair = refresh_token_service(db, payload, request)
     set_refresh_cookie(response, token_pair.refresh_token, request)

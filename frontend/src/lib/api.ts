@@ -1,11 +1,8 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import {
   clearAccessToken,
-  clearRefreshTokenCookie,
   getAccessToken,
-  getRefreshTokenFromCookie,
   setAccessToken,
-  setRefreshTokenCookie,
 } from '../utils/authTokens';
 
 /**
@@ -44,13 +41,12 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  // Mantém cookies HttpOnly ativos para refresh; fallback usa storage quando configurado
+  // Mantém cookies HttpOnly ativos para refresh via backend
   withCredentials: true,
 });
 
 // Em dev, logar a baseURL utilizada para facilitar diagnóstico remoto
 if (import.meta.env.DEV) {
-  // eslint-disable-next-line no-console
   console.debug('[api] API_BASE_URL =', API_BASE_URL, '=> RESOLVED_API_BASE =', RESOLVED_API_BASE);
 }
 
@@ -60,7 +56,6 @@ if (import.meta.env.DEV) {
  */
 const redirectToLogin = (): void => {
   clearAccessToken();
-  clearRefreshTokenCookie();
   // Redireciona para rota de login da aplicação
   window.location.href = '/login';
 };
@@ -81,7 +76,6 @@ apiClient.interceptors.request.use(
 // Tipagem esperada da resposta do endpoint de refresh
 interface RefreshResponse {
   access_token: string;
-  refresh_token: string;
 }
 
 let refreshPromise: Promise<string> | null = null;
@@ -95,18 +89,10 @@ const refreshAccessToken = async (): Promise<string> => {
   }
 
   refreshPromise = (async () => {
-    const refreshToken = getRefreshTokenFromCookie();
-    const payload = refreshToken ? { refresh_token: refreshToken } : {};
-    // A rota /auth/refresh aceita apenas POST; manter explícito evita regressões.
-    const response = await axios.post<RefreshResponse>(`${RESOLVED_API_BASE}/auth/refresh`, payload, {
-      withCredentials: true,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    const { access_token, refresh_token: newRefreshToken } = response.data;
+    // A rota/auth/refresh aceita apenas POST e lê o cookie HttpOnly
+    const response = await apiClient.post<RefreshResponse>('/auth/refresh');
+    const { access_token } = response.data;
     setAccessToken(access_token);
-    setRefreshTokenCookie(newRefreshToken);
     return access_token;
   })();
 
