@@ -2,8 +2,7 @@
 
 O módulo foi simplificado para entregar apenas os indicadores essenciais
 utilizados pelos cards do frontend. O foco permanece em identificar o menor e o
-maior preço, média dos concorrentes, ranking básico e alertas diretos de
-preço/ disponibilidade.
+maior preço, média dos concorrentes e ranking básico.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -65,7 +64,6 @@ def compare_prices(
     - average_competitor_price: média dos preços válidos dos concorrentes ou `None`
     - lowest_competitor/highest_competitor: discrepâncias completas do menor e do maior preço
     - discrepancies: discrepâncias de todos os concorrentes com preço válido
-    - alerts: eventos diretos de preço e disponibilidade consumidos pelas regras
     """
     #Valor base para referência durante a comparação
     monitored_price = monitored.current_price
@@ -79,7 +77,6 @@ def compare_prices(
             "lowest_competitor": None,
             "highest_competitor": None,
             "discrepancies": [],
-            "alerts": []
         }
 
     #Filtra concorrentes disponíveis com preço válido
@@ -100,7 +97,6 @@ def compare_prices(
             "lowest_competitor": None,
             "highest_competitor": None,
             "discrepancies": [],
-            "alerts": []
         }
 
     #Extrai lista de preços válidos dos concorrentes
@@ -113,9 +109,8 @@ def compare_prices(
     lowest = min(valid_competitors, key=lambda c: c.current_price)
     highest = max(valid_competitors, key=lambda c: c.current_price)
 
-    #Monta lista de discrepâncias e possíveis alertas
+    #Monta lista de discrepâncias
     discrepancies: List[Dict[str, Any]] = []
-    alerts: List[Dict[str, Any]] = []
 
     for c in valid_competitors:
         price: Decimal = c.current_price
@@ -132,38 +127,6 @@ def compare_prices(
         )
         discrepancies.append(discrepancy)
 
-        if discrepancy.get("pct_below_monitored") is not None:
-            alerts.append(
-                {
-                    "type": "price_below_monitored",
-                    "competitor_id": str(c.id),
-                    "name": c.name_competitor,
-                    "price": price,
-                    "pct_below_monitored": discrepancy["pct_below_monitored"],
-                }
-            )
-
-        status = getattr(c, "status", ProductStatus.available)
-        if status in (ProductStatus.unavailable, ProductStatus.removed):
-            alerts.append(
-                {
-                    "type": "listing_status",
-                    "competitor_id": str(c.id),
-                    "name": c.name_competitor,
-                    "status": status.value,
-                }
-            )
-
-    monitored_status = getattr(monitored, "status", ProductStatus.available)
-    if monitored_status in (ProductStatus.unavailable, ProductStatus.removed):
-        alerts.append(
-            {
-                "type": "monitored_status",
-                "product_id": str(monitored.id),
-                "status": monitored_status.value,
-            }
-        )
-
     result = {
         "monitored_price": monitored_price,
         "average_competitor_price": avg_price,
@@ -174,7 +137,6 @@ def compare_prices(
             highest, monitored_price, min_price, tolerance
         ),
         "discrepancies": discrepancies,
-        "alerts": alerts
     }
 
     logger.info("comparison_summary", monitored_id=str(monitored.id), base_price=str(monitored_price), lowest_price=str(lowest.current_price), highest_price=str(highest.current_price))

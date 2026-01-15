@@ -18,9 +18,9 @@ from . import (
     metrics_logging,
     metrics_api,
     metrics_redis,
-    metrics_alerts,
-    metrics_notifications,
     metrics_products,
+    metrics_notifications,
+    metrics_settings,
 )
 
 from .metrics_celery import *
@@ -36,9 +36,9 @@ from .metrics_recheck import *
 from .metrics_logging import *
 from .metrics_api import *
 from .metrics_redis import *
-from .metrics_alerts import *
-from .metrics_notifications import *
 from .metrics_products import *
+from .metrics_notifications import *
+from .metrics_settings import *
 
 __all__ = (
     metrics_celery.__all__
@@ -54,7 +54,7 @@ __all__ = (
     + metrics_logging.__all__
     + metrics_api.__all__
     + metrics_redis.__all__
-    + metrics_alerts.__all__
-    + metrics_notifications.__all__
     + metrics_products.__all__
+    + metrics_notifications.__all__
+    + metrics_settings.__all__
 )

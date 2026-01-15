@@ -4,7 +4,15 @@ import uuid
 from uuid import UUID
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Text, DateTime, ForeignKey, Integer, String, Enum as PgEnum
+from sqlalchemy import (
+    Column,
+    Text,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Enum as PgEnum,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Session, relationship
 
@@ -57,7 +65,7 @@ class ScrapingError(Base):
         db.commit()
         db.refresh(error)
 
-        #Verifica erros recorrentes e notifica o time interno
+        #Verifica erros recorrentes para sinalizar falhas persistentes
         count = (
             db.query(cls)
             .filter(cls.product_id == product_id)

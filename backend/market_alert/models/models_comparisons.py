@@ -3,7 +3,12 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, ForeignKey, DateTime, JSON
+from sqlalchemy import (
+    Column,
+    ForeignKey,
+    DateTime,
+    JSON,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from shared.infra.db import Base

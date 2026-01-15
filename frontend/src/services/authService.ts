@@ -1,4 +1,9 @@
 import apiClient from '../lib/api';
+import {
+  clearAccessToken,
+  getAccessToken,
+  setAccessToken,
+} from '../utils/authTokens';
 import { TokenPair, User } from '../types';
 
 /**
@@ -6,14 +11,14 @@ import { TokenPair, User } from '../types';
  *
  * Este módulo encapsula chamadas à API relacionadas à autenticação
  * (login, logout, registro, recuperação de senha, verificação de email, etc.)
- * e também gerencia o armazenamento simples de tokens no localStorage.
+ * e mantém o access_token em memória para reduzir exposição local.
  */
 export const authService = {
   /**
    * Realiza login com email (username) e senha.
    *
    * Envia um form-url-encoded para a rota /auth e, em caso de sucesso,
-   * persiste os tokens retornados no localStorage.
+   * armazena o access_token em memória e confia no cookie HttpOnly do backend.
    */
   async login(email: string, password: string): Promise<TokenPair> {
     // Usamos FormData para simular body x-www-form-urlencoded requisitado pelo backend.
@@ -21,54 +26,61 @@ export const authService = {
     formData.append('username', email);
     formData.append('password', password);
 
-    const response = await apiClient.post<TokenPair>('/auth', formData, {
+    const response = await apiClient.post<TokenPair>('/auth/login', formData, {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
 
-    // Salvar tokens no localStorage para uso nas próximas requisições.
-    localStorage.setItem('access_token', response.data.access_token);
-    localStorage.setItem('refresh_token', response.data.refresh_token);
-
-    return response.data;
+    // Salvar access token somente em memória para reduzir exposição local.
+    setAccessToken(response.data.access_token);
+     return response.data;
   },
 
   /**
    * Realiza logout do usuário e tenta revogar o refresh token no backend.
-   * - Se houver um refresh_token em localStorage, envia uma requisição para /auth/logout.
-   * - Independentemente do resultado da revogação, remove os tokens do localStorage.
+   * - Envia requisição para /auth/logout para revogar o cookie HttpOnly no backend.
+   * - Independentemente do resultado, remove tokens mantidos em memória.
    */
   async logout(): Promise<void> {
-    const refreshToken = localStorage.getItem('refresh_token');
-
-    if (refreshToken) {
-      try {
-        await apiClient.post('/auth/logout', {
-          refresh_token: refreshToken,
-        });
-      } catch (error) {
-        // Log de erro não-bloqueante: a limpeza local ainda é realizada.
-        // Preferir logger estruturado (ex: structlog) em produção.
-        console.error('Erro ao revogar token:', error);
-      }
+    try {
+      await apiClient.post('/auth/logout');
+    } catch (error) {
+      // Log de erro não-bloqeuante: limpeza local ainda é realizada
+      // Preferir logger estruturado (ex.: structlog) em produção
+      console.error('Erro ao revogar token:', error);
     }
 
     // Limpar tokens localmente para efetivar logout no frontend.
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    clearAccessToken();
   },
 
   /**
    * Registra um novo usuário no sistema.
    */
-  async register(email: string, password: string, name?: string): Promise<User> {
+  async register(payload: {
+    email: string;
+    password: string;
+    name: string;
+    phone_number?: string;
+  }): Promise<User> {
     const response = await apiClient.post<User>('/users', {
-      email,
-      password,
-      name,
+      email: payload.email,
+      password: payload.password,
+      name: payload.name,
+      phone_number: payload.phone_number,
     });
 
+    return response.data;
+  },
+
+  /**
+   * Solicita um novo access_token usando refresh token via cookie HttpOnly.
+   */
+  async refresh(): Promise<TokenPair> {
+    // A rota /auth/refresh aceita apenas POST; evitar GET preserva o contrato do backend
+    const response = await apiClient.post<TokenPair>('/auth/refresh');
+    setAccessToken(response.data.access_token);
     return response.data;
   },
 
@@ -114,24 +126,47 @@ export const authService = {
    * O backend deve enviar o email contendo o token/URL de verificação.
    */
   async requestEmailVerification(): Promise<void> {
-    await apiClient.post('/auth/verify/request');
+    await apiClient.post('/users/resend-verification', { channel: 'email' });
   },
 
   /**
    * Confirma a verificação de email utilizando o token recebido.
    */
   async confirmEmailVerification(token: string): Promise<void> {
-    await apiClient.post('/auth/verify/confirm', { token });
+    await apiClient.post('/auth/verify-email', null, { params: { token } });
   },
 
   /**
    * Indica se existe um token de acesso armazenado localmente.
    *
+   * Esta checagem depende do token em memória gerenciado pelos utilitários
+   * de autenticação, mantendo o acesso fora do armazenamento persistente.
    * Nota: Esta verificação é apenas local (presença do token) e não valida
    * se o token expirou. Verificações mais robustas devem chamar uma rota
    * de validação/refresh ou inspecionar o JWT.
    */
   isAuthenticated(): boolean {
-    return !!localStorage.getItem('access_token');
+    return !!getAccessToken();
+  },
+
+  /**
+   * Solicita o envio de OTP por telefone para o usuário autenticado.
+   */
+  async requestPhoneOtp(): Promise<void> {
+    await apiClient.post('/users/resend-verification', { channel: 'phone_number' });
+  },
+
+  /**
+   * Confirma o OTP de telefone utilizando user_id e otp.
+   */
+  async verifyPhoneOtp(userId: string, otp: string): Promise<void> {
+    await apiClient.post('/auth/verify-phone', { user_id: userId, otp });
+  },
+
+  /**
+   * Reenvia tokens de verificação com base no canal informado.
+   */
+  async resendVerification(channel: 'email' | 'phone_number'): Promise<void> {
+    await apiClient.post('/users/resend-verification', { channel });
   },
 };

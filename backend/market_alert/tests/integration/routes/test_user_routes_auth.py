@@ -14,7 +14,6 @@ def _build_user_payload():
         "email": f"novo_{unique}@exemplo.com",
         "password": "Senha1234",
         "phone_number": "11999998888",
-        "notifications_enabled": True,
     }
 
 

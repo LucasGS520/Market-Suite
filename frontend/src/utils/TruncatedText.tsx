@@ -36,8 +36,8 @@ const TruncatedText: React.FC<TruncatedTextProps> = ({
     ...sx,
   };
 
-  // Use a stable inline wrapper so Tooltip does not change layout on hover.
-  // The Box acts as the truncation container and keeps dimensions stable.
+  // Mantém um wrapper estável para que o Tooltip não altere o layout no hover.
+  // O Box concentra a lógica de truncamento e preserva as dimensões.
   // Resolve a largura efetiva do wrapper: se `maxWidth` foi fornecido use ele,
   // caso contrário ocupe 100% do espaço do pai. Para single-line usamos
   // `display: block` + `width: 100%` para garantir que o text-overflow
@@ -51,8 +51,9 @@ const TruncatedText: React.FC<TruncatedTextProps> = ({
     boxSizing: 'border-box',
   } as SxProps<Theme>;
 
+  // O atributo tittle aó é aplicado quando não há tooltip, evitando o warning do MUI
   const inner = (
-    <Box component="span" sx={wrapperSx} {...(tooltip ? { title: text } : {})}>
+    <Box component="span" sx={wrapperSx} {...(!tooltip ? { title: text } : {})}>
       <Typography {...typographyProps} noWrap={!clampMultipleLines} sx={{ display: 'block' }}>
         {text}
       </Typography>

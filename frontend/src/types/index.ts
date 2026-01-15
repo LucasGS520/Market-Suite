@@ -4,10 +4,18 @@
 export interface User {
   id: string; // Identificador único do usuário (UUID)
   email: string; // Email utilizado para autenticação/contato
-  name?: string; // Nome completo ou apelido (opcional)
+  name: string; // Nome completo ou apelido
+  phone_number?: string | null; // Número de telefone do usuário (opcional)
   is_active: boolean; // Indica se a conta está ativa
-  is_verified: boolean; // Indica se o email/conta já foi verificado
-  created_at: string; // Timestamp de criação do usuário (ISO 8601)
+  email_verified: boolean; // Indica se o email já foi verificado
+  email_verified_at?: string | null; // Timestamp da verificação do email
+  phone_number_verified: boolean; // Indica se o telefone foi verificado
+  phone_verified_at?: string | null; // Timestamp da verificação do telefone
+  status: string; // Status da conta (ex: pending, active, suspended)
+  role: string; // Perfil de acesso
+  last_login?: string | null; // Timestamp do último login
+  created_date: string; // Timestamp de criação do usuário (ISO 8601)
+  updated_date: string; // Timestamp da última atualização
 }
 
 /**

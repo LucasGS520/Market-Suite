@@ -28,12 +28,8 @@ from shared.infra.db import SessionLocal
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_price_history import PriceHistory
-from market_alert.models.models_alerts import AlertRule, NotificationLog
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.enums.enums_alerts import AlertType
-from market_alert.schemas.schemas_alert_rules import AlertRuleCreate
-from market_alert.crud import crud_alert_rules
 from market_alert.crud import crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
@@ -213,23 +209,6 @@ def get_last_price_change_for_monitored(db: Session, monitored_product_id: UUID)
     if latest_change and latest_change.tzinfo is None:
         return latest_change.replace(tzinfo=timezone.utc)
     return latest_change
-
-def count_notifications_for_monitored_product(
-    db: Session,
-    user_id: UUID,
-    monitored_product_id: UUID
-) -> int:
-    """Conta notificações enviadas para regras vinculadas ao monitorado."""
-    result = (
-        db.query(func.count(NotificationLog.id))
-        .join(AlertRule, NotificationLog.alert_rule_id == AlertRule.id)
-        .filter(
-            NotificationLog.user_id == user_id,
-            AlertRule.monitored_product_id == monitored_product_id,
-        )
-        .scalar()
-    )
-    return int(result or 0)
 
 def create_pending_monitored_product(
     db: Session,
@@ -478,19 +457,6 @@ def create_or_update_monitored_product_scraped(
 
     new._price_changed = True
     new._availability_changed = True
-
-    #Se não houver regras ativas para este produto, cria um padrão
-    rules = crud_alert_rules.get_active_alert_rules_for_product(db, user_id, new.id)
-    if not rules:
-        crud_alert_rules.create_alert_rule(
-            db,
-            AlertRuleCreate(
-                user_id=user_id,
-                monitored_product_id=new.id,
-                rule_type=AlertType.PRICE_CHANGE,
-                enabled=True
-            )
-        )
     return new
 
 def _join_latest_summary(query, db: Session):
@@ -673,21 +639,6 @@ def get_featured_monitored_products(
         if row.monitored_product_id not in baseline_map:
             baseline_map[row.monitored_product_id] = row.price
 
-    #Conta alertas ativos associados ao produto para priorizar itens mais sensíveis
-    alert_rows = (
-        db.query(
-            AlertRule.monitored_product_id,
-            func.count(AlertRule.id).label("alerts_count"),
-        )
-        .filter(
-            AlertRule.monitored_product_id.in_(candidate_ids),
-            AlertRule.enabled.is_(True),
-        )
-        .group_by(AlertRule.monitored_product_id)
-        .all()
-    )
-    alert_map = {row.monitored_product_id: int(row.alerts_count) for row in alert_rows}
-
     def _variation_24h(product: MonitoredProduct) -> Decimal:
         """ Calcula variação percentual aproximada em 24h para ordenação """
 
@@ -705,7 +656,6 @@ def get_featured_monitored_products(
         fallback_candidates,
         key=lambda product: (
             _variation_24h(product),
-            alert_map.get(product.id, 0),
             product.created_at or datetime.now(timezone.utc),
         ),
         reverse=True,

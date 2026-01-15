@@ -18,7 +18,6 @@ import market_alert.models.models_refresh_token
 import market_alert.models.models_products
 import market_alert.models.models_login_attempt
 import market_alert.models.models_comparisons
-import market_alert.models.models_alerts
 
 #Carrega o arquivo definido em ``ENV_FILE`` (padrão .env)
 env_path = os.path.join(os.path.dirname(__file__), "..", os.getenv("ENV_FILE", ".env"))

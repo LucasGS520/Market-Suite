@@ -98,7 +98,7 @@ def test_build_comparison_summary_without_data() -> None:
 
 
 def test_build_comparison_summary_with_metrics() -> None:
-    """ Valida agregados quando há discrepâncias e alerta disponíveis """
+    """ Valida agregados quando há discrepâncias disponíveis """
 
     comparison = _DummyComparison(
         data={
@@ -110,7 +110,6 @@ def test_build_comparison_summary_with_metrics() -> None:
                 {"price": "80.00"},
                 {"price": "120.00"},
             ],
-            "alerts": [{"type": "price_below_monitored"}],
         }
     )
 
@@ -124,7 +123,6 @@ def test_build_comparison_summary_with_metrics() -> None:
     assert summary["competitors_with_price_count"] == 2
     assert "25.00%" in summary["comparison_insights"]
     assert "R$20.00" in summary["comparison_insights"]
-    assert summary["alerts"] == [{"type": "price_below_monitored"}]
     assert summary["competitiveness_status"] == "urgente"
 
 def test_compute_summary_with_multiple_competitors_generates_rank_and_insights() -> None:
@@ -184,7 +182,6 @@ def test_build_comparison_summary_with_stored_snapshot() -> None:
             "competitors_max": "110.00",
             "potential_adjustment": None,
             "competitors_with_price_count": 3,
-            "alerts": [],
             "discrepancies": [],
         }
     )

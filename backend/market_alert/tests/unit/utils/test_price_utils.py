@@ -1,4 +1,4 @@
-""" Testes para utilitários de preço compartilhados no alert """
+""" Testes para utilitários de preço compartilhados no servico """
 
 from decimal import Decimal
 

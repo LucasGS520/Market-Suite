@@ -1,0 +1,1 @@
+Alerta no monitorado "{{ monitored_name }}". Verifique o painel para mais detalhes.

@@ -15,7 +15,6 @@ def test_user_create_rejects_password_without_numbers():
             email="teste@example.com",
             phone_number="11999999999",
             password="somenteletras",
-            notifications_enabled=True,
         )
 
 
@@ -28,6 +27,5 @@ def test_user_create_rejects_password_without_letters():
             email="teste@example.com",
             phone_number="11999999999",
             password="1234567890",
-            notifications_enabled=True,
         )
         

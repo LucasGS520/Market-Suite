@@ -1,0 +1,10 @@
+{
+  "event_id": "{{ event_id }}",
+  "trace_id": "{{ trace_id }}",
+  "alert_type": "{{ alert_type }}",
+  "monitored_id": "{{ monitored_id }}",
+  "monitored_name": "{{ monitored_name }}",
+  "price_previous": "{{ price_previous }}",
+  "price_current": "{{ price_current }}",
+  "price_delta_percent": "{{ price_delta_percent }}"
+}

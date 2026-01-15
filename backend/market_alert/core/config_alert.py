@@ -9,7 +9,27 @@ from shared.core.config_base import ConfigBase
 __all__ = ["Settings", "settings"]
 
 class Settings(ConfigBase):
-    """ Configurações específicas do serviço de alertas """
+    """ Configurações específicas do serviço market_alert """
+
+    #Origens permitidas para CORS no frontend
+    _frontend_origins_env = os.getenv("FRONTEND_ORIGINS", "")
+    FRONTEND_ORIGINS: list[str] = [
+        origin.strip()
+        for origin in _frontend_origins_env.split(",")
+        if origin.strip()
+    ] or [
+        #Fallback para ambiente local quando nenhuma origem foi declarada
+        #URL do servidor Vite em modo desenvolvimento
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        # IP da máquina que serve o frontend na rede local (ex.: seu servidor)
+        "http://192.168.15.150:5173",
+        #URL do servidor Express utilizado no build de produção local
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        # Frontend servido a partir do IP (possível variação de porta)
+        "http://192.168.15.150:3000",
+    ]
 
     #Configuração do banco de dados
     DATABASE_URL: str = os.getenv("DATABASE_URL")  # URL de conexão do Postgres
@@ -45,6 +65,25 @@ class Settings(ConfigBase):
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60)
     )
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7)) #Validade do refresh Token
+    REFRESH_TOKEN_COOKIE_NAME: str = os.getenv(
+        "REFRESH_TOKEN_COOKIE_NAME",
+        "refresh_token",
+    ) #Nome do cookie utilizado para refresh token
+    REFRESH_TOKEN_COOKIE_PATH: str = os.getenv(
+        "REFRESH_TOKEN_COOKIE_PATH",
+        "/",
+    ) #Path restrito para envio do cookie de refresh
+    REFRESH_TOKEN_COOKIE_SECURE: bool = os.getenv(
+        "REFRESH_TOKEN_COOKIE_SECURE",
+        "1",
+    ).lower() in {"1", "true", "yes", "on"} #Marca Secure habilitada por padrão
+    _refresh_cookie_samesite_env = os.getenv("REFRESH_TOKEN_COOKIE_SAMESITE")
+    #Mantém SameSite alinhado ao ambiente quando a variável não estiver declarada
+    REFRESH_TOKEN_COOKIE_SAMESITE: str = (
+        _refresh_cookie_samesite_env.strip().lower()
+        if _refresh_cookie_samesite_env
+        else "none"
+    ) #Política SameSite do cookie de refresh
 
     #Intervalo base utilizado pelo AdaptiveRecheckManager
     ADAPTIVE_RECHECK_BASE_INTERVAL: int = int(
@@ -154,6 +193,58 @@ class Settings(ConfigBase):
     ONBOARDING_ENQUEUE_STAGGER_SECONDS: float = float(
         os.getenv("ONBOARDING_ENQUEUE_STAGGER_SECONDS", "0.5")
     ) #Atraso leve para diluir enfileiramento inicial
+
+    #Configurações da camada de notificações
+    DEFAULT_COOLDOWN_SECONDS: int = int(
+        os.getenv("DEFAULT_COOLDOWN_SECONDS", "1800")
+    ) #Cooldown padrão por monitorado e tipo de alerta
+    MIN_PRICE_DELTA_PERCENT: float = float(
+        os.getenv("MIN_PRICE_DELTA_PERCENT", "1.0")
+    ) #Delta mínimo em porcentagem para alertas de preço
+    NOTIFICATION_MAX_ATTEMPTS: int = int(
+        os.getenv("NOTIFICATION_MAX_ATTEMPTS", "3")
+    ) #Quantidade máxima de tentativas de entrega
+    NOTIFICATION_BACKOFF_BASE_SECONDS: int = int(
+        os.getenv("NOTIFICATION_BACKOFF_BASE_SECONDS", "60")
+    ) #Base de espera para backoff exponencial
+    NOTIFICATION_BACKOFF_MULTIPLIER: int = int(
+        os.getenv("NOTIFICATION_BACKOFF_MULTIPLIER", "2")
+    ) #Multiplicador do backoff exponencial
+    NOTIFICATION_EMAIL_PROVIDER: str = os.getenv(
+        "NOTIFICATION_EMAIL_PROVIDER", "mock"
+    ) #Provider de email configurado (smtp/sendgrid/mock)
+    NOTIFICATION_SMS_PROVIDER: str = os.getenv(
+        "NOTIFICATION_SMS_PROVIDER", "mock"
+    ) #Provider de SMS configurado
+    NOTIFICATION_EMAIL_SENDER: str = os.getenv(
+        "NOTIFICATION_EMAIL_SENDER", "alerts@marketsuite.local"
+    ) #Remetente padrão de emails
+    NOTIFICATION_WHATSAPP_PROVIDER: str = os.getenv(
+        "NOTIFICATION_WHATSAPP_PROVIDER", "mock"
+    ) #Provider de WhatsApp configurado
+    NOTIFICATION_PUSH_PROVIDER: str = os.getenv(
+        "NOTIFICATION_PUSH_PROVIDER", "mock"
+    ) #Provider de push configurado
+
+    #Verificação de cadastro
+    EMAIL_VERIFICATION_EXPIRE_MINUTES: int = int(
+        os.getenv("EMAIL_VERIFICATION_EXPIRE_MINUTES", "60")
+    ) #Validade do token de email em minutos
+    PHONE_VERIFICATION_EXPIRE_MINUTES: int = int(
+        os.getenv("PHONE_VERIFICATION_EXPIRE_MINUTES", "10")
+    ) #Validade do OTP do telefone em minutos
+    PHONE_VERIFICATION_MAX_ATTEMPTS: int = int(
+        os.getenv("PHONE_VERIFICATION_MAX_ATTEMPTS", "5")
+    ) #Tentativas permitidas para OTP
+    VERIFICATION_RESEND_INTERVAL_SECONDS: int = int(
+        os.getenv("VERIFICATION_RESEND_INTERVAL_SECONDS", "60")
+    ) #Intervalo mínimo entre reenvios
+    VERIFICATION_RESEND_MAX_PER_HOUR: int = int(
+        os.getenv("VERIFICATION_RESEND_MAX_PER_HOUR", "5")
+    ) #Limite de reenvios por hora
+    REGISTRATION_MAX_PER_HOUR: int = int(
+        os.getenv("REGISTRATION_MAX_PER_HOUR", "5")
+    ) #Limite de cadastros por hora por IP
 
 #Instância única de settings para a aplicação
 settings = Settings()

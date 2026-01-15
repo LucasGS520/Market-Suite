@@ -7,6 +7,7 @@ liberação segura apenas pelo proprietário. O TTL adota
 ``PRODUCT_LOCK_TTL_SECONDS`` quando definido no ambiente para permitir
 ajuste operacional sem alterar código.
 """
+
 from __future__ import annotations
 
 import os
@@ -34,11 +35,14 @@ return 0
 """
 
 
-def _lock_key(product_id: UUID | str) -> str:
+def _lock_key_product(product_id: UUID | str) -> str:
     """ Monta a chave padrão de lock para o produto informado """
     #Incluímos namespace de ambiente para evitar colisão entre stacks compartilhando Redis
     return f"{_LOCK_PREFIX}product:{product_id}"
 
+def _lock_key_notification(dedup_key: str) -> str:
+    """ Monta chave padrão de lock para notificação com deduplicação """
+    return f"{_LOCK_PREFIX}notification:{dedup_key}"
 
 def _resolve_owner_id() -> str:
     """ Gera identificador curto do dono do lock para rastreamento """
@@ -46,6 +50,7 @@ def _resolve_owner_id() -> str:
     pid = os.getpid()
     return f"{hostname}:{pid}:{uuid4().hex[:8]}"
 
+# ----- Lock de produto -----
 def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = None) -> tuple[bool, str | None]:
     """ Tenta adquirir um lock exclusivo para o produto e retorna estado e dono.
 
@@ -64,7 +69,7 @@ def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = No
     owner_id = _resolve_owner_id()
     try:
         acquired = client.set(
-            _lock_key(product_id),
+            _lock_key_product(product_id),
             owner_id,
             px=int(effective_ttl * 1000),
             nx=True,
@@ -73,7 +78,7 @@ def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = No
             metrics_redis.REDIS_LOCK_ACQUIRED_TOTAL.labels(resource="product").inc()
             return True, owner_id
         
-        existing_owner = client.get(_lock_key(product_id))
+        existing_owner = client.get(_lock_key_product(product_id))
         metrics_redis.REDIS_LOCK_SKIPPED_TOTAL.labels(resource="product").inc()
         if existing_owner is None:
             return False, None
@@ -104,7 +109,7 @@ def release_product_lock(product_id: UUID | str, owner_id: str | None) -> bool:
         return False
 
     try:
-        released = client.eval(_RELEASE_SCRIPT, 1, _lock_key(product_id), owner_id)
+        released = client.eval(_RELEASE_SCRIPT, 1, _lock_key_product(product_id), owner_id)
         if released:
             return True
 
@@ -120,3 +125,62 @@ def release_product_lock(product_id: UUID | str, owner_id: str | None) -> bool:
 def get_product_lock_defaults() -> tuple[int, int]:
     """ Retorna TTL padrão configurado e margem mínima recomendada """
     return _DEFAULT_TTL_SECONDS, _MIN_SAFE_TTL_SECONDS
+
+# ----- Lock de notificação com deduplicação -----
+def acquire_notification_lock(dedup_key: str, *, ttl_seconds: int | None = None) -> tuple[bool, str | None]:
+    """ Tenta adquirir um lock exclusivo para a deduplicação informada """
+    client = get_redis_client()
+    if client is None:
+        logger.warning("notification_lock_unavailable", dedup_key=dedup_key)
+        return False, None
+    
+    effective_ttl = ttl_seconds or _DEFAULT_TTL_SECONDS
+    owner_id = _resolve_owner_id()
+    try:
+        acquired = client.set(
+            _lock_key_notification(dedup_key),
+            owner_id,
+            px=int(effective_ttl * 1000),
+            nx=True,
+        )
+        if acquired:
+            metrics_redis.REDIS_LOCK_ACQUIRED_TOTAL.labels(resource="notification").inc()
+            return True, owner_id
+        
+        existing_owner = client.get(_lock_key_notification(dedup_key))
+        metrics_redis.REDIS_LOCK_SKIPPED_TOTAL.labels(resource="notification").inc()
+        if existing_owner is None:
+            return False, None
+        
+        if isinstance(existing_owner, bytes):
+            return False, existing_owner.decode("utf-8")
+        
+        return False, str(existing_owner)
+    
+    except Exception:
+        logger.exception("notification_lock_failed", dedup_key=dedup_key)
+        return False, None
+    
+def release_notification_lock(dedup_key: str, owner_id: str | None) -> bool:
+    """ Remove o lock de notificação validando o dono informado """
+    if owner_id is None:
+        logger.warning("notification_lock_release_skipped", dedup_key=dedup_key, reason="missing_owner")
+        return False
+    
+    client = get_redis_client()
+    if client is None:
+        return False
+    
+    try:
+        released = client.eval(_RELEASE_SCRIPT, 1, _lock_key_notification(dedup_key), owner_id)
+        if released:
+            return True
+        
+        metrics_redis.REDIS_LOCK_RELEASE_FAILED_TOTAL.labels(resource="notification").inc()
+        logger.warning("notification_lock_release_failed", dedup_key=dedup_key, reason="mismatch_or_expired")
+        return False
+    
+    except Exception:
+        metrics_redis.REDIS_LOCK_RELEASE_FAILED_TOTAL.labels(resource="notification").inc()
+        logger.warning("notification_lock_release_failed", dedup_key=dedup_key, reason="exception")
+        return False

@@ -1,0 +1,1 @@
+Disponibilidade mudou: "{{ monitored_name }}" agora está {{ availability }}

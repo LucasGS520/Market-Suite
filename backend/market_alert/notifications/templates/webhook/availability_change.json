@@ -1,0 +1,9 @@
+{
+  "event_id": "{{ event_id }}",
+  "trace_id": "{{ trace_id }}",
+  "alert_type": "{{ alert_type }}",
+  "monitored_id": "{{ monitored_id }}",
+  "monitored_name": "{{ monitored_name }}",
+  "availability_previous": "{{ availability_previous }}",
+  "availability": "{{ availability }}"
+}

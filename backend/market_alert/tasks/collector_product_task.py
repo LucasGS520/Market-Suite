@@ -140,7 +140,11 @@ def _record_metrics(
     COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
     return "error"
 
-def _dispatch_comparison(monitored_id: UUID | None, result: ScrapeResult | None) -> None:
+def _dispatch_comparison(
+    monitored_id: UUID | None,
+    result: ScrapeResult | None,
+    trace_id: str | None,
+) -> None:
     """ Agenda comparação apenas quando scraping trouxe alteração relevante """
     if monitored_id is None or result is None:
         return
@@ -150,7 +154,12 @@ def _dispatch_comparison(monitored_id: UUID | None, result: ScrapeResult | None)
         #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
         celery_app.send_task(
             "market_alert.tasks.compare_prices_task.compare_prices_task",
-            args=[str(monitored_id)],
+            args=[
+                str(monitored_id),
+                bool(getattr(result, "price_changed", False)),
+                bool(getattr(result, "availability_changed", False)),
+                trace_id,
+            ],
             queue="monitor",
         )
 
@@ -317,7 +326,7 @@ def collect_product(
             trace_id=trace_id,
         )
         if dispatch_comparison:
-            _dispatch_comparison(monitored_id, result)
+            _dispatch_comparison(monitored_id, result, trace_id)
 
     return outcome, result
 

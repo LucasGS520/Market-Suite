@@ -1,2 +1,0 @@
-{% set state = 'pausada' if alert.status == 'unavailable' else 'removida' %}
-Listagem {{ alert.name or monitored.name_identification }} {{ state }}

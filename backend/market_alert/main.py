@@ -26,25 +26,23 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 
-from shared.infra.db import get_engine, SessionLocal
+from shared.infra.db import get_engine
 from shared.metrics.metrics_logging import LOG_ENTRIES_TOTAL
 from shared.metrics.metrics_http import HTTP_REQUESTS_TOTAL, HTTP_REQUESTS_LATENCY_SECONDS
 from shared.metrics.metrics_api import API_ERRORS_TOTAL
 from shared.metrics.metrics_db import DB_POOL_CHECKOUTS, DB_POOL_SIZE
-from shared.metrics.metrics_alerts import ALERT_RULES_ACTIVE
 
 from market_alert.core.config_alert import settings
-from market_alert.models.models_alerts import AlertRule
 
 #Rotas
 from market_alert.routes.routes_users import router as users_router
 from market_alert.routes.routes_monitored import router as monitored_router
 from market_alert.routes.routes_competitors import router as competitor_router
-from market_alert.routes.routes_notifications import router as notifications_router
 from market_alert.routes.routes_dashboard import router as dashboard_router
 from market_alert.routes.routes_comparisons import router as comparisons_router
-from market_alert.routes.routes_alerts import router as alerts_router
 from market_alert.routes.routes_health import router as health_router
+from market_alert.routes.routes_notifications import router as notifications_router
+from market_alert.routes.routes_settings import router as settings_router
 
 #Rotas de auth
 from market_alert.auth.routes_auth.routes_login import router as login_router
@@ -101,20 +99,6 @@ logger = structlog.get_logger("marketalert")
 #Rate limiter configurado por IP
 limiter = Limiter(key_func=get_remote_address)
 
-#Origens liberadas em desenvolviemento para permitir cominicação frontend/backend
-DEV_ALLOWED_ORIGINS = [
-    #URL do servidor Vite em modo desenvolvimento
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    # IP da máquina que serve o frontend na rede local (ex.: seu servidor)
-    "http://192.168.15.150:5173",
-    #URL do servidor Express utilizado no build de produção local
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    # Frontend servido a partir do IP (possível variação de porta)
-    "http://192.168.15.150:3000",
-]
-
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     """ Handler global para requisição excessiva """
     return JSONResponse(
@@ -169,10 +153,10 @@ def create_app() -> FastAPI:
         debug=getattr(settings, "debug", False)
     )
 
-    #Habilita CORS para ambientes de desenvolvimento do frontend
+    #Habilita CORS com base nas origens configuradas no ambiente
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=DEV_ALLOWED_ORIGINS,
+        allow_origins=settings.FRONTEND_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -222,9 +206,9 @@ def create_app() -> FastAPI:
     app.include_router(monitored_router)
     app.include_router(competitor_router)
     app.include_router(comparisons_router)
-    app.include_router(alerts_router)
-    app.include_router(notifications_router)
     app.include_router(dashboard_router)
+    app.include_router(notifications_router)
+    app.include_router(settings_router)
 
     #Health check
     app.include_router(health_router)
@@ -235,14 +219,6 @@ def create_app() -> FastAPI:
     for route in app.routes:
         if isinstance(route, APIRoute):
             logger.info("route_registered", path=route.path, name=route.name)
-
-    #Define o valor inicial do gauge de regras ativas
-    try:
-        with SessionLocal() as db:
-            count_enabled = db.query(AlertRule).filter(AlertRule.enabled.is_(True)).count()
-            ALERT_RULES_ACTIVE.set(count_enabled)
-    except Exception as exc:
-        logger.exception("init_alert_rule_metric_failed")
 
     logger.info("app_initialized", service="marketalert")
     return app

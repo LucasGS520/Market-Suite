@@ -1,34 +1,5 @@
 services:
 
-  #Serviço de conveniência para iniciar toda a stack do backend com um único comando.
-  #Uso: `docker compose up backend` para iniciar: db, redis, migrações, API, workers (Celery) e o serviço de scraping.
-  backend:
-    image: busybox
-    entrypoint:
-      - sh
-      - -c
-      - |
-        tail -f /dev/null
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-init:
-        condition: service_completed_successfully
-      migrations:
-        condition: service_completed_successfully
-      market_alert:
-        condition: service_started
-      market_scraper:
-        condition: service_started
-      celery_beat:
-        condition: service_started
-      celery-worker:
-        condition: service_started
-    networks:
-      - monitoring-net
-
   #Banco de dados PostgreSQL utilizado pela aplicação
   db:
     image: postgres:15
@@ -42,6 +13,36 @@ services:
       - "5432:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
+    networks:
+      - monitoring-net
+
+
+  #Executa migrações de banco de dados com Alembic
+  migrations:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
+    volumes:
+      - ./backend/market_alert:/market_alert
+      # Monta o pacote `shared` inteiro para que imports como `import shared` funcionem
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend:/backend:ro   
+    working_dir: /market_alert
+    command:
+      - alembic
+      - "-c"
+      - "alembic.ini"
+      - "upgrade"
+      - "head"
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - monitoring-net
 
@@ -88,36 +89,6 @@ services:
     volumes:
       - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
     restart: on-failure
-    networks:
-      - monitoring-net
-
-
-  #Executa migrações de banco de dados com Alembic
-  migrations:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-    env_file:
-      - ./backend/market_alert/.env.market_alert
-    environment:
-      - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/
-    volumes:
-      - ./backend/market_alert:/market_alert
-      # Monta o pacote `shared` inteiro para que imports como `import shared` funcionem
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend:/backend:ro   
-    working_dir: /market_alert
-    command:
-      - alembic
-      - "-c"
-      - "alembic.ini"
-      - "upgrade"
-      - "head"
-    depends_on:
-      db:
-        condition: service_healthy
     networks:
       - monitoring-net
 
@@ -206,7 +177,7 @@ services:
       - "market_alert.core.celery_app:celery_app"
       - "worker"
       - "--loglevel=info"
-      - "--pool=threads"
+      - "--pool=prefork"
       - "--concurrency=4"
       - "-Q"
       - "celery,scraping,monitor"
@@ -230,6 +201,45 @@ services:
     networks:
       - monitoring-net
 
+  #Worker do Celery dedicado ao envio de notificações
+  celery-worker-notifications:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
+    command:
+      - celery
+      - "-A"
+      - "market_alert.core.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=2"
+      - "-Q"
+      - "notifications"
+    user:
+      "1000:1000"
+    ports:
+      - "8003:8002"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro
+    networks:
+      - monitoring-net
 
   #Serviço dedicado ao scraping de produtos
   market_scraper:
@@ -295,128 +305,93 @@ services:
       - monitoring-net
 
   #Servidor Prometheus para coleta de métricas
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./backend/shared/infra/prometheus:/etc/prometheus:ro
-    ports:
-      - "9090:9090"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - monitoring-net
-
-
-  #Gerenciador de alertas do Prometheus
-  alertmanager:
-    build:
-      context: ./backend/shared/infra/alertmanager
-      dockerfile: Dockerfile
-    image: alertmanager-envsubst
-    volumes:
-      - ./backend/shared/infra/alertmanager:/etc/alertmanager:ro
-    env_file:
-      - .env.common
-    ports:
-      - "9093:9093"
-    networks:
-      - monitoring-net
-
+  # prometheus:  # comentado — não utilizado no ambiente de desenvolvimento leve
+  #  prometheus:
+  #    image: prom/prometheus:latest
+  #    volumes:
+  #      - ./backend/shared/infra/prometheus:/etc/prometheus:ro
+  #    ports:
+  #      - "9090:9090"
+  #    extra_hosts:
+  #      - "host.docker.internal:host-gateway"
+  #    networks:
+  #      - monitoring-net
 
   #Armazenamento centralizado de logs com Loki
-  loki:
-    image: grafana/loki:2.9.8
-    user: root
-    entrypoint:
-      - sh
-      - -c
-      - |
-        chown -R root:root /tmp/loki && \
-        exec /usr/bin/loki -config.file=/etc/loki/loki-config.yml
-    volumes:
-      - ./backend/shared/infra/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
-      - loki-data:/tmp/loki
-    ports:
-      - "3100:3100"
-    networks:
-      - monitoring-net
+  # loki:  # comentado — armazenamento de logs centralizado
+  #  loki:
+  #    image: grafana/loki:2.9.8
+  #    user: root
+  #    entrypoint:
+  #      - sh
+  #      - -c
+  #      - |
+  #        chown -R root:root /tmp/loki && \
+  #        exec /usr/bin/loki -config.file=/etc/loki/loki-config.yml
+  #    volumes:
+  #      - ./backend/shared/infra/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+  #      - loki-data:/tmp/loki
+  #    ports:
+  #      - "3100:3100"
+  #    networks:
+  #      - monitoring-net
 
 
   #Agente Promtail que envia logs para o Loki
-  promtail:
-    image: grafana/promtail:2.9.8
-    command: -config.file=/etc/promtail/promtail-config.yml
-    volumes:
-      - ./backend/shared/infra/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
-      - /var/log:/var/log:ro
-    networks:
-      - monitoring-net
+  # promtail:  # comentado — agente que envia logs ao Loki
+  #  promtail:
+  #    image: grafana/promtail:2.9.8
+  #    command: -config.file=/etc/promtail/promtail-config.yml
+  #    volumes:
+  #      - ./backend/shared/infra/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+  #      - /var/log:/var/log:ro
+  #    networks:
+  #      - monitoring-net
 
 
   #Exportador de métricas do host
-  node-exporter:
-    image: prom/node-exporter:latest
-    pid: host
-    volumes:
-      - /:/host:ro
-    command:
-      - '--path.rootfs=/host'
-    networks:
-      - monitoring-net
+  # node-exporter:  # comentado — exportador de métricas do host
+  #  node-exporter:
+  #    image: prom/node-exporter:latest
+  #    pid: host
+  #    volumes:
+  #      - /:/host:ro
+  #    command:
+  #      - '--path.rootfs=/host'
+  #    networks:
+  #      - monitoring-net
 
 
   #Exportador de métricas de containers Docker
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-    networks:
-      - monitoring-net
+  # cadvisor:  # comentado — exportador de métricas de containers
+  #  cadvisor:
+  #    image: gcr.io/cadvisor/cadvisor:latest
+  #    volumes:
+  #      - /:/rootfs:ro
+  #      - /var/run:/var/run:ro
+  #      - /sys:/sys:ro
+  #      - /var/lib/docker/:/var/lib/docker:ro
+  #    networks:
+  #      - monitoring-net
 
 
   #Interface do Grafana para visualização de métricas
-  grafana:
-    image: grafana/grafana:latest
-    env_file:
-      - .env.common
-    volumes:
-      - ./backend/shared/infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - grafana-storage:/var/lib/grafana
-    ports:
-      - "3000:3000"
-    networks:
-      - monitoring-net
-
-
-  #Ferramenta de teste de carga Locust
-  locust:
-    image: locustio/locust
-    depends_on:
-      - market_alert
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-    working_dir: /market_alert
-    command:
-      - "-f"
-      - "tests/load/locustfile.py"
-      - "--host"
-      - "http://market_alert:8000"
-    ports:
-      - "8089:8089"
-    networks:
-      - monitoring-net
-
+  # grafana:  # comentado — dashboard para métricas
+  #  grafana:
+  #    image: grafana/grafana:latest
+  #    env_file:
+  #      - .env.common
+  #    volumes:
+  #      - ./backend/shared/infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+  #      - grafana-storage:/var/lib/grafana
+  #    ports:
+  #      - "3000:3000"
+  #    networks:
+  #      - monitoring-net
 
 volumes:
   db-data:
-  grafana-storage:
   audit-logs:
-  loki-data:
   frontend-node-modules:
   frontend-pnpm-store:
 

@@ -16,18 +16,22 @@ TASK_MODULES = [
     "market_alert.tasks.collector_product_task",
     "market_alert.tasks.metrics_tasks",
     "market_alert.tasks.compare_prices_task",
-    "market_alert.tasks.alert_tasks",
     "market_alert.tasks.recheck_scheduler_task",
+    "market_alert.tasks.notifications_enqueue_task",
+    "market_alert.tasks.send_notification_task",
+    "market_alert.tasks.verification_tasks",
 ]
 
 #Exchanges separados para scraping e monitoramento
 SCRAPING_EXCHANGE = Exchange("scraping", type="direct")
 MONITOR_EXCHANGE = Exchange("monitor", type="direct")
+NOTIFICATIONS_EXCHANGE = Exchange("notifications", type="direct")
 
 #Filas conhecidas do serviço
 TASK_QUEUES = (
     Queue("scraping", SCRAPING_EXCHANGE, routing_key="scraping"),
     Queue("monitor", MONITOR_EXCHANGE, routing_key="monitor"),
+    Queue("notifications", NOTIFICATIONS_EXCHANGE, routing_key="notifications"),
 )
 
 #Roteamento explícito para manter cada domínio em sua fila
@@ -40,8 +44,23 @@ TASK_ROUTES = {
         "queue": "monitor",
         "routing_key": "monitor",
     },
+    "market_alert.tasks.notifications_enqueue_task.enqueue_notifications_task": {
+        "queue": "notifications",
+        "routing_key": "notifications",
+    },
+    "market_alert.tasks.send_notification_task.send_notification_task": {
+        "queue": "notifications",
+        "routing_key": "notifications",
+    },
+    "market_alert.tasks.verification_tasks.send_email_verification": {
+        "queue": "notifications",
+        "routing_key": "notifications",
+    },
+    "market_alert.tasks.verification_tasks.send_phone_otp": {
+        "queue": "notifications",
+        "routing_key": "notifications",
+    },
 }
-
 
 def _schedule_entry(task: str, schedule, *, queue: str = "monitor", routing_key: str | None = None) -> dict:
     """Cria uma entrada de agendamento consistente para o Beat."""

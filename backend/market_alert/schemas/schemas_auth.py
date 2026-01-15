@@ -37,7 +37,7 @@ class RefreshRequest(BaseModel):
     """ Payload para trocar um Refresh Token por um novo par de tokens """
     model_config = ConfigDict()
 
-    refresh_token: str = Field(..., description="Refresh Token previamente emitido")
+    refresh_token: str | None = Field(None, description="Refresh Token previamente emitido (pode vir via cookie HttpOnly)")
 
 
 # ---------- FLUXOS DE E-MAIL & SENHA ----------
@@ -48,6 +48,12 @@ class EmailTokenRequest(BaseModel):
 
     token: str = Field(..., min_length=6, description="Token gerado para verificação ou reset")
 
+class PhoneOtpRequest(BaseModel):
+    """ Esquema para confirmar OTP de telefone """
+    model_config = ConfigDict()
+
+    user_id: str = Field(..., description="Identificador do usuário")
+    otp: str = Field(..., min_length=6, max_length=6, description="Código OTP enviado por SMS")
 
 class ResetPasswordRequest(BaseModel):
     """ Esquema para solicitar reset da senha """

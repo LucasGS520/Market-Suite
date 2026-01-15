@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import structlog
 import time
@@ -45,7 +45,6 @@ from market_alert.schemas.schemas_comparisons import (
 from market_alert.utils.price_comparator import compare_prices
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.services.services_competitors import ensure_user_can_access_monitored
 
 
 logger = structlog.get_logger("comparison_service")
@@ -58,6 +57,8 @@ def ensure_user_can_view_monitored(
     *, db: Session, monitored_id: UUID, user: User
 ):
     """ Valida se o monitorado pertence ao usuário autenticado """
+    from market_alert.services.services_access import ensure_user_can_access_monitored
+    
     return ensure_user_can_access_monitored(
         db=db,
         product_id=monitored_id,
@@ -132,7 +133,7 @@ def run_price_comparison(
     db: Session,
     monitored_id: UUID,
     tolerance: Decimal | None = None,
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+) -> Dict[str, Any]:
     """Executa a comparação de preços retornando apenas o resumo essencial.
 
     O fluxo evita cálculos derivados quando já trabalhamos com resumos pré-existentes
@@ -141,7 +142,6 @@ def run_price_comparison(
     start = time.time()
     status = "success"
     result: Dict[str, Any] | None = None
-    alerts: List[Dict[str, Any]] = []
 
     try:
         #Carrega o produto monitorado para validação
@@ -181,7 +181,6 @@ def run_price_comparison(
             )
             payload_stub = {
                 "monitored_price": None,
-                "alerts": [],
                 "discrepancies": [],
                 "lowest_competitor": None,
                 "highest_competitor": None,
@@ -216,7 +215,7 @@ def run_price_comparison(
                 "highest_competitor": None,
             }
             result = encoded_result
-            return result, alerts
+            return result
 
         if not available_competitors:
             COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL.inc()
@@ -232,7 +231,6 @@ def run_price_comparison(
         #Processa comparação e persiste resultado
         raw_result = compare_prices(monitored, available_competitors, tol)
         encoded_result = jsonable_encoder(raw_result)
-        alerts = encoded_result.get("alerts", [])
 
         persist_raw_result = getattr(settings, "COMPARISON_STORE_RAW_RESULT", False)
         stored_payload = (
@@ -240,7 +238,6 @@ def run_price_comparison(
             if persist_raw_result
             else {
                 "monitored_price": encoded_result.get("monitored_price"),
-                "alerts": alerts,
                 "discrepancies": encoded_result.get("discrepancies", []),
                 "lowest_competitor": encoded_result.get("lowest_competitor"),
                 "highest_competitor": encoded_result.get("highest_competitor"),
@@ -268,7 +265,7 @@ def run_price_comparison(
         encoded_result["monitored_id"] = str(monitored.id)
         encoded_result["user_id"] = str(monitored.user_id)
         result = encoded_result
-        logger.info("comparison_finished", monitored_id=str(monitored_id), alerts=len(alerts))
+        logger.info("comparison_finished", monitored_id=str(monitored_id))
 
     except Exception:
         status = "failure"
@@ -280,7 +277,7 @@ def run_price_comparison(
         PRICE_COMPARISON_DURATION_SECONDS.observe(duration)
         PRICE_COMPARISONS_TOTAL.labels(status=status).inc()
 
-    return result, alerts
+    return result
 
 def _deduplicate_competitors(competitors: List[CompetitorProduct]) -> List[CompetitorProduct]:
     """Remove duplicidades simples mantendo o concorrente mais recente por ID """
@@ -359,7 +356,6 @@ def _empty_summary(competitors_count: int) -> Dict[str, Any]:
         "competitiveness_status": None,
         "comparison_insights": None,
         "discrepancies": [],
-        "alerts": [],
         "reason": None,
     }
 
@@ -485,8 +481,6 @@ def _compute_summary_from_payload(
         summary["discrepancies"] = (
             discrepancies_raw if isinstance(discrepancies_raw, list) else []
         )
-        alerts_raw = payload.get("alerts") or []
-        summary["alerts"] = alerts_raw if isinstance(alerts_raw, list) else []
         monitored_price = _to_decimal(payload.get("monitored_price"))
 
         summary["ignored_due_to_inactive"] = bool(payload.get("ignored_due_to_inactive"))
@@ -662,8 +656,6 @@ def _apply_summary_defaults(
 
     if summary.get("discrepancies") is None:
         summary["discrepancies"] = []
-    if summary.get("alerts") is None:
-        summary["alerts"] = []
 
     if comparison_id is not None:
         summary["comparison_id"] = summary.get("comparison_id") or str(comparison_id)
@@ -688,7 +680,7 @@ def _apply_summary_defaults(
         if status is not None:
             summary["competitiveness_status"] = status
 
-    #Motivo explicíto para ausência de dados competitivos facilita alertas e UI
+    #Motivo explicíto para ausência de dados competitivos exibição na UI
     if not summary.get("reason"):
         no_competitors_available = competitors_count == 0 or summary.get(
             "competitors_with_price_count", 0

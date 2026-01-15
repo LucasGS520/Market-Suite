@@ -21,15 +21,15 @@ def test_authenticate_user_falha(monkeypatch):
 
 def test_change_email_service_success(monkeypatch):
     db = SimpleNamespace(commit=lambda: None)
-    usuario = SimpleNamespace(id=1, email="antigo@example.com", is_email_verified=True)
+    usuario = SimpleNamespace(id=1, email="antigo@example.com", email_verified=True, email_verified_at=None)
     monkeypatch.setattr(services_auth, "get_user_by_email", lambda db, email: None)
     req = SimpleNamespace(new_email="novo@example.com")
     services_auth.change_email_service(db, usuario, req)
     assert usuario.email == "novo@example.com"
-    assert usuario.is_email_verified is False
+    assert usuario.email_verified is False
 
 def test_change_email_service_email_existente(monkeypatch):
-    usuario = SimpleNamespace(id=1, email="antigo@example.com", is_email_verified=True)
+    usuario = SimpleNamespace(id=1, email="antigo@example.com", email_verified=True, email_verified_at=None)
     monkeypatch.setattr(services_auth, "get_user_by_email", lambda db, email: object())
     req = SimpleNamespace(new_email="novo@example.com")
     with pytest.raises(HTTPException) as exc:
