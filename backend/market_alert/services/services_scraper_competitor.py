@@ -54,6 +54,8 @@ def scrape_competitor_product(
     user_id: UUID,
     url: str,
     payload: CompetitorProductCreateScraping,
+    *,
+    collected_at: datetime | None = None,
 ) -> ScrapeResult:
     """ Executa scraping de concorrentes de forma síncrona e determinística 
     
@@ -84,19 +86,23 @@ def scrape_competitor_product(
         )
 
     status_code = response.status_code
-    now = datetime.now(timezone.utc)
+    now = collected_at or datetime.now(timezone.utc)
 
     if status_code == 304:
         if existing:
             #Atualiza marcações de checagem para manter cadência mesmo sem alterações de conteúdo.
             existing.last_checked = now
             existing.last_scraped_at = now
+            existing.collected_at = now
             db.commit()
+            persisted_at = datetime.now(timezone.utc)
             logger.info(
                 "competitor_not_modified",
                 product_id=str(existing.id),
                 normalized_url=normalized_url,
                 last_checked=now.isoformat(),
+                collected_at=now.isoformat(),
+                persisted_at=persisted_at.isoformat(),
             )
 
         return ScrapeResult(
@@ -161,6 +167,16 @@ def scrape_competitor_product(
         currency=sanitized_currency,
         etag=metadata.etag,
         last_modified=metadata.last_modified,
+        collected_at=now,
+    )
+
+    persisted_at = datetime.now(timezone.utc)
+    logger.info(
+        "competitor_scrape_persisted",
+        competitor_id=str(competitor.id),
+        monitored_id=str(competitor.monitored_product_id),
+        collected_at=now.isoformat(),
+        persisted_at=persisted_at.isoformat(),
     )
 
     return ScrapeResult(

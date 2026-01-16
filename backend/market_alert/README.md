@@ -8,7 +8,7 @@ API FastAPI responsável por autenticação, gestão e monitoramento, além de c
 
 ## Principais Responsabilidades
 - **Expor rotas REST** para gerenciamento de usuários, autenticação, produtos monitorados e concorrentes, comparações.
-- **Agendar tarefas Celery** (`scraping`, `monitor`, `metrics`) para coleta de dados, rechecagens e coleta de métricas.
+- **Agendar tarefas Celery** (`scraping`, `monitor`, `metrics`) para coleta de dados contínua e coleta de métricas.
 - **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
 - **Registrar métricas e logs estruturados** para Prometheus e Loki.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
@@ -53,7 +53,7 @@ market_alert/
 | `POST` | `/notifications/preferences` | Cria ou atualiza preferência para canal e tipo de alerta. |
 | `GET` | `/metrics` | Exibe métricas Prometheus da API. |
 | `Celery` | `tasks.collector_product_task.collect_product_task` | Consome fila `scraping` e processa uma URL por vez (monitorado ou concorrente), respeitando lock Redis e retornando `ScrapeResult` padronizado; quando o lock não é adquirido retorna `no_result` e registra métrica de `lock_skipped`. |
-| `Celery` | `tasks.recheck_scheduler_task.schedule_rechecks` | Beat que identifica `next_check_at` vencido, recalcula o próximo horário e enfileira a `collect_product_task` diretamente com jitter leve. |
+| `Celery` | `tasks.continuous_collector_task.run_continuous_collector` | Worker contínuo que consome a fila de prioridade em Redis, coleta monitorados + concorrentes em sequência e recalcula o `next_check_at` com base na estabilidade do grupo. |
 | `Celery` | `tasks.compare_prices_task.compare_prices_task` | Idempotente e leve; recalcula comparação e `competitiveness_status` quando acionado. |
 | `Celery` | `tasks.notifications_enqueue_task.enqueue_notifications_task` | Normaliza notificações pendentes e calcula backoff exponencial antes de novos disparos. |
 
@@ -69,7 +69,7 @@ market_alert/
 - **Filas padrão:** `celery`, `scraping`, `monitor`, `notifications` (configuráveis via `.env.market_alert`).
 - **Tasks de destaque:**
   - `tasks.collector_product_task.collect_product_task`
-  - `tasks.recheck_scheduler_task.schedule_rechecks`
+  - `tasks.continuous_collector_task.run_continuous_collector`
   - `tasks.compare_prices_task.compare_prices_task`
   - `tasks.metrics_tasks.collect_celery_metrics`, `cleanup_cache`
 - **Beat com métricas:** `beat_with_metrics.py` executa agendamentos e expõe `/metrics` em porta dedicada (`8001`).
@@ -109,6 +109,8 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 - **`last_checked`**: registra quando o sistema tentou/processou uma checagem do produto (qualquer tentativa, sucesso ou não). Usado pelo agendador e para decisões operacionais como `SCRAPER_FORCE_REFRESH_TTL_SECONDS`.
 - **`last_scraped_at`**: registra o momento em que dados novos/atualizados foram efetivamente obtidos do `market_scraper` (ou seja, quando um fetch retornou payload que representa conteúdo atualizado). Não deve ser atualizado em retornos `304 Not Modified`.
 - **`collected_at`**: marca o instante real em que a extração foi concluída para monitorado/concorrente, servindo de base para filas contínuas.
+- **`enqueued_at`**: horário em que o monitorado foi colocado na fila de prioridade, usado para latência de consumo (registrado via Redis e logs).
+- **`persisted_at`**: horário em que o resultado do scraping foi confirmado no banco (registrado em logs estruturados).
 - **`checked_at`** (em `PriceHistory`): carimbo de tempo da observação/medição de preço — usado para séries históricas e determinação do instante da mudança de preço.
 
 Observação: a implementação foi ajustada para que respostas `304 Not Modified` atualizem apenas `last_checked` (indicador de atividade), preservando `last_scraped_at` como sinal de frescor dos dados brutos.
@@ -119,7 +121,7 @@ Observação: a implementação foi ajustada para que respostas `304 Not Modifie
 - `core/celery_app.py` – configura worker, beat e registradores de métricas.
 - `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
 - `services/comparison_service.py` – orquestra cálculos de comparação.
-- `tasks/recheck_scheduler_task.py` – beat responsável por enfileirar rechecagens usando o mesmo collector.
+- `tasks/continuous_collector_task.py` – worker contínuo que consome a fila de prioridade e recalcula `next_check_at` por estabilidade.
 - `tasks/metrics_tasks.py` – publica métricas periódicas da fila e recursos.
 - `tasks/compare_prices_task.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.
 
@@ -131,7 +133,7 @@ REDIS_URL=redis://:senha@redis:6379/0
 REDIS_PASSWORD=senha
 CELERY_BROKER_URL=redis://redis:6379/0
 CELERY_RESULT_BACKEND=redis://redis:6379/1
-CELERY_TASK_ROUTES={"tasks.recheck_scheduler_task.*": {"queue": "monitor"}}
+CELERY_TASK_ROUTES={"tasks.continuous_collector_task.*": {"queue": "monitor"}}
 
 SCRAPER_SERVICE_URL=http://market_scraper:8010
 SCRAPER_CONNECT_TIMEOUT=5.0
@@ -190,8 +192,8 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
 
 ## Orquestração de coletas e rechecagens
 - **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result` com métrica de `lock_skipped` incrementada.
-- **Rechecagem centralizada:** rechecagens usam a mesma `collect_product_task` aplicada a coletas manuais, com lock Redis e TTL automático como único mecanismo de exclusão mútua.
-- **Agendamento via Beat:** `market_alert.tasks.recheck_scheduler_task.schedule_rechecks` identifica `next_check_at` vencido, recalcula o próximo horário com `_compute_next_check_at` e enfileira diretamente o collector com jitter, evitando flags ou comparações inline.
+- **Fila contínua:** `market_alert.tasks.continuous_collector_task.run_continuous_collector` consome o Redis Sorted Set em loop, coleta monitorado + concorrentes em sequência e recalcula `next_check_at` com base na estabilidade de preço do grupo.
+- **Fallback de rechecagem:** em caso de indisponibilidade do Redis, o worker contínuo pode acionar a task `market_alert.tasks.recheck_scheduler_task.schedule_rechecks` para manter o fluxo anterior de enfileiramento.
 - **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
 
 ## Segurança e Observabilidade

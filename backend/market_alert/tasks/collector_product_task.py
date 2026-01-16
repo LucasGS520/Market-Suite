@@ -185,6 +185,7 @@ def collect_product(
 
     kind, monitored_id, competitor_id, url = _validate_payload(payload)
     trace_id = payload.get("trace_id") if payload else None
+    enqueued_at = payload.get("enqueued_at") if payload else None
     lock_target = competitor_id or monitored_id
 
     lock_status = "not_used"
@@ -194,6 +195,7 @@ def collect_product(
     lock_owner: str | None = None
 
     try:
+        collected_at = datetime.now(timezone.utc)
         if payload is None or lock_target is None or url is None:
             reason = "invalid_payload"
             task_logger.error("invalid_payload", kind=kind)
@@ -260,6 +262,7 @@ def collect_product(
                             user_id=user_uuid or monitored_id or competitor_id,
                             url=url,
                             payload=payload_model,
+                            collected_at=collected_at,
                         )
                     else:
                         monitored_row: MonitoredProduct | None = None
@@ -294,6 +297,7 @@ def collect_product(
                                 url=url,
                                 user_id=user_uuid or monitored_id,
                                 payload=payload_model,
+                                collected_at=collected_at,
                             )
     except ScraperError as exc:
         reason = "scraper_error"
@@ -324,6 +328,7 @@ def collect_product(
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
             trace_id=trace_id,
+            enqueued_at=enqueued_at,
         )
         if dispatch_comparison:
             _dispatch_comparison(monitored_id, result, trace_id)

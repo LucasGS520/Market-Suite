@@ -34,6 +34,12 @@ from market_alert.crud import crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
+from market_alert.services.services_priority_queue_manager import (
+    enqueue_monitored_now,
+    enqueue_monitored_at,
+    remove_from_priority_queue,
+)
+from market_alert.orchestrator.collector_service_orchestrator import enqueue_monitored_collection
 
 
 logger = structlog.get_logger("crud_monitored")
@@ -266,6 +272,11 @@ def create_pending_monitored_product(
         raise
     db.refresh(pending)
 
+    enqueued = enqueue_monitored_now(pending.id, source="monitored_create")
+    if not enqueued:
+        #Fallback imediato para garantir coleta mesmo sem Redis disponível
+        enqueue_monitored_collection(pending, user_id=user_id)
+
     return pending
 
 def create_or_update_monitored_product_scraped(
@@ -279,6 +290,7 @@ def create_or_update_monitored_product_scraped(
     etag: str | None = None,
     last_modified: datetime | None = None,
     scraped_name: str | None = None,
+    collected_at: datetime | None = None,
 ) -> MonitoredProduct:
     """ Cria ou atualiza um produto monitorado a partir de dados de scraping """
     normalized_url = normalize_product_url_for_storage(product_data.product_url)
@@ -326,6 +338,8 @@ def create_or_update_monitored_product_scraped(
             resolved_price=str(resolved_price) if resolved_price is not None else None,
             price_changed=price_changed,
         )
+        collected_reference = collected_at or last_checked
+
         try:
             existing.current_price = resolved_price
 
@@ -337,6 +351,7 @@ def create_or_update_monitored_product_scraped(
             existing.last_modified = last_modified or existing.last_modified
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
+            existing.collected_at = collected_reference
             existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
             existing.status = MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active
             existing.availability = availability
@@ -416,6 +431,7 @@ def create_or_update_monitored_product_scraped(
         status=MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active,
         last_checked=last_checked,
         last_scraped_at=last_checked,
+        collected_at=collected_at or last_checked,
         next_check_at=None,
         currency=resolved_currency,
         etag=etag,
@@ -701,6 +717,7 @@ def pause_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPro
         monitored.paused_at = now
         db.commit()
         db.refresh(monitored)
+        remove_from_priority_queue(monitored_id, source="monitored_pause")
         MONITORED_PAUSED_TOTAL.inc()
         return monitored
     finally:
@@ -722,6 +739,10 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
 
         db.commit()
         db.refresh(monitored)
+        enqueued = enqueue_monitored_now(monitored.id, source="monitored_resume")
+        if not enqueued:
+            #Fallback para garantir retomada mesmo se Redis estiver indisponível
+            enqueue_monitored_collection(monitored, user_id=user.id)
         if was_paused:
             MONITORED_RESUMED_TOTAL.inc()
         return monitored
@@ -738,6 +759,7 @@ def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
         dedicated_session = SessionLocal()
         monitored = _ensure_monitored_access(dedicated_session, monitored_id, user)
         lock_owner = _acquire_monitored_lock(monitored_id)
+        remove_from_priority_queue(monitored_id, source="monitored_delete")
 
         dedicated_session.delete(monitored)
         dedicated_session.commit()

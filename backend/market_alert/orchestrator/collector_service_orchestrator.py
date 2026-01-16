@@ -26,21 +26,26 @@ logger = structlog.get_logger("collector_service")
 def build_monitored_payload(
     monitored: MonitoredProduct,
     *,
-    user_id: UUID
+    user_id: UUID,
+    enqueued_at: str | None = None,
 ) -> dict[str, str]:
     """ Constrói payload padrão para coletas de monitorados """
-    return {
+    payload = {
         "kind": "monitored",
         "monitored_id": str(monitored.id),
         "user_id": str(user_id),
         "url": monitored.product_url,
         "name": monitored.name_identification,
     }
+    if enqueued_at:
+        payload["enqueued_at"] = enqueued_at
+    return payload
 
 def build_competitor_payload(
     competitor: CompetitorProduct,
     *,
-    user_id: UUID | None = None
+    user_id: UUID | None = None,
+    enqueued_at: str | None = None,
 ) -> dict[str, str]:
     """ Constrói payload padrão para coletas de concorrentes vinculados """
     payload: dict[str, str] = {
@@ -51,6 +56,8 @@ def build_competitor_payload(
     }
     if user_id:
         payload["user_id"] = str(user_id)
+    if enqueued_at:
+        payload["enqueued_at"] = enqueued_at
     return payload
 
 def enqueue_collect(

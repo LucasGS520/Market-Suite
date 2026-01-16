@@ -43,6 +43,7 @@ def _handle_response(
     existing_id: UUID | None,
     last_checked: datetime,
     request_url: str,
+    collected_at: datetime,
 ) -> ScrapeResult:
     """ Processa reposta do scraper e retorna ``ScrapeResult`` padronizado
 
@@ -68,9 +69,11 @@ def _handle_response(
                 #Marca checagem e scraping para evitar lacunas de monitoramento mesmo sem mudanças.
                 product.last_checked = last_checked
                 product.last_scraped_at = last_checked
+                product.collected_at = collected_at
                 product.status = MonitoredStatus.active
                 product.next_check_at = _compute_next_check_at(product, reference=last_checked)
                 db.commit()
+                persisted_at = datetime.now(timezone.utc)
                 try:
                     #Garante rechecagem assíncrona dos concorrentes sem bloquear a resposta
                     from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
@@ -87,6 +90,8 @@ def _handle_response(
                     product_id=str(product.id),
                     normalized_url=lookup_url,
                     last_checked=last_checked.isoformat(),
+                    collected_at=collected_at.isoformat(),
+                    persisted_at=persisted_at.isoformat(),
                 )
 
         return ScrapeResult(status="not_modified", product_id=str(existing_id) if existing_id else None, http_status=304)
@@ -146,6 +151,7 @@ def _handle_response(
         etag=metadata.etag,
         last_modified=metadata.last_modified,
         scraped_name=sanitized_name,
+        collected_at=collected_at,
     )
 
     price_changed = bool(getattr(product, "_price_changed", True))
@@ -159,6 +165,14 @@ def _handle_response(
     except Exception:
         logger.exception("enqueue_competitors_failed", monitored_id=str(product.id))
         metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
+    
+    persisted_at = datetime.now(timezone.utc)
+    logger.info(
+        "monitored_scrape_persisted",
+        product_id=str(product.id),
+        collected_at=collected_at.isoformat(),
+        persisted_at=persisted_at.isoformat(),
+    )
 
     return ScrapeResult(
         status="success",
@@ -173,6 +187,8 @@ def scrape_monitored_product(
     url: str,
     user_id: UUID,
     payload: MonitoredProductCreateScraping,
+    *,
+    collected_at: datetime | None = None,
 ) -> ScrapeResult:
     """ Executa scraping para produto monitorado de forma síncrona
 
@@ -198,7 +214,7 @@ def scrape_monitored_product(
     )
     etag, last_modified = resolve_conditional_headers(existing)
 
-    now = datetime.now(timezone.utc)
+    now = collected_at or datetime.now(timezone.utc)
     last_checked_ref = getattr(existing, "last_checked", None)
     force_refresh = compute_force_refresh(
         last_checked_ref if isinstance(last_checked_ref, datetime) else None,
@@ -227,6 +243,7 @@ def scrape_monitored_product(
         existing_id=existing.id if existing else None,
         last_checked=now,
         request_url=normalized_url,
+        collected_at=now,
     )
 
     return outcome

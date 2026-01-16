@@ -14,6 +14,7 @@ from kombu import Exchange, Queue
 #Módulos de tasks carregados pelo worker
 TASK_MODULES = [
     "market_alert.tasks.collector_product_task",
+    "market_alert.tasks.continuous_collector_task",
     "market_alert.tasks.metrics_tasks",
     "market_alert.tasks.compare_prices_task",
     "market_alert.tasks.recheck_scheduler_task",
@@ -39,6 +40,10 @@ TASK_ROUTES = {
     "market_alert.tasks.collector_product_task.collect_product_task": {
         "queue": "scraping",
         "routing_key": "scraping",
+    },
+    "market_alert.tasks.continuous_collector_task.run_continuous_collector": {
+        "queue": "monitor",
+        "routing_key": "monitor",
     },
     "market_alert.tasks.recheck_scheduler_task.schedule_rechecks": {
         "queue": "monitor",
@@ -85,12 +90,6 @@ BEAT_SCHEDULE = {
     "collect-db-metrics-every-1min": _schedule_entry(
         "market_alert.tasks.metrics_tasks.collect_db_metrics",
         crontab(minute="*/1"),
-    ),
-    "recheck-scraping-every-5min": _schedule_entry(
-        "market_alert.tasks.recheck_scheduler_task.schedule_rechecks",
-        crontab(minute="*/5"),
-        queue="monitor",
-        routing_key="monitor",
     ),
     "cleanup-cache-daily": _schedule_entry(
         "market_alert.tasks.metrics_tasks.cleanup_cache",

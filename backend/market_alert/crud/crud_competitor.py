@@ -22,6 +22,11 @@ from market_alert.models.models_products import CompetitorProduct, MonitoredProd
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
+from market_alert.services.services_priority_queue_manager import (
+    enqueue_monitored_now,
+    remove_from_priority_queue,
+)
+from market_alert.orchestrator.collector_service_orchestrator import enqueue_monitored_collection
 
 
 logger = structlog.get_logger("crud_competitor")
@@ -155,9 +160,11 @@ def create_pending_competitor_product(
 
     db.refresh(pending)
 
-    from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
     try:
-        enqueue_competitor_collection(pending)
+        enqueued = enqueue_monitored_now(monitored_product_id, source="competitor_create")
+        if not enqueued and monitored:
+            #Fallback para garantir coleta do grupo quando Redis estiver indisponível
+            enqueue_monitored_collection(monitored, user_id=monitored.user_id)
     except Exception:
         #Ignora falhas de enfileiramento para não quebrar a criação
         pass
@@ -184,6 +191,7 @@ def create_or_update_competitor_product_scraped(
     currency: str | None = None,
     etag: str | None = None,
     last_modified: datetime | None = None,
+    collected_at: datetime | None = None,
 ) -> CompetitorProduct:
     """ Atualiza ou cria um produto concorrente a partir dos dados extraídos pelo scraping """
     normalized_url = normalize_product_url_for_storage(str(product_data.product_url))
@@ -220,6 +228,8 @@ def create_or_update_competitor_product_scraped(
         price_changed = _different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
 
+        collected_reference = collected_at or last_checked
+
         try:
             existing.current_price = resolved_price
 
@@ -231,6 +241,7 @@ def create_or_update_competitor_product_scraped(
             existing.last_modified = last_modified or existing.last_modified
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
+            existing.collected_at = collected_reference
             existing.status = ProductStatus.unavailable if unavailable_by_data else ProductStatus.available
             existing.availability = availability
             existing.last_status = last_status
@@ -315,6 +326,7 @@ def create_or_update_competitor_product_scraped(
         status=ProductStatus.unavailable if unavailable_by_data else ProductStatus.available,
         last_checked=last_checked,
         last_scraped_at=last_checked,
+        collected_at=collected_at or last_checked,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
@@ -408,12 +420,14 @@ def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) 
     """ Remove todos os produtos concorrentes vinculados a um produto monitorado """
     competitors = get_competitors_by_monitored_id(db, monitored_product_id, include_paused=True)
     for item in competitors:
+        remove_from_priority_queue(item.id, source="competitor_delete")
         db.delete(item)
     db.commit()
     return competitors
 
 def delete_competitor(db: Session, competitor: CompetitorProduct) -> None:
     """ Remove concorrente específico garantindo flush para cascatas """
+    remove_from_priority_queue(competitor.id, source="competitor_delete")
     db.delete(competitor)
     db.flush()
 

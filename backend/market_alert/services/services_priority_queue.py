@@ -48,6 +48,7 @@ class PriorityQueueService:
         self._client_factory = client_factory
         self._queue_key = queue_key or settings.PRIORITY_QUEUE_KEY
         self._processing_key = processing_key or settings.PRIORITY_QUEUE_PROCESSING_KEY
+        self._metadata_key = f"{self._queue_key}:meta"
         self._pop_script = None
 
     def _client(self) -> Redis | None:
@@ -167,6 +168,7 @@ class PriorityQueueService:
             #Remove de ambos os conjuntos para garantir pausa ou deleção imediata
             client.zrem(self._queue_key, product_id)
             client.zrem(self._processing_key, product_id)
+            client.hdel(self._metadata_key, product_id)
             return True
         except Exception as exc:
             logger.warning("priority_queue_remove_error", extra={"error": str(exc)})
@@ -215,3 +217,41 @@ class PriorityQueueService:
             logger.warning("priority_queue_processing_error", extra={"error": str(exc)})
             return 0
         
+    def set_enqueued_at(self, product_id: str, enqueued_at: datetime) -> bool:
+        """ Registra o horário de enfileiramento para cálculo de latência """
+        client = self._client()
+        if client is None:
+            return False
+        
+        try:
+            client.hset(self._metadata_key, product_id, enqueued_at.isoformat())
+            return True
+        except Exception as exc:
+            logger.warning("priority_queue_metadata_error", extra={"error": str(exc)})
+            return False
+        
+    def get_enqueued_at(self, product_id: str) -> datetime | None:
+        """ Recupera o horário de enfileiramento salvo no metadata """
+        client = self._client()
+        if client is None:
+            return None
+        
+        try:
+            raw_value = client.hget(self._metadata_key, product_id)
+        except Exception as exc:
+            logger.warning("priority_queue_metadata_error", extra={"error": str(exc)})
+            return None
+        
+        if not raw_value:
+            return None
+        
+        try:
+            decoded = raw_value.decode() if isinstance(raw_value, (bytes, bytearray)) else str(raw_value)
+            return datetime.fromisoformat(decoded)
+        except Exception:
+            return None
+        
+    def is_available(self) -> bool:
+        """ Indica se o Redis está disponível para operação imediata """
+        return self._client() is not None
+    

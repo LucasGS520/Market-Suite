@@ -157,3 +157,7 @@ lerna-debug.log*
 *.sln
 *.swp
 *.swo
+
+# Backups and local scripts (do not version)
+/backups/
+/scripts/
