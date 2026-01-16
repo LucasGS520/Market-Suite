@@ -85,21 +85,10 @@ class Settings(ConfigBase):
         else "none"
     ) #Política SameSite do cookie de refresh
 
-    #Intervalo base utilizado pelo AdaptiveRecheckManager
-    ADAPTIVE_RECHECK_BASE_INTERVAL: int = int(
-        os.getenv("ADAPTIVE_RECHECK_BASE_INTERVAL", "7200")
-    ) #Base de reagendamento
-
     #Controles operacionais de rechecagem
     RECHECK_INTERVAL_DEFAULT: int = int(
         os.getenv("RECHECK_INTERVAL_DEFAULT", str(5 * 60))
     ) #Intervalo padrão entre rechecagens em segundos
-    DEFAULT_NEXT_CHECK_SECONDS: int = int(
-        os.getenv("DEFAULT_NEXT_CHECK_SECONDS", str(5 * 60))
-    ) #Intervalo aplicado no onboarding quando não houver cálculo específico
-    RECHECK_TIMEOUT_SECONDS: int = int(
-        os.getenv("RECHECK_TIMEOUT_SECONDS", "120")
-    ) #Tempo máximo para manter uma rechecagem ativa antes de liberar
     RECHECK_ENQUEUE_BATCH_SIZE: int = int(
         os.getenv("RECHECK_ENQUEUE_BATCH_SIZE", "50")
     ) #Quantidade máxima de itens enfileirados por ciclo de rechecagem
@@ -116,6 +105,58 @@ class Settings(ConfigBase):
     PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS: int = int(
         os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "45")
     ) #Margem mínima recomendada para evitar expiração prematura do lock
+
+    #Intervalos do agendamento contínuo (em segundos)
+    COLLECT_INTERVAL_UNSTABLE_MIN: int = int(
+        os.getenv("COLLECT_INTERVAL_UNSTABLE_MIN", str(2 * 60))
+    ) #Intervalo mínimo para produtos instáveis
+    COLLECT_INTERVAL_UNSTABLE_MAX: int = int(
+        os.getenv("COLLECT_INTERVAL_UNSTABLE_MAX", str(5 * 60))
+    ) #Intervalo máximo para produtos instáveis
+    COLLECT_INTERVAL_STABLE_MIN: int = int(
+        os.getenv("COLLECT_INTERVAL_STABLE_MIN", str(5 * 60))
+    ) #Intervalo mínimo para produtos estáveis
+    COLLECT_INTERVAL_STABLE_MAX: int = int(
+        os.getenv("COLLECT_INTERVAL_STABLE_MAX", str(15 * 60))
+    ) #Intervalo máximo para produtos estáveis
+    COLLECT_INTERVAL_VERY_STABLE_MIN: int = int(
+        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MIN", str(10 * 60))
+    ) #Intervalo mínimo para produtos muito estáveis
+    COLLECT_INTERVAL_VERY_STABLE_MAX: int = int(
+        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MAX", str(30 * 60))
+    ) #Intervalo máximo para produtos muito estáveis
+
+    #Thresholds de estabilidade em dias
+    STABILITY_DAYS_UNSTABLE: int = int(
+        os.getenv("STABILITY_DAYS_UNSTABLE", "1")
+    ) #Janela para considerar produto instável
+    STABILITY_DAYS_STABLE: int = int(
+        os.getenv("STABILITY_DAYS_STABLE", "3")
+    ) #Janela para considerar produto estável
+    STABILITY_DAYS_VERY_STABLE: int = int(
+        os.getenv("STABILITY_DAYS_VERY_STABLE", "7")
+    ) #Janela para considerar produto muito estável
+
+    #Configuração do worker contínuo
+    CONTINUOUS_WORKER_POLL_INTERVAL: float = float(
+        os.getenv("CONTINUOUS_WORKER_POLL_INTERVAL", "1.0")
+    ) #Intervalo base entre verificações da fila
+    CONTINUOUS_WORKER_BATCH_SIZE: int = int(
+        os.getenv("CONTINUOUS_WORKER_BATCH_SIZE", "20")
+    ) #Quantidade de itens processados por ciclo
+    CONTINUOUS_WORKER_IDLE_SLEEP: float = float(
+        os.getenv("CONTINUOUS_WORKER_IDLE_SLEEP", "2.0")
+    ) #Pausa aplicada quando a fila está vazia
+
+    #Chaves Redis do agendamento contínuo
+    PRIORITY_QUEUE_KEY: str = os.getenv(
+        "PRIORITY_QUEUE_KEY",
+        "market_alert:priority_queue",
+    ) #Sorted set principal de agendamento
+    PRIORITY_QUEUE_PROCESSING_KEY: str = os.getenv(
+        "PRIORITY_QUEUE_PROCESSING_KEY",
+        "market_alert:priority_queue:processing",
+    ) #Sorted set auxiliar para itens em processamento
 
     #URL base do serviço externo de scraping
     SCRAPER_SERVICE_URL: str = os.getenv(

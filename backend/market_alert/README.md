@@ -95,6 +95,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 | Verificação | `EMAIL_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_MAX_ATTEMPTS`, `VERIFICATION_RESEND_INTERVAL_SECONDS`, `VERIFICATION_RESEND_MAX_PER_HOUR`, `REGISTRATION_MAX_PER_HOUR` |
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
+| Agendamento contínuo | `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
 | Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER`, `NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS`, `NOTIFICATION_EMAIL_PROVIDER`, `NOTIFICATION_SMS_PROVIDER`, `NOTIFICATION_WHATSAPP_PROVIDER`, `NOTIFICATION_PUSH_PROVIDER`, `NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` |
 
@@ -107,6 +108,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 **Semântica de timestamps de scraping**
 - **`last_checked`**: registra quando o sistema tentou/processou uma checagem do produto (qualquer tentativa, sucesso ou não). Usado pelo agendador e para decisões operacionais como `SCRAPER_FORCE_REFRESH_TTL_SECONDS`.
 - **`last_scraped_at`**: registra o momento em que dados novos/atualizados foram efetivamente obtidos do `market_scraper` (ou seja, quando um fetch retornou payload que representa conteúdo atualizado). Não deve ser atualizado em retornos `304 Not Modified`.
+- **`collected_at`**: marca o instante real em que a extração foi concluída para monitorado/concorrente, servindo de base para filas contínuas.
 - **`checked_at`** (em `PriceHistory`): carimbo de tempo da observação/medição de preço — usado para séries históricas e determinação do instante da mudança de preço.
 
 Observação: a implementação foi ajustada para que respostas `304 Not Modified` atualizem apenas `last_checked` (indicador de atividade), preservando `last_scraped_at` como sinal de frescor dos dados brutos.
@@ -160,8 +162,23 @@ REFRESH_TOKEN_COOKIE_SECURE=0
 REFRESH_TOKEN_COOKIE_SAMESITE=none
 FRONTEND_ORIGINS=http://localhost:5173
 
-ADAPTIVE_RECHECK_BASE_INTERVAL=7200
-SCRAPER_SERVICE_URL=url_servico_scraping
+COLLECT_INTERVAL_UNSTABLE_MIN=120
+COLLECT_INTERVAL_UNSTABLE_MAX=300
+COLLECT_INTERVAL_STABLE_MIN=300
+COLLECT_INTERVAL_STABLE_MAX=900
+COLLECT_INTERVAL_VERY_STABLE_MIN=600
+COLLECT_INTERVAL_VERY_STABLE_MAX=1800
+
+STABILITY_DAYS_UNSTABLE=1
+STABILITY_DAYS_STABLE=3
+STABILITY_DAYS_VERY_STABLE=7
+
+CONTINUOUS_WORKER_POLL_INTERVAL=1.0
+CONTINUOUS_WORKER_BATCH_SIZE=20
+CONTINUOUS_WORKER_IDLE_SLEEP=2.0
+
+PRIORITY_QUEUE_KEY=market_alert:priority_queue
+PRIORITY_QUEUE_PROCESSING_KEY=market_alert:priority_queue:processing
 
 DEFAULT_COOLDOWN_SECONDS=1800
 MIN_PRICE_DELTA_PERCENT=1.0

@@ -30,6 +30,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Backend (`backend/`)**: agrega `market_alert` (API FastAPI, Celery Worker e Beat) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, métricas, contratos Pydantic, clientes externos).
 - **Infraestrutura de apoio**: PostgreSQL, Redis, Prometheus, Grafana, Loki e Alertmanager são orquestrados via `docker-compose.yml`.
 - **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery → worker conversa com o `market_scraper`, Redis e PostgreSQL → eventos de domínio geram notificações persistidas → observabilidade coleta métricas/logs → dashboards são atualizados.
+- **Agendamento contínuo (preparação)**: a fila de prioridade em Redis usa `PRIORITY_QUEUE_KEY` e `PRIORITY_QUEUE_PROCESSING_KEY` para ordenar coletas por timestamp.
 
 ### Responsabilidades das tarefas Celery (`market_alert`)
 - **Collector (`tasks.collector_product_task.collect_product_task`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock no Redis e retorna um `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`) contendo `http_status`, `price_changed`/`availability_changed` e `error_code` quando aplicável.

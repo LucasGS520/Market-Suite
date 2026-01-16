@@ -18,6 +18,7 @@ from sqlalchemy import (
     Float,
     Enum as PgEnum,
     UniqueConstraint,
+    Integer,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -66,12 +67,17 @@ class MonitoredProduct(Base):
     last_modified = Column(DateTime(timezone=True), nullable=True)
     last_scrape_signature = Column(String, nullable=True)
 
-    #Controle de status - Rechecagens usados pelo agendador
+    #Controle de status
     status = Column(PgEnum(MonitoredStatus, name="monitored_status_enum"), nullable=False, default=MonitoredStatus.active)
     paused = Column(Boolean, nullable=False, default=False, server_default="false")
     paused_at = Column(DateTime(timezone=True), nullable=True)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    collected_at = Column(DateTime(timezone=True), nullable=True)
+    last_price_change_at = Column(DateTime(timezone=True), nullable=True)
+    group_collected_at = Column(DateTime(timezone=True), nullable=True)
+    check_interval = Column(Integer, nullable=True)
+    stability_score = Column(Integer, nullable=True)
     next_check_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -142,6 +148,8 @@ class CompetitorProduct(Base):
     is_paused = Column(Boolean, nullable=False, default=False)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    collected_at = Column(DateTime(timezone=True), nullable=True)
+    last_price_change_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
