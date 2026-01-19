@@ -217,6 +217,51 @@ class PriorityQueueService:
             logger.warning("priority_queue_processing_error", extra={"error": str(exc)})
             return 0
         
+    def reclaim_stale_processing(
+        self,
+        stale_after_seconds: int,
+        *,
+        now: datetime | float | int | None = None,
+    ) -> list[str]:
+        """ Recoloca itens parados no processamento de volta à fila principal """
+        if stale_after_seconds <= 0:
+            return []
+        
+        client = self._client()
+        if client is None:
+            return []
+        
+        current_time = now or datetime.now(timezone.utc)
+        timestamp = self._to_timestamp(current_time)
+        stale_before = timestamp - float(stale_after_seconds)
+
+        try:
+            stale_items = client.zrangebyscore(self._processing_key, "-inf", stale_before)
+        except Exception as exc:
+            logger.warning("priority_queue_processing_stale_error", extra={"error": str(exc)})
+            return []
+        
+        if not stale_items:
+            return []
+        
+        decoded_items = [
+            item.decode() if isinstance(item, (bytes, bytearray)) else str(item)
+            for item in stale_items
+        ]
+
+        try:
+            #Move os itens de volta para a fila com timestamp atual para nova tentativa
+            payload = {item: timestamp for item in decoded_items}
+            pipeline = client.pipeline()
+            pipeline.zrem(self._processing_key, *decoded_items)
+            pipeline.zadd(self._queue_key, payload)
+            pipeline.execute()
+        except Exception as exc:
+            logger.warning("priority_queue_processing_reclaim_error", extra={"error": str(exc)})
+            return []
+        
+        return decoded_items
+
     def set_enqueued_at(self, product_id: str, enqueued_at: datetime) -> bool:
         """ Registra o horário de enfileiramento para cálculo de latência """
         client = self._client()

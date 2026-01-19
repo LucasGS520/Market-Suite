@@ -32,10 +32,9 @@ from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_monitored import get_monitored_product_by_id, get_last_price_change_for_monitored
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
-from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, build_competitor_payload, enqueue_collect
+from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, build_competitor_payload
 from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.tasks.collector_product_task import collect_product
-from market_alert.tasks.recheck_scheduler_task import schedule_rechecks
 from market_alert.utils.interval_calculator_products import (
     calculate_next_check_at,
     calculate_stability_score,
@@ -111,48 +110,48 @@ def _collect_group(
     )
 
     with SessionLocal() as db:
-        competitors = get_competitors_by_monitored_id(
-            db,
-            monitored.id,
-            include_paused=False,
-            include_inactive=False,
-        )
-        for competitor in competitors:
-            competitor_payload = build_competitor_payload(
-                competitor,
-                user_id=monitored.user_id,
-                enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
-            )
-            competitor_payload["trace_id"] = trace_id
-            collect_product(
-                competitor_payload,
-                use_lock=True,
-                dispatch_comparison=True,
-                logger_bound=logger.bind(
-                    monitored_id=str(monitored.id),
-                    competitor_id=str(competitor.id),
-                    trace_id=trace_id,
-                ),
-            )
-
-    group_finished_at = _utc_now()
-    with SessionLocal() as db:
-        refreshed = get_monitored_product_by_id(db, monitored.id)
-        if refreshed:
-            refreshed.group_collected_at = group_finished_at
-            refreshed.last_price_change_at = get_last_price_change_for_monitored(
+        #Mantém uma única sessão para reduzir overhead e evitar inconsistências de leitura.
+        with db.begin():
+            competitors = get_competitors_by_monitored_id(
                 db,
-                refreshed.id,
+                monitored.id,
+                include_paused=False,
+                include_inactive=False,
             )
-            refreshed.stability_score = calculate_stability_score(
-                refreshed,
-                reference_time=group_finished_at,
-            )
-            refreshed.next_check_at = calculate_next_check_at(
-                refreshed,
-                collected_at=group_finished_at,
-            )
-            db.commit()
+            for competitor in competitors:
+                competitor_payload = build_competitor_payload(
+                    competitor,
+                    user_id=monitored.user_id,
+                    enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
+                )
+                competitor_payload["trace_id"] = trace_id
+                collect_product(
+                    competitor_payload,
+                    use_lock=True,
+                    dispatch_comparison=True,
+                    logger_bound=logger.bind(
+                        monitored_id=str(monitored.id),
+                        competitor_id=str(competitor.id),
+                        trace_id=trace_id,
+                    ),
+                )
+
+            group_finished_at = _utc_now()
+            refreshed = get_monitored_product_by_id(db, monitored.id)
+            if refreshed:
+                refreshed.group_collected_at = group_finished_at
+                refreshed.last_price_change_at = get_last_price_change_for_monitored(
+                    db,
+                    refreshed.id,
+                )
+                refreshed.stability_score = calculate_stability_score(
+                    refreshed,
+                    reference_time=group_finished_at,
+                )
+                refreshed.next_check_at = calculate_next_check_at(
+                    refreshed,
+                    collected_at=group_finished_at,
+                )
 
     if monitored_result and monitored_result.status:
         PRIORITY_QUEUE_PROCESSED_TOTAL.labels(outcome=monitored_result.status).inc()
@@ -165,18 +164,19 @@ def _requeue_monitored(
     *,
     monitored: MonitoredProduct,
     queue_service: PriorityQueueService,
-    fallback_payload: dict[str, str],
 ) -> None:
-    """ Reenfileira monitorado ou utiliza fallback via Celery """
+    """ Reenfileira monitorado e registra falha caso Redis esteja indisponível """
     next_check_at = monitored.next_check_at or _utc_now()
     enqueued = queue_service.enqueue(str(monitored.id), next_check_at)
     if enqueued:
         queue_service.set_enqueued_at(str(monitored.id), _utc_now())
         return
     
-    #Fallback via Celery quando Redis falhar
-    delay_seconds = max(int((next_check_at - _utc_now()).total_seconds()), 0)
-    enqueue_collect(fallback_payload, countdown=delay_seconds)
+    logger.error(
+        "continuous_requeue_failed",
+        monitored_id=str(monitored.id),
+        next_check_at=next_check_at.isoformat(),
+    )
 
 def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
     """ Carrega monitorado por ID garantindo UUID válido """
@@ -202,6 +202,7 @@ def run_continuous_collector(self) -> None:
     bound_logger = logger.bind(task_id=getattr(self.request, "id", None))
     queue_service = PriorityQueueService()
     batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
+    processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
 
     while True:
         if is_scraping_suspended():
@@ -210,12 +211,17 @@ def run_continuous_collector(self) -> None:
             continue
         
         if not queue_service.is_available():
-            #Fallback para o comportamento anterior quando Redis estiver indisponível
-            bound_logger.warning("continuous_queue_unavailable_fallback")
-            with SessionLocal() as db:
-                schedule_rechecks(db, logger_bound=bound_logger)
+            bound_logger.error("continuous_queue_unavailable")
             time.sleep(settings.CONTINUOUS_WORKER_IDLE_SLEEP)
             continue
+        
+        reclaimed = queue_service.reclaim_stale_processing(processing_ttl)
+        if reclaimed:
+            #Recoloca itens travados para garantir novas tentativas no loop contínuo
+            bound_logger.warning(
+                "continuous_processing_reclaimed",
+                reclaimed_count=len(reclaimed),
+            )
         
         processed_ids: list[str] = []
         for _ in range(batch_size):
@@ -251,15 +257,9 @@ def run_continuous_collector(self) -> None:
                 refreshed = get_monitored_product_by_id(db, monitored.id)
                 if refreshed is None:
                     continue
-                fallback_payload = build_monitored_payload(
-                    refreshed,
-                    user_id=refreshed.user_id,
-                )
-                fallback_payload["trace_id"] = str(UUID(int=0))
                 _requeue_monitored(
                     monitored=refreshed,
                     queue_service=queue_service,
-                    fallback_payload=fallback_payload,
                 )
 
             bound_logger.info(

@@ -147,6 +147,9 @@ class Settings(ConfigBase):
     CONTINUOUS_WORKER_IDLE_SLEEP: float = float(
         os.getenv("CONTINUOUS_WORKER_IDLE_SLEEP", "2.0")
     ) #Pausa aplicada quando a fila está vazia
+    CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS: int = int(
+        os.getenv("CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS", str(15 * 60))
+    ) #TTL para recuperar itens travados no conjunto de processamento
 
     #Chaves Redis do agendamento contínuo
     PRIORITY_QUEUE_KEY: str = os.getenv(

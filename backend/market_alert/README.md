@@ -95,7 +95,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 | Verificação | `EMAIL_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_MAX_ATTEMPTS`, `VERIFICATION_RESEND_INTERVAL_SECONDS`, `VERIFICATION_RESEND_MAX_PER_HOUR`, `REGISTRATION_MAX_PER_HOUR` |
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
-| Agendamento contínuo | `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
+| Agendamento contínuo | `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
 | Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER`, `NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS`, `NOTIFICATION_EMAIL_PROVIDER`, `NOTIFICATION_SMS_PROVIDER`, `NOTIFICATION_WHATSAPP_PROVIDER`, `NOTIFICATION_PUSH_PROVIDER`, `NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` |
 
@@ -178,6 +178,7 @@ STABILITY_DAYS_VERY_STABLE=7
 CONTINUOUS_WORKER_POLL_INTERVAL=1.0
 CONTINUOUS_WORKER_BATCH_SIZE=20
 CONTINUOUS_WORKER_IDLE_SLEEP=2.0
+CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS=900
 
 PRIORITY_QUEUE_KEY=market_alert:priority_queue
 PRIORITY_QUEUE_PROCESSING_KEY=market_alert:priority_queue:processing
@@ -193,7 +194,6 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
 ## Orquestração de coletas e rechecagens
 - **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result` com métrica de `lock_skipped` incrementada.
 - **Fila contínua:** `market_alert.tasks.continuous_collector_task.run_continuous_collector` consome o Redis Sorted Set em loop, coleta monitorado + concorrentes em sequência e recalcula `next_check_at` com base na estabilidade de preço do grupo.
-- **Fallback de rechecagem:** em caso de indisponibilidade do Redis, o worker contínuo pode acionar a função `market_alert.tasks.recheck_scheduler_task.schedule_rechecks` para manter o fluxo anterior de enfileiramento.
 - **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
 
 ## Segurança e Observabilidade
