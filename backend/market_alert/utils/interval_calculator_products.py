@@ -53,11 +53,11 @@ def calculate_stability_score(
         return STABILITY_STABLE
     return STABILITY_UNSTABLE
 
-def _random_interval(min_seconds: int, max_seconds: int) -> timedelta:
-    """ Sorteia um intervalo entre limites para diluir chamadas simultâneas """
+def _random_interval(min_seconds: int, max_seconds: int) -> int:
+    """ Sorteia um intervalo entre limites """
     if min_seconds >= max_seconds:
-        return int(min_seconds)
-    return int(random.randint(min_seconds, max_seconds))
+        return min_seconds
+    return random.randint(min_seconds, max_seconds)
 
 def calculate_next_interval(
     product: MonitoredProduct,

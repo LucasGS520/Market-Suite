@@ -83,7 +83,7 @@ def enqueue_monitored_at(
     )
     return True
 
-def remove_monitored_from_priority_queue(
+def remove_from_priority_queue(
     product_id: UUID,
     *,
     source: str,
