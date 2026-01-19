@@ -17,7 +17,6 @@ from shared.utils.url_validation import normalize_product_url
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import (
     create_or_update_monitored_product_scraped,
-    _compute_next_check_at,
     get_monitored_product_by_user_and_url,
 )
 from market_alert.enums.enums_products import MonitoredStatus
@@ -29,6 +28,7 @@ from market_alert.services._scraper_common import (
     normalize_currency_code,
     resolve_conditional_headers,
 )
+from market_alert.utils.interval_calculator_products import calculate_next_check_at
 
 
 #Logger específico para o fluxo de monitorados
@@ -71,7 +71,7 @@ def _handle_response(
                 product.last_scraped_at = last_checked
                 product.collected_at = collected_at
                 product.status = MonitoredStatus.active
-                product.next_check_at = _compute_next_check_at(product, reference=last_checked)
+                product.next_check_at = calculate_next_check_at(product, collected_at=last_checked)
                 db.commit()
                 persisted_at = datetime.now(timezone.utc)
                 try:

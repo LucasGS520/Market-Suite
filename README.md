@@ -55,7 +55,7 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 
 ### Tarefas Celery do `market_alert`
 - **Collector (`tasks.collector_product_task.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir.
-- **Agendador de rechecagem (`tasks.recheck_scheduler_task.schedule_rechecks`)**: Beat que varre monitorados com `next_check_at` vencido, recalcula o próximo horário com base em `check_interval` (ou `RECHECK_INTERVAL_DEFAULT`) e enfileira diretamente a `collect_product_task` com jitter controlado.
+- **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`)**: worker dedicado que consome a fila de prioridade Redis, recalcula `next_check_at` conforme estabilidade e enfileira as coletas sem depender de Beat.
 - **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: permanece idempotente e leve, usada pelo collector e acionamentos manuais para recalcular históricos e campos derivados.
 - **Notificações (`fila notifications`)**: entrega alertas enfileirados com retry e backoff, registrando histórico em `notification_attempt` e marcando DLQ quando necessário.
 

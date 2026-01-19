@@ -85,22 +85,7 @@ class Settings(ConfigBase):
         else "none"
     ) #Política SameSite do cookie de refresh
 
-    #Controles operacionais de rechecagem
-    RECHECK_INTERVAL_DEFAULT: int = int(
-        os.getenv("RECHECK_INTERVAL_DEFAULT", str(5 * 60))
-    ) #Intervalo padrão entre rechecagens em segundos
-    RECHECK_ENQUEUE_BATCH_SIZE: int = int(
-        os.getenv("RECHECK_ENQUEUE_BATCH_SIZE", "50")
-    ) #Quantidade máxima de itens enfileirados por ciclo de rechecagem
-    RECHECK_ENQUEUE_STAGGER_SECONDS: float = float(
-        os.getenv(
-            "RECHECK_ENQUEUE_STAGGER_SECONDS",
-            os.getenv("ONBOARDING_ENQUEUE_STAGGER_SECONDS", "0.5"),
-        )
-    ) #Atraso base reutilizado para diluir enfileiramento de rechecagens
-    RECHECK_ENQUEUE_JITTER_SECONDS: int = int(
-        os.getenv("RECHECK_ENQUEUE_JITTER_SECONDS", "5")
-    ) #Jitter aleatório para dispersar rechecagens simultâneas
+    #Controles operacionais de coleta
     PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "60")) #TTL padrão para lock de produto
     PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS: int = int(
         os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "45")

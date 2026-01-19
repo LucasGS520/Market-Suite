@@ -126,8 +126,8 @@ def enqueue_competitors_for_monitored(
     """ Agenda coleta para concorrentes vinculados aplicando batching e jitter """
 
     try:
-        resolved_batch_size = batch_size or settings.RECHECK_ENQUEUE_BATCH_SIZE
-        resolved_base_delay = base_delay or settings.RECHECK_ENQUEUE_STAGGER_SECONDS
+        resolved_batch_size = batch_size or settings.CONTINUOUS_WORKER_BATCH_SIZE
+        resolved_base_delay = base_delay or settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS
 
         if resolved_batch_size <= 0:
             logger.warning(

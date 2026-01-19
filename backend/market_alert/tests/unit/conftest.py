@@ -95,13 +95,6 @@ def fake_redis_client(monkeypatch):
         scraper_tasks = None
     if scraper_tasks is not None:
         monkeypatch.setattr(scraper_tasks, "redis_client", fake_redis, raising=False)
-
-    try:
-        import backend.market_alert.tasks.recheck_scheduler_task as recheck_scheduler_task
-    except ImportError:
-        recheck_scheduler_task = None
-    if recheck_scheduler_task is not None:
-        monkeypatch.setattr(recheck_scheduler_task, "redis_client", fake_redis, raising=False)
     return fake_redis
 
 @pytest.fixture(autouse=True)

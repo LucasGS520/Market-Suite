@@ -34,6 +34,7 @@ from market_alert.crud import crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.services.services_priority_queue import PriorityQueueService
+from market_alert.utils.interval_calculator_products import calculate_next_check_at, calculate_next_interval
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
@@ -86,31 +87,13 @@ def _different_price(previous_price: Decimal | float | int | str | None, current
     current = _to_decimal(current_price)
     return previous != current
 
-def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
-    """ Calcula o próximo agendamento respeitando configuração dinâmica do item.
-
-    A função usa o atributo opcional ``check_interval`` quando presente e,
-    caso o valor seja inválido ou ausente, aplica ``RECHECK_INTERVAL_DEFAULT``
-    como fallback. O cálculo sempre considera timezone UTC para garantir
-    previsibilidade entre workers e Beat.
-    """
-    base_time = reference or datetime.now(timezone.utc)
-    if base_time.tzinfo is None:
-        base_time = base_time.replace(tzinfo=timezone.utc)
-    interval_seconds = getattr(monitored, "check_interval", None)
-    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
-        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
-    return base_time + timedelta(seconds=interval_seconds)
-
 def _compute_resume_window(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
     """ Calcula janela curta para retomada aplicando jitter controlado """
     base_time = reference or datetime.now(timezone.utc)
     if base_time.tzinfo is None:
         base_time = base_time.replace(tzinfo=timezone.utc)
-    interval_seconds = getattr(monitored, "check_interval", None)
-    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
-        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
-
+    
+    interval_seconds = calculate_next_interval(monitored, reference_time=base_time)
     delay_seconds = min(interval_seconds, 5)
     jitter_seconds = random.uniform(0, 5)
     return base_time + timedelta(seconds=delay_seconds + jitter_seconds)
@@ -254,7 +237,7 @@ def create_pending_monitored_product(
     )
 
     #Calcula o próximo agendamento após istanciar o objeto para reutilizar referências e evitar uso de variáveis inexistentes
-    pending.next_check_at = _compute_next_check_at(pending, reference=reference_time)
+    pending.next_check_at = calculate_next_check_at(pending, collected_at=reference_time)
     db.add(pending)
 
     try:
@@ -342,7 +325,7 @@ def create_or_update_monitored_product_scraped(
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
             existing.collected_at = collected_reference
-            existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
+            existing.next_check_at = calculate_next_check_at(existing, collected_at=last_checked)
             existing.status = MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active
             existing.availability = availability
             existing.last_status = last_status
@@ -429,7 +412,7 @@ def create_or_update_monitored_product_scraped(
         availability=availability,
         last_status=last_status,
     )
-    new.next_check_at = _compute_next_check_at(new, reference=last_checked)
+    new.next_check_at = calculate_next_check_at(new, collected_at=last_checked)
     
     try:
         db.add(new)
