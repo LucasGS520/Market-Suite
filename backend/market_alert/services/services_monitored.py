@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 import structlog
@@ -15,6 +17,7 @@ from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.metrics.metrics_products import MONITORED_LISTED_WITHOUT_PRICE_TOTAL
 
 from market_alert.core.config_alert import settings
+from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.crud.crud_monitored import (
     create_pending_monitored_product,
     get_monitored_product_by_user_and_url,
@@ -34,6 +37,7 @@ from market_alert.crud.crud_comparison import (
     get_latest_summary,
 )
 from market_alert.models import User
+from market_alert.models.models_products import MonitoredProduct
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
     MonitoredProductResponse,
@@ -45,9 +49,63 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_competitors import create_competitor_scrape_request
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
+from market_alert.utils.interval_calculator_products import calculate_next_check_at
 
 
 logger = structlog.get_logger("monitored_service")
+
+def _remove_monitored_from_priority_queue(monitored_id: UUID, *, reason: str) -> None:
+    """ Remove monitorado da fila de prioridade sem bloquear a requisição """
+    queue_service = PriorityQueueService()
+    removed = queue_service.remove(str(monitored_id))
+
+    if removed:
+        logger.info(
+            "monitored_removed_from_priority_queue",
+            monitored_id=str(monitored_id),
+            reason=reason,
+        )
+        return
+    
+    #Mantém execução da rotina mesmo quando Redis estiver indisponível
+    logger.warning(
+        "monitored_priority_queue_remove_failed",
+        monitored_id=str(monitored_id),
+        reason=reason,
+    )
+
+def _enqueue_monitored_to_priority_queue(monitored_id: UUID, scheduled_at: datetime) -> None:
+    """ Enfileira monitorado na fila de prioridade e registra metadata """
+    queue_service = PriorityQueueService()
+    enqueued_at = datetime.now(timezone.utc)
+    enqueued = queue_service.enqueue(str(monitored_id), scheduled_at)
+
+    if not enqueued:
+        #Não bloqueia a operação principal quando Redis não responde
+        logger.warning(
+            "monitored_priority_queue_enqueue_failed",
+            monitored_id=str(monitored_id),
+        )
+        return
+    
+    queue_service.set_enqueued_at(str(monitored_id), enqueued_at)
+    logger.info(
+        "monitored_enqueued_to_priority_queue",
+        monitored_id=str(monitored_id),
+    )
+
+def _recalculate_and_enqueue_monitored(
+    *,
+    db: Session,
+    monitored: MonitoredProduct,
+) -> None:
+    """ Recalcula o próximo agendamento e reinsere o monitorado na fila """
+    reference_time = datetime.now(timezone.utc)
+    monitored.next_check_at = calculate_next_check_at(monitored, collected_at=reference_time)
+    db.commit()
+    db.refresh(monitored)
+
+    _enqueue_monitored_to_priority_queue(monitored.id, monitored.next_check_at)
 
 def _raise_from_monitored_error(exc: Exception) -> None:
     """ Converte exceções de domínio em respostas HTTP coerentes """
@@ -185,7 +243,7 @@ def get_monitored_product(
 def pause_monitored_product_entry(
     *, db: Session, product_id: UUID, user: User
 ) -> MonitoredProductResponse:
-    """ Pausa monitorado e devolve estado atualizado """
+    """ Pausa monitorado, remove da fila e devolve estado atualizado """
     try:
         monitored = pause_monitored(db, product_id, user)
     except Exception as exc:
@@ -195,6 +253,7 @@ def pause_monitored_product_entry(
     if refreshed is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado")
 
+    _remove_monitored_from_priority_queue(refreshed.id, reason="pause")
     logger.info("monitored_paused", product_id=str(product_id), user_id=str(user.id))
     summary = get_latest_summary(db, product_id)
     return build_monitored_response(
@@ -206,7 +265,7 @@ def pause_monitored_product_entry(
 def resume_monitored_product_entry(
     *, db: Session, product_id: UUID, user: User
 ) -> MonitoredProductResponse:
-    """ Retoma monitorado atualizando janela de rechecagem otimista """
+    """ Retoma monitorado, recalcula janela e reinsere na fila """
     try:
         monitored = resume_monitored(db, product_id, user)
     except Exception as exc:  # noqa: BLE001 - conversão controlada para HTTP
@@ -216,6 +275,7 @@ def resume_monitored_product_entry(
     if refreshed is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado")
 
+    _recalculate_and_enqueue_monitored(db=db, monitored=refreshed)
     logger.info("monitored_resumed", product_id=str(product_id), user_id=str(user.id))
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
@@ -230,7 +290,7 @@ def resume_monitored_product_entry(
 def update_monitored_pause_state(
     *, db: Session, product_id: UUID, user: User, payload: MonitoredPausedUpdateRequest
 ) -> MonitoredProductResponse:
-    """ Ajusta a pausa de forma idempotente e devolve o estado consolidado """
+    """ Ajusta a pausa, sincroniza fila de prioridade e devolve o estado consolidado """
     try:
         monitored = (
             pause_monitored(db, product_id, user)
@@ -246,6 +306,11 @@ def update_monitored_pause_state(
 
     action = "paused" if payload.paused else "resumed"
     logger.info(f"monitored_{action}", product_id=str(product_id), user_id=str(user.id))
+
+    if payload.paused:
+        _remove_monitored_from_priority_queue(refreshed.id, reason="pause_state_update")
+    else:
+        _recalculate_and_enqueue_monitored(db=db, monitored=refreshed)
 
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
@@ -273,7 +338,7 @@ def schedule_monitored_scrape(
     product_data: MonitoredProductCreateScraping,
     request: Request | None = None,
 ) -> MonitoredScrapeCreationResponse:
-    """ Valida e agenda scraping de produto monitorado e concorrente inicial
+    """ Valida, cria monitorado e enfileira coleta com concorrente inicial
     
     O serviço centraliza logs e validações para reduzir duplicação entre rotas,
     garantindo verificação de URL, duplicidade e rate-limit antes de agendar a
@@ -354,6 +419,8 @@ def schedule_monitored_scrape(
         name_identification=product_data.name_identification,
         product_url=normalized_url,
     )
+
+    _enqueue_monitored_to_priority_queue(pending.id, pending.next_check_at)
 
     if product_data.initial_competitor:
         competitor_payload = CompetitorProductCreateScraping(

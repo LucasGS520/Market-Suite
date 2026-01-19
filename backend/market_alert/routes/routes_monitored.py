@@ -44,7 +44,7 @@ def create_scrape_product(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ Delegação enxuta paara agendar scraping de monitorado """
+    """ Delegação enxuta para criar monitorado e enfileirar na fila de prioridade """
     return schedule_monitored_scrape(
         db=db,
         user=user,

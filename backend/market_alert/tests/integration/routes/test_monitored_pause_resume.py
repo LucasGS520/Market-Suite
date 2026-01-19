@@ -16,7 +16,20 @@ def _stub_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
     """Evita enfileiramento real de scraping durante os testes."""
 
     monkeypatch.setattr(
-        "market_alert.services.services_monitored.enqueue_monitored_collection", lambda *_, **__: None
+        "market_alert.services.services_priority_queue.PriorityQueueService.enqueue",
+        lambda *_, **__: True,
+    )
+    monkeypatch.setattr(
+        "market_alert.services.services_priority_queue.PriorityQueueService.set_enqueued_at",
+        lambda *_, **__: True,
+    )
+    monkeypatch.setattr(
+        "market_alert.services.services_priority_queue.PriorityQueueService.remove",
+        lambda *_, **__: True,
+    )
+    monkeypatch.setattr(
+        "market_alert.services.services_priority_queue.PriorityQueueService.get_score",
+        lambda *_, **__: None,
     )
     monkeypatch.setattr(
         "market_alert.orchestrator.collector_service_orchestrator.enqueue_collect", lambda *_, **__: None

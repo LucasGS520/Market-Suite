@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 from types import SimpleNamespace
 from typing import Callable
@@ -26,9 +27,9 @@ from market_alert.schemas.schemas_products import CompetitorScrapeCreationRespon
 from market_alert.schemas.schemas_products import CompetitorsListResponse
 from market_alert.services.services_products import build_competitor_response
 from market_alert.services.services_access import ensure_user_can_access_monitored
-from market_alert.orchestrator.collector_service_orchestrator import enqueue_monitored_collection
-from market_alert.services.services_priority_queue_manager import enqueue_monitored_now
+from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
+from market_alert.utils.interval_calculator_products import calculate_next_check_at
 from market_alert.core.config_alert import settings
 
 from shared.utils.url_validation import normalize_and_validate_product_url
@@ -133,7 +134,7 @@ def create_competitor_scrape_request(
     product_data: CompetitorProductCreateScraping,
     request_context: dict[str, str] | None = None,
 ) -> CompetitorScrapeCreationResponse:
-    """Orquestra validações e agendamento de scraping de concorrente."""
+    """Orquestra validações, criação e enfileiramento do monitorado """
 
     context = request_context or {}
     log_context = {
@@ -214,10 +215,36 @@ def create_competitor_scrape_request(
         **context,
     )
 
-    enqueued = enqueue_monitored_now(monitored_product.id, source="competitor_create")
-    if not enqueued:
-        #Fallback para garantir coleta do grupo caso o Redis esteja indisponível
-        enqueue_monitored_collection(monitored_product, user_id=user.id)
+    queue_service = PriorityQueueService()
+    score = queue_service.get_score(str(monitored_product.id))
+    if score is None:
+        #Recalcula janela para garantir entrada do monitorado em fila única
+        reference_time = datetime.now(timezone.utc)
+        monitored_product.next_check_at = calculate_next_check_at(
+            monitored_product,
+            collected_at=reference_time,
+        )
+        db.commit()
+        db.refresh(monitored_product)
+
+        enqueued = queue_service.enqueue(
+            str(monitored_product.id),
+            monitored_product.next_check_at,
+        )
+        if enqueued:
+            queue_service.set_enqueued_at(str(monitored_product.id), reference_time)
+            logger.info(
+                "monitored_enqueued_to_priority_queue",
+                monitored_id=str(monitored_product.id),
+                source="competitor_create",
+            )
+        else:
+            #Não bloqueia criação quando Redis estiver indisponível
+            logger.warning(
+                "monitored_priority_queue_enqueue_failed",
+                monitored_id=str(monitored_product.id),
+                source="competitor_create",
+            )
 
     logger.info(
         "competitor_scrape_scheduled",

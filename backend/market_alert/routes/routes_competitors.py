@@ -41,7 +41,7 @@ def create_competitor_scrape(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ Cria concorrente pendente e agenda scraping para completar informações """
+    """ Cria concorrente pendente e garante monitorado na fila de prioridade """
     return create_competitor_scrape_request(
         db=db,
         user=user,

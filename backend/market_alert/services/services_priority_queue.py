@@ -158,6 +158,23 @@ class PriorityQueueService:
             logger.warning("priority_queue_list_error", extra={"error": str(exc)})
             return []
         
+    def get_score(self, product_id: str) -> float | None:
+        """ Recupera o score atual de um item na fila principal """
+        client = self._client()
+        if client is None:
+            return None
+        
+        try:
+            score = client.zscore(self._queue_key, product_id)
+        except Exception as exc:
+            logger.warning("priority_queue_score_error", extra={"error": str(exc)})
+            return None
+        
+        if score is None:
+            return None
+        
+        return float(score)
+        
     def remove(self, product_id: str) -> bool:
         """ Remove um produto da fila principal e da fila de processamento """
         client = self._client()

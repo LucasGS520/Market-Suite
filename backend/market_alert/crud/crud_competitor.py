@@ -21,12 +21,8 @@ from shared.metrics.metrics_products import PRICE_HISTORY_SKIPPED_UNAVAILABLE_TO
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
+from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
-from market_alert.services.services_priority_queue_manager import (
-    enqueue_monitored_now,
-    remove_from_priority_queue,
-)
-from market_alert.orchestrator.collector_service_orchestrator import enqueue_monitored_collection
 
 
 logger = structlog.get_logger("crud_competitor")
@@ -159,15 +155,6 @@ def create_pending_competitor_product(
         raise
 
     db.refresh(pending)
-
-    try:
-        enqueued = enqueue_monitored_now(monitored_product_id, source="competitor_create")
-        if not enqueued and monitored:
-            #Fallback para garantir coleta do grupo quando Redis estiver indisponível
-            enqueue_monitored_collection(monitored, user_id=monitored.user_id)
-    except Exception:
-        #Ignora falhas de enfileiramento para não quebrar a criação
-        pass
 
     return pending
 
@@ -419,15 +406,43 @@ def get_competitors_by_monitored_id(
 def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) -> List[CompetitorProduct]:
     """ Remove todos os produtos concorrentes vinculados a um produto monitorado """
     competitors = get_competitors_by_monitored_id(db, monitored_product_id, include_paused=True)
+    queue_service = PriorityQueueService()
     for item in competitors:
-        remove_from_priority_queue(item.id, source="competitor_delete")
+        removed = queue_service.remove(str(item.id))
+        if removed:
+            logger.info(
+                "competitor_removed_from_priority_queue",
+                competitor_id=str(item.id),
+                reason="competitor_delete",
+            )
+        else:
+            #Mantém remoção de concorrente mesmo sem Redis disponível
+            logger.warning(
+                "competitor_priority_queue_remove_failed",
+                competitor_id=str(item.id),
+                reason="competitor_delete",
+            )
         db.delete(item)
     db.commit()
     return competitors
 
 def delete_competitor(db: Session, competitor: CompetitorProduct) -> None:
     """ Remove concorrente específico garantindo flush para cascatas """
-    remove_from_priority_queue(competitor.id, source="competitor_delete")
+    queue_service = PriorityQueueService()
+    removed = queue_service.remove(str(competitor.id))
+    if removed:
+        logger.info(
+            "competitor_removed_from_priority_queue",
+            competitor_id=str(competitor.id),
+            reason="competitor_delete",
+        )
+    else:
+        #Evita falha de deleção quando Redis estiver indisponível
+        logger.warning(
+            "competitor_priority_queue_remove_failed",
+            competitor_id=str(competitor.id),
+            reason="competitor_delete",
+        )
     db.delete(competitor)
     db.flush()
 

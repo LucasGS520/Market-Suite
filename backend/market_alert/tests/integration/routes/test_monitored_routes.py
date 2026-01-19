@@ -19,8 +19,22 @@ from market_alert.orchestrator import collector_service_orchestrator
 @pytest.fixture(autouse=True)
 def stub_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
     """ Evita chamadas reais ao Celery durante os testes de integração """
-    monkeypatch.setattr("market_alert.services.services_monitored.enqueue_monitored_collection", lambda *_, **__: None)
-    monkeypatch.setattr("market_alert.orchestrator.collector_service_orchestrator.enqueue_collect", lambda *_, **__: None)
+    monkeypatch.setattr(
+        "market_alert.services.services_priority_queue.PriorityQueueService.enqueue",
+        lambda *_, **__: True,
+    )
+    monkeypatch.setattr(
+        "market_alert.services.services_priority_queue.PriorityQueueService.set_enqueued_at",
+        lambda *_, **__: True,
+    )
+    monkeypatch.setattr(
+        "market_alert.services.services_priority_queue.PriorityQueueService.get_score",
+        lambda *_, **__: None,
+    )
+    monkeypatch.setattr(
+        "market_alert.orchestrator.collector_service_orchestrator.enqueue_collect",
+        lambda *_, **__: None,
+    )
 
 def test_list_monitored_products_inclui_contagem_concorrentes(client, db_session, test_user, prepare_test_database):
     """ Garante que a rota retorne a quantidade de concorrentes por produto monitorado """
