@@ -15,12 +15,11 @@ from datetime import datetime, timezone
 import structlog
 from sqlalchemy.orm import Session
 
-from shared.infra.db import SessionLocal
+
 from shared.metrics.metrics_recheck import RECHECK_SCHEDULED_TOTAL
 from shared.metrics.metrics_scraper import MONITORED_SKIPPED_PAUSED_TOTAL, RECHECK_ENQUEUED_TOTAL
 from shared.utils.redis_client import is_scraping_suspended
 
-from market_alert.core.celery_app import celery_app
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import _compute_next_check_at
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
@@ -110,6 +109,9 @@ def schedule_rechecks(
     próximo agendamento com base em ``check_interval`` (ou fallback padrão) e
     enfileira a ``collect_product_task`` com jitter leve. Itens sem
     ``next_check_at`` são corrigidos automaticamente para impedir travamentos.
+
+    Esta função é usada como fallback pelo worker contínuo quando o Redis
+    fica indisponível, mantendo o fluxo anterior de enfileiramento.
     """
     bound_logger = logger_bound or logger
     reference = now or _now()
@@ -149,18 +151,4 @@ def schedule_rechecks(
         reference=reference.isoformat(),
     )
     return scheduled
-
-
-@celery_app.task(
-    bind=True,
-    max_retries=0,
-    name="market_alert.tasks.recheck_scheduler_task.schedule_rechecks",
-    queue="monitor",
-    acks_late=True,
-)
-def schedule_rechecks_task(self) -> int:
-    """ Task executada pelo Beat para agendar rechecagens vencidas """
-    bound_logger = logger.bind(task_id=getattr(self.request, "id", None))
-    with SessionLocal() as db:
-        return schedule_rechecks(db, logger_bound=bound_logger)
     

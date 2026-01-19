@@ -17,7 +17,6 @@ TASK_MODULES = [
     "market_alert.tasks.continuous_collector_task",
     "market_alert.tasks.metrics_tasks",
     "market_alert.tasks.compare_prices_task",
-    "market_alert.tasks.recheck_scheduler_task",
     "market_alert.tasks.notifications_enqueue_task",
     "market_alert.tasks.send_notification_task",
     "market_alert.tasks.verification_tasks",
@@ -42,10 +41,6 @@ TASK_ROUTES = {
         "routing_key": "scraping",
     },
     "market_alert.tasks.continuous_collector_task.run_continuous_collector": {
-        "queue": "monitor",
-        "routing_key": "monitor",
-    },
-    "market_alert.tasks.recheck_scheduler_task.schedule_rechecks": {
         "queue": "monitor",
         "routing_key": "monitor",
     },

@@ -193,7 +193,7 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
 ## Orquestração de coletas e rechecagens
 - **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result` com métrica de `lock_skipped` incrementada.
 - **Fila contínua:** `market_alert.tasks.continuous_collector_task.run_continuous_collector` consome o Redis Sorted Set em loop, coleta monitorado + concorrentes em sequência e recalcula `next_check_at` com base na estabilidade de preço do grupo.
-- **Fallback de rechecagem:** em caso de indisponibilidade do Redis, o worker contínuo pode acionar a task `market_alert.tasks.recheck_scheduler_task.schedule_rechecks` para manter o fluxo anterior de enfileiramento.
+- **Fallback de rechecagem:** em caso de indisponibilidade do Redis, o worker contínuo pode acionar a função `market_alert.tasks.recheck_scheduler_task.schedule_rechecks` para manter o fluxo anterior de enfileiramento.
 - **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
 
 ## Segurança e Observabilidade
