@@ -20,6 +20,7 @@ from shared.infra.db import SessionLocal
 from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_CONSUME_LATENCY_MS,
     PRIORITY_QUEUE_PROCESSED_TOTAL,
+    PRIORITY_QUEUE_READY_TOTAL,
     PRIORITY_QUEUE_SIZE,
     PRIORITY_QUEUE_STABILITY_TOTAL,
 )
@@ -84,6 +85,11 @@ def _record_enqueue_latency(enqueued_at: datetime | None, collected_at: datetime
         return
     latency_ms = max(int((collected_at - normalized).total_seconds() * 1000), 0)
     PRIORITY_QUEUE_CONSUME_LATENCY_MS.observe(latency_ms)
+
+def _update_queue_metrics(queue_service: PriorityQueueService) -> None:
+    """ Atualiza métricas básicas da fila de prioridade """
+    PRIORITY_QUEUE_SIZE.set(queue_service.size())
+    PRIORITY_QUEUE_READY_TOTAL.set(queue_service.ready_count())
 
 def _collect_group(
     *,
@@ -272,9 +278,9 @@ def run_continuous_collector(self) -> None:
             _drain_processing(queue_service, processed_ids)
             with SessionLocal() as db:
                 _update_stability_metrics(db)
-            PRIORITY_QUEUE_SIZE.set(queue_service.size())
+            _update_queue_metrics(queue_service)
             time.sleep(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
         else:
-            PRIORITY_QUEUE_SIZE.set(queue_service.size())
+            _update_queue_metrics(queue_service)
             time.sleep(settings.CONTINUOUS_WORKER_IDLE_SLEEP)
             

@@ -7,6 +7,11 @@ PRIORITY_QUEUE_SIZE = Gauge(
     "Quantidade atual de itens na fila de prioridade",
 )
 
+PRIORITY_QUEUE_READY_TOTAL = Gauge(
+    "priority_queue_ready_total",
+    "Quantidade de itens prontos para coleta na fila de prioridade",
+)
+
 PRIORITY_QUEUE_CONSUME_LATENCY_MS = Histogram(
     "priority_queue_consume_latency_ms",
     "Latência em milissegundos entre enfileiramento e consumo",
@@ -39,6 +44,7 @@ PRIORITY_QUEUE_PROCESSED_TOTAL = Counter(
 
 __all__ = [
     "PRIORITY_QUEUE_SIZE",
+    "PRIORITY_QUEUE_READY_TOTAL",
     "PRIORITY_QUEUE_CONSUME_LATENCY_MS",
     "PRIORITY_QUEUE_STABILITY_TOTAL",
     "PRIORITY_QUEUE_ENQUEUED_TOTAL",

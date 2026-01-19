@@ -106,7 +106,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 - **Destaques**: `/monitored/featured` devolve até 3 monitorados com `is_featured=true`, ordenados pelo critério definido em `routes_monitored`.
 
 **Semântica de timestamps de scraping**
-- **`last_checked`**: registra quando o sistema tentou/processou uma checagem do produto (qualquer tentativa, sucesso ou não). Usado pelo agendador e para decisões operacionais como `SCRAPER_FORCE_REFRESH_TTL_SECONDS`.
+- **`last_checked`**: registra quando o sistema tentou/processou uma checagem do produto (qualquer tentativa, sucesso ou não). Usado pelo worker contínuo e para decisões operacionais como `SCRAPER_FORCE_REFRESH_TTL_SECONDS`.
 - **`last_scraped_at`**: registra o momento em que dados novos/atualizados foram efetivamente obtidos do `market_scraper` (ou seja, quando um fetch retornou payload que representa conteúdo atualizado). Não deve ser atualizado em retornos `304 Not Modified`.
 - **`collected_at`**: marca o instante real em que a extração foi concluída para monitorado/concorrente, servindo de base para filas contínuas.
 - **`enqueued_at`**: horário em que o monitorado foi colocado na fila de prioridade, usado para latência de consumo (registrado via Redis e logs).
