@@ -1,5 +1,5 @@
 # Market Alert
-API FastAPI responsável por autenticação, gestão e monitoramento, além de comparação de preços. Opera com PostgreSQL, Redis, Celery (worker + beat) e integra o `market_scraper` para coleta de dados.
+API FastAPI responsável por autenticação, gestão e monitoramento, além de comparação de preços. Opera com PostgreSQL, Redis, Celery (workers dedicados) e integra o `market_scraper` para coleta de dados.
 
 ## Relações e Referências
 - Visão geral da suíte e topologia: [`../README.md`](../README.md)
@@ -72,7 +72,6 @@ market_alert/
   - `tasks.continuous_collector_task.run_continuous_collector`
   - `tasks.compare_prices_task.compare_prices_task`
   - `tasks.metrics_tasks.collect_celery_metrics`, `cleanup_cache`
-- **Beat com métricas:** `beat_with_metrics.py` executa agendamentos e expõe `/metrics` em porta dedicada (`8001`).
 
 ### Scraping e resiliência
 - **Cliente síncrono:** `scraper/scraper_client.py` usa `httpx.Client` de vida curta e fluxo linear. Evite helpers assíncronos ou `asyncio.run` dentro das tasks para impedir erros de loop fechado.
@@ -118,7 +117,7 @@ Observação: a implementação foi ajustada para que respostas `304 Not Modifie
 ## Principais Componentes do Serviço
 - `main.py` – instancia a aplicação FastAPI, middlewares, limiter e rotas.
 - `core/config_alert.py` – carrega variáveis de ambiente e aplica defaults.
-- `core/celery_app.py` – configura worker, beat e registradores de métricas.
+- `core/celery_app.py` – configura workers e registradores de métricas.
 - `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
 - `services/comparison_service.py` – orquestra cálculos de comparação.
 - `tasks/continuous_collector_task.py` – worker contínuo que consome a fila de prioridade e recalcula `next_check_at` por estabilidade.
@@ -211,14 +210,14 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
 - **Observabilidade:**
   - Métricas expostas em `/metrics`
   - Logs estruturados via `structlog`
-     - Métricas Celery disponíveis em `beat_with_metrics.py` na porta configurada, incluindo contadores de scraping e latência (`market_alert_monitoring_tasks_total`, `market_alert_scrape_latency_seconds`).
+     - Métricas Celery disponíveis nos workers configurados, incluindo contadores de scraping e latência (`market_alert_monitoring_tasks_total`, `market_alert_scrape_latency_seconds`).
 
 ## Execução Local
 - **Docker Compose** (recomendado):
   ```bash
   docker compose up -d db redis redis-init
   docker compose up -d migrations
-  docker compose up -d api celery-worker celery_beat
+  docker compose up -d api celery-worker celery-worker-monitor celery-worker-notifications
   ```
 
 - **Sem Docker:**
@@ -226,8 +225,9 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
   2. Configure `.env.common` e `.env.market_alert` com valores locais.
   3. Execute migrações: `alembic upgrade head`.
   4. Inicie API: `uvicorn market_alert.main:app --reload --port 8000`.
-  5. Suba worker Celery: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q celery,scraping,monitor,notifications`.
-  6. Inicie o beat com métricas: `python market_alert/beat_with_metrics.py`.
+  5. Suba worker Celery principal: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q celery,scraping`.
+  6. Suba worker do coletor contínuo: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q monitor`.
+  7. Suba worker de notificações: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q notifications`.
 
 ## Testes
 ```bash
@@ -240,6 +240,6 @@ As suítes cobrem rotas, tasks e integrações simuladas com o scraper; utilize 
 - **Fila Celery acumulada:** confira o estado do Redis e monitore `CELERY_TASKS_TOTAL` por fila; ajuste `concurrency` do worker conforme necessário.
 - **Rate limit excedido:** erros 429 indicam configuração do `Limiter`; ajuste limites ou whitelists em `main.py`.
 - **Problemas de banco:** monitore `DB_POOL_SIZE`, `DB_POOL_CHECKOUTS` (expostos em `/metrics`) e revise parâmetros de pool no `.env`.
-- **Métricas ausentes**: confirme porta exposta pelo `beat_with_metrics.py` e se o processo está ativo.
+- **Métricas ausentes**: confirme porta exposta pelos workers e se os processos estão ativos.
 
 Atualize este documento sempre que rotas, tasks, filas ou dependências forem alteradas.

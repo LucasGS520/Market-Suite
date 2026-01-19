@@ -129,39 +129,7 @@ services:
       - monitoring-net
 
 
-  #Agendador de tarefas do Celery
-  celery_beat:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-    env_file:
-      - ./backend/market_alert/.env.market_alert
-    environment:
-      - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/
-    command:
-      - python
-      - "beat_with_metrics.py"
-    ports:
-      - "8001:8001"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro   
-    networks:
-      - monitoring-net
-
-
-  #Worker do Celery para tarefas assíncronas
+  #Worker do Celery para tarefas assíncronas gerais (scraping e comparações)
   celery-worker:
     build:
       context: ./backend/market_alert
@@ -180,7 +148,7 @@ services:
       - "--pool=prefork"
       - "--concurrency=4"
       - "-Q"
-      - "celery,scraping,monitor"
+      - "celery,scraping"
     user: 
       "1000:1000"
     ports:
@@ -198,6 +166,47 @@ services:
       - ./backend/shared/infra:/market_alert/infra
       - ./backend/shared:/market_alert/shared:ro
       - ./backend:/backend:ro   
+    networks:
+      - monitoring-net
+
+
+  #Worker do Celery dedicado ao coletor contínuo (fila monitor)
+  celery-worker-monitor:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
+    command:
+      - celery
+      - "-A"
+      - "market_alert.core.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=2"
+      - "-Q"
+      - "monitor"
+    user:
+      "1000:1000"
+    ports:
+      - "8004:8002"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro
     networks:
       - monitoring-net
 
