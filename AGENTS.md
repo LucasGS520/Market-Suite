@@ -37,7 +37,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`)**: worker dedicado que consome a fila de prioridade Redis e recalcula `next_check_at` após cada coleta, mantendo a frequência adaptativa baseada em estabilidade.
 - **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: idempotente e leve; usada pelo collector em cenários assíncronos e em acionamentos manuais para recalcular histórico/comparativos.
 - **Notificações (`tasks.notifications_enqueue_task.enqueue_notifications_task`)**: normaliza notificações pendentes, calcula backoff exponencial e mantém consistência de retries antes de novos disparos.
-- **Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando flags em banco e mantendo TTL automático como único mecanismo de exclusão mútua.
+- **Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando flags em banco e mantendo TTL automático como único mecanismo de exclusão mútua. Exceção: operações administrativas no `crud_monitored` podem usar um lock curto para garantir consistência em ações críticas do monitorado.
 - **Pausa de monitoramento**: monitorados com `paused=true` devem ser ignorados por agendador e collector, incrementando `monitored_skipped_paused` e mantendo histórico íntegro até retomada explícita.
 - **Contratos de desfecho**: quando o lock não é adquirido o collector retorna `no_result` (mantendo métrica de lock skipped) para preservar o contrato enxuto; rechecagens sem mudança (`not_modified`) não geram novo `PriceHistory` e já atualizam `next_check_at`.
 

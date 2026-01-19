@@ -1,7 +1,9 @@
-""" Utilitários para calcular estabilidade e intervalos de coleta 
+""" Utilitários para calcular estabilidade e intervalos de coleta.
 
 O cálculo considera o histórico de mudanças de preço e o tempo desde a última
 alteração relevante, permitindo ajustar dinamicamente a frequência de coleta.
+Este módulo é a única fonte de verdade para o cálculo de estabilidade e 
+intervalos, evitando duplicação de lógica em outras partes do sistema.
 """
 
 from __future__ import annotations
