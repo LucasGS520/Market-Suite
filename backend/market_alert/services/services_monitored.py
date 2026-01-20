@@ -48,6 +48,7 @@ from market_alert.schemas.schemas_products import (
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_competitors import create_competitor_scrape_request
+from market_alert.orchestrator import collector_service_orchestrator
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import calculate_next_check_at
 
@@ -338,11 +339,13 @@ def schedule_monitored_scrape(
     product_data: MonitoredProductCreateScraping,
     request: Request | None = None,
 ) -> MonitoredScrapeCreationResponse:
-    """ Valida, cria monitorado e enfileira coleta com concorrente inicial
+    """ Valida, cria monitorado e enfileira coleta imediata e continua.
     
     O serviço centraliza logs e validações para reduzir duplicação entre rotas,
     garantindo verificação de URL, duplicidade e rate-limit antes de agendar a
-    coleta assíncrona do monitorado e, quando enviado, do concorrente inicial.
+    coleta assíncrona imediata do monitorado, mantendo o registro na fila de
+    prioridade para rechecagens contínuas. Quando enviado, também cria o
+    concorrente inicial.
     """
     log_context: dict[str, str | None] = {
         "user_id": str(user.id),
@@ -420,7 +423,16 @@ def schedule_monitored_scrape(
         product_url=normalized_url,
     )
 
-    _enqueue_monitored_to_priority_queue(pending.id, pending.next_check_at)
+    #Enfileira a coleta imediata para acelerar a primeira resposta do monitorado
+    collector_service_orchestrator.enqueue_monitored_collection(
+        pending,
+        user_id=user.id
+    )
+    #Mantém o monitorado na fila contínua para rechecagens futuras
+    _enqueue_monitored_to_priority_queue(
+        pending.id,
+        pending.next_check_at
+    )
 
     if product_data.initial_competitor:
         competitor_payload = CompetitorProductCreateScraping(

@@ -28,6 +28,7 @@ from market_alert.schemas.schemas_products import CompetitorsListResponse
 from market_alert.services.services_products import build_competitor_response
 from market_alert.services.services_access import ensure_user_can_access_monitored
 from market_alert.services.services_priority_queue import PriorityQueueService
+from market_alert.orchestrator import collector_service_orchestrator
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import calculate_next_check_at
 from market_alert.core.config_alert import settings
@@ -100,8 +101,7 @@ def validate_competitor_limit(
         )
     
 def enforce_competitor_scrape_rate_limit(user_id: UUID) -> None:
-    """Garante que requisições de scraping respeitam limites configurados por usuário."""
-
+    """ Garante que requisições de scraping respeitam limites configurados por usuário."""
     parsed_limit = parse_rate_limit_config(settings.COMPETITOR_RATE_LIMIT)
     if not parsed_limit:
         return
@@ -134,8 +134,7 @@ def create_competitor_scrape_request(
     product_data: CompetitorProductCreateScraping,
     request_context: dict[str, str] | None = None,
 ) -> CompetitorScrapeCreationResponse:
-    """Orquestra validações, criação e enfileiramento do monitorado """
-
+    """ Orquestra validações, criação e enfileiramento imediato/contínuo do concorrente """
     context = request_context or {}
     log_context = {
         "user_id": str(user.id),
@@ -204,6 +203,12 @@ def create_competitor_scrape_request(
         monitored_product_id=monitored_product.id,
         product_url=normalized_url,
         display_name=product_data.name,
+    )
+
+    #Enfileira coleta imediata para o concorrente recém-criado
+    collector_service_orchestrator.enqueue_competitor_collection(
+        pending,
+        user_id=user.id,
     )
 
     metrics.PENDING_COMPETITOR_CREATED_TOTAL.inc()

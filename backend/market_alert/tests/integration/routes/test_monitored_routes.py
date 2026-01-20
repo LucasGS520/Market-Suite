@@ -9,7 +9,6 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.models.models_price_history import PriceHistory
-from market_alert.tasks import scraper_tasks
 from shared.utils.url_validation import normalize_product_url_for_storage
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from market_alert.crud import crud_monitored
@@ -245,10 +244,16 @@ def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_se
 
     captured = {}
 
-    def fake_delay(**kwargs):
-        captured.update(kwargs)
+    def fake_enqueue(monitored, *, user_id):
+        captured["monitored_id"] = str(monitored.id)
+        captured["user_id"] = str(user_id)
+        captured["name_identification"] = monitored.name_identification
 
-    monkeypatch.setattr(scraper_tasks.collect_product_task, "delay", fake_delay)
+    monkeypatch.setattr(
+        collector_service_orchestrator,
+        "enqueue_monitored_collection",
+        fake_enqueue,
+    )
 
     response = client.post(
         "/monitored/scrape",
@@ -278,22 +283,40 @@ def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_se
     assert payload["url"] == created.normalized_url
     assert datetime.fromisoformat(payload["created_at"]) == created.created_at
     assert captured["monitored_id"] == str(created.id)
+    assert captured["user_id"] == str(test_user.id)
     assert captured["name_identification"] == "Console PS5"
 
 def test_create_scrape_product_com_concorrente_inicial(monkeypatch, client, db_session, test_user, prepare_test_database):
-    """Garante que o concorrente inicial é criado e enfileirado após o monitorado"""
+    """Garante que o concorrente inicial é criado e os enfileiramentos ocorrem """
 
     captured: list[tuple[str, dict]] = []
     user_id = test_user.id
 
-    def fake_monitored_delay(**kwargs):
-        captured.append(("monitored", kwargs))
+    def fake_enqueue(monitored, *, user_id):
+        captured.append(("monitored", {"id": str(monitored.id), "user_id": str(user_id)}))
 
-    def fake_competitor_delay(**kwargs):
-        captured.append(("competitor", kwargs))
+    def fake_competitor_enqueue(competitor, *, user_id, countdown=None):
+        captured.append(
+            (
+                "competitor",
+                {
+                    "id": str(competitor.id),
+                    "monitored_id": str(competitor.monitored_product_id),
+                    "user_id": str(user_id),
+                },
+            )
+        )
 
-    monkeypatch.setattr(scraper_tasks.collect_product_task, "delay", fake_monitored_delay)
-    monkeypatch.setattr(scraper_tasks.collect_competitor_task, "delay", fake_competitor_delay)
+    monkeypatch.setattr(
+        collector_service_orchestrator,
+        "enqueue_monitored_collection",
+        fake_enqueue,
+    )
+    monkeypatch.setattr(
+        collector_service_orchestrator,
+        "enqueue_competitor_collection",
+        fake_competitor_enqueue,
+    )
 
     response = client.post(
         "/monitored/scrape",
@@ -327,18 +350,25 @@ def test_create_scrape_product_com_concorrente_inicial(monkeypatch, client, db_s
     assert competitor.name_competitor == "Loja Beta"
     assert competitor.product_url == "https://loja.com/oferta-ps5"
     assert captured[0][0] == "monitored"
+    assert captured[0][1]["id"] == str(monitored.id)
     assert captured[1][0] == "competitor"
-    assert captured[1][1]["monitored_product_id"] == str(monitored.id)
+    assert captured[1][1]["id"] == str(competitor.id)
+    assert captured[1][1]["monitored_id"] == str(monitored.id)
 
 def test_create_scrape_product_sem_nome_aplica_fallback(monkeypatch, client, db_session, test_user, prepare_test_database):
     """Confere que o cadastro aceita nome ausente e gera fallback legível"""
 
     captured = {}
 
-    def fake_delay(**kwargs):
-        captured.update(kwargs)
+    def fake_enqueue(monitored, *, user_id):
+        captured["name_identification"] = monitored.name_identification
+        captured["user_id"] = str(user_id)
 
-    monkeypatch.setattr(scraper_tasks.collect_product_task, "delay", fake_delay)
+    monkeypatch.setattr(
+        collector_service_orchestrator,
+        "enqueue_monitored_collection",
+        fake_enqueue,
+    )
 
     response = client.post(
         "/monitored/scrape",
@@ -361,6 +391,7 @@ def test_create_scrape_product_sem_nome_aplica_fallback(monkeypatch, client, db_
 
     assert created.name_identification == "MLB 9999 produto incrivel 123"
     assert captured["name_identification"] == "MLB 9999 produto incrivel 123"
+    assert captured["user_id"] == str(test_user.id)
 
 def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_session, test_user, prepare_test_database):
     """Confere que duplicidade devolve mensagem informativa e reusa registro"""
@@ -381,10 +412,14 @@ def test_create_scrape_product_detecta_duplicidade(monkeypatch, client, db_sessi
 
     captured = {}
 
-    def fake_delay(**kwargs):
-        captured.update(kwargs)
+    def fake_enqueue(monitored, *, user_id):
+        captured["monitored_id"] = str(monitored.id)
 
-    monkeypatch.setattr(scraper_tasks.collect_product_task, "delay", fake_delay)
+    monkeypatch.setattr(
+        collector_service_orchestrator,
+        "enqueue_monitored_collection",
+        fake_enqueue,
+    )
 
     response = client.post(
         "/monitored/scrape",

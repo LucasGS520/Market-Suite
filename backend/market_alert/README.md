@@ -42,12 +42,12 @@ market_alert/
 | `GET` | `/monitored` | Lista monitorados usando envelope `{ items, meta }` com filtros `page`, `per_page`, `query` e `status`. O parâmetro `per_page` é opcional e, quando omitido, retorna todos os itens dentro do limite defensivo aplicado pela API.  |
 | `GET` | `/monitored/{id}` | Retorna detalhes do monitorado com `owner_id`, `thumbnail`, `current_price` (`Decimal` serializado) e datas derivadas (`created_at`, `last_price_change_at`). |
 | `GET` | `/monitored/featured` | Retorna até 3 monitorados em destaque respeitando `is_featured` e ordenação configurada. |
-| `POST` | `/monitored/scrape` | Valida duplicidade por usuário + URL, cria recurso mínimo (`id`, `url`, `created_at`) e agenda coleta na fila `scraping`, aceitando `initial_competitor` para disparo imediato do concorrente. |
+| `POST` | `/monitored/scrape` | Valida duplicidade por usuário + URL, cria recurso mínimo (`id`, `url`, `created_at`), dispara coleta imediata na fila `scraping` e agenda o monitorado na fila contínua de prioridade para rechecagens. |
 | `POST` | `/monitored` | Cria produto monitorado associado ao usuário autenticado (fluxo alternativo ao scrape imediato). |
 | `GET` | `/comparisons/{monitored_id}` | Lista comparações paginadas (`items` + `meta`) para o monitorado informado. |
 | `GET` | `/comparisons/{monitored_id}/summary` | Consolida métricas de comparação; `Decimal` enviado como número apenas no resumo (encoder existente). |
 | `GET` | `/competitors` | Lista todos os concorrentes vinculados (incluindo pausados e indisponíveis por padrão), aceita `include_inactive`/`include_paused` e retorna contadores `competitors_total`, `competitors_with_price_count` e `excluded_due_to_inactive_count`. |
-| `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo e agenda coleta na fila `scraping`. |
+| `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo, dispara coleta imediata na fila `scraping` e garante o monitorado na fila contínua de prioridade para rechecagens. |
 | `GET` | `/notifications` | Lista histórico de notificações do usuário com paginação padrão. |
 | `GET` | `/notifications/preferences` | Retorna preferências de notificação do usuário. |
 | `POST` | `/notifications/preferences` | Cria ou atualiza preferência para canal e tipo de alerta. |
@@ -101,7 +101,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 ### Padrões de contratos
 - **Paginação**: todas as rotas de listagem utilizam envelope `{ items: [], meta: { total, page, per_page } }` com paginação base 1. Quando `per_page` não é enviado em `/monitored`, a API retorna todos os registros disponíveis preservando um teto de segurança.
 - **Campos monetários**: valores `Decimal` são serializados como string (`"1099.90"`) por padrão. O resumo de comparação mantém encoder que envia números (`1099.9`) e deve ser tratado pelo frontend.
-- **Criar via scraping**: endpoints `/monitored/scrape` e `/competitors/scrape` retornam 202 com representação mínima do recurso (`id`, `url`, `created_at`) e enfileiram coleta na fila `scraping`.
+- **Criar via scraping**: o endpoint `/monitored/scrape` retorna 202 com representação mínima do recurso (`id`, `url`, `created_at`), dispara coleta imediata na fila `scraping` e agenda o monitorado na fila contínua para rechecagens. O endpoint `/competitors/scrape` retorna 202 com o payload mínimo e enfileira coleta na fila `scraping`.
 - **Destaques**: `/monitored/featured` devolve até 3 monitorados com `is_featured=true`, ordenados pelo critério definido em `routes_monitored`.
 
 **Semântica de timestamps de scraping**
