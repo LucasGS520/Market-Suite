@@ -47,7 +47,7 @@ from market_alert.models.models_products import CompetitorProduct, MonitoredProd
 
 logger = structlog.get_logger("collector_product_task")
 
-def _validate_payload(payload: Mapping[str, str] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
+def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
     """ Valida campos mínimos, retornando tipo, IDs e URL.
 
     A validação impede que a tarefa tente acessar campos ausentes e garante
@@ -164,7 +164,7 @@ def _dispatch_comparison(
         )
 
 def collect_product(
-    payload: Mapping[str, str] | None,
+    payload: Mapping[str, str | None] | None,
     *,
     use_lock: bool = True,
     dispatch_comparison: bool = True,
@@ -344,7 +344,7 @@ def collect_product(
     soft_time_limit=90,
     time_limit=120,
 )
-def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
+def collect_product_task(self, payload: Mapping[str, str | None] | None = None) -> str:
     """Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
 
     A task valida o payload mínimo, aplica o lock Redis para o produto alvo e

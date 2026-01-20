@@ -8,7 +8,7 @@ lock Redis aplicado pelo collector.
 from __future__ import annotations
 
 import random
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 from sqlalchemy.orm import Session
@@ -28,7 +28,8 @@ def build_monitored_payload(
     *,
     user_id: UUID,
     enqueued_at: str | None = None,
-) -> dict[str, str]:
+    trace_id: str | None = None,
+) -> dict[str, str | None]:
     """ Constrói payload padrão para coletas de monitorados """
     payload = {
         "kind": "monitored",
@@ -36,6 +37,7 @@ def build_monitored_payload(
         "user_id": str(user_id),
         "url": monitored.product_url,
         "name": monitored.name_identification,
+        "trace_id": trace_id,
     }
     if enqueued_at:
         payload["enqueued_at"] = enqueued_at
@@ -46,13 +48,15 @@ def build_competitor_payload(
     *,
     user_id: UUID | None = None,
     enqueued_at: str | None = None,
-) -> dict[str, str]:
+    trace_id: str | None = None,
+) -> dict[str, str | None]:
     """ Constrói payload padrão para coletas de concorrentes vinculados """
-    payload: dict[str, str] = {
+    payload: dict[str, str | None] = {
         "kind": "competitor",
         "monitored_id": str(competitor.monitored_product_id),
         "url": competitor.product_url,
         "competitor_id": str(competitor.id),
+        "trace_id": trace_id,
     }
     if user_id:
         payload["user_id"] = str(user_id)
@@ -61,12 +65,16 @@ def build_competitor_payload(
     return payload
 
 def enqueue_collect(
-    payload: dict[str, str],
+    payload: dict[str, str | None],
     *,
     countdown: float | None = None
 ) -> None:
     """ Enfileira coleta na fila ``scraping`` mantendo única porta de entrada """
     from market_alert.tasks.collector_product_task import collect_product_task
+
+    #Garante rastreio mínimo caso o payload venha de integrações antigas
+    if not payload.get("trace_id"):
+        payload["trace_id"] = str(uuid4())
 
     collect_product_task.apply_async(
         kwargs={"payload": payload},
@@ -77,7 +85,8 @@ def enqueue_collect(
 def enqueue_monitored_collection(
     monitored: MonitoredProduct,
     *,
-    user_id: UUID
+    user_id: UUID,
+    trace_id: str | None = None,
 ) -> None:
     """ Abstrai o enfileiramento de monitorados e registra contexto em log """
     #Se o monitorado estiver pausado, não enfileira e incrementa métrica
@@ -90,11 +99,13 @@ def enqueue_monitored_collection(
         )
         return
 
-    payload = build_monitored_payload(monitored, user_id=user_id)
+    resolved_trace_id = trace_id or str(uuid4())
+    payload = build_monitored_payload(monitored, user_id=user_id, trace_id=resolved_trace_id)
     logger.info(
         "enqueue_monitored_collection",
         monitored_id=str(monitored.id),
         user_id=str(user_id),
+        trace_id=resolved_trace_id,
     )
     enqueue_collect(payload, countdown=settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS)
 
@@ -103,13 +114,16 @@ def enqueue_competitor_collection(
     *,
     user_id: UUID | None = None,
     countdown: float | None = None,
+    trace_id: str | None = None,
 ) -> None:
     """ Enfileira coleta de concorrente mantendo padrão de payload """
-    payload = build_competitor_payload(competitor, user_id=user_id)
+    resolved_trace_id = trace_id or str(uuid4())
+    payload = build_competitor_payload(competitor, user_id=user_id, trace_id=resolved_trace_id)
     logger.info(
         "enqueue_competitor_collection",
         competitor_id=str(competitor.id),
         monitored_id=str(competitor.monitored_product_id),
+        trace_id=resolved_trace_id,
     )
     enqueue_collect(
         payload,
