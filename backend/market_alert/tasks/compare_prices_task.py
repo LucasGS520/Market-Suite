@@ -271,20 +271,22 @@ def compare_prices_task(
                         outcome="no_notifications",
                     ).inc()
 
-        except Exception as exc:
-            #Log estruturado para acompanhar falhas e motivos antes de propagar
-            task_logger.exception(
-                "compare_prices_failed",
-                product_id=mask_identifier(monitored_id),
-                reason=str(exc),
-            )
-            raise
+    except Exception as exc:
+        #Log estruturado para acompanhar falhas e motivos antes de propagar
+        task_logger.exception(
+            "compare_prices_failed",
+            product_id=mask_identifier(monitored_id),
+            reason=str(exc),
+        )
+        raise
 
-        finally:
-            #Observa métricas de latência e contagem
-            duration = (datetime.now(timezone.utc) - start).total_seconds()
-            SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
-            PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
+    finally:
+        #Observa métricas de latência e contagem
+        duration = (datetime.now(timezone.utc) - start).total_seconds()
+        SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
+        PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
+        SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
+        PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
 
 def _fetch_recent_prices(
     db: Session,
