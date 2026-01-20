@@ -201,7 +201,6 @@ def create_pending_monitored_product(
     product_url: str,
 ) -> MonitoredProduct:
     """ Cria registro pendente garantindo unicidade por usuário e URL """
-
     normalized_url = normalize_product_url_for_storage(product_url)
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
 

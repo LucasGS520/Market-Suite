@@ -93,6 +93,7 @@ def _enqueue_monitored_to_priority_queue(monitored_id: UUID, scheduled_at: datet
     logger.info(
         "monitored_enqueued_to_priority_queue",
         monitored_id=str(monitored_id),
+        next_check_at=scheduled_at,
     )
 
 def _recalculate_and_enqueue_monitored(
@@ -456,12 +457,16 @@ def schedule_monitored_scrape(
         )
 
     logger.info(
-        "monitored_scrape_scheduled", monitored_id=str(pending.id), url=normalized_url
+        "monitored_scrape_scheduled",
+        monitored_id=str(pending.id),
+        url=normalized_url,
+        next_check_at=pending.next_check_at,
     )
 
     return MonitoredScrapeCreationResponse(
         id=pending.id,
         url=pending.normalized_url,
         created_at=pending.created_at,
+        next_check_at=pending.next_check_at,
         message="Scraping agendado. O produto será salvo em breve.",
     )

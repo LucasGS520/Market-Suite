@@ -34,6 +34,7 @@ class MonitoredScrapeCreationResponse(BaseModel):
     id: UUID = Field(..., description="Identificador do produto monitorado")
     url: HttpUrl = Field(..., description="URL normalizada usada no monitoramento")
     created_at: datetime = Field(..., description="Momento de criação do registro")
+    next_check_at: datetime = Field(..., description="Próximo horário previsto para a primeira rechecagem")
     message: str = Field(..., description="Resumo amigável do agendamento")
 
 class CompetitorScrapeCreationResponse(BaseModel):

@@ -282,6 +282,7 @@ def test_create_scrape_product_cria_registro_pendente(monkeypatch, client, db_se
     assert payload["id"] == str(created.id)
     assert payload["url"] == created.normalized_url
     assert datetime.fromisoformat(payload["created_at"]) == created.created_at
+    assert datetime.fromisoformat(payload["next_check_at"]) == created.next_check_at
     assert captured["monitored_id"] == str(created.id)
     assert captured["user_id"] == str(test_user.id)
     assert captured["name_identification"] == "Console PS5"

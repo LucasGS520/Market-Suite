@@ -341,6 +341,8 @@ def collect_product(
     name="market_alert.tasks.collector_product_task.collect_product_task",
     queue="scraping",
     acks_late=True,
+    soft_time_limit=90,
+    time_limit=120,
 )
 def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
     """Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
