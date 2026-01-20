@@ -62,8 +62,8 @@ def compare_prices_task(
     start = datetime.now(timezone.utc)
     task_logger.info("compare_prices_started")
 
-    with SessionLocal() as db:
-        try:
+    try:
+        with SessionLocal() as db:
             result = run_price_comparison(db, UUID(monitored_id))
 
             summary = result.get("summary") or {}
@@ -78,7 +78,6 @@ def compare_prices_task(
                 summary = {"reason": "no_available_competitors", "items": []}
             result["summary"] = summary
 
-
             #Log do resultado resumido para fácil consulta
             task_logger.info(
                 "compare_prices_completed",
@@ -86,9 +85,11 @@ def compare_prices_task(
                 highest=result["highest_competitor"],
             )
 
-            resolved_trace_id = trace_id or self.request.id or str(uuid4())
+        resolved_trace_id = trace_id or self.request.id or str(uuid4())
+        #Mantém uma nova sessão para evitar transação aberta da comparação
+        with SessionLocal() as db_notifications:
             monitored = (
-                db.query(MonitoredProduct)
+                db_notifications.query(MonitoredProduct)
                 .filter(MonitoredProduct.id == UUID(monitored_id))
                 .first()
             )
@@ -113,7 +114,10 @@ def compare_prices_task(
                 )
                 return
             
-            price_previous, price_current = _fetch_recent_prices(db, monitored.id)
+            price_previous, price_current = _fetch_recent_prices(
+                db_notifications,
+                monitored.id,
+            )
             availability_previous = None
             if availability_changed and monitored.availability is not None:
                 # NÃO HÁ HISTÓRICO DE DISPONIBILIDADE, ENTÃO APENAS REGISTRA O VALOR ANTERIOR
@@ -133,7 +137,11 @@ def compare_prices_task(
                     ((price_current - price_previous) / price_previous) * 100
                 )
 
-            user = db.query(User).filter(User.id == monitored.user_id).first()
+            user = (
+                db_notifications.query(User)
+                .filter(User.id == monitored.user_id)
+                .first()
+            )
             if user is None:
                 task_logger.warning(
                     "compare_prices_notifications_missing_user",
@@ -159,12 +167,12 @@ def compare_prices_task(
             }
 
             preferences = list_user_notification_preferences(
-                db,
+                db_notifications,
                 user_id=monitored.user_id,
                 monitored_product_id=monitored.id,
             )
             alert_rules = list_alert_rules(
-                db,
+                db_notifications,
                 user_id=monitored.user_id,
                 monitored_product_id=monitored.id,
             )
@@ -174,7 +182,7 @@ def compare_prices_task(
                 previous_snapshot,
                 current_snapshot,
                 preferences,
-                db=db,
+                db=db_notifications,
                 user=user,
                 alert_rules=alert_rules,
             )
@@ -189,9 +197,9 @@ def compare_prices_task(
                     "event_type": event_type.value,
                 }
                 notification_ids: list[str] = []
-                with db.begin():
+                with db_notifications.begin():
                     event = create_event_log(
-                        db,
+                        db_notifications,
                         event_type=event_type,
                         trace_id=resolved_trace_id,
                         payload=payload,
@@ -207,7 +215,7 @@ def compare_prices_task(
 
                     for candidate in candidates_by_event.get(event_type, []):
                         notification = create_notification(
-                            db,
+                            db_notifications,
                             event_id=event.id,
                             user_id=monitored.user_id,
                             channel=candidate.channel,
@@ -238,14 +246,14 @@ def compare_prices_task(
 
                         if candidate.alert_rule:
                             update_alert_rule_last_triggered(
-                                db,
+                                db_notifications,
                                 alert_rule=candidate.alert_rule,
                                 triggered_at=datetime.now(timezone.utc),
                                 commit=False,
                             )
                         if candidate.preference:
                             update_preference_last_notified(
-                                db,
+                                db_notifications,
                                 preference=candidate.preference,
                                 notified_at=datetime.now(timezone.utc),
                                 commit=False,
