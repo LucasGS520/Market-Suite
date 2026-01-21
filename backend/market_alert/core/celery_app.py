@@ -11,6 +11,7 @@ from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
 from prometheus_client import start_http_server
 from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL
+from shared.utils.redis_client import set_key_with_ttl
 
 try:
     from opentelemetry.instrumentation.celery import CeleryInstrumentor
@@ -26,6 +27,7 @@ from market_alert.core.celery_schedule import (
 )
 
 SERVICE_LABEL = "market_alert_worker"
+CONTINUOUS_COLLECTOR_AUTOSTART_KEY = "market_alert:continuous_collector:autostart"
 NOISY_EVENT_NAMES = {
     "channel_vars_missing",
     "collected_celery_metrics",
@@ -107,6 +109,39 @@ if CeleryInstrumentor:
     #Instrumenta o Celery para observabilidade distribuída
     CeleryInstrumentor().instrument()
 
+def _continuous_collector_autostart_enabled() -> bool:
+    """ Determina se o coletor contínuo deve iniciar automaticamente no worker """
+    flag = os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART", "0").strip().lower()
+    return flag in {"1", "true", "yes"}
+
+def _request_continuous_collector_start() -> None:
+    """ Dispara a task contínua apenas uma vez quando habilitada por ambiente """
+    if not _continuous_collector_autostart_enabled():
+        return
+    
+    ttl_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_TTL", "300"))
+    lock_result = set_key_with_ttl(
+        CONTINUOUS_COLLECTOR_AUTOSTART_KEY,
+        value="1",
+        ttl_seconds=ttl_seconds,
+        only_if_absent=True,
+    )
+    if lock_result is False:
+        logger.info("continuous_autostart_skipped", reason="already_running")
+        return
+    if lock_result is None:
+        #Ainda tentamos disparar a task para evitar ficar sem coletas em cenários instáveis
+        logger.warning("continuous_autostart_lock_unavailable")
+
+    try:
+        celery_app.send_task(
+            "market_alert.tasks.continuous_collector_task.run_continuous_collector",
+            queue="monitor",
+        )
+        logger.info("continuous_autostart_triggered")
+    except Exception:
+        logger.exception("continuous_autostart_failed")
+
 def _force_import_task_modules() -> None:
     """ Garante importação explícita dos módulos de tasks registrados
     
@@ -149,6 +184,7 @@ def _start_prometheus_server(**kwargs):
     """ Inicia o servidor Prometheus assim que o worker estiver pronto """
     #Servidor de métricas Prometheus
     start_http_server(port=8002, addr="0.0.0.0")
+    _request_continuous_collector_start()
 
 @task_success.connect
 def handle_task_success(sender=None, **kwargs):
