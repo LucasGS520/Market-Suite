@@ -305,17 +305,37 @@ def collect_product(
                         )
                     elif competitor_id is not None:
                         monitored_id = monitored_id or competitor_row.monitored_product_id if competitor_row else monitored_id
-                        payload_model = CompetitorProductCreateScraping(
-                            monitored_product_id=monitored_id,
-                            product_url=url,
+                        monitored_paused = bool(
+                            competitor_row.monitored_product and competitor_row.monitored_product.paused
                         )
-                        result = scrape_competitor_product(
-                            db=db,
-                            user_id=user_uuid or monitored_id or competitor_id,
-                            url=url,
-                            payload=payload_model,
-                            collected_at=collected_at,
-                        )
+                        if competitor_row.is_paused or monitored_paused:
+                            reason = "paused"
+                            #Evita scraping quando o concorrente ou o monitorado está pausado
+                            MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="collector").inc()
+                            task_logger.info(
+                                "collector_skipped_paused",
+                                competitor_id=str(competitor_id),
+                                monitored_id=str(monitored_id) if monitored_id else None,
+                                trace_id=trace_id,
+                            )
+                            result = ScrapeResult(
+                                status="no_result",
+                                product_id=str(competitor_id),
+                                http_status=200,
+                                error_code=None,
+                            )
+                        else:
+                            payload_model = CompetitorProductCreateScraping(
+                                monitored_product_id=monitored_id,
+                                product_url=url,
+                            )
+                            result = scrape_competitor_product(
+                                db=db,
+                                user_id=user_uuid or monitored_id or competitor_id,
+                                url=url,
+                                payload=payload_model,
+                                colllected_at=collected_at,
+                            )
                     else:
                         monitored_row: MonitoredProduct | None = None
                         if monitored_id is not None:
