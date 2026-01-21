@@ -304,8 +304,6 @@ def compare_prices_task(
         duration = (datetime.now(timezone.utc) - start).total_seconds()
         SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
         PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
-        SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
-        PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
 
 def _fetch_recent_prices(
     db: Session,

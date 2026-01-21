@@ -163,7 +163,7 @@ def _dispatch_comparison(
         args=[
             str(monitored_id),
             bool(getattr(result, "price_changed", False)),
-            bool(getattr(result, "avilability_changed", False)),
+            bool(getattr(result, "availability_changed", False)),
             trace_id,
         ],
         queue="notifications",
