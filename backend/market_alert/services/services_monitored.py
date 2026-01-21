@@ -388,7 +388,20 @@ def schedule_monitored_scrape(
     db.refresh(pending)
 
     try:
-        #Enfileira a coleta imediata para acelerar a primeira resposta do monitorado
+        #Dispara coleta imediata na fila scraping para devolver resposta incial rapidamente
+        immediate_trace_id = str(uuid4())
+        immediate_payload = build_monitored_payload(
+            pending,
+            user_id=user.id,
+            trace_id=immediate_trace_id,
+        )
+        enqueue_collect(immediate_payload)
+        logger.info(
+            "monitored_immediate_enqueued",
+            monitored_id=str(pending.id),
+            trace_id=immediate_trace_id,
+        )
+        #Mantém monitorado na fila contínua para rechecagens subsequentes
         enqueued = enqueue_monitored_now(pending.id, source="new_monitored")
         if not enqueued:
             logger.warning(
