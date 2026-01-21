@@ -13,6 +13,7 @@ from typing import Mapping
 from uuid import UUID
 
 import structlog
+from sqlalchemy.orm import Session
 from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
     MonitoredProductCreateScraping,
@@ -43,6 +44,7 @@ from market_alert.core.celery_app import celery_app
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
+from market_alert.enums.enums_products import MonitoredStatus
 
 
 logger = structlog.get_logger("collector_product_task")
@@ -162,6 +164,37 @@ def _dispatch_comparison(
             ],
             queue="monitor",
         )
+
+def _activate_pending_monitored(
+    db: Session,
+    monitored_id: UUID | None,
+    *,
+    task_logger,
+    trace_id: str | None,
+) -> None:
+    """ Atualiza monitorado pendente para ativo após coleta bem-sucedida """
+    if monitored_id is None:
+        return
+    
+    monitored = (
+        db.query(MonitoredProduct)
+        .filter(MonitoredProduct.id == monitored_id)
+        .first()
+    )
+    if monitored is None:
+        return
+    
+    if monitored.status != MonitoredStatus.pending:
+        return
+    
+    monitored.status = MonitoredStatus.active
+    db.commit()
+    db.refresh(monitored)
+    task_logger.info(
+        "monitored_status_activated",
+        monitored_id=str(monitored_id),
+        trace_id=trace_id,
+    )
 
 def collect_product(
     payload: Mapping[str, str | None] | None,
@@ -299,6 +332,14 @@ def collect_product(
                                 payload=payload_model,
                                 collected_at=collected_at,
                             )
+                            if result and result.status in {"success", "not_modified"}:
+                                #Garante a transição para ativo mesmo que o fluxo anterior não tenha persistido
+                                _activate_pending_monitored(
+                                    db,
+                                    monitored_id,
+                                    task_logger=task_logger,
+                                    trace_id=trace_id,
+                                )
     except ScraperError as exc:
         reason = "scraper_error"
         task_logger.warning("scraper_error", kind=kind, error=str(exc))

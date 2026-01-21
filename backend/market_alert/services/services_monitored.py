@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 import structlog
@@ -44,8 +45,9 @@ from market_alert.schemas.schemas_products import (
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_competitors import create_competitor_scrape_request
-from market_alert.orchestrator import collector_service_orchestrator
+from market_alert.services.services_priority_queue_manager import enqueue_monitored_now
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
+from market_alert.utils.interval_calculator_products import calculate_next_check_at
 
 
 logger = structlog.get_logger("monitored_service")
@@ -274,13 +276,13 @@ def schedule_monitored_scrape(
     product_data: MonitoredProductCreateScraping,
     request: Request | None = None,
 ) -> MonitoredScrapeCreationResponse:
-    """ Valida, cria monitorado e enfileira coleta imediata e continua.
+    """ Valida, cria monitorado e enfileira coleta imediata na fila continua.
     
     O serviço centraliza logs e validações para reduzir duplicação entre rotas,
     garantindo verificação de URL, duplicidade e rate-limit antes de agendar a
-    coleta assíncrona imediata do monitorado, mantendo o registro na fila de
-    prioridade para rechecagens contínuas. Quando enviado, também cria o
-    concorrente inicial.
+    coleta assíncrona do monitorado, mantendo o registro na fila de prioridade
+    para rechecagens contínuas. Quando enviado, também cria o concorrente
+    inicial.
     """
     log_context: dict[str, str | None] = {
         "user_id": str(user.id),
@@ -358,11 +360,27 @@ def schedule_monitored_scrape(
         product_url=normalized_url,
     )
 
-    #Enfileira a coleta imediata para acelerar a primeira resposta do monitorado
-    collector_service_orchestrator.enqueue_monitored_collection(
-        pending,
-        user_id=user.id
-    )
+    reference_time = datetime.now(timezone.utc)
+    pending.next_check_at = calculate_next_check_at(pending, collected_at=reference_time)
+    db.commit()
+    db.refresh(pending)
+
+    try:
+        #Enfileira a coleta imediata para acelerar a primeira resposta do monitorado
+        enqueued = enqueue_monitored_now(pending.id, source="new_monitored")
+        if not enqueued:
+            logger.warning(
+                "monitored_enqueue_failed_fallback",
+                monitored_id=str(pending.id),
+                reason="priority_queue_unavailable",
+            )
+    except Exception:
+        #Evita bloquear a criação quando Redis estiver indisponível
+        logger.warning(
+            "monitored_enqueue_exception_fallback",
+            monitored_id=str(pending.id),
+            exc_info=True,
+        )
 
     if product_data.initial_competitor:
         competitor_payload = CompetitorProductCreateScraping(
@@ -397,5 +415,5 @@ def schedule_monitored_scrape(
         url=pending.normalized_url,
         created_at=pending.created_at,
         next_check_at=pending.next_check_at,
-        message="Scraping agendado. O produto será salvo em breve.",
+        message="Coleta iniciada, dados aparecerão em breve.",
     )

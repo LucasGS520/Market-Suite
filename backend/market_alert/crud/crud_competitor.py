@@ -111,6 +111,7 @@ def create_pending_competitor_product(
     product_url: str,
     *,
     display_name: str | None = None,
+    is_paused: bool | None = None,
 ) -> CompetitorProduct:
     """ Cria um concorrente pendente garantindo unicidade por monitorado e URL.
     
@@ -129,6 +130,7 @@ def create_pending_competitor_product(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Monitoramento pausado. Retome o produto para adicionar concorrentes.",
         )
+    resolved_is_paused = is_paused if is_paused is not None else bool(getattr(monitored, "paused", False))
     normalized_url = normalize_product_url_for_storage(str(product_url))
     if not normalized_url:
         try:
@@ -154,7 +156,8 @@ def create_pending_competitor_product(
         seller_rating=None,
         currency=None,
         thumbnail=None,
-        status=ProductStatus.pending,
+        status=ProductStatus.available,
+        is_paused=resolved_is_paused,
         last_checked=None,
         last_scraped_at=None,
     )

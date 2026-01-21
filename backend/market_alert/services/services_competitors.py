@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import UUID
-from types import SimpleNamespace
-from typing import Callable
 
 import structlog
 from fastapi import HTTPException, status
@@ -28,7 +26,6 @@ from market_alert.schemas.schemas_products import CompetitorsListResponse
 from market_alert.services.services_products import build_competitor_response
 from market_alert.services.services_access import ensure_user_can_access_monitored
 from market_alert.services.services_priority_queue import PriorityQueueService
-from market_alert.orchestrator import collector_service_orchestrator
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import calculate_next_check_at
 from market_alert.core.config_alert import settings
@@ -134,7 +131,7 @@ def create_competitor_scrape_request(
     product_data: CompetitorProductCreateScraping,
     request_context: dict[str, str] | None = None,
 ) -> CompetitorScrapeCreationResponse:
-    """ Orquestra validações, criação e enfileiramento imediato/contínuo do concorrente """
+    """ Orquestra validações, criação e agendamento conjunto do concorrente """
     context = request_context or {}
     log_context = {
         "user_id": str(user.id),
@@ -162,18 +159,7 @@ def create_competitor_scrape_request(
         hide_forbidden=False,
     )
 
-    if monitored_product.paused:
-        #Bloqueia alterações em concorrentes quando o monitoramento está pausado
-        logger.warning(
-            "competitor_action_blocked_monitored_paused",
-            monitored_id=str(monitored_product.id),
-            user_id=str(user.id),
-            **context,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Monitoramento pausado. Retome o produto para adicionar concorrentes.",
-        )
+    monitored_is_paused = bool(monitored_product.paused)
 
     existing = get_competitor_by_monitored_and_url(db, monitored_product.id, normalized_url)
     if existing:
@@ -203,12 +189,7 @@ def create_competitor_scrape_request(
         monitored_product_id=monitored_product.id,
         product_url=normalized_url,
         display_name=product_data.name,
-    )
-
-    #Enfileira coleta imediata para o concorrente recém-criado
-    collector_service_orchestrator.enqueue_competitor_collection(
-        pending,
-        user_id=user.id,
+        is_paused=monitored_is_paused,
     )
 
     metrics.PENDING_COMPETITOR_CREATED_TOTAL.inc()
@@ -220,36 +201,46 @@ def create_competitor_scrape_request(
         **context,
     )
 
-    queue_service = PriorityQueueService()
-    score = queue_service.get_score(str(monitored_product.id))
-    if score is None:
-        #Recalcula janela para garantir entrada do monitorado em fila única
-        reference_time = datetime.now(timezone.utc)
-        monitored_product.next_check_at = calculate_next_check_at(
-            monitored_product,
-            collected_at=reference_time,
+    if monitored_is_paused:
+        #Mantém o concorrente sincronizado ao estado pausado do monitorado
+        logger.info(
+            "competitor_created_while_monitored_paused",
+            competitor_id=str(pending.id),
+            monitored_id=str(monitored_product.id),
+            **context,
         )
-        db.commit()
-        db.refresh(monitored_product)
+    else:
+        #Garante que o monitorado estará em fila para coletar o novo concorrente no próximo ciclo
+        queue_service = PriorityQueueService()
+        score = queue_service.get_score(str(monitored_product.id))
+        if score is None:
+            #Recalcula janela para garantir entrada do monitorado em fila única
+            reference_time = datetime.now(timezone.utc)
+            monitored_product.next_check_at = calculate_next_check_at(
+                monitored_product,
+                collected_at=reference_time,
+            )
+            db.commit()
+            db.refresh(monitored_product)
 
-        enqueued = queue_service.enqueue(
-            str(monitored_product.id),
-            monitored_product.next_check_at,
-        )
-        if enqueued:
-            queue_service.set_enqueued_at(str(monitored_product.id), reference_time)
-            logger.info(
-                "monitored_enqueued_to_priority_queue",
-                monitored_id=str(monitored_product.id),
-                source="competitor_create",
+            enqueued = queue_service.enqueue(
+                str(monitored_product.id),
+                monitored_product.next_check_at,
             )
-        else:
-            #Não bloqueia criação quando Redis estiver indisponível
-            logger.warning(
-                "monitored_priority_queue_enqueue_failed",
-                monitored_id=str(monitored_product.id),
-                source="competitor_create",
-            )
+            if enqueued:
+                queue_service.set_enqueued_at(str(monitored_product.id), reference_time)
+                logger.info(
+                    "monitored_enqueued_to_priority_queue",
+                    monitored_id=str(monitored_product.id),
+                    source="competitor_create",
+                )
+            else:
+                #Não bloqueia criação quando Redis estiver indisponível
+                logger.warning(
+                    "monitored_priority_queue_enqueue_failed",
+                    monitored_id=str(monitored_product.id),
+                    source="competitor_create",
+                )
 
     logger.info(
         "competitor_scrape_scheduled",
@@ -262,7 +253,7 @@ def create_competitor_scrape_request(
         id=pending.id,
         url=pending.product_url,
         created_at=pending.created_at,
-        message="Scraping de concorrente agendado com sucesso.",
+        message="Concorrente criado. A coleta ocorrerá no próximo ciclo de monitoramento.",
     )
 
 def list_competitors_with_pagination(

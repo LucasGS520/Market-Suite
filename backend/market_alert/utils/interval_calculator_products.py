@@ -12,6 +12,7 @@ import random
 from datetime import datetime, timezone, timedelta
 
 from market_alert.core.config_alert import settings
+from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
 
 
@@ -92,5 +93,8 @@ def calculate_next_check_at(
 ) -> datetime:
     """ Calcula o datetime da próxima coleta considerando o horário da extração """
     normalized_collected = _normalize_datetime(collected_at) or datetime.now(timezone.utc)
+    if product.status == MonitoredStatus.pending and not product.last_checked:
+        #Mantém o primeira coleta imediata para itens recém criados
+        return normalized_collected
     interval_seconds = calculate_next_interval(product, reference_time=normalized_collected)
     return normalized_collected + timedelta(seconds=interval_seconds)
