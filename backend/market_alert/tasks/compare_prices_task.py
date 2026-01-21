@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from shared.utils.logging_utils import mask_identifier
 from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
 from shared.metrics.metrics_price_comparison import (
+    COMPARISON_SKIPPED_PAUSED_TOTAL,
     PRICE_COMPARISON_TASK_LATENCY_SECONDS,
 )
 from shared.metrics.metrics_notifications import (
@@ -64,6 +65,24 @@ def compare_prices_task(
 
     try:
         with SessionLocal() as db:
+            monitored = (
+                db.query(MonitoredProduct)
+                .filter(MonitoredProduct.id == UUID(monitored_id))
+                .first()
+            )
+            if monitored is None:
+                task_logger.warning("compare_prices_monitored_missing")
+                return
+            
+            if monitored.paused:
+                #Evita cálculos de comparação quando o monitorado está pausado
+                COMPARISON_SKIPPED_PAUSED_TOTAL.inc()
+                task_logger.warning(
+                    "compare_prices_skipped_paused",
+                    monitored_id=mask_identifier(monitored_id),
+                )
+                return
+            
             result = run_price_comparison(db, UUID(monitored_id))
 
             summary = result.get("summary") or {}

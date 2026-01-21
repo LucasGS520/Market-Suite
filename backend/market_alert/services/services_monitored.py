@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 import structlog
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from backend.shared.schemas.shared_schemas_products import (
     MonitoredProductCreateScraping,
@@ -34,7 +34,7 @@ from market_alert.crud.crud_comparison import (
     get_latest_summaries_for_products,
     get_latest_summary,
 )
-from market_alert.models import User
+from market_alert.models import MonitoredProduct, User
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
     MonitoredProductResponse,
@@ -46,11 +46,30 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_competitors import create_competitor_scrape_request
 from market_alert.services.services_priority_queue_manager import enqueue_monitored_now
+from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import calculate_next_check_at
 
 
 logger = structlog.get_logger("monitored_service")
+
+def _enqueue_resume_collection(monitored: MonitoredProduct, user: User) -> None:
+    """ Agenda coleta imediata com comparação forçada para retomadas """
+    payload = build_monitored_payload(
+        monitored,
+        user_id=user.id,
+        trace_id=str(uuid4()),
+    )
+    payload["force_compare"] = "true"
+    try:
+        enqueue_collect(payload)
+    except Exception:
+        #Evita bloquear a retomada caso a fila de scraping esteja indisponível
+        logger.warning(
+            "monitored_resume_collect_enqueue_failed",
+            monitored_id=str(monitored.id),
+            user_id=str(user.id),
+        )
 
 def _raise_from_monitored_error(exc: Exception) -> None:
     """ Converte exceções de domínio em respostas HTTP coerentes """
@@ -220,6 +239,7 @@ def resume_monitored_product_entry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado")
 
     logger.info("monitored_resumed", product_id=str(product_id), user_id=str(user.id))
+    _enqueue_resume_collection(monitored, user)
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
     return build_monitored_response(
@@ -249,6 +269,8 @@ def update_monitored_pause_state(
 
     action = "paused" if payload.paused else "resumed"
     logger.info(f"monitored_{action}", product_id=str(product_id), user_id=str(user.id))
+    if not payload.paused:
+        _enqueue_resume_collection(monitored, user)
 
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)

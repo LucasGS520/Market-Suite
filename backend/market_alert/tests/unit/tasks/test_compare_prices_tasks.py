@@ -101,7 +101,8 @@ def test_compare_prices_task_continues_without_redis(monkeypatch):
         "SessionLocal",
         build_session_sequence(
             DummySession(),
-            DummySession(query_result=DummyMonitored(paused=True)),
+            DummySession(query_result=DummyMonitored(paused=False)),
+            DummySession(query_result=DummyMonitored(paused=False)),
         ),
         raising=False,
     )
@@ -111,6 +112,34 @@ def test_compare_prices_task_continues_without_redis(monkeypatch):
 
     assert dummy_logger.warning_called is False
     
+def test_compare_prices_task_skips_when_paused(monkeypatch):
+    """Garante que a comparação seja ignorada quando o monitorado está pausado."""
+    run_called = False
+
+    def fake_run(*args, **kwargs):
+        nonlocal run_called
+        run_called = True
+        return {"lowest_competitor": {}, "highest_competitor": {}}
+
+    dummy_logger = DummyLogger()
+
+    monkeypatch.setattr(compare_prices_task, "logger", dummy_logger, raising=False)
+    monkeypatch.setattr(
+        compare_prices_task,
+        "SessionLocal",
+        build_session_sequence(
+            DummySession(query_result=DummyMonitored(paused=True)),
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(compare_prices_task, "run_price_comparison", fake_run, raising=False)
+
+    compare_prices_task.compare_prices_task.run(VALID_UUID)
+
+    assert run_called is False
+    assert dummy_logger.warning_called is True
+    assert dummy_logger.last_event == "compare_prices_skipped_paused"
+
 def test_compare_prices_task_always_runs(monkeypatch):
     """Executa a comparação mesmo quando chaves duplicadas não são controladas."""
 
@@ -126,8 +155,8 @@ def test_compare_prices_task_always_runs(monkeypatch):
         compare_prices_task,
         "SessionLocal",
         build_session_sequence(
-            DummySession(),
-            DummySession(query_result=DummyMonitored(paused=True)),
+            DummySession(query_result=DummyMonitored(paused=False)),
+            DummySession(query_result=DummyMonitored(paused=False)),
         ),
         raising=False,
     )
@@ -139,8 +168,8 @@ def test_compare_prices_task_always_runs(monkeypatch):
 
 def test_compare_prices_task_handles_previous_transaction(monkeypatch):
     """ Garante que a task não falha quando a comparação já iniciou transação """
-    first_session = DummySession()
-    second_session = DummySession(query_result=DummyMonitored(paused=True))
+    first_session = DummySession(query_result=DummyMonitored(paused=False))
+    second_session = DummySession(query_result=DummyMonitored(paused=False))
 
     def fake_run_price_comparison(db, *args, **kwargs):
         with db.begin():

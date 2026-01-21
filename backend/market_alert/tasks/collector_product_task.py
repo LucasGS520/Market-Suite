@@ -146,24 +146,41 @@ def _dispatch_comparison(
     monitored_id: UUID | None,
     result: ScrapeResult | None,
     trace_id: str | None,
+    *,
+    force: bool = False,
 ) -> None:
     """ Agenda comparação apenas quando scraping trouxe alteração relevante """
     if monitored_id is None or result is None:
         return
     
     changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
-    if changed:
-        #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
-        celery_app.send_task(
-            "market_alert.tasks.compare_prices_task.compare_prices_task",
-            args=[
-                str(monitored_id),
-                bool(getattr(result, "price_changed", False)),
-                bool(getattr(result, "availability_changed", False)),
-                trace_id,
-            ],
-            queue="monitor",
-        )
+    if not (force or changed):
+        return
+    
+    #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
+    celery_app.send_task(
+        "market_alert.tasks.compare_prices_task.compare_prices_task",
+        args=[
+            str(monitored_id),
+            bool(getattr(result, "price_changed", False)),
+            bool(getattr(result, "avilability_changed", False)),
+            trace_id,
+        ],
+        queue="notifications",
+    )
+    logger.info(
+        "compare_prices_enqueued",
+        monitored_id=str(monitored_id),
+        trace_id=trace_id,
+        forced=force,
+        changed=changed,
+    )
+
+def _parse_force_compare_(value: str | None) -> bool:
+    """ Normaliza o flag de disparo forçado para comparação """
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 def _activate_pending_monitored(
     db: Session,
@@ -220,6 +237,7 @@ def collect_product(
     trace_id = payload.get("trace_id") if payload else None
     enqueued_at = payload.get("enqueued_at") if payload else None
     lock_target = competitor_id or monitored_id
+    force_compare = _parse_force_compare_(payload.get("force_compare") if payload else None)
 
     lock_status = "not_used"
     
@@ -372,7 +390,7 @@ def collect_product(
             enqueued_at=enqueued_at,
         )
         if dispatch_comparison:
-            _dispatch_comparison(monitored_id, result, trace_id)
+            _dispatch_comparison(monitored_id, result, trace_id, force=force_compare)
 
     return outcome, result
 
