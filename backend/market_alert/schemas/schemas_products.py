@@ -71,7 +71,7 @@ class MonitoredProductResponse(ProductResponse):
     thumbnail: str | None = Field(None, description="Miniatura mais recente identificada pelo fluxo de scraping")
     created_at: datetime | None = Field(None, description="Momento de criação do monitoramento (timestamp do cadastro)")
     last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")
-    last_collected_at: datetime | None = Field(None, description="Momento da última tentativa de coleta concluída (alias para `last_scraped_at`, exposto para clareza no frontend)")
+    last_collected_at: datetime | None = Field(None, description="Momento da última tentativa de coleta registrada, mesmo sem extração concluída")
     next_check_at: datetime | None = Field(None, description="Próximo horário previsto para rechecagem do produto")
     last_price_change_at: datetime | None = Field(None, description="Última vez em que o preço monitorado mudou")
     stability: str | None = Field(None, description="Classificação de estabilidade derivada da pontuação interna, usada para ajustar frequências de coleta")

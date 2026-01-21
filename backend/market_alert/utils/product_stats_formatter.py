@@ -39,7 +39,7 @@ def get_product_stats(product: MonitoredProduct) -> dict:
     """ Retorna estatísticas derivadas do produto monitorado para a API """
     #Centraliza valores derivados para evitar divergências entre rotas e contratos
     return {
-        "last_collected_at": product.last_scraped_at,
+        "last_collected_at": product.last_checked,
         "last_price_change_at": product.last_price_change_at,
         "stability": format_stability_level(product.stability_score),
         "next_check_at": format_next_check_at(product),
