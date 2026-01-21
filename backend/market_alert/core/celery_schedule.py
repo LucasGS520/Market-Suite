@@ -44,6 +44,10 @@ TASK_ROUTES = {
         "queue": "monitor",
         "routing_key": "monitor",
     },
+    "market_alert.tasks.compare_prices_task.compare_prices_task": {
+        "queue": "monitor",
+        "routing_key": "monitor",
+    },
     "market_alert.tasks.notifications_enqueue_task.enqueue_notifications_task": {
         "queue": "notifications",
         "routing_key": "notifications",
