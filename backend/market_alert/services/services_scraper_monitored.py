@@ -68,7 +68,6 @@ def _handle_response(
             if product:
                 #Marca checagem e scraping para evitar lacunas de monitoramento mesmo sem mudanças.
                 product.last_checked = last_checked
-                product.last_scraped_at = last_checked
                 product.collected_at = collected_at
                 product.status = MonitoredStatus.active
                 product.next_check_at = calculate_next_check_at(product, collected_at=last_checked)
