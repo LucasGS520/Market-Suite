@@ -1,4 +1,4 @@
-""" Metricas para o agendamento contínuo via fila de prioridade """
+""" Métricas para o agendamento contínuo via fila de prioridade """
 
 from prometheus_client import Counter, Gauge, Histogram
 
@@ -39,6 +39,12 @@ PRIORITY_QUEUE_FALLBACK_TOTAL = Counter(
 PRIORITY_QUEUE_PROCESSED_TOTAL = Counter(
     "priority_queue_processed_total",
     "Total de itens processados pelo worker contínuo",
+    labelnames=("source", "outcome"),
+)
+
+PRIORITY_QUEUE_LOOP_ERRORS_TOTAL = Counter(
+    "priority_queue_loop_errors_total",
+    "Total de erros capturados no loop do worker contínuo",
     labelnames=("source",),
 )
 
@@ -50,4 +56,5 @@ __all__ = [
     "PRIORITY_QUEUE_ENQUEUED_TOTAL",
     "PRIORITY_QUEUE_FALLBACK_TOTAL",
     "PRIORITY_QUEUE_PROCESSED_TOTAL",
+    "PRIORITY_QUEUE_LOOP_ERRORS_TOTAL",
 ]

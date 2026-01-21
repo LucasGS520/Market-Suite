@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_CONSUME_LATENCY_MS,
+    PRIORITY_QUEUE_LOOP_ERRORS_TOTAL,
     PRIORITY_QUEUE_PROCESSED_TOTAL,
     PRIORITY_QUEUE_READY_TOTAL,
     PRIORITY_QUEUE_SIZE,
@@ -87,10 +88,46 @@ def _record_enqueue_latency(enqueued_at: datetime | None, collected_at: datetime
     latency_ms = max(int((collected_at - normalized).total_seconds() * 1000), 0)
     PRIORITY_QUEUE_CONSUME_LATENCY_MS.observe(latency_ms)
 
-def _update_queue_metrics(queue_service: PriorityQueueService) -> None:
+def _update_queue_metrics(
+    queue_service: PriorityQueueService,
+    *,
+    queue_size: int | None = None,
+    ready_total: int | None = None,
+) -> None:
     """ Atualiza métricas básicas da fila de prioridade """
-    PRIORITY_QUEUE_SIZE.set(queue_service.size())
-    PRIORITY_QUEUE_READY_TOTAL.set(queue_service.ready_count())
+    resolved_size = queue_size if queue_size is not None else queue_service.size()
+    resolved_ready = ready_total if ready_total is not None else queue_service.ready_count()    
+    PRIORITY_QUEUE_SIZE.set(resolved_size)
+    PRIORITY_QUEUE_READY_TOTAL.set(resolved_ready)
+
+def _calculate_idle_sleep(empty_streak: int, queue_size: int) -> float:
+    """ Calcula o tempo de espera progressivo quando não há itens prontos """
+    if queue_size >= 1000:
+        adaptive_sleep = 1.0
+    elif queue_size >= 500:
+        adaptive_sleep = 2.0
+    elif queue_size >= 100:
+        adaptive_sleep = 3.0
+    else:
+        adaptive_sleep = 5.0
+    if empty_streak <= 0:
+        return adaptive_sleep
+    if empty_streak == 1:
+        return max(adaptive_sleep, 1.0)
+    if empty_streak == 2:
+        return max(adaptive_sleep, 2.0)
+    if empty_streak == 3:
+        return max(adaptive_sleep, 5.0)
+    return float(max(adaptive_sleep, min(30, 5 * (empty_streak - 2))))
+
+def _should_abort(task_request) -> bool:
+    """ Verifica se a task foi sinalizada para abortar """
+    if task_request is None:
+        return False
+    abort_fn = getattr(task_request, "is_aborted", None)
+    if abort_fn is None:
+        return False
+    return bool(abort_fn())
 
 def _collect_group(
     *,
@@ -100,6 +137,23 @@ def _collect_group(
     """ Coleta monitorado e concorrentes em sequência retornando desfecho """
     trace_id = str(uuid4())
     group_started_at = _utc_now()
+    group_started_perf = time.perf_counter()
+
+    if monitored.paused or monitored.status in {MonitoredStatus.failed}:
+        #Evita coletas em itens pausados para respeitar contrato de pausa
+        logger.info(
+            "continuous_group_skipped_paused",
+            monitored_id=str(monitored.id),
+            status=monitored.status,
+        )
+        return "skipped_paused"
+    
+    logger.info(
+        "continuous_group_started",
+        monitored_id=str(monitored.id),
+        collected_at=group_started_at.isoformat(),
+        trace_id=trace_id,
+    )
 
     monitored_payload = build_monitored_payload(
         monitored,
@@ -109,12 +163,21 @@ def _collect_group(
     monitored_payload["trace_id"] = trace_id
 
     _record_enqueue_latency(enqueued_at, group_started_at)
-    outcome, monitored_result = collect_product(
-        monitored_payload,
-        use_lock=True,
-        dispatch_comparison=True,
-        logger_bound=logger.bind(monitored_id=str(monitored.id), trace_id=trace_id),
-    )
+    try:
+        outcome, monitored_result = collect_product(
+            monitored_payload,
+            use_lock=True,
+            dispatch_comparison=False,
+            logger_bound=logger.bind(monitored_id=str(monitored.id), trace_id=trace_id),
+        )
+    except Exception:
+        #Mantém o loop vivo ao capturar falhas inesperadas do coletor do monitorado
+        logger.exception(
+            "continuous_monitored_collect_failed",
+            monitored_id=str(monitored.id),
+            trace_id=trace_id,
+        )
+        outcome, monitored_result = "error", None
 
     with SessionLocal() as db:
         #Mantém uma única sessão para reduzir overhead e evitar inconsistências de leitura.
@@ -129,25 +192,43 @@ def _collect_group(
             for competitor in competitors:
                 db.refresh(competitor)
                 previous_change_at = competitor.last_price_change_at
+                competitor_started_perf = time.perf_counter()
                 competitor_payload = build_competitor_payload(
                     competitor,
                     user_id=monitored.user_id,
                     enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
                 )
                 competitor_payload["trace_id"] = trace_id
-                collect_product(
-                    competitor_payload,
-                    use_lock=True,
-                    dispatch_comparison=True,
-                    logger_bound=logger.bind(
+                try:
+                    collect_product(
+                        competitor_payload,
+                        use_lock=True,
+                        dispatch_comparison=False,
+                        logger_bound=logger.bind(
+                            monitored_id=str(monitored.id),
+                            competitor_id=str(competitor.id),
+                            trace_id=trace_id,
+                        ),
+                    )
+                except Exception:
+                    #Isola falhas de concorrentes para não comprometer o grupo inteiro
+                    logger.exception(
+                        "continuous_competitor_collect_failed",
                         monitored_id=str(monitored.id),
                         competitor_id=str(competitor.id),
                         trace_id=trace_id,
-                    ),
-                )
+                    )
                 db.refresh(competitor)
                 if competitor.last_price_change_at != previous_change_at:
                     competitor_change_detected = True
+                competitor_duration_ms = int((time.perf_counter() - competitor_started_perf) * 1000)
+                logger.info(
+                    "continuous_competitor_collected",
+                    monitored_id=str(monitored.id),
+                    competitor_id=str(competitor.id),
+                    duration_ms=competitor_duration_ms,
+                    trace_id=trace_id,
+                )
 
             group_finished_at = _utc_now()
             refreshed = get_monitored_product_by_id(db, monitored.id)
@@ -177,9 +258,38 @@ def _collect_group(
                 )
 
     if monitored_result and monitored_result.status:
-        PRIORITY_QUEUE_PROCESSED_TOTAL.labels(outcome=monitored_result.status).inc()
+        PRIORITY_QUEUE_PROCESSED_TOTAL.labels(source="continuous", outcome=monitored_result.status).inc()
     else:
-        PRIORITY_QUEUE_PROCESSED_TOTAL.labels(outcome=outcome).inc()
+        PRIORITY_QUEUE_PROCESSED_TOTAL.labels(source="continuous", outcome=outcome).inc()
+
+    if monitored_result is not None:
+        has_change = bool(
+            getattr(monitored_result, "price_changed", False)
+            or getattr(monitored_result, "availability_changed", False)
+        )
+    else:
+        has_change = False
+
+    if has_change or competitor_change_detected:
+        #Dispara comparação apenas uma vez após coletar todo o grupo
+        celery_app.send_task(
+            "market_alert.tasks.compare_prices_task.compare_prices_task",
+            args=[
+                str(monitored.id),
+                bool(getattr(monitored_result, "price_changed", False)) if monitored_result else False,
+                bool(getattr(monitored_result, "availability_changed", False)) if monitored_result else False,
+                trace_id,
+            ],
+            queue="monitor",
+        )
+
+    group_duration_ms = int((time.perf_counter() - group_started_perf) * 1000)
+    logger.info(
+        "continuous_group_finished",
+        monitored_id=str(monitored.id),
+        duration_ms=group_duration_ms,
+        trace_id=trace_id,
+    )
 
     return outcome
 
@@ -219,6 +329,8 @@ def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable
     name="market_alert.tasks.continuous_collector_task.run_continuous_collector",
     queue="monitor",
     acks_late=True,
+    soft_time_limit=3600,
+    time_limit=3700,
 )
 def run_continuous_collector(self) -> None:
     """ Loop contínuo que consome a fila de prioridade e dispara coletas """
@@ -226,78 +338,123 @@ def run_continuous_collector(self) -> None:
     queue_service = PriorityQueueService()
     batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
     processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
+    empty_streak = 0
 
     while True:
-        if is_scraping_suspended():
-            bound_logger.warning("continuous_scraping_suspended")
-            time.sleep(settings.CONTINUOUS_WORKER_IDLE_SLEEP)
-            continue
+        if _should_abort(getattr(self, "request", None)):
+            bound_logger.warning("continuous_worker_aborted")
+            break
         
-        if not queue_service.is_available():
-            bound_logger.error("continuous_queue_unavailable")
-            time.sleep(settings.CONTINUOUS_WORKER_IDLE_SLEEP)
-            continue
-        
-        reclaimed = queue_service.reclaim_stale_processing(processing_ttl)
-        if reclaimed:
-            #Recoloca itens travados para garantir novas tentativas no loop contínuo
-            bound_logger.warning(
-                "continuous_processing_reclaimed",
-                reclaimed_count=len(reclaimed),
-            )
-        
-        processed_ids: list[str] = []
-        for _ in range(batch_size):
-            next_id = queue_service.pop_due()
-            if not next_id:
-                break
+        try:
+            if is_scraping_suspended():
+                bound_logger.warning("continuous_scraping_suspended")
+                time.sleep(10)
+                continue
             
-            with SessionLocal() as db:
-                monitored = _load_monitored(db, next_id)
-                if monitored is None:
-                    bound_logger.warning("continuous_monitored_missing", monitored_id=next_id)
-                    processed_ids.append(next_id)
-                    continue
-                
-                if monitored.paused or monitored.status in {MonitoredStatus.failed}:
-                    MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="continuous_worker").inc()
-                    bound_logger.info(
-                        "continuous_skipped_paused",
-                        monitored_id=str(monitored.id),
-                    )
-                    processed_ids.append(str(monitored.id))
-                    continue
-                
-            enqueued_at = queue_service.get_enqueued_at(next_id)
-            outcome = _collect_group(
-                monitored=monitored,
-                enqueued_at=enqueued_at,
+            if not queue_service.is_available():
+                bound_logger.error("continuous_queue_unavailable")
+                time.sleep(settings.CONTINUOUS_WORKER_IDLE_SLEEP)
+                continue
+            
+            queue_size = queue_service.size()
+            ready_total = queue_service.ready_count()
+            _update_queue_metrics(
+                queue_service,
+                queue_size=queue_size,
+                ready_total=ready_total,
+            )
+        
+            bound_logger.info(
+                "continuous_loop_iteration",
+                queue_size=queue_size,
+                ready_total=ready_total,
+                timestamp=_utc_now().isoformat(),
             )
 
-            processed_ids.append(str(monitored.id))
-
-            with SessionLocal() as db:
-                refreshed = get_monitored_product_by_id(db, monitored.id)
-                if refreshed is None:
-                    continue
-                _requeue_monitored(
-                    monitored=refreshed,
-                    queue_service=queue_service,
+            reclaimed = queue_service.reclaim_stale_processing(processing_ttl)
+            if reclaimed:
+                #Recoloca itens travados para garantir novas tentativas no loop contínuo
+                bound_logger.warning(
+                    "continuous_processing_reclaimed",
+                    reclaimed_count=len(reclaimed),
                 )
 
-            bound_logger.info(
-                "continuous_item_processed",
-                monitored_id=str(monitored.id),
-                outcome=outcome,
-            )
+            processed_ids: list[str] = []
+            for _ in range(batch_size):
+                next_id = queue_service.pop_due()
+                if not next_id:
+                    break
+                
+                with SessionLocal() as db:
+                    monitored = _load_monitored(db, next_id)
+                    if monitored is None:
+                        bound_logger.warning("continuous_monitored_missing", monitored_id=next_id)
+                        processed_ids.append(next_id)
+                        continue
+                    
+                    if monitored.paused or monitored.status in {MonitoredStatus.failed}:
+                        MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="continuous_worker").inc()
+                        bound_logger.info(
+                            "continuous_skipped_paused",
+                            monitored_id=str(monitored.id),
+                        )
+                        processed_ids.append(str(monitored.id))
+                        continue
+                
+                enqueued_at = queue_service.get_enqueued_at(next_id)
+                try:
+                    outcome = _collect_group(
+                        monitored=monitored,
+                        enqueued_at=enqueued_at,
+                    )
+                except Exception:
+                    outcome = "error"
+                    PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
+                    bound_logger.exception(
+                        "continuous_group_failed",
+                        monitored_id=str(monitored.id),
+                    )
 
-        if processed_ids:
-            _drain_processing(queue_service, processed_ids)
-            with SessionLocal() as db:
-                _update_stability_metrics(db)
-            _update_queue_metrics(queue_service)
-            time.sleep(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
-        else:
-            _update_queue_metrics(queue_service)
+                processed_ids.append(str(monitored.id))
+                empty_streak = 0
+
+                with SessionLocal() as db:
+                    refreshed = get_monitored_product_by_id(db, monitored.id)
+                    if refreshed is None:
+                        continue
+                    _requeue_monitored(
+                        monitored=refreshed,
+                        queue_service=queue_service,
+                    )
+
+                bound_logger.info(
+                    "continuous_item_processed",
+                    monitored_id=str(monitored.id),
+                    outcome=outcome,
+                )
+
+            if processed_ids:
+                _drain_processing(queue_service, processed_ids)
+                with SessionLocal() as db:
+                    _update_stability_metrics(db)
+                _update_queue_metrics(queue_service)
+                time.sleep(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
+            else:
+                empty_streak += 1
+                idle_sleep = _calculate_idle_sleep(empty_streak, queue_size)
+                _update_queue_metrics(
+                    queue_service,
+                    queue_size=queue_size,
+                    ready_total=ready_total,
+                )
+                bound_logger.info(
+                    "continuous_idle_sleep",
+                    sleep_seconds=idle_sleep,
+                    empty_streak=empty_streak,
+                )
+                time.sleep(idle_sleep)
+        except Exception:
+            PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
+            bound_logger.exception("continuous_loop_error")
             time.sleep(settings.CONTINUOUS_WORKER_IDLE_SLEEP)
             
