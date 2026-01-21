@@ -1,6 +1,5 @@
 """ Operações CRUD para produtos monitorados pelo sistema """
 
-import random
 from typing import List, Optional, Tuple
 
 from uuid import UUID
@@ -30,11 +29,15 @@ from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_price_history import PriceHistory
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.crud import crud_price_history
+from market_alert.crud import crud_competitor, crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.services.services_priority_queue import PriorityQueueService
-from market_alert.utils.interval_calculator_products import calculate_next_check_at, calculate_next_interval
+from market_alert.services.services_priority_queue_manager import (
+    enqueue_monitored_now,
+    remove_from_priority_queue,
+)
+from market_alert.utils.interval_calculator_products import calculate_next_check_at
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
@@ -86,17 +89,6 @@ def _different_price(previous_price: Decimal | float | int | str | None, current
     previous = _to_decimal(previous_price)
     current = _to_decimal(current_price)
     return previous != current
-
-def _compute_resume_window(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
-    """ Calcula janela curta para retomada aplicando jitter controlado """
-    base_time = reference or datetime.now(timezone.utc)
-    if base_time.tzinfo is None:
-        base_time = base_time.replace(tzinfo=timezone.utc)
-    
-    interval_seconds = calculate_next_interval(monitored, reference_time=base_time)
-    delay_seconds = min(interval_seconds, 5)
-    jitter_seconds = random.uniform(0, 5)
-    return base_time + timedelta(seconds=delay_seconds + jitter_seconds)
 
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
@@ -673,49 +665,101 @@ def get_monitored_product_by_id(db: Session, product_id: UUID) -> Optional[Monit
     )
 
 def pause_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
-    """ Pausa monitorado de forma idempotente garantindo lock curto """
-    lock_owner: str | None = None
-    try:
-        monitored = _ensure_monitored_access(db, monitored_id, user)
-        lock_owner = _acquire_monitored_lock(monitored_id)
+    """ Pausa monitorado de forma idempotente e sincroniza a fila contínua """
+    monitored = _ensure_monitored_access(db, monitored_id, user)
+    now = datetime.now(timezone.utc)
+    was_paused = bool(monitored.paused)
 
-        if monitored.paused:
-            db.commit()
-            db.refresh(monitored)
-            return monitored
-
-        now = datetime.now(timezone.utc)
+    if not was_paused:
         monitored.paused = True
         monitored.paused_at = now
-        db.commit()
-        db.refresh(monitored)
+
+    competitors_updated = crud_competitor.update_competitors_pause_state(
+        db,
+        monitored.id,
+        is_paused=True,
+    )
+
+    db.commit()
+    db.refresh(monitored)
+
+    if competitors_updated:
+        logger.info(
+            "competitors_paused",
+            monitored_id=str(monitored.id),
+            count=competitors_updated,
+        )
+
+    logger.info(
+        "monitored_pause_state_updated",
+        monitored_id=str(monitored.id),
+        paused_at=monitored.paused_at.isoformat() if monitored.paused_at else None,
+        user_id=str(user.id),
+        already_paused=was_paused,
+    )
+
+    if not was_paused:
         MONITORED_PAUSED_TOTAL.inc()
-        return monitored
-    finally:
-        if lock_owner:
-            release_product_lock(monitored_id, lock_owner)
+
+    try:
+        remove_from_priority_queue(monitored.id, source="user_paused")
+    except Exception as exc:
+        #Evita bloquear a pausa quando Redis estiver indisponível
+        logger.warning(
+            "monitored_priority_queue_remove_failed",
+            monitored_id=str(monitored.id),
+            error=str(exc),
+        )
+
+    return monitored
 
 def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
-    """ Retoma monitorado recalculando janela de rechecagem com jitter """
-    lock_owner: str | None = None
+    """ Retoma monitorado, recalcula janela e reativa concorrentes """
+    monitored = _ensure_monitored_access(db, monitored_id, user)
+    reference = datetime.now(timezone.utc)
+    was_paused = bool(monitored.paused)
+    monitored.paused = False
+    monitored.paused_at = None
+    monitored.next_check_at = calculate_next_check_at(monitored, collected_at=reference)
+
+    competitors_updated = crud_competitor.update_competitors_pause_state(
+        db,
+        monitored.id,
+        is_paused=False,
+    )
+
+    db.commit()
+    db.refresh(monitored)
+
+    logger.info(
+        "monitored_resume_state_updated",
+        monitored_id=str(monitored.id),
+        next_check_at=monitored.next_check_at.isoformat() if monitored.next_check_at else None,
+        user_id=str(user.id),
+        was_paused=was_paused,
+    )
+
+    if was_paused:
+        MONITORED_RESUMED_TOTAL.inc()
+
+    if competitors_updated:
+        logger.info(
+            "competitors_resumed",
+            monitored_id=str(monitored.id),
+            count=competitors_updated,
+        )
+    
     try:
-        monitored = _ensure_monitored_access(db, monitored_id, user)
-        lock_owner = _acquire_monitored_lock(monitored_id)
-
-        was_paused = bool(monitored.paused)
-        reference = datetime.now(timezone.utc)
-        monitored.paused = False
-        monitored.paused_at = None
-        monitored.next_check_at = _compute_resume_window(monitored, reference=reference)
-
-        db.commit()
-        db.refresh(monitored)
-        if was_paused:
-            MONITORED_RESUMED_TOTAL.inc()
-        return monitored
-    finally:
-        if lock_owner:
-            release_product_lock(monitored_id, lock_owner)
+        enqueue_monitored_now(monitored.id, source="user_resumed")
+    except Exception as exc:
+        #Mantém a retomada mesmo que o Redis não responda
+        logger.warning(
+            "monitored_resume_queue_enqueue_failed",
+            monitored_id=str(monitored.id),
+            error=str(exc),
+        )
+        
+    return monitored
 
 def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
     """ Remove monitorado utilizando sessão dedicada para isolar a transação """

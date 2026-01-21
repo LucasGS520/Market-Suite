@@ -71,6 +71,21 @@ def get_competitor_by_id(db: Session, competitor_id: UUID) -> CompetitorProduct 
         .first()
     )
 
+def update_competitors_pause_state(
+    db: Session,
+    monitored_product_id: UUID,
+    *,
+    is_paused: bool,
+) -> int:
+    """ Atualiza o estado de pausa de concorrentes vinculados a um monitorado """
+    #Mantém concorrentes sincronizados com o monitorado sem alterar o fluxo de coleta
+    updated = (
+        db.query(CompetitorProduct)
+        .filter(CompetitorProduct.monitored_product_id == monitored_product_id)
+        .update({CompetitorProduct.is_paused: is_paused}, synchronize_session=False)
+    )
+    return int(updated or 0)
+
 def _derive_competitor_name_from_url(product_url: str) -> str:
     """Gera um nome provisório a partir da URL para preencher o cadastro pendente."""
     parsed = urlparse(product_url)
