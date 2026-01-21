@@ -24,6 +24,7 @@ from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_SIZE,
     PRIORITY_QUEUE_STABILITY_TOTAL,
 )
+from shared.metrics.metrics_products import COMPETITOR_CHANGE_AFFETCTED_STABILITY_TOTAL
 from shared.metrics.metrics_scraper import MONITORED_SKIPPED_PAUSED_TOTAL
 from shared.utils.redis_client import is_scraping_suspended
 
@@ -124,7 +125,10 @@ def _collect_group(
                 include_paused=False,
                 include_inactive=False,
             )
+            competitor_change_detected = False
             for competitor in competitors:
+                db.refresh(competitor)
+                previous_change_at = competitor.last_price_change_at
                 competitor_payload = build_competitor_payload(
                     competitor,
                     user_id=monitored.user_id,
@@ -141,6 +145,9 @@ def _collect_group(
                         trace_id=trace_id,
                     ),
                 )
+                db.refresh(competitor)
+                if competitor.last_price_change_at != previous_change_at:
+                    competitor_change_detected = True
 
             group_finished_at = _utc_now()
             refreshed = get_monitored_product_by_id(db, monitored.id)
@@ -150,10 +157,20 @@ def _collect_group(
                     db,
                     refreshed.id,
                 )
-                refreshed.stability_score = calculate_stability_score(
-                    refreshed,
-                    reference_time=group_finished_at,
-                )
+                if competitor_change_detected:
+                    #Reduzimos estabilidade para acelerar novas coletas após mudanças do concorrente.
+                    refreshed.stability_score = STABILITY_UNSTABLE
+                    COMPETITOR_CHANGE_AFFETCTED_STABILITY_TOTAL.inc()
+                    logger.info(
+                        "monitored_stability_reset_by_competitor",
+                        monitored_id=str(refreshed.id),
+                        collected_at=group_finished_at.isoformat(),
+                    )
+                else:
+                    refreshed.stability_score = calculate_stability_score(
+                        refreshed,
+                        reference_time=group_finished_at,
+                    )
                 refreshed.next_check_at = calculate_next_check_at(
                     refreshed,
                     collected_at=group_finished_at,

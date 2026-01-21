@@ -44,6 +44,25 @@ def _different_price(previous_price: Decimal | float | int | str | None, current
     current = _to_decimal(current_price)
     return previous != current
 
+def _update_competitor_price_change_tracking(
+    competitor: CompetitorProduct,
+    new_price: Decimal | None,
+    old_price: Decimal | None,
+    collected_at: datetime,
+) -> None:
+    """ Atualiza o registro de mudança de preço do concorrente quando necessário """
+    collected_reference = collected_at.astimezone(timezone.utc) if collected_at.tzinfo else collected_at.replace(tzinfo=timezone.utc)
+    if _different_price(old_price, new_price):
+        competitor.last_price_change_at = collected_reference
+        logger.info(
+            "competitor_price_change_detected",
+            competitor_id=str(competitor.id),
+            monitored_id=str(competitor.monitored_product_id),
+            old_price=str(old_price) if old_price is not None else None,
+            new_price=str(new_price) if new_price is not None else None,
+            collected_at=collected_reference.isoformat(),
+        )
+
 def get_competitor_by_monitored_and_url(
     db: Session,
     monitored_product_id: UUID,
@@ -290,6 +309,13 @@ def create_or_update_competitor_product_scraped(
                     last_checked,
                 )
 
+            _update_competitor_price_change_tracking(
+                existing,
+                new_price=resolved_price,
+                old_price=previous_price,
+                collected_at=collected_reference,
+            )
+
             db.commit()
         except Exception:
             #Rollback evita sessões sujas quando o chamador controla a transação externamente
@@ -338,6 +364,12 @@ def create_or_update_competitor_product_scraped(
         availability=availability,
         last_status=last_status,
         )
+    _update_competitor_price_change_tracking(
+        new,
+        new_price=resolved_price,
+        old_price=None,
+        collected_at=collected_at or last_checked
+    )
     try:
         db.add(new)
         db.flush()

@@ -37,7 +37,7 @@ from market_alert.services.services_priority_queue_manager import (
     enqueue_monitored_now,
     remove_from_priority_queue,
 )
-from market_alert.utils.interval_calculator_products import calculate_next_check_at
+from market_alert.utils.interval_calculator_products import calculate_next_check_at, STABILITY_UNSTABLE
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
@@ -89,6 +89,28 @@ def _different_price(previous_price: Decimal | float | int | str | None, current
     previous = _to_decimal(previous_price)
     current = _to_decimal(current_price)
     return previous != current
+
+def _update_price_change_tracking(
+    monitored: MonitoredProduct,
+    new_price: Decimal | None,
+    old_price: Decimal | None,
+    collected_at: datetime,
+) -> None:
+    """ Atualiza rastreio de mudança de preço e marca coleta em grupo """
+    collected_reference = collected_at.astimezone(timezone.utc) if collected_at.tzinfo else collected_at.replace(tzinfo=timezone.utc)
+    monitored.group_collected_at = collected_reference
+
+    if _different_price(old_price, new_price):
+        #Resetamos estabilidade para acelerar rechecagem após mudança de preço
+        monitored.last_price_change_at = collected_reference
+        monitored.stability_score = STABILITY_UNSTABLE
+        logger.info(
+            "monitored_price_change_detected",
+            monitored_id=str(monitored.id),
+            old_price=str(old_price) if old_price is not None else None,
+            new_price=str(new_price) if new_price is not None else None,
+            collected_at=collected_reference.isoformat(),
+        )
 
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
@@ -354,6 +376,13 @@ def create_or_update_monitored_product_scraped(
                     last_checked,
                 )
 
+            _update_price_change_tracking(
+                existing,
+                new_price=resolved_price,
+                old_price=previous_price,
+                collected_at=collected_reference,
+            )
+
             db.commit()
         except Exception:
             #Rollback evita manter sessão suja em falhas de gravação e previne transações aninhadas
@@ -404,6 +433,12 @@ def create_or_update_monitored_product_scraped(
         last_status=last_status,
     )
     new.next_check_at = calculate_next_check_at(new, collected_at=last_checked)
+    _update_price_change_tracking(
+        new,
+        new_price=resolved_price,
+        old_price=None,
+        collected_at=collected_at or last_checked,
+    )
     
     try:
         db.add(new)
@@ -758,7 +793,7 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
             monitored_id=str(monitored.id),
             error=str(exc),
         )
-        
+
     return monitored
 
 def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
