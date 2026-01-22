@@ -498,7 +498,48 @@ const ProductDetail: React.FC = () => {
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
   const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
+  const latestPrice = summary?.monitored_price ?? product.current_price;
+  const alertsCount = 
+    typeof summary?.alerts_count === 'number'
+      ? summary.alerts_count
+      : summaryAlerts.length > 0
+        ? summaryAlerts.length
+        : product.alerts_sent ?? null;
   const actionBusy = pauseMonitoredMutation.isPending || resumeMonitoredMutation.isPending || deleteMonitoredMutation.isPending;
+
+  /**
+   * Resolve rótulo de estabilidade para a UI, mantendo consistência com o backend.
+   */
+  const resolveStabilityLabel = (stability?: MonitoredProduct['stability']): string => {
+    const stabilityMap: Record<NonNullable<MonitoredProduct['stability']>, string> = {
+      unstable: 'Instável',
+      stable: 'Estável',
+      very_stable: 'Muito Estável',
+    };
+
+    if (!stability) {
+      return '—';
+    }
+
+    return stabilityMap[stability] ?? '—';
+  };
+
+  /**
+   * Combina tempo relativo e preço para destacar a última mudança de preço.
+   */
+  const renderLastPriceChange = (): string => {
+    const relativeLabel = formatRelativeTime(lastPriceChangeAt);
+    if (relativeLabel === '—') {
+      return '—';
+    }
+
+    const priceLabel = renderSummaryCurrency(latestPrice);
+    if (priceLabel === '—') {
+      return relativeLabel;
+    }
+
+    return `${relativeLabel} (${priceLabel})`;
+  };
 
   return (
     <Layout>
@@ -1042,9 +1083,7 @@ const ProductDetail: React.FC = () => {
                     <Typography variant="body2" color="text.secondary">
                       Última mudança de preço
                     </Typography>
-                    <Typography variant="body1">
-                      {formatRelativeTime(lastPriceChangeAt)}
-                    </Typography>
+                    <Typography variant="body1">{renderLastPriceChange()}</Typography>
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
@@ -1054,9 +1093,15 @@ const ProductDetail: React.FC = () => {
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
+                      Status
+                    </Typography>
+                    <Typography variant="body1">{resolveStabilityLabel(product.stability)}</Typography>
+                  </Box>
+                  <Box display="flex" justifyContent="space-between">
+                    <Typography variant="body2" color="text.secondary">
                       Alertas enviados
                     </Typography>
-                    <Typography variant="body1">{product.alerts_sent ?? '—'}</Typography>
+                    <Typography variant="body1">{alertsCount ?? '—'}</Typography>
                   </Box>
                 </Box>                
               </CardContent>
