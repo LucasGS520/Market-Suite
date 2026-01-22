@@ -10,6 +10,7 @@ import {
   Button,
   Container,
   Paper,
+  Stack,
   TextField,
   Typography,
 } from '@mui/material';
@@ -30,6 +31,9 @@ const VerifyPhone: React.FC = () => {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
+  /**
+   * Envia o OTP de verificação e mantém o usuário autenticado durante o fluxo
+   */
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
@@ -57,6 +61,9 @@ const VerifyPhone: React.FC = () => {
     }
   };
 
+  /**
+   * Reenvia o código de verificação por telefone quando o usuário está autenticado
+   */
   const handleResend = async () => {
     try {
       await authService.requestPhoneOtp();
@@ -138,15 +145,28 @@ const VerifyPhone: React.FC = () => {
             )}
           </Box>
 
-          <Button
-            component={RouterLink}
-            to="/login"
-            variant="text"
-            fullWidth
-            sx={{ mt: 2 }}
-          >
-            Voltar para login
-          </Button>
+          <Alert severity="warning" sx={{ mt: 3 }}>
+            Você pode continuar a navegação sem verificação, mas alguns recursos podem ficar limitados até concluir a validação.
+          </Alert>
+
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            <Button
+              component={RouterLink}
+              to="/dashboard"
+              variant="contained"
+              fullWidth
+            >
+              Voltar ao Dashboard
+            </Button>
+            <Button
+              component={RouterLink}
+              to="/login"
+              variant="text"
+              fullWidth
+            >
+              Voltar para Login
+            </Button>
+          </Stack>
         </Paper>
       </Box>
     </Container>

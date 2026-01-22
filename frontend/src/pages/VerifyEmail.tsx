@@ -4,11 +4,14 @@
 
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, Link as RouterLink } from 'react-router-dom';
-import { Alert, Box, Button, CircularProgress, Container, Paper, Typography } from '@mui/material';
+import { Alert, Box, Button, CircularProgress, Container, Paper, Stack, Typography } from '@mui/material';
 import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { ApiErrorResponse } from '../types';
 
+/**
+ * Página que confirma o token de verificação de email e mantém o usuário autenticado
+ */
 const VerifyEmail: React.FC = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
@@ -22,6 +25,9 @@ const VerifyEmail: React.FC = () => {
       return;
     }
 
+    /**
+     * Valida o token recebido pela URL sem invalidar a sessão atual.
+     */
     const verifyToken = async () => {
       setStatus('loading');
       try {
@@ -70,14 +76,28 @@ const VerifyEmail: React.FC = () => {
                 </Alert>
             )}
 
-            <Button
-              component={RouterLink}
-              to="/login"
-              variant="contained"
-              fullWidth
-            >
-              Ir para Login
-            </Button>
+            <Alert severity="warning" sx={{ mb: 3 }}>
+              Você pode continuar a navegação sem verificação, mas alguns recursos podem ficar limitados até concluir a validação.
+            </Alert>
+
+            <Stack spacing={2}>
+              <Button
+                component={RouterLink}
+                to="/dashboard"
+                variant="contained"
+                fullWidth
+              >
+                Voltar ao Dashboard
+              </Button>
+              <Button
+                component={RouterLink}
+                to="/login"
+                variant="text"
+                fullWidth
+              >
+                Ir para Login
+              </Button>
+            </Stack>
         </Paper>
       </Box>
     </Container>
