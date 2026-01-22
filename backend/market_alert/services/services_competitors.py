@@ -26,6 +26,7 @@ from market_alert.schemas.schemas_products import CompetitorsListResponse
 from market_alert.services.services_products import build_competitor_response
 from market_alert.services.services_access import ensure_user_can_access_monitored
 from market_alert.services.services_priority_queue import PriorityQueueService
+from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import calculate_next_check_at
 from market_alert.core.config_alert import settings
@@ -241,6 +242,22 @@ def create_competitor_scrape_request(
                     monitored_id=str(monitored_product.id),
                     source="competitor_create",
                 )
+
+        try:
+            #Dispara coleta inicial do concorrente para evitar longas filas de pendência
+            enqueue_competitor_collection(
+                pending,
+                user_id=monitored_product.user_id,
+                trace_id=context.get("trace_id"),
+            )
+        except Exception:
+            #Não bloqueia o fluxo principal caso a fila de scraping esteja indisponível
+            logger.exception(
+                "competitor_initial_enqueue_failed",
+                competitor_id=str(pending.id),
+                monitored_id=str(monitored_product.id),
+                **context,
+            )
 
     logger.info(
         "competitor_scrape_scheduled",

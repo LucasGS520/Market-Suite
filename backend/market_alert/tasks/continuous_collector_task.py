@@ -134,11 +134,12 @@ def _collect_group(
     *,
     monitored: MonitoredProduct,
     enqueued_at: datetime | None,
-) -> str:
-    """ Coleta monitorado e concorrentes em sequência retornando desfecho """
+) -> tuple[str, datetime | None]:
+    """ Coleta monitorado e concorrentes e retorna desfecho e próxima rechecagem """
     trace_id = str(uuid4())
     group_started_at = _utc_now()
     group_started_perf = time.perf_counter()
+    next_check_at: datetime | None = None
 
     if monitored.paused or monitored.status in {MonitoredStatus.failed}:
         #Evita coletas em itens pausados para respeitar contrato de pausa
@@ -147,7 +148,7 @@ def _collect_group(
             monitored_id=str(monitored.id),
             status=monitored.status,
         )
-        return "skipped_paused"
+        return "skipped_paused", None
     
     logger.info(
         "continuous_group_started",
@@ -257,6 +258,7 @@ def _collect_group(
                     refreshed,
                     collected_at=group_finished_at,
                 )
+                next_check_at = refreshed.next_check_at
 
     if monitored_result and monitored_result.status:
         PRIORITY_QUEUE_PROCESSED_TOTAL.labels(source="continuous", outcome=monitored_result.status).inc()
@@ -292,19 +294,21 @@ def _collect_group(
         trace_id=trace_id,
     )
 
-    return outcome
+    return outcome, next_check_at
 
 def _requeue_monitored(
     *,
     monitored: MonitoredProduct,
+    next_check_at: datetime | None = None,
     queue_service: PriorityQueueService,
 ) -> None:
     """ Reenfileira monitorado e registra falha caso Redis esteja indisponível """
-    next_check_at = monitored.next_check_at or _utc_now()
+    #Usa a janela calculada pela coleta para garantir o reenqueue correto
+    resolved_next_check_at = next_check_at or monitored.next_check_at or _utc_now()
     #Centraliza o reenqueue para registrar métricas e logs padronizados
     if enqueue_monitored_at(
         monitored.id,
-        next_check_at,
+        resolved_next_check_at,
         source="continuous_worker",
         queue_service=queue_service,
     ):
@@ -313,7 +317,7 @@ def _requeue_monitored(
     logger.error(
         "continuous_requeue_failed",
         monitored_id=str(monitored.id),
-        next_check_at=next_check_at.isoformat(),
+        next_check_at=resolved_next_check_at.isoformat(),
     )
 
 def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
@@ -408,12 +412,12 @@ def run_continuous_collector(self) -> None:
                 
                 enqueued_at = queue_service.get_enqueued_at(next_id)
                 try:
-                    outcome = _collect_group(
+                    outcome, next_check_at = _collect_group(
                         monitored=monitored,
                         enqueued_at=enqueued_at,
                     )
                 except Exception:
-                    outcome = "error"
+                    outcome, next_check_at = "error", None
                     PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
                     bound_logger.exception(
                         "continuous_group_failed",
@@ -423,14 +427,11 @@ def run_continuous_collector(self) -> None:
                 processed_ids.append(str(monitored.id))
                 empty_streak = 0
 
-                with SessionLocal() as db:
-                    refreshed = get_monitored_product_by_id(db, monitored.id)
-                    if refreshed is None:
-                        continue
-                    _requeue_monitored(
-                        monitored=refreshed,
-                        queue_service=queue_service,
-                    )
+                _requeue_monitored(
+                    monitored=monitored,
+                    next_check_at=next_check_at,
+                    queue_service=queue_service,
+                )
 
                 bound_logger.info(
                     "continuous_item_processed",
