@@ -334,7 +334,7 @@ def collect_product(
                                 user_id=user_uuid or monitored_id or competitor_id,
                                 url=url,
                                 payload=payload_model,
-                                colllected_at=collected_at,
+                                collected_at=collected_at,
                             )
                     else:
                         monitored_row: MonitoredProduct | None = None

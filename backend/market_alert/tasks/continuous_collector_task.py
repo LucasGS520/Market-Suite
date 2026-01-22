@@ -25,7 +25,7 @@ from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_SIZE,
     PRIORITY_QUEUE_STABILITY_TOTAL,
 )
-from shared.metrics.metrics_products import COMPETITOR_CHANGE_AFFETCTED_STABILITY_TOTAL
+from shared.metrics.metrics_products import COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL
 from shared.metrics.metrics_scraper import MONITORED_SKIPPED_PAUSED_TOTAL
 from shared.utils.redis_client import is_scraping_suspended
 
@@ -241,7 +241,7 @@ def _collect_group(
                 if competitor_change_detected:
                     #Reduzimos estabilidade para acelerar novas coletas após mudanças do concorrente.
                     refreshed.stability_score = STABILITY_UNSTABLE
-                    COMPETITOR_CHANGE_AFFETCTED_STABILITY_TOTAL.inc()
+                    COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL.inc()
                     logger.info(
                         "monitored_stability_reset_by_competitor",
                         monitored_id=str(refreshed.id),

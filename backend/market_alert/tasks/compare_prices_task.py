@@ -216,7 +216,8 @@ def compare_prices_task(
                     "event_type": event_type.value,
                 }
                 notification_ids: list[str] = []
-                with db_notifications.begin():
+                try:
+                    #Evita transação aninhada: SessionLocal já inicia uma transação implícita
                     event = create_event_log(
                         db_notifications,
                         event_type=event_type,
@@ -277,6 +278,10 @@ def compare_prices_task(
                                 notified_at=datetime.now(timezone.utc),
                                 commit=False,
                             )
+                    db_notifications.commit()
+                except Exception:
+                    db_notifications.rollback()
+                    raise
 
                 if notification_ids:
                     celery_app.send_task(
