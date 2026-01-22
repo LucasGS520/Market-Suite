@@ -24,8 +24,8 @@ from shared.utils.redis_client import get_redis_client
 logger = structlog.get_logger(__name__)
 _ENV_NAMESPACE: Final = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip()
 _LOCK_PREFIX: Final = f"lock:{_ENV_NAMESPACE}:" if _ENV_NAMESPACE else "lock:"
-_DEFAULT_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "60"))
-_MIN_SAFE_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "45"))
+_DEFAULT_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "30"))
+_MIN_SAFE_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "30"))
 
 _RELEASE_SCRIPT: Final = """
 if redis.call('get', KEYS[1]) == ARGV[1] then

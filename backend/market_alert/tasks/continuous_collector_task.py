@@ -37,6 +37,7 @@ from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, build_competitor_payload
 from market_alert.services.services_priority_queue import PriorityQueueService
+from market_alert.services.services_priority_queue_manager import enqueue_monitored_at
 from market_alert.tasks.collector_product_task import collect_product
 from market_alert.utils.interval_calculator_products import (
     calculate_next_check_at,
@@ -300,9 +301,13 @@ def _requeue_monitored(
 ) -> None:
     """ Reenfileira monitorado e registra falha caso Redis esteja indisponível """
     next_check_at = monitored.next_check_at or _utc_now()
-    enqueued = queue_service.enqueue(str(monitored.id), next_check_at)
-    if enqueued:
-        queue_service.set_enqueued_at(str(monitored.id), _utc_now())
+    #Centraliza o reenqueue para registrar métricas e logs padronizados
+    if enqueue_monitored_at(
+        monitored.id,
+        next_check_at,
+        source="continuous_worker",
+        queue_service=queue_service,
+    ):
         return
     
     logger.error(
