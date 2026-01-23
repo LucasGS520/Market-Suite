@@ -121,6 +121,7 @@ docker compose up -d api market_scraper celery-worker celery-worker-monitor cele
 
 - Interrompa com `docker compose down` (utilize `docker compose down -v` para remover volumes, se necessário).
 - Variáveis comuns residem em `.env.common`; arquivos específicos estão em `backend/market_alert/.env.market_alert`, `backend/market_scraper/.env.market_scraper` e `frontend/.env` (quando aplicável).
+- Persistência do Redis: o serviço usa AOF + smapshots e grava em `redis-data`, garantindo fila e cache entre reinícios. Remover volumes (`docker compose down -v`) apaga o estado persistido. Em ambiente com disco limitado ou alto volume de gravações, considere o impacto de I/O e monitore espaço para evitar indisponibilidade por falta de armazenamento.
 
 ### Ambiente local (sem Docker)
 #### Backend

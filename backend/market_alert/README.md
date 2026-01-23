@@ -83,6 +83,9 @@ market_alert/
 ## Configuração
 Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e podem ser sobrescritas via `market_alert/.env.market_alert`.
 
+### Persistência do Redis
+O Redis do `docker-compose.yml` utiliza AOF com snapshots para manter filas Celery e dados de cache entre reinícios. O volume `redis-data` armazena o diretório `/data`, garantindo retenção em restarts comuns. Remover volumes com `docker compose down -v` apaga o estado persistido, e uso intenso pode aumentar I/O e exigir monitoramento de disco para evitar degradação ou indisponibilidade por falta de espaço.
+
 ### Cookies de refresh em ambiente local
 - Para frontend rodando em outro host/porta HTTP, defina `REFRESH_TOKEN_COOKIE_SECURE=0` e `REFRESH_TOKEN_COOKIE_SAMESITE=none`.
 - Ajuste `REFRESH_TOKEN_COOKIE_NAME` e `REFRESH_TOKEN_COOKIE_PATH` apenas se houver necessidade de múltiplos ambientes ou rotas específicas.
