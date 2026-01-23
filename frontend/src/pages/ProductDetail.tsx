@@ -753,17 +753,17 @@ const ProductDetail: React.FC = () => {
                     <Table sx={{ tableLayout: 'fixed' }}>
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ maxWidth: 420, width: 420 }}>Produto</TableCell>
-                          <TableCell align="right" sx={{ width: 160 }}>
+                          <TableCell sx={{ width: '40%' }}>Produto</TableCell>
+                          <TableCell align="right" sx={{ width: '15%' }}>
                             Preço
                           </TableCell>
-                          <TableCell align="center" sx={{ width: 180 }}>
+                          <TableCell align="center" sx={{ width: '20%' }}>
                             Disponibilidade
                           </TableCell>
-                          <TableCell align="center" sx={{ width: 140 }}>
+                          <TableCell align="center" sx={{ width: '13%' }}>
                             Status
                           </TableCell>
-                          <TableCell align="center" sx={{ width: 160 }}>
+                          <TableCell align="center" sx={{ width: '12%' }}>
                             Ações
                           </TableCell>
                         </TableRow>
@@ -795,7 +795,7 @@ const ProductDetail: React.FC = () => {
                               text={resolvedName}
                               variant="body2"
                               lines={2}
-                              maxWidth={380}
+                              maxWidth={280}
                               tooltip={false}
                               sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
                             />
@@ -819,7 +819,7 @@ const ProductDetail: React.FC = () => {
                                   : undefined,
                               }}
                             >
-                              <TableCell sx={{ maxWidth: 420, width: 420 }}>
+                              <TableCell sx={{ width: '40%' }}>
                                 <Box display="flex" alignItems="center" gap={1}>
                                   {competitor.thumbnail && (
                                     <Box
@@ -829,13 +829,13 @@ const ProductDetail: React.FC = () => {
                                       sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
                                     />
                                   )}
-                                  <Box sx={{ maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
                                     {wrappedName}
                                     <TruncatedText
                                       text={new URL(competitor.url).hostname}
                                       variant="caption"
                                       color="text.secondary"
-                                      maxWidth={360}
+                                      maxWidth={280}
                                       tooltip={true}
                                     />
                                     {isPendingName && (
@@ -843,14 +843,14 @@ const ProductDetail: React.FC = () => {
                                         text="Coletando nome..."
                                         variant="caption"
                                         color="text.secondary"
-                                        maxWidth={360}
+                                        maxWidth={280}
                                         tooltip={false}
                                       />
                                     )}
                                   </Box>
                                 </Box>
                               </TableCell>
-                              <TableCell align="right" sx={{ verticalAlign: 'middle', width: 160 }}>
+                              <TableCell align="right" sx={{ verticalAlign: 'middle', width: '15%' }}>
                                 {renderPrice(
                                   competitor.current_price,
                                   competitor.availability,
