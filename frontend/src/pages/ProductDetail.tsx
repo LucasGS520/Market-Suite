@@ -496,9 +496,8 @@ const ProductDetail: React.FC = () => {
   const detailCardOpacity = monitoringPaused ? 0.5 : monitoredStatus === 'inactive' ? 0.8 : 1;
   const competitorActionsBlocked = monitoringPaused;
   // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
-  const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
+  const lastCollectedAt = product.last_scraped_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
-  const latestPrice = summary?.monitored_price ?? product.current_price;
   const alertsCount = 
     typeof summary?.alerts_count === 'number'
       ? summary.alerts_count
@@ -525,20 +524,15 @@ const ProductDetail: React.FC = () => {
   };
 
   /**
-   * Combina tempo relativo e preço para destacar a última mudança de preço.
+   * Exibe o tempo relativo da última mudança de preço com fallback seguro
    */
   const renderLastPriceChange = (): string => {
     const relativeLabel = formatRelativeTime(lastPriceChangeAt);
-    if (relativeLabel === '—') {
+    if (!relativeLabel || relativeLabel === '—') {
       return '—';
     }
 
-    const priceLabel = renderSummaryCurrency(latestPrice);
-    if (priceLabel === '—') {
-      return relativeLabel;
-    }
-
-    return `${relativeLabel} (${priceLabel})`;
+    return relativeLabel;
   };
 
   return (
