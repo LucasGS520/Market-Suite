@@ -22,6 +22,7 @@ from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_LOOP_ERRORS_TOTAL,
     PRIORITY_QUEUE_PROCESSED_TOTAL,
     PRIORITY_QUEUE_READY_TOTAL,
+    PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL,
     PRIORITY_QUEUE_SIZE,
     PRIORITY_QUEUE_STABILITY_TOTAL,
 )
@@ -49,6 +50,7 @@ from market_alert.utils.interval_calculator_products import (
 
 
 logger = structlog.get_logger("continuous_collector_task")
+EMPTY_STREAK_RECONCILE_THRESHOLD = 12
 
 def _utc_now() -> datetime:
     """ Retorna timestamp em UTC sem microssegundos para logs e métricas """
@@ -97,7 +99,7 @@ def _update_queue_metrics(
 ) -> None:
     """ Atualiza métricas básicas da fila de prioridade """
     resolved_size = queue_size if queue_size is not None else queue_service.size()
-    resolved_ready = ready_total if ready_total is not None else queue_service.ready_count()    
+    resolved_ready = ready_total if ready_total is not None else queue_service.ready_count()
     PRIORITY_QUEUE_SIZE.set(resolved_size)
     PRIORITY_QUEUE_READY_TOTAL.set(resolved_ready)
 
@@ -120,6 +122,39 @@ def _calculate_idle_sleep(empty_streak: int, queue_size: int) -> float:
     if empty_streak == 3:
         return max(adaptive_sleep, 5.0)
     return float(max(adaptive_sleep, min(30, 5 * (empty_streak - 2))))
+
+def _maybe_trigger_reconciliation(
+    *,
+    empty_streak: int,
+    threshold: int,
+    bound_logger: structlog.BoundLogger,
+) -> bool:
+    """ Dispara a reconciliação da fila quando a ociosidade supera o limiar """
+    if empty_streak <= threshold:
+        return False
+    try:
+        celery_app.send_task(
+            "market_alert.tasks.priority_queue_tasks.reconcile_priority_queue",
+            queue="monitor",
+        )
+        PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL.labels(
+            source="continuous_worker",
+            reason="empty_streak",
+        ).inc()
+        bound_logger.info(
+            "continuous_reconcile_triggered",
+            empty_streak=empty_streak,
+            threshold=threshold,
+        )
+        return True
+    except Exception:
+        #Mantém o loop vivo ao lidar com falhas de disparo da reconciliação
+        bound_logger.exception(
+            "continuous_reconcile_trigger_failed",
+            empty_streak=empty_streak,
+            threshold=threshold,
+        )
+        return False
 
 def _should_abort(task_request) -> bool:
     """ Verifica se a task foi sinalizada para abortar """
@@ -348,6 +383,7 @@ def run_continuous_collector(self) -> None:
     batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
     processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
     empty_streak = 0
+    reconcile_triggered = False
 
     while True:
         if _should_abort(getattr(self, "request", None)):
@@ -426,6 +462,7 @@ def run_continuous_collector(self) -> None:
 
                 processed_ids.append(str(monitored.id))
                 empty_streak = 0
+                reconcile_triggered = False
 
                 _requeue_monitored(
                     monitored=monitored,
@@ -447,6 +484,13 @@ def run_continuous_collector(self) -> None:
                 time.sleep(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
             else:
                 empty_streak += 1
+                if not reconcile_triggered:
+                    #Garante reconciliação somente uma vez por streak ocioso
+                    reconcile_triggered = _maybe_trigger_reconciliation(
+                        empty_streak=empty_streak,
+                        threshold=EMPTY_STREAK_RECONCILE_THRESHOLD,
+                        bound_logger=bound_logger,
+                    )
                 idle_sleep = _calculate_idle_sleep(empty_streak, queue_size)
                 _update_queue_metrics(
                     queue_service,
