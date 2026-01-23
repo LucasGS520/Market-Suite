@@ -348,8 +348,8 @@ def _requeue_monitored(
     """ Reenfileira monitorado e registra falha caso Redis esteja indisponível """
     #Usa a janela calculada pela coleta para garantir o reenqueue correto
     now = _utc_now()
-    reoslved_next_check_at = next_check_at or monitored.next_check_at or now
-    if reoslved_next_check_at < now:
+    resolved_next_check_at = next_check_at or monitored.next_check_at or now
+    if resolved_next_check_at < now:
         #Evita reenqueue com horário no passado para impedir loops ociosos
         resolved_next_check_at = now
     #Centraliza o reenqueue para registrar métricas e logs padronizados
