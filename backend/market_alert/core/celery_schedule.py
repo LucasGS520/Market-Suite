@@ -20,6 +20,7 @@ TASK_MODULES = [
     "market_alert.tasks.notifications_enqueue_task",
     "market_alert.tasks.send_notification_task",
     "market_alert.tasks.verification_tasks",
+    "market_alert.tasks.priority_queue_tasks",
 ]
 
 #Exchanges separados para scraping e monitoramento
@@ -63,6 +64,10 @@ TASK_ROUTES = {
     "market_alert.tasks.verification_tasks.send_phone_otp": {
         "queue": "notifications",
         "routing_key": "notifications",
+    },
+    "market_alert.tasks.priority_queue_tasks.reconcile_priority_queue": {
+        "queue": "monitor",
+        "routing_key": "monitor",
     },
 }
 

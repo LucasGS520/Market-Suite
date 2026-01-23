@@ -28,6 +28,7 @@ from market_alert.core.celery_schedule import (
 
 SERVICE_LABEL = "market_alert_worker"
 CONTINUOUS_COLLECTOR_AUTOSTART_KEY = "market_alert:continuous_collector:autostart"
+PRIORITY_QUEUE_RECONCILE_AUTOSTART_KEY = "market_alert:priority_queue:reconcile:autostart"
 NOISY_EVENT_NAMES = {
     "channel_vars_missing",
     "collected_celery_metrics",
@@ -114,6 +115,11 @@ def _continuous_collector_autostart_enabled() -> bool:
     flag = os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART", "0").strip().lower()
     return flag in {"1", "true", "yes"}
 
+def _priority_queue_reconcile_autostart_enabled() -> bool:
+    """ Determina se a reconciliação da fila de prioridade inicia no boot """
+    flag = os.getenv("PRIORITY_QUEUE_RECONCILE_AUTOSTART", "1").strip().lower()
+    return flag in {"1", "true", "yes"}
+
 def _request_continuous_collector_start() -> None:
     """ Dispara a task contínua apenas uma vez quando habilitada por ambiente """
     if not _continuous_collector_autostart_enabled():
@@ -141,6 +147,34 @@ def _request_continuous_collector_start() -> None:
         logger.info("continuous_autostart_triggered")
     except Exception:
         logger.exception("continuous_autostart_failed")
+
+def _request_priority_queue_reconcile_start() -> None:
+    """ Dispara a task de reconciliação da fila no boot do worker """
+    if not _priority_queue_reconcile_autostart_enabled():
+        return
+    
+    ttl_seconds = int(os.getenv("PRIORITY_QUEUE_RECONCILE_AUTOSTART_TTL", "300"))
+    lock_result = set_key_with_ttl(
+        PRIORITY_QUEUE_RECONCILE_AUTOSTART_KEY,
+        value="1",
+        ttl_seconds=ttl_seconds,
+        only_if_absent=True,
+    )
+    if lock_result is False:
+        logger.info("priority_queue_reconcile_autostart_skipped", reason="aleady_running")
+        return
+    if lock_result is None:
+        #Mantém tentativa de disparo mesmo sem lock em Redis
+        logger.warning("priority_queue_reconcile_lock_unavailable")
+
+    try:
+        celery_app.send_task(
+            "market_alert.tasks.priority_queue_tasks.reconcile_priority_queue",
+            queue="monitor",
+        )
+        logger.info("priority_queue_reconcile_autostart_triggered")
+    except Exception:
+        logger.exception("priority_queue_reconcile_autostart_failed")
 
 def _force_import_task_modules() -> None:
     """ Garante importação explícita dos módulos de tasks registrados
@@ -185,6 +219,7 @@ def _start_prometheus_server(**kwargs):
     #Servidor de métricas Prometheus
     start_http_server(port=8002, addr="0.0.0.0")
     _request_continuous_collector_start()
+    _request_priority_queue_reconcile_start()
 
 @task_success.connect
 def handle_task_success(sender=None, **kwargs):

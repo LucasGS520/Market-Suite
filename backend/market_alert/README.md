@@ -70,6 +70,7 @@ market_alert/
 - **Tasks de destaque:**
   - `tasks.collector_product_task.collect_product_task`
   - `tasks.continuous_collector_task.run_continuous_collector`
+  - `task.priority_queue_tasks.reconcile_priority_queue`
   - `tasks.compare_prices_task.compare_prices_task`
   - `tasks.metrics_tasks.collect_celery_metrics`, `cleanup_cache`
 
@@ -95,6 +96,7 @@ Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e p
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
 | Agendamento contínuo | `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
+| Reconciliação da fila | `PRIORITY_QUEUE_RECONCILE_AUTOSTART`, `PRIORITY_QUEUE_RECONCILE_AUTOSTART_TTL` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
 | Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER`, `NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS`, `NOTIFICATION_EMAIL_PROVIDER`, `NOTIFICATION_SMS_PROVIDER`, `NOTIFICATION_WHATSAPP_PROVIDER`, `NOTIFICATION_PUSH_PROVIDER`, `NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` |
 
@@ -121,6 +123,7 @@ Observação: a implementação foi ajustada para que respostas `304 Not Modifie
 - `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
 - `services/comparison_service.py` – orquestra cálculos de comparação.
 - `tasks/continuous_collector_task.py` – worker contínuo que consome a fila de prioridade e recalcula `next_check_at` por estabilidade.
+- `tasks/priority_queue_tasks.py` – task de reconciliação que repopula a fila de prioridade com monitorados ativos.
 - `tasks/metrics_tasks.py` – publica métricas periódicas da fila e recursos.
 - `tasks/compare_prices_task.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.
 
@@ -178,8 +181,11 @@ CONTINUOUS_WORKER_POLL_INTERVAL=1.0
 CONTINUOUS_WORKER_BATCH_SIZE=20
 CONTINUOUS_WORKER_IDLE_SLEEP=2.0
 CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS=900
+
 CONTINUOUS_COLLECTOR_AUTOSTART=1
 CONTINUOUS_COLLECTOR_AUTOSTART_TTL=300
+PRIORITY_QUEUE_RECONCILE_AUTOSTART=1
+PRIORITY_QUEUE_RECONCILE_AUTOSTART_TTL=300
 
 PRIORITY_QUEUE_KEY=market_alert:priority_queue
 PRIORITY_QUEUE_PROCESSING_KEY=market_alert:priority_queue:processing
@@ -195,6 +201,7 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
 ## Orquestração de coletas e rechecagens
 - **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result` com métrica de `lock_skipped` incrementada.
 - **Fila contínua:** `market_alert.tasks.continuous_collector_task.run_continuous_collector` consome o Redis Sorted Set em loop, coleta monitorado + concorrentes em sequência e recalcula `next_check_at` com base na estabilidade de preço do grupo.
+- **Repopulação da fila:** `market_alert.tasks.priority_queue_tasks.reconcile_priority_queue` reenvia monitorados ativos não pausados para a fila de prioridade, usando `next_check_at` ou `utc_now`, e pode ser disparada no boot dos workers via `PRIORITY_QUEUE_RECONCILE_AUTOSTART`.
 - **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
 
 ## Segurança e Observabilidade
