@@ -23,8 +23,8 @@ from shared.metrics.metrics_price_comparison import (
     COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL,
 )
 
-from market_alert.crud.crud_monitored import count_competitors_by_monitored, get_monitored_product_by_id
-from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, count_competitors_by_monitored
 from market_alert.crud.crud_comparison import (
     create_price_comparison,
     get_comparison_by_id,
