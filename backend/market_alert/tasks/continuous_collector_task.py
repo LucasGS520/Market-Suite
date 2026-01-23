@@ -294,6 +294,10 @@ def _collect_group(
                     collected_at=group_finished_at,
                 )
                 next_check_at = refreshed.next_check_at
+                if next_check_at is None or next_check_at < group_finished_at:
+                    #Protege o reenqueue com um timestamp válido para manter a fila ativa
+                    next_check_at = group_finished_at
+                    refreshed.next_check_at = next_check_at
 
     if monitored_result and monitored_result.status:
         PRIORITY_QUEUE_PROCESSED_TOTAL.labels(source="continuous", outcome=monitored_result.status).inc()
@@ -329,6 +333,10 @@ def _collect_group(
         trace_id=trace_id,
     )
 
+    if next_check_at is None:
+        #Garante que o reagendamento sempre tenha base temporal válida
+        next_check_at = _utc_now()
+
     return outcome, next_check_at
 
 def _requeue_monitored(
@@ -339,7 +347,11 @@ def _requeue_monitored(
 ) -> None:
     """ Reenfileira monitorado e registra falha caso Redis esteja indisponível """
     #Usa a janela calculada pela coleta para garantir o reenqueue correto
-    resolved_next_check_at = next_check_at or monitored.next_check_at or _utc_now()
+    now = _utc_now()
+    reoslved_next_check_at = next_check_at or monitored.next_check_at or now
+    if reoslved_next_check_at < now:
+        #Evita reenqueue com horário no passado para impedir loops ociosos
+        resolved_next_check_at = now
     #Centraliza o reenqueue para registrar métricas e logs padronizados
     if enqueue_monitored_at(
         monitored.id,

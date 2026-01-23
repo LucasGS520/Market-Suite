@@ -35,11 +35,16 @@ def format_next_check_at(product: MonitoredProduct) -> datetime | None:
     """ Retorna a próxima coleta planejada preservando valores nulos """
     return product.next_check_at
 
+def format_last_collected_at(product: MonitoredProduct) -> datetime | None:
+    """ Retorna o timestamp da última coleta efetiva do monitorado """
+    #Prioriza o instante real de coleta para evitar divergência com checagens administrativas
+    return product.group_collected_at or product.collected_at
+
 def get_product_stats(product: MonitoredProduct) -> dict:
     """ Retorna estatísticas derivadas do produto monitorado para a API """
     #Centraliza valores derivados para evitar divergências entre rotas e contratos
     return {
-        "last_collected_at": product.last_checked,
+        "last_collected_at": format_last_collected_at(product),
         "last_price_change_at": product.last_price_change_at,
         "stability": format_stability_level(product.stability_score),
         "next_check_at": format_next_check_at(product),
