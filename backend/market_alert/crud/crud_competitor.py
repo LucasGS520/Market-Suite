@@ -156,6 +156,12 @@ def create_pending_competitor_product(
             normalized_url = canonicalize_product_url(str(product_url))
         except ValueError:
             normalized_url = str(product_url).strip()
+    if monitored and normalized_url == monitored.product_url:
+        #Evita concorrente auto-referenciado ao salvar direto no CRUD
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="URL do concorrente não pode ser igual ao monitorado.",
+        )
     existing = get_competitor_by_monitored_and_url(db, monitored_product_id, normalized_url)
 
     if existing:

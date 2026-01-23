@@ -160,6 +160,13 @@ def create_competitor_scrape_request(
         hide_forbidden=False,
     )
 
+    if normalized_url == monitored_product.normalized_url:
+        #Evita concorrente auto-referenciado no monitorado
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="URL do concorrente não pode ser igual ao monitorado.",
+        )
+
     monitored_is_paused = bool(monitored_product.paused)
 
     existing = get_competitor_by_monitored_and_url(db, monitored_product.id, normalized_url)

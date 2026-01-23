@@ -202,6 +202,49 @@ def test_create_competitor_scrape_duplicate_returns_conflict(
     )
     assert total == 1
     assert called["count"] == 1
+
+def test_create_competitor_scrape_blocks_self_reference(
+    client,
+    db_session,
+    test_user,
+    prepare_test_database,
+    monkeypatch,
+):
+    """ Garante que não seja possível cadastrar concorrente com URL idêntica ao monitorado """
+
+    monitored = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Monitor 4K",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/produto-monitorado",
+        normalized_url="https://example.com/produto-monitorado",
+        status=MonitoredStatus.active,
+    )
+    db_session.add(monitored)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "market_alert.services.services_competitors.enforce_competitor_scrape_rate_limit",
+        lambda _user_id: None,
+    )
+
+    response = client.post(
+        "/competitors/scrape",
+        jason={
+            "monitored_product_id": str(monitored.id),
+            "product_url": "https://example.com/produto-monitorado",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "URL do concorrente não pode ser igual ao monitorado."
+
+    total = (
+        db_session.query(CompetitorProduct)
+        .filter(CompetitorProduct.monitored_product_id == monitored.id)
+        .count()
+    )
+    assert total == 0
     
 def test_create_competitor_scrape_respects_rate_limit(
     client,
