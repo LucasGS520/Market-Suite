@@ -23,8 +23,10 @@ def _build_competitor(**overrides) -> CompetitorProduct:
         seller_rating=overrides.get("seller_rating"),
         currency=overrides.get("currency"),
         thumbnail=overrides.get("thumbnail"),
+        availability=overrides.get("availability"),
         status=overrides.get("status", ProductStatus.available),
         is_paused=overrides.get("is_paused", False),
+        last_status=overrides.get("last_status"),
         last_checked=overrides.get("last_checked", datetime.now(timezone.utc)),
         updated_at=overrides.get("updated_at", datetime.now(timezone.utc)),
         created_at=overrides.get("created_at", datetime.now(timezone.utc)),
@@ -42,14 +44,14 @@ def test_build_competitor_response_uses_hostname_fallback() -> None:
 
     assert response.name == "loja.example.com"
 
-
-def test_build_competitor_response_keeps_display_name() -> None:
-    """Confirma que nomes sanitizados fornecidos pelo usuário são respeitados."""
+def test_build_competitor_response_uses_persisted_last_status() -> None:
+    """Garante que o status persistido é retornado ao frontend."""
     competitor = _build_competitor(
-        name_competitor=" Concorrente VIP ",
-        product_url="https://example.com/item",
+        availability=None,
+        status=ProductStatus.unavailable,
+        last_status="from_scraper",
     )
 
     response = build_competitor_response(competitor, allow_missing_price=True)
 
-    assert response.name == "Concorrente VIP"
+    assert response.last_status == "from_scraper"

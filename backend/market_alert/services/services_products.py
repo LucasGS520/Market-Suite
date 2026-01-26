@@ -236,6 +236,6 @@ def build_competitor_response(
         last_checked=_normalize_timestamp(competitor.last_checked),
         source=source,
         availability=availability,
-        last_status=competitor.status.value,
+        last_status=competitor.last_status,
         is_paused=competitor.is_paused,
     )
