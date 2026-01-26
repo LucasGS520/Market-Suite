@@ -28,6 +28,9 @@ from shared.metrics.metrics_priority_queue import (
 )
 from shared.metrics.metrics_products import COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL
 from shared.metrics.metrics_scraper import (
+    COMPETITOR_COLLECT_DURATION_MS,
+    COMPETITOR_COLLECT_IN_FLIGHT,
+    COMPETITOR_COLLECT_OUTCOME_TOTAL,
     CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL,
     CONTINUOUS_COMPETITOR_SKIPPED_TOTAL,
     MONITORED_SKIPPED_PAUSED_TOTAL,
@@ -242,6 +245,7 @@ def _collect_group(
                 )
                 competitor_payload["trace_id"] = trace_id
                 try:
+                    COMPETITOR_COLLECT_IN_FLIGHT.inc()
                     competitor_outcome, competitor_result = collect_product(
                         competitor_payload,
                         use_lock=True,
@@ -261,6 +265,13 @@ def _collect_group(
                         trace_id=trace_id,
                     )
                     competitor_outcome, competitor_result = "error", None
+                finally:
+                    #Mantém o gauge consistente mesmo quando ocorrem falhas inesperadas
+                    COMPETITOR_COLLECT_IN_FLIGHT.dec()
+                    competitor_duration_ms = int(
+                        (time.perf_counter() - competitor_started_perf) * 1000
+                    )
+                    COMPETITOR_COLLECT_DURATION_MS.observe(competitor_duration_ms)
                 _record_competitor_metrics(
                     outcome=competitor_outcome,
                     result=competitor_result,
@@ -271,7 +282,6 @@ def _collect_group(
                 db.refresh(competitor)
                 if competitor.last_price_change_at != previous_change_at:
                     competitor_change_detected = True
-                competitor_duration_ms = int((time.perf_counter() - competitor_started_perf) * 1000)
                 logger.info(
                     "continuous_competitor_collected",
                     monitored_id=str(monitored.id),
@@ -361,6 +371,10 @@ def _record_competitor_metrics(
     trace_id: str,
 ) -> None:
     """ Registra métricas específicas de concorrentes processados no loop contínuo """
+    outcome_label = _resolve_competitor_outcome_label(outcome=outcome, result=result)
+    if outcome_label:
+        COMPETITOR_COLLECT_OUTCOME_TOTAL.labels(outcome=outcome_label).inc()
+    
     if result is None:
         if outcome == "error":
             CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL.inc()
@@ -394,6 +408,22 @@ def _record_competitor_metrics(
             competitor_id=competitor_id,
             trace_id=trace_id,
         )
+
+def _resolve_competitor_outcome_label(
+    *,
+    outcome: str,
+    result: ScrapeResult | None,
+) -> str | None:
+    """ Normaliza o label de desfecho de concorrentes para métricas consolidadas """
+    if result is None:
+        return "error" if outcome == "error" else None
+    if result.error_code == "lock_skipped":
+        return "lock_skipped"
+    if result.status in {"success", "not_modified", "no_result", "error"}:
+        return result.status
+    if outcome in {"success", "not_modified", "no_result", "error"}:
+        return outcome
+    return None
 
 def _requeue_monitored(
     *,

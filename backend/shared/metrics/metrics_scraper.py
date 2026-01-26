@@ -156,6 +156,24 @@ COLLECTOR_DURATION_MS = Histogram(
     buckets=[25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
 )
 
+#Métricas específicas do fluxo contínuo de concorrentes
+COMPETITOR_COLLECT_OUTCOME_TOTAL = Counter(
+    "competitor_collect_outcome_total",
+    "Total de desfechos de coleta de concorrentes no worker contínuo",
+    ["outcome"],
+)
+
+COMPETITOR_COLLECT_DURATION_MS = Histogram(
+    "competitor_collect_duration_ms",
+    "Duração das coletas de concorrentes no worker contínuo (milissegundos)",
+    buckets=[25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
+)
+
+COMPETITOR_COLLECT_IN_FLIGHT = Gauge(
+    "competitor_collect_in_flight",
+    "Número de coletas de concorrentes em andamento no worker contínuo",
+)
+
 #Métricas específicas do ciclo de rechecagem
 RECHECK_DISPATCH_TOTAL = Counter(
     "recheck_dispatch_total",
