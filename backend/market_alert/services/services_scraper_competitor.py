@@ -12,7 +12,7 @@ from backend.shared.schemas.shared_schemas_products import CompetitorProductCrea
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
-from shared.utils.url_validation import canonicalize_product_url
+from shared.utils.url_validation import normalize_competitor_url
 from market_alert.crud.crud_competitor import (
     create_or_update_competitor_product_scraped,
     get_competitor_by_monitored_and_url,
@@ -49,6 +49,14 @@ def _get_existing(
         normalized_url,
     )
 
+def _normalize_competitor_scrape_url(url: str) -> str:
+    """ Normalize a URL do concorrente para manter consistência entre fetch e persistência """
+    normalized = normalize_competitor_url(url)
+    if not normalized:
+        #Garante previsibilidade mesmo quando a URL original é inválida
+        return str(url).strip()
+    return normalized
+
 def scrape_competitor_product(
     db: Session,
     user_id: UUID,
@@ -64,10 +72,7 @@ def scrape_competitor_product(
     URLs são canônicas antes da coleta para evitar duplicação e permitir
     reaproveitamento de cabeçalhos condicionais.
     """
-    try:
-        normalized_url = canonicalize_product_url(str(url))
-    except ValueError:
-        normalized_url = str(url)
+    normalized_url = _normalize_competitor_scrape_url(str(url))
     normalized_payload = payload.model_copy(update={"product_url": normalized_url})
     existing = _get_existing(db, normalized_payload, normalized_url)
     etag, last_modified = resolve_conditional_headers(existing)
@@ -143,6 +148,9 @@ def scrape_competitor_product(
             url=normalized_url,
             last_status=last_status,
         )
+    if price_value is not None and availability_flag is None:
+        #Interferência defensiva para garantir disponibilidade quando há preço válido
+        availability_flag = True
 
     scraped_info = CompetitorScrapedInfo(
         name=ensure_name(payload_model, normalized_url),

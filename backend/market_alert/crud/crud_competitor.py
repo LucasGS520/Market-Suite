@@ -15,7 +15,7 @@ from fastapi import HTTPException, status
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
-from shared.utils.url_validation import canonicalize_product_url, normalize_product_url_for_storage
+from shared.utils.url_validation import normalize_competitor_url, normalize_product_url_for_storage
 from shared.metrics.metrics_products import PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
@@ -26,6 +26,14 @@ from market_alert.utils.price_utils import normalize_scraped_price, should_creat
 
 
 logger = structlog.get_logger("crud_competitor")
+
+def _normalize_competitor_storage_url(product_url: str) -> str:
+    """ Normaliza URL de concorrente garantindo consistência com o armazenamento """
+    normalized = normalize_competitor_url(product_url)
+    if normalized:
+        return normalized
+    #Mantém um fallback mínimo para evitar escrita de URLs vazias no banco
+    return str(product_url or "").strip()
 
 def _to_decimal(value: Decimal | float | int | str | None) -> Decimal | None:
     """ Converte valor para `Decimal` preservando `None` e falhas de parsing """
@@ -69,7 +77,7 @@ def get_competitor_by_monitored_and_url(
     product_url: str,
 ) -> CompetitorProduct | None:
     """ Recupera concorrente usando URL canônica vinculada ao monitorado """
-    normalized_url = normalize_product_url_for_storage(str(product_url))
+    normalized_url = _normalize_competitor_storage_url(str(product_url))
     if not normalized_url:
         return None
     return (
@@ -152,10 +160,7 @@ def create_pending_competitor_product(
     resolved_is_paused = is_paused if is_paused is not None else bool(getattr(monitored, "paused", False))
     normalized_url = normalize_product_url_for_storage(str(product_url))
     if not normalized_url:
-        try:
-            normalized_url = canonicalize_product_url(str(product_url))
-        except ValueError:
-            normalized_url = str(product_url).strip()
+        normalized_url = _normalize_competitor_storage_url(str(product_url))
     if monitored and normalized_url == monitored.product_url:
         #Evita concorrente auto-referenciado ao salvar direto no CRUD
         raise HTTPException(
@@ -227,10 +232,7 @@ def create_or_update_competitor_product_scraped(
     normalized_url = normalize_product_url_for_storage(str(product_data.product_url))
     if not normalized_url:
         #Mantém fallback para registros antigos que já passaram pela validação externa
-        try:
-            normalized_url = canonicalize_product_url(str(product_data.product_url))
-        except ValueError:
-            normalized_url = str(product_data.product_url).strip()
+        normalized_url = _normalize_competitor_storage_url(product_data.product_url)
 
     if last_checked.tzinfo is None:
         last_checked = last_checked.replace(tzinfo=timezone.utc)
