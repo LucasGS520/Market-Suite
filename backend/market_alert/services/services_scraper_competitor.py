@@ -141,9 +141,11 @@ def scrape_competitor_product(
 
     availability_flag = bool(availability) if availability is not None else None
     price_value = None
-    if payload_model.current_price is not None and availability_flag is not False:
+    if payload_model.current_price is not None:
         price_value = ensure_price(payload_model, normalized_url)
-    elif availability_flag is False:
+        if price_value is not None:
+            availability_flag = True
+    if availability_flag is False and price_value is None:
         logger.info(
             "competitor_unavailable_payload",
             url=normalized_url,

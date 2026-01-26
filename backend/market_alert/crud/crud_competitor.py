@@ -256,6 +256,8 @@ def create_or_update_competitor_product_scraped(
         availability = scraped_info.availability
         last_status = scraped_info.last_status or existing.last_status
         unavailable_by_data = availability is False or resolved_price is None
+        if availability is False and resolved_price is not None:
+            unavailable_by_data = False
 
         price_changed = _different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
@@ -351,6 +353,8 @@ def create_or_update_competitor_product_scraped(
     availability = scraped_info.availability
     last_status = scraped_info.last_status
     unavailable_by_data = availability is False or resolved_price is None
+    if availability is False and resolved_price is not None:
+        unavailable_by_data = False
     
     new = CompetitorProduct(
         monitored_product_id=product_data.monitored_product_id,
