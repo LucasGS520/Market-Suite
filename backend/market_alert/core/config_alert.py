@@ -86,9 +86,9 @@ class Settings(ConfigBase):
     ) #Política SameSite do cookie de refresh
 
     #Controles operacionais de coleta
-    PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "30")) #TTL padrão para lock de produto
+    PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "20")) #TTL padrão para lock de produto
     PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS: int = int(
-        os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "30")
+        os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "15")
     ) #Margem mínima recomendada para evitar expiração prematura do lock
 
     #Intervalos do agendamento contínuo (em segundos)

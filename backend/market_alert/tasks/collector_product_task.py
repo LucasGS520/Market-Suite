@@ -395,7 +395,14 @@ def collect_product(
             lock_owner=lock_owner,
         )
         if use_lock and lock_status == "acquired":
-            release_product_lock(lock_target, lock_owner)
+            #Tentativa explícita de liberar o lock para evitar contenção após falhas
+            released = release_product_lock(lock_target, lock_owner)
+            if not released:
+                task_logger.warning(
+                    "collect_lock_release_failed",
+                    product_id=str(lock_target) if lock_target else None,
+                    trace_id=trace_id,
+                )
         SCRAPER_IN_FLIGHT.dec()
         COLLECTOR_DURATION_MS.labels(kind=kind, outcome=outcome).observe(duration_ms)
         task_logger.info(
