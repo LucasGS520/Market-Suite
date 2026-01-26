@@ -216,6 +216,17 @@ RECHECK_FINALIZE_FAILED_TOTAL = Counter(
     ["reason"],
 )
 
+CONTINUOUS_COMPETITOR_SKIPPED_TOTAL = Counter(
+    "continuous_competitor_skipped_total",
+    "Concorrentes ignorados pelo worker contínuo de coleta",
+    ["reason"],
+)
+
+CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL = Counter(
+    "continuous_competitor_parse_failure_total",
+    "Falhas de parsing registradas pelo worker contínuo de coleta",
+)
+
 SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(
     "scraper_cache_lookups_total",
     "Total de consultas ao cache básico do scraper por resultado",

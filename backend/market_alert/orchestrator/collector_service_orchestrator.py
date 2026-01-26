@@ -19,6 +19,7 @@ from shared import metrics
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from shared.metrics.metrics_scraper import MONITORED_SKIPPED_PAUSED_TOTAL
+from shared.utils.url_validation import normalize_competitor_url
 
 
 logger = structlog.get_logger("collector_service")
@@ -31,11 +32,12 @@ def build_monitored_payload(
     trace_id: str | None = None,
 ) -> dict[str, str | None]:
     """ Constrói payload padrão para coletas de monitorados """
+    resolved_url = monitored.normalized_url or monitored.product_url
     payload = {
         "kind": "monitored",
         "monitored_id": str(monitored.id),
         "user_id": str(user_id),
-        "url": monitored.product_url,
+        "url": resolved_url,
         "name": monitored.name_identification,
         "trace_id": trace_id,
     }
@@ -51,10 +53,12 @@ def build_competitor_payload(
     trace_id: str | None = None,
 ) -> dict[str, str | None]:
     """ Constrói payload padrão para coletas de concorrentes vinculados """
+    normalized_url = normalize_competitor_url(competitor.product_url)
+    resolved_url = normalized_url or competitor.product_url
     payload: dict[str, str | None] = {
         "kind": "competitor",
         "monitored_id": str(competitor.monitored_product_id),
-        "url": competitor.product_url,
+        "url": resolved_url,
         "competitor_id": str(competitor.id),
         "trace_id": trace_id,
     }

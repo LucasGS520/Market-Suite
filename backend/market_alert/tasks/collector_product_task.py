@@ -263,6 +263,13 @@ def collect_product(
                     COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
                 else:
                     reason = "lock_skipped"
+                    #Garante retorno explícito para rastrear locks no worker contínuo
+                    result = ScrapeResult(
+                        status="no_result",
+                        product_id=str(lock_target) if lock_target else None,
+                        http_status=200,
+                        error_code="lock_skipped",
+                    )
                     task_logger.info(
                         "collect_skipped_lock",
                         kind=kind,
@@ -322,7 +329,7 @@ def collect_product(
                                 status="no_result",
                                 product_id=str(competitor_id),
                                 http_status=200,
-                                error_code=None,
+                                error_code="paused",
                             )
                         else:
                             payload_model = CompetitorProductCreateScraping(
@@ -357,7 +364,7 @@ def collect_product(
                                 status="no_result",
                                 product_id=str(monitored_id) if monitored_id else None,
                                 http_status=200,
-                                error_code=None,
+                                error_code="paused",
                             )
                         else:
                             payload_model = MonitoredProductCreateScraping(

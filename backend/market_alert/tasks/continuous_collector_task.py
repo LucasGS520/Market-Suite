@@ -27,7 +27,11 @@ from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_STABILITY_TOTAL,
 )
 from shared.metrics.metrics_products import COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL
-from shared.metrics.metrics_scraper import MONITORED_SKIPPED_PAUSED_TOTAL
+from shared.metrics.metrics_scraper import (
+    CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL,
+    CONTINUOUS_COMPETITOR_SKIPPED_TOTAL,
+    MONITORED_SKIPPED_PAUSED_TOTAL,
+)
 from shared.utils.redis_client import is_scraping_suspended
 
 from market_alert.core.celery_app import celery_app
@@ -47,6 +51,7 @@ from market_alert.utils.interval_calculator_products import (
     STABILITY_UNSTABLE,
     STABILITY_VERY_STABLE,
 )
+from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 
 logger = structlog.get_logger("continuous_collector_task")
@@ -237,7 +242,7 @@ def _collect_group(
                 )
                 competitor_payload["trace_id"] = trace_id
                 try:
-                    collect_product(
+                    competitor_outcome, competitor_result = collect_product(
                         competitor_payload,
                         use_lock=True,
                         dispatch_comparison=False,
@@ -255,6 +260,14 @@ def _collect_group(
                         competitor_id=str(competitor.id),
                         trace_id=trace_id,
                     )
+                    competitor_outcome, competitor_result = "error", None
+                _record_competitor_metrics(
+                    outcome=competitor_outcome,
+                    result=competitor_result,
+                    monitored_id=str(monitored.id),
+                    competitor_id=str(competitor.id),
+                    trace_id=trace_id,
+                )
                 db.refresh(competitor)
                 if competitor.last_price_change_at != previous_change_at:
                     competitor_change_detected = True
@@ -338,6 +351,49 @@ def _collect_group(
         next_check_at = _utc_now()
 
     return outcome, next_check_at
+
+def _record_competitor_metrics(
+    *,
+    outcome: str,
+    result: ScrapeResult | None,
+    monitored_id: str,
+    competitor_id: str,
+    trace_id: str,
+) -> None:
+    """ Registra métricas específicas de concorrentes processados no loop contínuo """
+    if result is None:
+        if outcome == "error":
+            CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL.inc()
+        return
+    
+    if result.error_code == "lock_skipped":
+        CONTINUOUS_COMPETITOR_SKIPPED_TOTAL.labels(reason="lock").inc()
+        logger.info(
+            "continuous_competitor_skipped_lock",
+            monitored_id=monitored_id,
+            competitor_id=competitor_id,
+            trace_id=trace_id,
+        )
+        return
+
+    if result.error_code == "paused":
+        CONTINUOUS_COMPETITOR_SKIPPED_TOTAL.labels(reason="paused").inc()
+        logger.info(
+            "continuous_competitor_skipped_paused",
+            monitored_id=monitored_id,
+            competitor_id=competitor_id,
+            trace_id=trace_id,
+        )
+        return
+    
+    if result.status == "no_result" and result.error_code == "no_result":
+        CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL.inc()
+        logger.info(
+            "continuous_competitor_parse_failure",
+            monitored_id=monitored_id,
+            competitor_id=competitor_id,
+            trace_id=trace_id,
+        )
 
 def _requeue_monitored(
     *,
