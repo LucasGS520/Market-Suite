@@ -272,7 +272,7 @@ def create_or_update_competitor_product_scraped(
             existing.etag = etag or existing.etag
             existing.last_modified = last_modified or existing.last_modified
             existing.last_checked = last_checked
-            existing.last_scraped_at = last_checked
+            existing.last_scraped_at = collected_reference
             existing.collected_at = collected_reference
             existing.status = ProductStatus.unavailable if unavailable_by_data else ProductStatus.available
             existing.availability = availability

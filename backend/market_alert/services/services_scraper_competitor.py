@@ -98,6 +98,7 @@ def scrape_competitor_product(
             #Atualiza marcações de checagem para manter cadência mesmo sem alterações de conteúdo.
             existing.last_checked = now
             existing.collected_at = now
+            existing.last_scraped_at = now
             db.commit()
             persisted_at = datetime.now(timezone.utc)
             logger.info(
