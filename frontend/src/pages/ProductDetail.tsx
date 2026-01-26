@@ -505,8 +505,8 @@ const ProductDetail: React.FC = () => {
   const monitoredStatus = resolveMonitoredStatus(product);
   const detailCardOpacity = monitoringPaused ? 0.5 : monitoredStatus === 'inactive' ? 0.8 : 1;
   const competitorActionsBlocked = monitoringPaused;
-  // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
-  const lastCollectedAt = product.last_scraped_at;
+  // Usa o timestamp real de checagem/persistência para refletir coletas com ou sem mudança.
+  const lastCollectedAt = product.last_checked ?? product.last_scraped_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
   const alertsCount = 
     typeof summary?.alerts_count === 'number'
@@ -543,6 +543,18 @@ const ProductDetail: React.FC = () => {
     }
 
     return relativeLabel;
+  };
+
+  /**
+   * Exibe a data da última coleta com indicação de mudança de preço no ciclo mais recente
+   */
+  const renderLastCollection = (): JSX.Element => {
+    const formatted = renderDateTime(lastCollectedAt);
+    if (!formatted || formatted === '—') {
+      return <Typography variant="body1">—</Typography>;
+    }
+
+    return <Typography variant="body1">{formatted}</Typography>;
   };
 
   return (
@@ -1081,7 +1093,7 @@ const ProductDetail: React.FC = () => {
                     <Typography variant="body2" color="text.secondary">
                       Última coleta
                     </Typography>
-                    <Typography variant="body1">{renderDateTime(lastCollectedAt)}</Typography>
+                    {renderLastCollection()}
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">

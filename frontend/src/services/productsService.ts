@@ -1,7 +1,6 @@
 import apiClient from '../lib/api';
 import {
   MonitoredProduct,
-  CompetitorProduct,
   CompetitorsListResponse,
   PriceComparisonSummary,
   PaginatedResponse,
@@ -70,6 +69,9 @@ const sanitizeCompetitivenessStatus = (
 const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct => {
   const comparisonSummary =
     product.comparison_summary === undefined ? undefined : product.comparison_summary;
+  // Usa last_checked quando disponível, mantendo fallback para last_scraped_at
+  const normalizedLastChecked = 
+    product.last_checked ?? product.last_scraped_at ?? undefined;
 
   const inferredAvailability =
     product.availability === false || isUnavailableFromLastStatus(product.last_status)
@@ -111,6 +113,7 @@ const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct 
   return {
     ...product,
     current_price: product.current_price ?? null,
+    last_checked: normalizedLastChecked,
     availability: inferredAvailability,
     is_paused: normalizedPaused,
     paused: normalizedPaused,
