@@ -8,6 +8,7 @@ import {
   MonitoredProductCreateScraping,
   CompetitorProductCreateScraping,
   ScrapeCreationResponse,
+  MonitoredScrapeCreationResponse,
   DashboardStats,
   CompetitivenessStatus,
 } from '../types';
@@ -198,8 +199,8 @@ export const productsService = {
    */
   async createMonitoredProduct(
     data: MonitoredProductCreateScraping
-  ): Promise<ScrapeCreationResponse> {
-    const response = await apiClient.post<ScrapeCreationResponse>(
+  ): Promise<MonitoredScrapeCreationResponse> {
+    const response = await apiClient.post<MonitoredScrapeCreationResponse>(
       '/monitored/scrape',
       data
     );

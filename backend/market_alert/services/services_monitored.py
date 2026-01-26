@@ -417,6 +417,7 @@ def schedule_monitored_scrape(
             exc_info=True,
         )
 
+    competitor_warning: str | None = None
     if product_data.initial_competitor:
         competitor_payload = CompetitorProductCreateScraping(
             monitored_product_id=pending.id,
@@ -429,14 +430,23 @@ def schedule_monitored_scrape(
             "origin": "monitored_onboarding",
         }
 
-        create_competitor_scrape_request(
-            db=db,
-            user=user,
-            product_data=competitor_payload,
-            request_context={
-                key: value for key, value in competitor_context.items() if value is not None
-            },
-        )
+        try:
+            create_competitor_scrape_request(
+                db=db,
+                user=user,
+                product_data=competitor_payload,
+                request_context={
+                    key: value for key, value in competitor_context.items() if value is not None
+                },
+            )
+        except HTTPException as exc:
+            #Comentário preserva o monitorado criado, mas informa o alerta do concorrente inicial
+            competitor_warning = str(exc.detail)
+            logger.warning(
+                "monitored_initial_competitor_failed",
+                monitored_id=str(pending.id),
+                detail=competitor_warning,
+            )
 
     logger.info(
         "monitored_scrape_scheduled",
@@ -451,4 +461,5 @@ def schedule_monitored_scrape(
         created_at=pending.created_at,
         next_check_at=pending.next_check_at,
         message="Coleta iniciada, dados aparecerão em breve.",
+        competitor_warning=competitor_warning,
     )

@@ -39,6 +39,7 @@ import {
   Pause as PauseIcon,
   OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
+import { AxiosError } from 'axios';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
@@ -47,8 +48,16 @@ import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
-import { CompetitorProduct, MonitoredProduct } from '../types';
+import { ApiErrorResponse, CompetitorProduct, MonitoredProduct } from '../types';
 import { useToast } from '../hooks/useToast';
+
+/**
+ * Obtém o detalhe do erro enviado pela API, quando presente
+ */
+const getApiErrorDetail = (error: unknown): string | undefined => {
+  const axiosError = error as AxiosError<ApiErrorResponse>;
+  return axiosError.response?.data?.detail;
+};
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -135,11 +144,12 @@ const ProductDetail: React.FC = () => {
         replace: true,
       });
     },
-    onError: () => {
+    onError: (error) => {
       // Orienta o usuário a revisar a URL ou a sessão antes de tentar novamente
+      const apiMessage = getApiErrorDetail(error);
       showToast({
         key: `monitoring:product:${id}:competitor:create:error`,
-        message: 'Não foi possível adicionar concorrente. Revise a URL e tente novamente.',
+        message: apiMessage || 'Não foi possível adicionar concorrente. Revise a URL e tente novamente.',
         severity: 'error',
         persist: true,
         replace: true,

@@ -36,6 +36,7 @@ class MonitoredScrapeCreationResponse(BaseModel):
     created_at: datetime = Field(..., description="Momento de criação do registro")
     next_check_at: datetime = Field(..., description="Próximo horário previsto para a primeira rechecagem")
     message: str = Field(..., description="Resumo amigável do agendamento")
+    competitor_warning: str | None = Field(None, description="Aviso opcional quando o concorrente inicial não pôde ser criado")
 
 class CompetitorScrapeCreationResponse(BaseModel):
     """ Retorno mínimo ao agendar scraping de um concorrente """

@@ -230,6 +230,16 @@ export interface ScrapeCreationResponse {
   id: string; // ID do job criado
   url: string; // URL alvo do scraping
   created_at: string; // Timestamp de criação
+  message?: string; // Mensagem amigável retornada pelo backend
+}
+
+/**
+ * Resposta de scraping ao criar um monitorado com aviso opcional de concorrente
+ */
+export interface MonitoredScrapeCreationResponse extends ScrapeCreationResponse {
+  next_check_at?: string; // Próxima verificação estimada quando aplicável
+  competitor_warning?: string; // Aviso quando o concorrente inicial falha
+  competitor_error?: string; // Campo opcional para compatibilidade com versões futuras
 }
 
 /**
