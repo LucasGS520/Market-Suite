@@ -10,6 +10,7 @@ import {
   MonitoredScrapeCreationResponse,
   DashboardStats,
   CompetitivenessStatus,
+  CompetitorProduct,
 } from '../types';
 
 /**
@@ -63,15 +64,56 @@ const sanitizeCompetitivenessStatus = (
 };
 
 /**
+ * Normaliza dados de concorrentes para manter consistência de disponibilidade e timestamps
+ * Ajusta valores faltantes para refletir o estado real de coleta e evitar falsos "indisponíveis"
+ */
+const normalizeCompetitorProduct = (
+  competitor: CompetitorProduct,
+  monitoredId: string
+): CompetitorProduct => {
+  const fallbackName = (() => {
+    try {
+      return new URL(competitor.url).hostname;
+    } catch {
+      return 'Concorrente';
+    }
+  })();
+
+  const displayName = competitor.display_name || competitor.name || competitor.title || fallbackName;
+  const normalizedLastChecked = competitor.last_checked ?? competitor.last_scraped_at ?? null;
+  const normalizedLastScrapedAt = competitor.last_scraped_at ?? competitor.last_checked ?? null;
+  // Mantém disponibilidade coerente mesmo quando o backend retorna apenas status textual
+  const inferredAvailability =
+    competitor.availability === false || isUnavailableFromLastStatus(competitor.last_status)
+      ? false
+      : competitor.availability ??
+        (competitor.current_price !== null && competitor.current_price !== undefined ? true : undefined);
+
+  return {
+    ...competitor,
+    display_name: competitor.display_name || competitor.name || competitor.title,
+    name: displayName,
+    current_price: competitor.current_price ?? null,
+    monitored_id: competitor.monitored_id || competitor.monitored_product_id || monitoredId,
+    monitored_product_id: competitor.monitored_product_id || competitor.monitored_id || monitoredId,
+    availability: inferredAvailability,
+    last_checked: normalizedLastChecked,
+    last_scraped_at: normalizedLastScrapedAt,
+  };
+};
+
+/**
  * Normaliza campos centrais de produtos monitorados para evitar nullables inconsistentes.
  * Garante que disponibilidade, pausa e resumo de comparação estejam preenchidos e coerentes.
  */
 const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct => {
   const comparisonSummary =
     product.comparison_summary === undefined ? undefined : product.comparison_summary;
-  // Usa last_checked quando disponível, mantendo fallback para last_scraped_at
-  const normalizedLastChecked = 
+  // Usa last_checked quando disponível e replica o valor como fallback para last_scraped_at
+  const normalizedLastChecked =
     product.last_checked ?? product.last_scraped_at ?? undefined;
+  const normalizedLastScrapedAt =
+    product.last_scraped_at ?? product.last_checked ?? undefined;
 
   const inferredAvailability =
     product.availability === false || isUnavailableFromLastStatus(product.last_status)
@@ -114,6 +156,7 @@ const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct 
     ...product,
     current_price: product.current_price ?? null,
     last_checked: normalizedLastChecked,
+    last_scraped_at: normalizedLastScrapedAt,
     availability: inferredAvailability,
     is_paused: normalizedPaused,
     paused: normalizedPaused,
@@ -272,26 +315,9 @@ export const productsService = {
       '/competitors',
       { params: requestParams }
     );
-    const normalizedItems = (response.data.items || []).map((competitor) => {
-      const fallbackName = (() => {
-        try {
-          return new URL(competitor.url).hostname;
-        } catch {
-          return 'Concorrente';
-        }
-      })();
-
-      const displayName = competitor.display_name || competitor.name || competitor.title || fallbackName;
-
-      return {
-        ...competitor,
-        display_name: competitor.display_name || competitor.name || competitor.title,
-        name: displayName,
-        current_price: competitor.current_price ?? null,
-        monitored_id: competitor.monitored_id || competitor.monitored_product_id || params.monitored_id,
-        monitored_product_id: competitor.monitored_product_id || competitor.monitored_id || params.monitored_id,
-      };
-    });
+    const normalizedItems = (response.data.items || []).map((competitor) =>
+      normalizeCompetitorProduct(competitor, params.monitored_id)
+    );
 
     return {
       ...response.data,
