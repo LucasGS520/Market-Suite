@@ -32,13 +32,15 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery → worker conversa com o `market_scraper`, Redis e PostgreSQL → eventos de domínio geram notificações persistidas → observabilidade coleta métricas/logs → dashboards são atualizados.
 
 ### Responsabilidades das tarefas Celery (`market_alert`)
-- **Collector (`tasks.collector_product_task.collect_product_task`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock no Redis e retorna um `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`) contendo `http_status`, `price_changed`/`availability_changed` e `error_code` quando aplicável.
-- **Agendador de rechecagem (`tasks.recheck_scheduler_task.schedule_rechecks`)**: Beat que varre `next_check_at` vencidos, atualiza o próximo horário calculado a partir de `check_interval` (ou `RECHECK_INTERVAL_DEFAULT`) e enfileira a própria `collect_product_task` com jitter leve.
+- **Collector (`tasks.collector_product_task.collect_product_task`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock no Redis e retorna um `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`) contendo `http_status`, `price_changed`/`availability_changed` e `error_code` quando aplicável. Implementa retry automático com backoff exponencial (5s, 15s, 45s) via Celery countdown para erros temporários (timeout, 429, 5xx).
+- **Agendador de rechecagem (`tasks.recheck_scheduler_task.schedule_rechecks`)**: Beat que varre `next_check_at` vencidos, atualiza o próximo horário calculado com **intervalo adaptativo** baseado em estabilidade de preço (5min a 2h) ou usa `check_interval` manual quando configurado, e enfileira a própria `collect_product_task` com jitter leve.
+- **Intervalo Adaptativo**: produtos com preços estáveis são checados com menos frequência automaticamente. A lógica analisa o histórico de mudanças de preço e escala gradualmente: < 1h desde mudança = 5min, 1-6h = 5-30min, 6-24h = 30min-1h, > 24h = 2h. Isso reduz carga no sistema mantendo responsividade para produtos voláteis.
 - **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: idempotente e leve; usada pelo collector em cenários assíncronos e em acionamentos manuais para recalcular histórico/comparativos.
 - **Notificações (`tasks.notifications_enqueue_task.enqueue_notifications_task`)**: normaliza notificações pendentes, calcula backoff exponencial e mantém consistência de retries antes de novos disparos.
 - **Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando flags em banco e mantendo TTL automático como único mecanismo de exclusão mútua.
 - **Pausa de monitoramento**: monitorados com `paused=true` devem ser ignorados por agendador e collector, incrementando `monitored_skipped_paused` e mantendo histórico íntegro até retomada explícita.
 - **Contratos de desfecho**: quando o lock não é adquirido o collector retorna `no_result` (mantendo métrica de lock skipped) para preservar o contrato enxuto; rechecagens sem mudança (`not_modified`) não geram novo `PriceHistory` e já atualizam `next_check_at`.
+- **Retries não-bloqueantes**: o scraper client não realiza retries com `time.sleep()`. Erros temporários (timeout, 5xx, 429) são propagados para a task que agenda retry usando Celery `countdown`, evitando bloqueio do worker prefork.
 
 ## Diretrizes de Desenvolvimento para Agentes
 - **Linguagem, Docstrings e comentários**: mantenha docstrings e comentários em português, descrevendo propósito, parâmetros, retornos e exceções. Evite comentários redundantes; foque em contexto e decisões. Siga esse padrão para comentários e Docstrings: (Ex: #Comentário Padrão vem seguido da Hastag, """ Docstrings possui espaço após incio e fim """).
@@ -107,3 +109,42 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 - Comparar o conteúdo com o `README.md` para evitar redundâncias: mantenha aqui instruções operacionais para agentes; no `README.md`, mantenha setup humano e visão geral.
 
 > Nota: Um guia desatualizado prejudica a confiabilidade do agente e pode levar a ações incorretas.
+
+## Estabilidade do MVP - Melhorias Implementadas
+
+### Eliminação de Bloqueios em Workers (Janeiro 2026)
+**Problema:** Chamadas `time.sleep()` no scraper client bloqueavam workers Celery prefork durante retries, reduzindo throughput.
+**Solução:** Removido loop de retry com sleep do scraper client. Retries agora gerenciados pela task Celery usando `countdown` (5s, 15s, 45s backoff exponencial).
+**Impacto:** Workers mantêm disponibilidade durante retries, melhorando capacidade de processamento paralelo.
+
+### Limitação de Loops Infinitos (Janeiro 2026)
+**Problema:** Task de limpeza de cache Redis (`cleanup_cache`) executava `while True` sem timeout, podendo bloquear por minutos em bases grandes.
+**Solução:** Adicionados limites de segurança: máximo 10.000 iterações e timeout de 60 segundos.
+**Impacto:** Previne bloqueios prolongados mantendo funcionalidade de limpeza eficaz.
+
+### Agendamento Adaptativo (Janeiro 2026)
+**Problema:** Todos os produtos checados a cada 5 minutos independente de estabilidade, gerando carga desnecessária.
+**Solução:** Implementado escalonamento automático baseado em histórico de mudanças de preço:
+- Produtos voláteis (mudança < 1h): checados a cada 5 minutos
+- Estabilizando (1-6h): escala gradual até 30 minutos
+- Estáveis (6-24h): escala gradual até 1 hora
+- Muito estáveis (> 24h): checados a cada 2 horas
+**Impacto:** Redução estimada de 60-80% em chamadas de scraping para produtos estáveis, liberando capacidade para produtos críticos.
+
+### Validação de Configuração (Janeiro 2026)
+**Problema:** Timeouts misconfigured causavam falhas silenciosas em runtime.
+**Solução:** Validação na inicialização do Settings, com UserWarning e auto-correção quando `SCRAPER_TOTAL_TIMEOUT < SCRAPER_CONNECT_TIMEOUT + SCRAPER_READ_TIMEOUT`.
+**Impacto:** Falhas detectadas no startup com orientação clara para correção no `.env`.
+
+### Métricas de Observabilidade
+Novas métricas Prometheus para monitoramento do comportamento adaptativo:
+- `adaptive_interval_calculated_seconds`: histograma de intervalos calculados
+- `adaptive_interval_decision_total{category}`: contador de decisões por categoria
+- Categorias: `no_scrape_history`, `no_price_history`, `recent_change`, `scaling_6h`, `scaling_24h`, `stable_24h_plus`, `error_fallback`
+
+### Boas Práticas para Manutenção
+- **Nunca usar `time.sleep()` em tasks Celery**: use `countdown` ou `apply_async(eta=...)` para delays não-bloqueantes
+- **Sempre limitar loops**: adicione timeouts e/ou limites de iteração em qualquer `while True`
+- **Validar configurações críticas**: adicione validação no `__init__` de Settings para falhar rápido
+- **Expor métricas**: toda decisão de sistema deve ter métrica correspondente para observabilidade
+- **Testar sob carga**: validar comportamento com volumes realistas antes de produção
