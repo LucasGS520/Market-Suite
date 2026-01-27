@@ -13,6 +13,7 @@ from typing import Iterable
 from uuid import UUID, uuid4
 
 import structlog
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -478,17 +479,56 @@ def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable
     time_limit=3700,
 )
 def run_continuous_collector(self) -> None:
-    """ Loop contínuo que consome a fila de prioridade e dispara coletas """
+    """ Loop contínuo que consome a fila de prioridade e dispara coletas 
+    
+    Mantém um budget de execução com `time.monotonic()` para encerrar o worker de
+    forma previsível antes do hard time limit do Celery, preservando o drain da
+    fila de processamento e o fechamento das métricas finais.
+    """
     bound_logger = logger.bind(task_id=getattr(self.request, "id", None))
     queue_service = PriorityQueueService()
     batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
     processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
     empty_streak = 0
     reconcile_triggered = False
+    started_at = time.monotonic()
+    max_runtime_seconds = int(getattr(self.request, "soft_time_limit", 3600) or 3600)
+
+    def _budget_exceeded() -> bool:
+        """ Avalia se o budget de execução do loop foi excedido """
+        return (time.monotonic() - started_at) >= max_runtime_seconds
+    
+    def _shutdown_loop(*, reason: str, processed: list[str]) -> None:
+        """ Finaliza o loop com drain da fila auxiliar e métricas consolidadas """
+        if processed:
+            _drain_processing(queue_service, processed)
+        try:
+            with SessionLocal() as db:
+                _update_stability_metrics(db)
+        except Exception:
+            #Evita quebrar o shutdown por falha pontual de métricas
+            bound_logger.exception("continuous_shutdown_metrics_failed")
+        try:
+            _update_queue_metrics(queue_service)
+        except Exception:
+            #Evita quebrar o shutdown caso o Redis esteja indisponível
+            bound_logger.exception("continuous_shutdown_queue_metrics_failed")
+        bound_logger.info(
+            "continuous_worker_shutdown",
+            reason=reason,
+            processed_count=len(processed),
+            elapsed_seconds=int(time.monotonic() - started_at),
+        )
 
     while True:
+        processed_ids: list[str] = []
+        if _budget_exceeded():
+            #Encerra antes do limite do Celery para garantir flush de métricas e drain
+            _shutdown_loop(reason="max_runtime_exceeded", processed=processed_ids)
+            break
         if _should_abort(getattr(self, "request", None)):
             bound_logger.warning("continuous_worker_aborted")
+            _shutdown_loop(reason="worker_aborted", processed=processed_ids)
             break
         
         try:
@@ -525,7 +565,10 @@ def run_continuous_collector(self) -> None:
                     reclaimed_count=len(reclaimed),
                 )
 
-            processed_ids: list[str] = []
+            if _budget_exceeded():
+                #Evita iniciar um novo batch quando o budget já foi consumido
+                _shutdown_loop(reason="max_runtime_exceeded_before_batch", processed=processed_ids)
+                break
             for _ in range(batch_size):
                 next_id = queue_service.pop_due()
                 if not next_id:
@@ -604,6 +647,11 @@ def run_continuous_collector(self) -> None:
                     empty_streak=empty_streak,
                 )
                 time.sleep(idle_sleep)
+        except SoftTimeLimitExceeded:
+            #Respeita o soft time limit do Celery com encerramento controlado
+            bound_logger.warning("continuous_soft_time_limit_exceeded")
+            _shutdown_loop(reason="soft_time_limit_exceeded", processed=processed_ids)
+            break
         except Exception:
             PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
             bound_logger.exception("continuous_loop_error")
