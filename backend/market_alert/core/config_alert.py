@@ -246,5 +246,32 @@ class Settings(ConfigBase):
         os.getenv("REGISTRATION_MAX_PER_HOUR", "5")
     ) #Limite de cadastros por hora por IP
 
+    def __init__(self, **kwargs):
+        """ Inicializa e valida configurações críticas """
+        super().__init__(**kwargs)
+        self._validate_timeout_config()
+    
+    def _validate_timeout_config(self) -> None:
+        """ Valida que o timeout total seja coerente com connect + read
+        
+        O httpx requer que timeout total seja maior ou igual à soma de
+        connect + read para evitar ValueError. Auto-ajuste já ocorre no
+        scraper_client, mas validar aqui evita configurações incorretas.
+        """
+        minimal_total = self.SCRAPER_CONNECT_TIMEOUT + self.SCRAPER_READ_TIMEOUT
+        if self.SCRAPER_TOTAL_TIMEOUT < minimal_total:
+            import warnings
+            corrected_total = minimal_total
+            warnings.warn(
+                f"SCRAPER_TOTAL_TIMEOUT ({self.SCRAPER_TOTAL_TIMEOUT}s) é menor que "
+                f"SCRAPER_CONNECT_TIMEOUT + SCRAPER_READ_TIMEOUT ({minimal_total}s). "
+                f"Auto-corrigindo para {corrected_total}s. "
+                f"Atualize a variável SCRAPER_TOTAL_TIMEOUT no arquivo .env para evitar este aviso.",
+                UserWarning,
+                stacklevel=2,
+            )
+            #Auto-corrige para evitar falhas de runtime
+            self.SCRAPER_TOTAL_TIMEOUT = corrected_total
+
 #Instância única de settings para a aplicação
 settings = Settings()
