@@ -208,119 +208,122 @@ def _collect_group(
     monitored_payload["trace_id"] = trace_id
 
     _record_enqueue_latency(enqueued_at, group_started_at)
-    try:
-        outcome, monitored_result = collect_product(
-            monitored_payload,
-            use_lock=True,
-            dispatch_comparison=False,
-            logger_bound=logger.bind(monitored_id=str(monitored.id), trace_id=trace_id),
-        )
-    except Exception:
-        #Mantém o loop vivo ao capturar falhas inesperadas do coletor do monitorado
-        logger.exception(
-            "continuous_monitored_collect_failed",
-            monitored_id=str(monitored.id),
-            trace_id=trace_id,
-        )
-        outcome, monitored_result = "error", None
 
     with SessionLocal() as db:
-        #Mantém uma única sessão para reduzir overhead e evitar inconsistências de leitura.
-        with db.begin():
-            competitors = get_competitors_by_monitored_id(
-                db,
-                monitored.id,
-                include_paused=False,
-                include_inactive=True, #Inclui intens indisponíveis para rechecagem
+        #Usa uma sessão compartilhada para manter commits e refresh no mesmo contexto
+        try:
+            outcome, monitored_result = collect_product(
+                monitored_payload,
+                use_lock=True,
+                dispatch_comparison=False,
+                logger_bound=logger.bind(monitored_id=str(monitored.id), trace_id=trace_id),
+                db=db,
             )
-            competitor_change_detected = False
-            for competitor in competitors:
-                db.refresh(competitor)
-                previous_change_at = competitor.last_price_change_at
-                competitor_started_perf = time.perf_counter()
-                competitor_payload = build_competitor_payload(
-                    competitor,
-                    user_id=monitored.user_id,
-                    enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
-                )
-                competitor_payload["trace_id"] = trace_id
-                try:
-                    COMPETITOR_COLLECT_IN_FLIGHT.inc()
-                    competitor_outcome, competitor_result = collect_product(
-                        competitor_payload,
-                        use_lock=True,
-                        dispatch_comparison=False,
-                        logger_bound=logger.bind(
-                            monitored_id=str(monitored.id),
-                            competitor_id=str(competitor.id),
-                            trace_id=trace_id,
-                        ),
-                    )
-                except Exception:
-                    #Isola falhas de concorrentes para não comprometer o grupo inteiro
-                    logger.exception(
-                        "continuous_competitor_collect_failed",
+        except Exception:
+            #Mantém o loop vivo ao capturar falhas inesperadas do coletor do monitorado
+            logger.exception(
+                "continuous_monitored_collect_failed",
+                monitored_id=str(monitored.id),
+                trace_id=trace_id,
+            )
+            outcome, monitored_result = "error", None
+
+        competitors = get_competitors_by_monitored_id(
+            db,
+            monitored.id,
+            include_paused=False,
+            include_inactive=True, #Inclui itens indisponíveis para rechecagem
+        )
+        competitor_change_detected = False
+        for competitor in competitors:
+            db.refresh(competitor)
+            previous_change_at = competitor.last_price_change_at
+            competitor_started_perf = time.perf_counter()
+            competitor_payload = build_competitor_payload(
+                competitor,
+                user_id=monitored.user_id,
+                enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
+            )
+            competitor_payload["trace_id"] = trace_id
+            try:
+                COMPETITOR_COLLECT_IN_FLIGHT.inc()
+                competitor_outcome, competitor_result = collect_product(
+                    competitor_payload,
+                    use_lock=True,
+                    dispatch_comparison=False,
+                    logger_bound=logger.bind(
                         monitored_id=str(monitored.id),
                         competitor_id=str(competitor.id),
                         trace_id=trace_id,
-                    )
-                    competitor_outcome, competitor_result = "error", None
-                finally:
-                    #Mantém o gauge consistente mesmo quando ocorrem falhas inesperadas
-                    COMPETITOR_COLLECT_IN_FLIGHT.dec()
-                    competitor_duration_ms = int(
-                        (time.perf_counter() - competitor_started_perf) * 1000
-                    )
-                    COMPETITOR_COLLECT_DURATION_MS.observe(competitor_duration_ms)
-                _record_competitor_metrics(
-                    outcome=competitor_outcome,
-                    result=competitor_result,
+                    ),
+                    db=db,
+                )
+            except Exception:
+                #Isola falhas de concorrentes para não comprometer grupo inteiro
+                logger.exception(
+                    "continuous_competitor_collect_failed",
                     monitored_id=str(monitored.id),
                     competitor_id=str(competitor.id),
                     trace_id=trace_id,
                 )
-                db.refresh(competitor)
-                if competitor.last_price_change_at != previous_change_at:
-                    competitor_change_detected = True
-                logger.info(
-                    "continuous_competitor_collected",
-                    monitored_id=str(monitored.id),
-                    competitor_id=str(competitor.id),
-                    duration_ms=competitor_duration_ms,
-                    trace_id=trace_id,
+                competitor_outcome, competitor_result = "error", None
+            finally:
+                #Mantém o gauge consistente mesmo quando ocorrem falhas inesperadas
+                COMPETITOR_COLLECT_IN_FLIGHT.dec()
+                competitor_duration_ms = int(
+                    (time.perf_counter() - competitor_started_perf) * 1000
                 )
+                COMPETITOR_COLLECT_DURATION_MS.obeserve(competitor_duration_ms)
+            _record_competitor_metrics(
+                outcome=competitor_outcome,
+                result=competitor_result,
+                monitored_id=str(monitored.id),
+                competitor_id=str(competitor.id),
+                trace_id=trace_id,
+            )
+            db.refresh(competitor)
+            if competitor.last_price_change_at != previous_change_at:
+                competitor_change_detected = True
+            logger.info(
+                "continuous_competitor_collected",
+                monitored_id=str(monitored.id),
+                competitor_id=str(competitor.id),
+                duration_ms=competitor_duration_ms,
+                trace_id=trace_id,
+            )
 
-            group_finished_at = _utc_now()
-            refreshed = get_monitored_product_by_id(db, monitored.id)
-            if refreshed:
-                refreshed.group_collected_at = group_finished_at
-                refreshed.last_price_change_at = get_last_price_change_for_monitored(
-                    db,
-                    refreshed.id,
+        group_finished_at = _utc_now()
+        refreshed = get_monitored_product_by_id(db, monitored.id)
+        if refreshed:
+            refreshed.group_collected_at = group_finished_at
+            refreshed.last_price_change_at = get_last_price_change_for_monitored(
+                db,
+                refreshed.id,
+            )
+            if competitor_change_detected:
+                #Reduzimos estabilidade para acelerar novas coletas após mudanças do concorrente.
+                refreshed.stability_score = STABILITY_UNSTABLE
+                COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL.inc()
+                logger.info(
+                    "monitored_stability_reset_by_competitor",
+                    monitored_id=str(refreshed.id),
+                    collected_at=group_finished_at.isoformat(),
                 )
-                if competitor_change_detected:
-                    #Reduzimos estabilidade para acelerar novas coletas após mudanças do concorrente.
-                    refreshed.stability_score = STABILITY_UNSTABLE
-                    COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL.inc()
-                    logger.info(
-                        "monitored_stability_reset_by_competitor",
-                        monitored_id=str(refreshed.id),
-                        collected_at=group_finished_at.isoformat(),
-                    )
-                else:
-                    refreshed.stability_score = calculate_stability_score(
-                        refreshed,
-                        reference_time=group_finished_at,
-                    )
-                refreshed.next_check_at = calculate_next_check_at(
+            else:
+                refreshed.stability_score = calculate_stability_score(
                     refreshed,
-                    collected_at=group_finished_at,
+                    reference_time=group_finished_at,
                 )
-                next_check_at = refreshed.next_check_at
-                if next_check_at is None or next_check_at < group_finished_at:
-                    #Protege o reenqueue com um timestamp válido para manter a fila ativa
-                    next_check_at = group_finished_at
-                    refreshed.next_check_at = next_check_at
+            refreshed.next_check_at = calculate_next_check_at(
+                refreshed,
+                collected_at=group_finished_at,
+            )
+            next_check_at = refreshed.next_check_at
+            if next_check_at is None or next_check_at < group_finished_at:
+                #Protege o reenque com um timestamp válido para manter a fila ativa
+                next_check_at = group_finished_at
+                refreshed.next_check_at = next_check_at
+            db.commit()
 
     if monitored_result and monitored_result.status:
         PRIORITY_QUEUE_PROCESSED_TOTAL.labels(source="continuous", outcome=monitored_result.status).inc()

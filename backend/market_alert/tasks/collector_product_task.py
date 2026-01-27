@@ -221,13 +221,16 @@ def collect_product(
     dispatch_comparison: bool = True,
     lock_ttl_seconds: int | None = None,
     logger_bound=None,
+    db: Session | None = None,
 ) -> tuple[str, ScrapeResult | None]:
     """ Executa coleta de produto de forma reutilizável para tasks e orquestradores.
 
     A função aplica validação de payload, coordena lock distribuído quando
     ``use_lock`` estiver habilitado e registra métricas consistentes. O TTL
     do lock segue ``PRODUCT_LOCK_TTL_SECONDS`` ou o valor informado em
-    ``lock_ttl_seconds``.
+    ``lock_ttl_seconds``. Quando ``db`` é fornecida, reutilizamos a sessão
+    compartilhada para garantir consistência transacional e reduzir overhead
+    de conexões, mantendo commits e refresh no mesmo contexto.
     """
     SCRAPER_IN_FLIGHT.inc()
     #Mede latência com relógio monotônico para evitar valores negativos
@@ -287,11 +290,13 @@ def collect_product(
                 except Exception:
                     user_uuid = None
 
-                with SessionLocal() as db:
+                def _collect_with_db(session_manager: Session) -> None:
+                    nonlocal monitored_id, reason, result
+
                     competitor_row: CompetitorProduct | None = None
                     if competitor_id is not None:
                         competitor_row = (
-                            db.query(CompetitorProduct)
+                            session_manager.query(CompetitorProduct)
                             .filter(CompetitorProduct.id == competitor_id)
                             .first()
                         )
@@ -337,7 +342,7 @@ def collect_product(
                                 product_url=url,
                             )
                             result = scrape_competitor_product(
-                                db=db,
+                                db=session_manager,
                                 user_id=user_uuid or monitored_id or competitor_id,
                                 url=url,
                                 payload=payload_model,
@@ -347,7 +352,7 @@ def collect_product(
                         monitored_row: MonitoredProduct | None = None
                         if monitored_id is not None:
                             monitored_row = (
-                                db.query(MonitoredProduct)
+                                session_manager.query(MonitoredProduct)
                                 .filter(MonitoredProduct.id == monitored_id)
                                 .first()
                             )
@@ -372,7 +377,7 @@ def collect_product(
                                 product_url=url,
                             )
                             result = scrape_monitored_product(
-                                db=db,
+                                db=session_manager,
                                 url=url,
                                 user_id=user_uuid or monitored_id,
                                 payload=payload_model,
@@ -381,11 +386,19 @@ def collect_product(
                             if result and result.status in {"success", "not_modified"}:
                                 #Garante a transição para ativo mesmo que o fluxo anterior não tenha persistido
                                 _activate_pending_monitored(
-                                    db,
+                                    session_manager,
                                     monitored_id,
                                     task_logger=task_logger,
                                     trace_id=trace_id,
                                 )
+
+                #Mantém a sessão compartilhada quando fornecida para preservar consistência transacional.
+                if db is None:
+                    with SessionLocal() as session_manager:
+                        _collect_with_db(session_manager)
+                else:
+                    _collect_with_db(db)
+                            
     except ScraperError as exc:
         reason = "scraper_error"
         task_logger.warning("scraper_error", kind=kind, error=str(exc))
