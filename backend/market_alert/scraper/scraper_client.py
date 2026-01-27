@@ -217,114 +217,104 @@ class ScraperClient:
         if extra_metadata:
             request_payload["metadata"] = extra_metadata
 
-        attempt = 0
-        backoff = settings.SCRAPER_RETRY_BACKOFF_MIN
-
-        while True:
-            attempt += 1
-            try:
-                response = self.client.post(
-                    "/scraper/parse",
-                    json=request_payload,
-                    headers=headers or None,
-                )
-            except httpx.TimeoutException as exc:
-                circuit_breaker.record_failure(host)
-                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
-                    raise ScraperClientError(
-                        "Tempo limite ao consultar o serviço de scraping",
-                        status_code=504,
-                    ) from exc
-                time.sleep(self._compute_backoff(backoff, attempt))
-                continue
-            except httpx.RequestError as exc:
-                circuit_breaker.record_failure(host)
-                raise ScraperClientError(
-                    f"Falha de transporte ao consultar o scraper: {exc}",
-                    status_code=503,
-                ) from exc
-
-            status_code = response.status_code
-
-            if status_code == 200:
-                try:
-                    raw_body = response.json()
-                except ValueError as exc:
-                    circuit_breaker.record_failure(host)
-                    raise ScraperClientError(
-                        "Corpo JSON inválido retornado pelo serviço de scraping",
-                        status_code=500,
-                    ) from exc
-
-                try:
-                    parsed_payload = ParserResponse.model_validate(raw_body)
-                    parsed_payload = _sanitize_parser_response(parsed_payload)
-                except ValidationError as exc:
-                    circuit_breaker.record_failure(host)
-                    raise ScraperClientError(
-                        "Resposta inválida recebida do serviço de scraping",
-                        status_code=500,
-                    ) from exc
-                circuit_breaker.record_success(host)
-                return ScraperFetchResult(
-                    status_code=status_code,
-                    payload=parsed_payload,
-                    headers=response.headers,
-                )
-
-            if status_code == 304:
-                circuit_breaker.record_success(host)
-                return ScraperFetchResult(
-                    status_code=status_code,
-                    payload=None,
-                    headers=response.headers,
-                )
-
-            if status_code == 422:
-                try:
-                    body = response.json()
-                except ValueError as exc:
-                    circuit_breaker.record_failure(host)
-                    raise ScraperClientError(
-                        "Corpo JSON inválido retornado pelo serviço de scraping",
-                        status_code=500,
-                    ) from exc
-                error_code = body.get("error_code")
-                circuit_breaker.record_success(host)
-                return ScraperFetchResult(
-                    status_code=status_code,
-                    payload=None,
-                    headers=response.headers,
-                    error_code=error_code,
-                )
-
-            if status_code in {429}:
-                circuit_breaker.record_failure(host)
-                retry_after = self._extract_retry_after(response)
-                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
-                    raise ScraperClientError(
-                        "Serviço de scraping respondeu com 429",
-                        status_code=status_code,
-                        retry_after=retry_after,
-                    )
-                time.sleep(self._calculate_retry_delay(backoff, attempt, retry_after))
-                continue
-
-            if 500 <= status_code < 600:
-                circuit_breaker.record_failure(host)
-                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
-                    raise ScraperClientError(
-                        "Erro 5xx ao consultar o serviço de scraping",
-                        status_code=status_code,
-                    )
-                time.sleep(self._compute_backoff(backoff, attempt))
-                continue
-
+        #Remove retry loop com time.sleep para evitar bloqueio do worker Celery
+        #Retries devem ser gerenciados no nível da task com countdown
+        try:
+            response = self.client.post(
+                "/scraper/parse",
+                json=request_payload,
+                headers=headers or None,
+            )
+        except httpx.TimeoutException as exc:
             circuit_breaker.record_failure(host)
             raise ScraperClientError(
-                f"Resposta inesperada do scraper: {status_code}",
+                "Tempo limite ao consultar o serviço de scraping",
+                status_code=504,
+            ) from exc
+        except httpx.RequestError as exc:
+            circuit_breaker.record_failure(host)
+            raise ScraperClientError(
+                f"Falha de transporte ao consultar o scraper: {exc}",
+                status_code=503,
+            ) from exc
+
+        status_code = response.status_code
+
+        if status_code == 200:
+            try:
+                raw_body = response.json()
+            except ValueError as exc:
+                circuit_breaker.record_failure(host)
+                raise ScraperClientError(
+                    "Corpo JSON inválido retornado pelo serviço de scraping",
+                    status_code=500,
+                ) from exc
+
+            try:
+                parsed_payload = ParserResponse.model_validate(raw_body)
+                parsed_payload = _sanitize_parser_response(parsed_payload)
+            except ValidationError as exc:
+                circuit_breaker.record_failure(host)
+                raise ScraperClientError(
+                    "Resposta inválida recebida do serviço de scraping",
+                    status_code=500,
+                ) from exc
+            circuit_breaker.record_success(host)
+            return ScraperFetchResult(
+                status_code=status_code,
+                payload=parsed_payload,
+                headers=response.headers,
+            )
+
+        if status_code == 304:
+            circuit_breaker.record_success(host)
+            return ScraperFetchResult(
+                status_code=status_code,
+                payload=None,
+                headers=response.headers,
+            )
+
+        if status_code == 422:
+            try:
+                body = response.json()
+            except ValueError as exc:
+                circuit_breaker.record_failure(host)
+                raise ScraperClientError(
+                    "Corpo JSON inválido retornado pelo serviço de scraping",
+                    status_code=500,
+                ) from exc
+            error_code = body.get("error_code")
+            circuit_breaker.record_success(host)
+            return ScraperFetchResult(
+                status_code=status_code,
+                payload=None,
+                headers=response.headers,
+                error_code=error_code,
+            )
+
+        if status_code in {429}:
+            circuit_breaker.record_failure(host)
+            retry_after = self._extract_retry_after(response)
+            #Propaga erro com retry_after para que a task possa reagendar com countdown
+            raise ScraperClientError(
+                "Serviço de scraping respondeu com 429",
+                status_code=status_code,
+                retry_after=retry_after,
+            )
+
+        if 500 <= status_code < 600:
+            circuit_breaker.record_failure(host)
+            #Propaga erro 5xx para que a task possa reagendar com backoff exponencial
+            raise ScraperClientError(
+                "Erro 5xx ao consultar o serviço de scraping",
                 status_code=status_code,
             )
+
+        circuit_breaker.record_failure(host)
+        raise ScraperClientError(
+            f"Resposta inesperada do scraper: {status_code}",
+            status_code=status_code,
+        )
 
     def close(self) -> None:
         """ Encerra a sessão HTTP síncrona para liberar recursos """

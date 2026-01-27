@@ -106,10 +106,39 @@ def collect_db_metrics():
 def cleanup_cache():
     """ Remove entradas expiradas ou sem TTL do cache de scraping """
     removed = 0
+    max_iterations = 10000  #Limite de segurança para evitar loop infinito
+    max_duration_seconds = 60  #Timeout de 1 minuto
+    
     try:
+        import time
+        start_time = time.perf_counter()
         cursor = 0
+        iteration_count = 0
+        
         #Percorre chaves iniciadas com "cache": utilizando SCAN para evitar bloqueios
         while True:
+            #Valida limites de segurança antes de cada iteração
+            iteration_count += 1
+            elapsed = time.perf_counter() - start_time
+            
+            if iteration_count >= max_iterations:
+                logger.warning(
+                    "cleanup_cache_max_iterations",
+                    removed=removed,
+                    iterations=iteration_count,
+                    elapsed_seconds=int(elapsed),
+                )
+                break
+            
+            if elapsed >= max_duration_seconds:
+                logger.warning(
+                    "cleanup_cache_timeout",
+                    removed=removed,
+                    iterations=iteration_count,
+                    elapsed_seconds=int(elapsed),
+                )
+                break
+            
             cursor, keys = redis_client.scan(cursor=cursor, match="cache:*", count=100)
             for key in keys:
                 ttl = redis_client.ttl(key)
@@ -121,8 +150,14 @@ def cleanup_cache():
                     removed += 1
             if cursor == 0:
                 break
+        
         if removed:
             CACHE_CLEANUP_TOTAL.inc(removed)
-        logger.info("cleanup_cache_success", removed=removed)
+        logger.info(
+            "cleanup_cache_success",
+            removed=removed,
+            iterations=iteration_count,
+            elapsed_seconds=int(time.perf_counter() - start_time),
+        )
     except Exception as exc:
         logger.exception("cleanup_cache_failure")

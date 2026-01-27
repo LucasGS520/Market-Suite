@@ -332,7 +332,7 @@ def collect_product(
 
 @celery_app.task(
     bind=True,
-    max_retries=0,
+    max_retries=3,
     name="market_alert.tasks.collector_product_task.collect_product_task",
     queue="scraping",
     acks_late=True,
@@ -341,15 +341,56 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
     """Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
 
     A task valida o payload mínimo, aplica o lock Redis para o produto alvo e
-    invoca o serviço de scraping adequado. Não executa orquestrações extras,
-    mantendo a granularidade por item e favorecendo retries simples. Quando o
-    lock não pode ser adquirido, retorna ``no_result`` para manter o contrato
-    de status enxuto previsto pelo pipeline.
+    invoca o serviço de scraping adequado. Retries são gerenciados pelo Celery
+    com backoff exponencial usando countdown para evitar bloqueio do worker.
+    Quando o lock não pode ser adquirido, retorna ``no_result`` para manter o
+    contrato de status enxuto previsto pelo pipeline.
     """
-    outcome, _ = collect_product(
-        payload,
-        use_lock=True,
-        dispatch_comparison=True,
-        logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
-    )
-    return outcome
+    from market_alert.scraper.scraper_client import ScraperClientError
+    
+    task_logger = logger.bind(task_id=getattr(self.request, "id", None))
+    
+    try:
+        outcome, _ = collect_product(
+            payload,
+            use_lock=True,
+            dispatch_comparison=True,
+            logger_bound=task_logger,
+        )
+        return outcome
+    except ScraperClientError as exc:
+        #Erros temporários do scraper (timeout, 429, 5xx) acionam retry com backoff
+        if exc.status_code in {429, 503, 504} or (500 <= (exc.status_code or 0) < 600):
+            retry_count = self.request.retries
+            if retry_count < self.max_retries:
+                #Backoff exponencial: 5s, 15s, 45s (aproximadamente)
+                backoff_base = 5
+                countdown = backoff_base * (3 ** retry_count)
+                
+                #Se 429 com Retry-After, usa o valor sugerido
+                if exc.status_code == 429 and exc.retry_after:
+                    countdown = min(countdown, exc.retry_after)
+                
+                task_logger.warning(
+                    "collect_retry_scheduled",
+                    error=str(exc),
+                    status_code=exc.status_code,
+                    retry_count=retry_count,
+                    countdown=countdown,
+                )
+                raise self.retry(countdown=countdown, exc=exc)
+            else:
+                task_logger.error(
+                    "collect_max_retries_exceeded",
+                    error=str(exc),
+                    status_code=exc.status_code,
+                )
+                return "error"
+        
+        #Erros permanentes (422, 4xx) não acionam retry
+        task_logger.warning(
+            "collect_permanent_error",
+            error=str(exc),
+            status_code=exc.status_code,
+        )
+        return "error"
