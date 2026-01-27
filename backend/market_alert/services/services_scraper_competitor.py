@@ -50,7 +50,7 @@ def _get_existing(
     )
 
 def _normalize_competitor_scrape_url(url: str) -> str:
-    """ Normalize a URL do concorrente para manter consistência entre fetch e persistência """
+    """ Normalize a URL do concorrente para alinhar fetch e persistência """
     normalized = normalize_competitor_url(url)
     if not normalized:
         #Garante previsibilidade mesmo quando a URL original é inválida

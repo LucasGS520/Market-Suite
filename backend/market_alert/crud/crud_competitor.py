@@ -77,14 +77,13 @@ def get_competitor_by_monitored_and_url(
     product_url: str,
 ) -> CompetitorProduct | None:
     """ Recupera concorrente usando URL canônica vinculada ao monitorado """
-    normalized_url = _normalize_competitor_storage_url(str(product_url))
-    if not normalized_url:
+    if not product_url:
         return None
     return (
         db.query(CompetitorProduct)
         .filter(
             CompetitorProduct.monitored_product_id == monitored_product_id,
-            CompetitorProduct.product_url == normalized_url,
+            CompetitorProduct.product_url == product_url,
         )
         .first()
     )
