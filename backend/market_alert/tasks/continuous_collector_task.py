@@ -231,7 +231,7 @@ def _collect_group(
                 db,
                 monitored.id,
                 include_paused=False,
-                include_inactive=False,
+                include_inactive=True, #Inclui intens indisponíveis para rechecagem
             )
             competitor_change_detected = False
             for competitor in competitors:
