@@ -106,8 +106,8 @@ def collect_db_metrics():
 def cleanup_cache():
     """ Remove entradas expiradas ou sem TTL do cache de scraping """
     removed = 0
-    max_iterations = 10000  #Limite de segurança para evitar loop infinito
-    max_duration_seconds = 60  #Timeout de 1 minuto
+    max_iterations = 10000  # Limite de segurança para evitar loop infinito
+    max_duration_seconds = 60  # Timeout de 1 minuto
     
     try:
         import time
@@ -115,9 +115,9 @@ def cleanup_cache():
         cursor = 0
         iteration_count = 0
         
-        #Percorre chaves iniciadas com "cache": utilizando SCAN para evitar bloqueios
+        # Percorre chaves iniciadas com "cache": utilizando SCAN para evitar bloqueios
         while True:
-            #Valida limites de segurança antes de cada iteração
+            # Valida limites de segurança antes de cada iteração
             iteration_count += 1
             elapsed = time.perf_counter() - start_time
             
@@ -142,7 +142,7 @@ def cleanup_cache():
             cursor, keys = redis_client.scan(cursor=cursor, match="cache:*", count=100)
             for key in keys:
                 ttl = redis_client.ttl(key)
-                #ttl == -2 significa chave inexistente; -1 indica ausência de expiração
+                # ttl == -2 significa chave inexistente; -1 indica ausência de expiração
                 if ttl == -2:
                     continue
                 if ttl <= 0:

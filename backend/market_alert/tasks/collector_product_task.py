@@ -359,15 +359,15 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
         )
         return outcome
     except ScraperClientError as exc:
-        #Erros temporários do scraper (timeout, 429, 5xx) acionam retry com backoff
-        if exc.status_code in {429, 503, 504} or (500 <= (exc.status_code or 0) < 600):
+        # Erros temporários do scraper (timeout, 429, 5xx) acionam retry com backoff
+        if exc.status_code == 429 or (500 <= (exc.status_code or 0) < 600):
             retry_count = self.request.retries
             if retry_count < self.max_retries:
-                #Backoff exponencial: 5s, 15s, 45s (aproximadamente)
+                # Backoff exponencial: 5s, 15s, 45s (aproximadamente)
                 backoff_base = 5
                 countdown = backoff_base * (3 ** retry_count)
                 
-                #Se 429 com Retry-After, usa o valor sugerido
+                # Se 429 com Retry-After, usa o valor sugerido
                 if exc.status_code == 429 and exc.retry_after:
                     countdown = min(countdown, exc.retry_after)
                 
@@ -387,7 +387,7 @@ def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
                 )
                 return "error"
         
-        #Erros permanentes (422, 4xx) não acionam retry
+        # Erros permanentes (422, 4xx) não acionam retry
         task_logger.warning(
             "collect_permanent_error",
             error=str(exc),
