@@ -56,10 +56,11 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 7. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 
 ### Tarefas Celery do `market_alert`
-- **Collector (`tasks.collector_product_task.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir.
-- **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`)**: worker dedicado que consome a fila de prioridade Redis, recalcula `next_check_at` conforme estabilidade e enfileira as coletas sem depender de Beat.
-- **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: permanece idempotente e leve, usada pelo collector e acionamentos manuais para recalcular históricos e campos derivados.
-- **Notificações (`fila notifications`)**: entrega alertas enfileirados com retry e backoff, registrando histórico em `notification_attempt` e marcando DLQ quando necessário.
+- **Collector (`tasks.collector_product_task.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir. Enfileirado na fila `scraping`.
+- **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`)**: task que executa indefinidamente no worker dedicado `monitor`, consome a fila de prioridade Redis (sorted sets), coleta monitorado + concorrentes em sequência, recalcula `next_check_at` conforme estabilidade e reenfileira automaticamente. Inicia via env `CONTINUOUS_COLLECTOR_AUTOSTART=1` no worker.
+- **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: idempotente e leve, disparada automaticamente após coleções que detectem mudanças de preço/disponibilidade ou mudanças em concorrentes. Enfileirada na fila `monitor`.
+- **Notificações (`tasks.send_notification_task.send_notification_task`)**: entrega alertas com retry e backoff exponencial, registrando histórico em `notification_attempt` e marcando DLQ quando necessário. Enfileirada na fila `notifications`.
+- **Reconciliação de fila (`tasks.priority_queue_tasks.reconcile_priority_queue`)**: disparada automaticamente quando o coletor contínuo identifica ociosidade, repopula a fila de prioridade com monitorados ativos. Enfileirada na fila `monitor`.
 
 #### Princípios do backend
 - **Exposição de APIs**: o FastAPI em `market_alert` oferece rotas públicas, autenticação JWT e endpoints para monitoramentos, concorrentes e comparações.
@@ -113,11 +114,20 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 
 ### Docker Compose
 ```bash
+# Subir dependências primeiro
 docker compose up -d db redis redis-init
-docker compose up -d api market_scraper celery-worker celery-worker-monitor celery-worker-notifications
-# Após dependências, subir serviços de aplicação e observabilidade
+
+# Subir serviços da aplicação (ordem não importa após dependências)
 docker compose up -d api market_scraper celery-worker celery-worker-monitor celery-worker-notifications frontend
+
+# Para subir apenas backend sem frontend
+docker compose up -d db redis redis-init api market_scraper celery-worker celery-worker-monitor celery-worker-notifications
 ```
+
+**Filas Celery separadas:**
+- `celery-worker` (portas 8002): filas `celery,scraping` - tarefas de scraping de produtos
+- `celery-worker-monitor` (porta 8004): fila `monitor` - coletor contínuo + comparações + reconciliação
+- `celery-worker-notifications` (porta 8003): fila `notifications` - envio de alertas e verificações
 
 - Interrompa com `docker compose down` (utilize `docker compose down -v` para remover volumes, se necessário).
 - Variáveis comuns residem em `.env.common`; arquivos específicos estão em `backend/market_alert/.env.market_alert`, `backend/market_scraper/.env.market_scraper` e `frontend/.env` (quando aplicável).
@@ -128,13 +138,12 @@ docker compose up -d api market_scraper celery-worker celery-worker-monitor cele
 1. `python -m venv .venv && source .venv/bin/activate`
 2. `pip install -r requirements.txt`
 3. Configure arquivos `.env` mencionados acima.
-4. Inicie serviços:
+4. Inicie serviços em terminais separados:
    - API FastAPI: `uvicorn backend.market_alert.main:app --reload --port 8000`
-   - Worker Celery principal: `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=4 -Q celery,scraping,monitor`
-   - Worker Celery principal: `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=4 -Q celery,scraping`
-   - Worker Celery do coletor contínuo: `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=2 -Q monitor`
-   - Worker Celery de notificações: `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=2 -Q notifications`
    - Scraper FastAPI: `uvicorn backend.market_scraper.main:app --reload --port 8010`
+   - Worker Celery (scraping): `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=4 -Q celery,scraping`
+   - Worker Celery (monitor/coletor contínuo): `CONTINUOUS_COLLECTOR_AUTOSTART=1 celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=2 -Q monitor`
+   - Worker Celery (notificações): `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=2 -Q notifications`
 
 #### Frontend
 1. `cd frontend`

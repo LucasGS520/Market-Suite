@@ -64,21 +64,39 @@ market_alert/
 - **Codificação numérica**: valores monetários são serializados como string (`Decimal` → `"1099.90"`) em quase todos os contratos, exceto no resumo de comparação que mantém encoder numérico para compatibilidade.
 - **Execução das comparações**: as comparações são executadas automaticamente pelas tasks de monitoramento e comparação; não há endpoint para disparo manual.
 
-## Celery
-- **Arquivo principal:** `core/celery_app.py`.
-- **Filas padrão:** `celery`, `scraping`, `monitor`, `notifications` (configuráveis via `.env.market_alert`).
-- **Tasks de destaque:**
-  - `tasks.collector_product_task.collect_product_task`
-  - `tasks.continuous_collector_task.run_continuous_collector`
-  - `task.priority_queue_tasks.reconcile_priority_queue`
-  - `tasks.compare_prices_task.compare_prices_task`
-  - `tasks.metrics_tasks.collect_celery_metrics`, `cleanup_cache`
+## Celery - Arquitetura de Workers e Filas
 
-### Scraping e resiliência
-- **Cliente síncrono:** `scraper/scraper_client.py` usa `httpx.Client` de vida curta e fluxo linear. Evite helpers assíncronos ou `asyncio.run` dentro das tasks para impedir erros de loop fechado.
+### Organização por Workers Dedicados
+O sistema utiliza **três workers Celery separados**, cada um consumindo uma fila específica e executando em containers ou processos independentes:
+
+| Worker | Fila(s) | Concorrência | Responsabilidades |
+|--------|---------|--------------|-------------------|
+| **celery-worker** | `celery,scraping` | 4 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
+| **celery-worker-monitor** | `monitor` | 2 | Executa o loop contínuo `run_continuous_collector` + `compare_prices_task` + `reconcile_priority_queue` |
+| **celery-worker-notifications** | `notifications` | 2 | Executa `send_notification_task` + `verification_tasks` |
+
+### Arquivo principal
+- **`core/celery_app.py`**: instancia e configura o app Celery, registra métricas, inicializa conectores.
+- **`core/celery_schedule.py`**: centraliza declarações de filas, rotas e agendamentos Beat.
+
+### Tasks de destaque
+- **`tasks.collector_product_task.collect_product_task`** (fila `scraping`): coleta um monitorado ou concorrente por vez com lock Redis.
+- **`tasks.continuous_collector_task.run_continuous_collector`** (fila `monitor`): **task que roda indefinidamente**, consome fila de prioridade Redis, coleta grupos monitorado+concorrentes, recalcula estabilidade e reenfileira.
+- **`tasks.priority_queue_tasks.reconcile_priority_queue`** (fila `monitor`): repopula a fila de prioridade com monitorados ativos quando há ociosidade prolongada.
+- **`tasks.compare_prices_task.compare_prices_task`** (fila `monitor`): dispara automaticamente após coletas com mudanças.
+- **`tasks.send_notification_task.send_notification_task`** (fila `notifications`): entrega alertas com retry.
+- **`tasks.metrics_tasks.collect_celery_metrics`**, **`cleanup_cache`** (agendadas via Beat): coleta métricas e limpa cache.
+
+### Autostart do Coletor Contínuo
+O worker `celery-worker-monitor` define a variável de ambiente `CONTINUOUS_COLLECTOR_AUTOSTART=1`, que faz com que a task `run_continuous_collector` seja iniciada automaticamente quando o worker inicia. O loop contém lógica de graceful shutdown e respeita soft time limits do Celery.
+
+### Scraping e Coleta Contínua
+- **Cliente síncrono:** `services/scraper_client.py` usa `httpx.Client` de vida curta e fluxo linear. Evite helpers assíncronos ou `asyncio.run` dentro das tasks para impedir erros de loop fechado.
 - **Proteções:** rate limiter e circuit breaker recebem `get_redis_client` como fábrica e só tentam abrir conexão quando invocados, tolerando Redis indisponível durante o bootstrap do worker.
 - **Pool do worker:** mantenha o pool `prefork` (padrão) para que `time.sleep` usado nos backoffs não bloqueie outros workers em pools baseados em threads/eventlet. Se migrar para pools cooperativos, troque os backoffs bloqueantes por `countdown` do Celery ou sleeps compatíveis com o worker escolhido.
 - **Retries e erros:** tarefas de scraping aplicam `self.retry` progressivo (incluindo `429 Retry-After`) antes de marcar monitorados como `failed`. Cada falha registra `scraping_errors` com o motivo retornado pelo cliente.
+- **Locks Redis:** apenas o `collect_product_task` aplica `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando race conditions entre workers sem usar flags no banco.
+- **Fila de Prioridade:** o `run_continuous_collector` consome um Redis Sorted Set (`PRIORITY_QUEUE_KEY`) ordenado por timestamp. Monitorados são reenfileirados automaticamente após coleta com `next_check_at` recalculado pela estabilidade. Quando há ociosidade prolongada (threshold configurável), o worker dispara `reconcile_priority_queue` para recarregar monitorados ativos.
 
 ## Configuração
 Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e podem ser sobrescritas via `market_alert/.env.market_alert`.
@@ -98,8 +116,8 @@ O Redis do `docker-compose.yml` utiliza AOF com snapshots para manter filas Cele
 | Verificação | `EMAIL_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_MAX_ATTEMPTS`, `VERIFICATION_RESEND_INTERVAL_SECONDS`, `VERIFICATION_RESEND_MAX_PER_HOUR`, `REGISTRATION_MAX_PER_HOUR` |
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
-| Agendamento contínuo | `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
-| Reconciliação da fila | `PRIORITY_QUEUE_RECONCILE_AUTOSTART`, `PRIORITY_QUEUE_RECONCILE_AUTOSTART_TTL` |
+| Agendamento contínuo | `CONTINUOUS_COLLECTOR_AUTOSTART`, `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
+| Reconciliação contínua | `PRIORITY_QUEUE_RECONCILE_AUTOSTART`, `PRIORITY_QUEUE_RECONCILE_AUTOSTART_TTL` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
 | Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER`, `NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS`, `NOTIFICATION_EMAIL_PROVIDER`, `NOTIFICATION_SMS_PROVIDER`, `NOTIFICATION_WHATSAPP_PROVIDER`, `NOTIFICATION_PUSH_PROVIDER`, `NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` |
 
@@ -220,16 +238,107 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
   - Em fluxos de auditoria, prefira `token_id` ou `user_id` em vez do valor cru de chaves ou tokens.
 
 - **Observabilidade:**
-  - Métricas expostas em `/metrics`
+  - Métricas expostos em `/metrics`
   - Logs estruturados via `structlog`
-     - Métricas Celery disponíveis nos workers configurados, incluindo contadores de scraping e latência (`market_alert_monitoring_tasks_total`, `market_alert_scrape_latency_seconds`).
+  - Métricas Celery disponíveis nos workers configurados, incluindo contadores de scraping e latência (`market_alert_monitoring_tasks_total`, `market_alert_scrape_latency_seconds`).
+
+## Fluxo de Orquestração Completo
+
+### 1. Criação de Monitorado
+```
+POST /monitored/scrape
+  ↓
+Valida duplicidade por usuário + URL
+  ↓
+Cria recurso mínimo (id, url, created_at, next_check_at)
+  ↓
+Dispara collect_product_task na fila "scraping"
+  ↓
+Agenda monitorado na fila de prioridade Redis para rechecagens contínuas
+  ↓
+Responde 202 com id e dados mínimos
+```
+
+### 2. Coleta Imediata (na fila scraping)
+```
+collect_product_task (worker: celery-worker)
+  ↓
+Valida payload (tipo, IDs, URL)
+  ↓
+Tenta adquirir lock Redis (product_lock)
+  ├─ Lock adquirido: continua
+  └─ Lock não adquirido: retorna "no_result" com métrica
+  ↓
+Chama scraper_client.scrape() → market_scraper
+  ↓
+Recebe ScrapeResult (success/not_modified/no_result/error)
+  ↓
+Persiste em PriceHistory se houver nova informação
+  ↓
+Retorna ao banco com resultado
+```
+
+### 3. Loop Contínuo (na fila monitor)
+```
+run_continuous_collector (worker: celery-worker-monitor - LOOP INFINITO)
+  ↓
+Enquanto não atingir soft_time_limit (≈3600s):
+  ├─ Consome fila de prioridade Redis (Sorted Set)
+  ├─ Pop item com timestamp <= agora
+  ├─ Se nenhum item pronto: sleep adaptativo, incrementa empty_streak
+  │   └─ Se empty_streak > threshold: dispara reconcile_priority_queue
+  │
+  └─ Se item encontrado:
+      ├─ Carrega monitorado do DB
+      ├─ Coleta_product (com lock) → ScrapeResult
+      ├─ Carrega concorrentes do DB
+      ├─ Para cada concorrente:
+      │   └─ Coleta_product (com lock) → ScrapeResult
+      ├─ Recalcula stability_score baseado em histórico de mudanças
+      ├─ Calcula next_check_at (mais estável = menos frequente)
+      ├─ Se houver mudanças: dispara compare_prices_task
+      ├─ Persiste em DB
+      └─ Reenfileira para próxima coleta com next_check_at
+  ↓
+Graceful shutdown: drain fila de processamento, flush métricas
+```
+
+### 4. Reconciliação Automática (na fila monitor)
+```
+reconcile_priority_queue (disparada por run_continuous_collector)
+  ↓
+Itera monitorados com status=active e paused=false
+  ↓
+Para cada monitorado: enqueue_monitored_at(monitored_id, next_check_at)
+  ↓
+Registra contadores (total, enqueued, failed)
+```
+
+### 5. Comparação e Notificações
+```
+compare_prices_task (fila monitor, disparada automaticamente)
+  ↓
+Recalcula competitividade do monitorado vs concorrentes
+  ↓
+Atualiza competitiveness_status (Competitivo/Atenção/Urgente/Sem concorrentes)
+  ↓
+Gera eventos de domínio (PriceDropped, PriceIncreased, etc.)
+  ↓
+Notificações são enfileiradas em fila "notifications"
+  ↓
+send_notification_task (worker: celery-worker-notifications)
+  ├─ Resolve canal preferido do usuário
+  ├─ Tenta envio (email/SMS/webhook/push)
+  ├─ Se falha: retry com backoff exponencial
+  └─ Registra em notification_attempt
+```
 
 ## Execução Local
 - **Docker Compose** (recomendado):
   ```bash
   docker compose up -d db redis redis-init
   docker compose up -d migrations
-  docker compose up -d api celery-worker celery-worker-monitor celery-worker-notifications
+  docker compose up -d api market_scraper celery-worker celery-worker-monitor celery-worker-notifications
   ```
 
 - **Sem Docker:**
@@ -237,7 +346,10 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
   2. Configure `.env.common` e `.env.market_alert` com valores locais.
   3. Execute migrações: `alembic upgrade head`.
   4. Inicie API: `uvicorn market_alert.main:app --reload --port 8000`.
-  5. Suba worker Celery principal: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q celery,scraping`.
+  5. Inicie Scraper: `uvicorn market_scraper.main:app --reload --port 8010`.
+  6. Inicie worker scraping: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork -Q celery,scraping`.
+  7. Inicie worker monitor: `CONTINUOUS_COLLECTOR_AUTOSTART=1 celery -A market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork -Q monitor`.
+  8. Inicie worker notificações: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork -Q notifications`.
   6. Suba worker do coletor contínuo: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q monitor`.
   7. Suba worker de notificações: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q notifications`.
 
