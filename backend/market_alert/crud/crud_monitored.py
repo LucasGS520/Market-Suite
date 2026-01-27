@@ -86,20 +86,125 @@ def _different_price(previous_price: Decimal | float | int | str | None, current
     return previous != current
 
 def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
-    """ Calcula o próximo agendamento respeitando configuração dinâmica do item.
+    """ Calcula o próximo agendamento com intervalo adaptativo baseado em estabilidade.
 
     A função usa o atributo opcional ``check_interval`` quando presente e,
-    caso o valor seja inválido ou ausente, aplica ``RECHECK_INTERVAL_DEFAULT``
-    como fallback. O cálculo sempre considera timezone UTC para garantir
-    previsibilidade entre workers e Beat.
+    caso o valor seja inválido ou ausente, aplica lógica adaptativa que
+    aumenta o intervalo para produtos com preços estáveis. O cálculo sempre
+    considera timezone UTC para garantir previsibilidade entre workers e Beat.
+    
+    Lógica adaptativa:
+    - Se check_interval definido manualmente: usa o valor
+    - Se preço mudou recentemente: usa intervalo curto (RECHECK_INTERVAL_DEFAULT)
+    - Se preço estável: aumenta gradualmente até ADAPTIVE_RECHECK_BASE_INTERVAL
     """
     base_time = reference or datetime.now(timezone.utc)
     if base_time.tzinfo is None:
         base_time = base_time.replace(tzinfo=timezone.utc)
+    
+    #Verifica se tem intervalo manual configurado
     interval_seconds = getattr(monitored, "check_interval", None)
-    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
-        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
+    if isinstance(interval_seconds, int) and interval_seconds > 0:
+        return base_time + timedelta(seconds=interval_seconds)
+    
+    #Aplica lógica adaptativa baseada em estabilidade de preço
+    interval_seconds = _compute_adaptive_interval(monitored)
     return base_time + timedelta(seconds=interval_seconds)
+
+def _compute_adaptive_interval(monitored: MonitoredProduct) -> int:
+    """ Calcula intervalo adaptativo baseado em estabilidade de preço
+    
+    Produtos com preços estáveis são checados com menos frequência,
+    reduzindo carga no sistema e aumentando eficiência. A lógica avalia
+    quando foi a última mudança de preço e ajusta o intervalo gradualmente.
+    
+    Retorna:
+        Intervalo em segundos entre RECHECK_INTERVAL_DEFAULT e ADAPTIVE_RECHECK_BASE_INTERVAL
+    """
+    from market_alert.models.models_price_history import PriceHistory
+    from shared.metrics.metrics_recheck import (
+        ADAPTIVE_INTERVAL_CALCULATED_SECONDS,
+        ADAPTIVE_INTERVAL_DECISION_TOTAL,
+    )
+    
+    #Configurações
+    min_interval = settings.RECHECK_INTERVAL_DEFAULT  #5 minutos (300s)
+    max_interval = settings.ADAPTIVE_RECHECK_BASE_INTERVAL  #2 horas (7200s)
+    
+    #Se produto nunca foi coletado ou não tem histórico, usa intervalo mínimo
+    if not monitored.last_scraped_at:
+        ADAPTIVE_INTERVAL_DECISION_TOTAL.labels(category="no_scrape_history").inc()
+        ADAPTIVE_INTERVAL_CALCULATED_SECONDS.observe(min_interval)
+        return min_interval
+    
+    #Busca última mudança de preço no histórico
+    try:
+        from shared.infra.db import SessionLocal
+        with SessionLocal() as db:
+            last_price_change = (
+                db.query(PriceHistory)
+                .filter(PriceHistory.monitored_product_id == monitored.id)
+                .order_by(PriceHistory.created_at.desc())
+                .first()
+            )
+            
+            if not last_price_change:
+                #Sem histórico de mudança, usa intervalo padrão
+                ADAPTIVE_INTERVAL_DECISION_TOTAL.labels(category="no_price_history").inc()
+                ADAPTIVE_INTERVAL_CALCULATED_SECONDS.observe(min_interval)
+                return min_interval
+            
+            #Calcula tempo desde última mudança de preço
+            now = datetime.now(timezone.utc)
+            time_since_change = (now - last_price_change.created_at).total_seconds()
+            
+            #Lógica de escalonamento gradual:
+            #- < 1 hora: intervalo mínimo (5 min)
+            #- 1-6 horas: escalonamento linear até 30 min
+            #- 6-24 horas: escalonamento linear até 1 hora
+            #- > 24 horas: intervalo máximo (2 horas)
+            
+            one_hour = 3600
+            six_hours = 6 * 3600
+            one_day = 24 * 3600
+            
+            if time_since_change < one_hour:
+                #Preço mudou recentemente, checar com frequência
+                ADAPTIVE_INTERVAL_DECISION_TOTAL.labels(category="recent_change").inc()
+                ADAPTIVE_INTERVAL_CALCULATED_SECONDS.observe(min_interval)
+                return min_interval
+            elif time_since_change < six_hours:
+                #Escala de 5 min → 30 min nas primeiras 6 horas
+                progress = (time_since_change - one_hour) / (six_hours - one_hour)
+                target_interval = min_interval + int(progress * (1800 - min_interval))
+                result = min(target_interval, max_interval)
+                ADAPTIVE_INTERVAL_DECISION_TOTAL.labels(category="scaling_6h").inc()
+                ADAPTIVE_INTERVAL_CALCULATED_SECONDS.observe(result)
+                return result
+            elif time_since_change < one_day:
+                #Escala de 30 min → 1 hora entre 6-24 horas
+                progress = (time_since_change - six_hours) / (one_day - six_hours)
+                target_interval = 1800 + int(progress * (3600 - 1800))
+                result = min(target_interval, max_interval)
+                ADAPTIVE_INTERVAL_DECISION_TOTAL.labels(category="scaling_24h").inc()
+                ADAPTIVE_INTERVAL_CALCULATED_SECONDS.observe(result)
+                return result
+            else:
+                #Preço estável por mais de 24 horas, usa intervalo máximo
+                ADAPTIVE_INTERVAL_DECISION_TOTAL.labels(category="stable_24h_plus").inc()
+                ADAPTIVE_INTERVAL_CALCULATED_SECONDS.observe(max_interval)
+                return max_interval
+                
+    except Exception:
+        #Em caso de erro ao consultar histórico, usa intervalo padrão
+        logger = structlog.get_logger("crud_monitored")
+        logger.exception(
+            "adaptive_interval_calculation_failed",
+            monitored_id=str(monitored.id),
+        )
+        ADAPTIVE_INTERVAL_DECISION_TOTAL.labels(category="error_fallback").inc()
+        ADAPTIVE_INTERVAL_CALCULATED_SECONDS.observe(min_interval)
+        return min_interval
 
 def _compute_resume_window(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
     """ Calcula janela curta para retomada aplicando jitter controlado """
