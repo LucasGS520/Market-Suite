@@ -72,7 +72,7 @@ O sistema utiliza **três workers Celery separados**, cada um consumindo uma fil
 | Worker | Fila(s) | Concorrência | Responsabilidades |
 |--------|---------|--------------|-------------------|
 | **celery-worker** | `celery,scraping` | 4 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
-| **celery-worker-monitor** | `monitor` | 2 | Executa o loop contínuo `run_continuous_collector` + `compare_prices_task` + `reconcile_priority_queue` |
+| **celery-worker-monitor** | `monitor` | 2 | Executa o loop contínuo `run_continuous_collector` + `compare_prices_task` |
 | **celery-worker-notifications** | `notifications` | 2 | Executa `send_notification_task` + `verification_tasks` |
 
 ### Arquivo principal
@@ -82,7 +82,6 @@ O sistema utiliza **três workers Celery separados**, cada um consumindo uma fil
 ### Tasks de destaque
 - **`tasks.collector_product_task.collect_product_task`** (fila `scraping`): coleta um monitorado ou concorrente por vez com lock Redis.
 - **`tasks.continuous_collector_task.run_continuous_collector`** (fila `monitor`): **task que roda indefinidamente**, consome fila de prioridade Redis, coleta grupos monitorado+concorrentes, recalcula estabilidade e reenfileira.
-- **`tasks.priority_queue_tasks.reconcile_priority_queue`** (fila `monitor`): repopula a fila de prioridade com monitorados ativos quando há ociosidade prolongada.
 - **`tasks.compare_prices_task.compare_prices_task`** (fila `monitor`): dispara automaticamente após coletas com mudanças.
 - **`tasks.send_notification_task.send_notification_task`** (fila `notifications`): entrega alertas com retry.
 - **`tasks.metrics_tasks.collect_celery_metrics`**, **`cleanup_cache`** (agendadas via Beat): coleta métricas e limpa cache.
@@ -96,7 +95,7 @@ O worker `celery-worker-monitor` define a variável de ambiente `CONTINUOUS_COLL
 - **Pool do worker:** mantenha o pool `prefork` (padrão) para que `time.sleep` usado nos backoffs não bloqueie outros workers em pools baseados em threads/eventlet. Se migrar para pools cooperativos, troque os backoffs bloqueantes por `countdown` do Celery ou sleeps compatíveis com o worker escolhido.
 - **Retries e erros:** tarefas de scraping aplicam `self.retry` progressivo (incluindo `429 Retry-After`) antes de marcar monitorados como `failed`. Cada falha registra `scraping_errors` com o motivo retornado pelo cliente.
 - **Locks Redis:** apenas o `collect_product_task` aplica `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando race conditions entre workers sem usar flags no banco.
-- **Fila de Prioridade:** o `run_continuous_collector` consome um Redis Sorted Set (`PRIORITY_QUEUE_KEY`) ordenado por timestamp. Monitorados são reenfileirados automaticamente após coleta com `next_check_at` recalculado pela estabilidade. Quando há ociosidade prolongada (threshold configurável), o worker dispara `reconcile_priority_queue` para recarregar monitorados ativos.
+- **Fila de Prioridade:** o `run_continuous_collector` consome um Redis Sorted Set (`PRIORITY_QUEUE_KEY`) ordenado por timestamp. Monitorados são reenfileirados automaticamente após coleta com `next_check_at` recalculado pela estabilidade.
 
 ## Configuração
 Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e podem ser sobrescritas via `market_alert/.env.market_alert`.
@@ -117,7 +116,6 @@ O Redis do `docker-compose.yml` utiliza AOF com snapshots para manter filas Cele
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
 | Agendamento contínuo | `CONTINUOUS_COLLECTOR_AUTOSTART`, `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
-| Reconciliação contínua | `PRIORITY_QUEUE_RECONCILE_AUTOSTART`, `PRIORITY_QUEUE_RECONCILE_AUTOSTART_TTL` |
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
 | Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER`, `NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS`, `NOTIFICATION_EMAIL_PROVIDER`, `NOTIFICATION_SMS_PROVIDER`, `NOTIFICATION_WHATSAPP_PROVIDER`, `NOTIFICATION_PUSH_PROVIDER`, `NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` |
 
@@ -205,8 +203,6 @@ CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS=900
 
 CONTINUOUS_COLLECTOR_AUTOSTART=1
 CONTINUOUS_COLLECTOR_AUTOSTART_TTL=60
-PRIORITY_QUEUE_RECONCILE_AUTOSTART=1
-PRIORITY_QUEUE_RECONCILE_AUTOSTART_TTL=300
 
 PRIORITY_QUEUE_KEY=market_alert:priority_queue
 PRIORITY_QUEUE_PROCESSING_KEY=market_alert:priority_queue:processing
@@ -222,7 +218,7 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
 ## Orquestração de coletas e rechecagens
 - **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result` com métrica de `lock_skipped` incrementada.
 - **Fila contínua:** `market_alert.tasks.continuous_collector_task.run_continuous_collector` consome o Redis Sorted Set em loop, coleta monitorado + concorrentes em sequência e recalcula `next_check_at` com base na estabilidade de preço do grupo.
-- **Repopulação da fila:** `market_alert.tasks.priority_queue_tasks.reconcile_priority_queue` reenvia monitorados ativos não pausados para a fila de prioridade, usando `next_check_at` ou `utc_now`, e pode ser disparada no boot dos workers via `PRIORITY_QUEUE_RECONCILE_AUTOSTART`.
+- **Repopulação da fila:** `market_alert.tasks.priority_queue_tasks.reconcile_priority_queue` reenvia monitorados ativos não pausados para a fila de prioridade, usando `next_check_at` ou `utc_now`, sob demanda operacional.
 - **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
 
 ## Segurança e Observabilidade
@@ -285,8 +281,7 @@ run_continuous_collector (worker: celery-worker-monitor - LOOP INFINITO)
 Enquanto não atingir soft_time_limit (≈3600s):
   ├─ Consome fila de prioridade Redis (Sorted Set)
   ├─ Pop item com timestamp <= agora
-  ├─ Se nenhum item pronto: sleep adaptativo, incrementa empty_streak
-  │   └─ Se empty_streak > threshold: dispara reconcile_priority_queue
+  ├─ Se nenhum item pronto: sleep adaptativo, seguindo a configuração do worker
   │
   └─ Se item encontrado:
       ├─ Carrega monitorado do DB
@@ -303,18 +298,7 @@ Enquanto não atingir soft_time_limit (≈3600s):
 Graceful shutdown: drain fila de processamento, flush métricas
 ```
 
-### 4. Reconciliação Automática (na fila monitor)
-```
-reconcile_priority_queue (disparada por run_continuous_collector)
-  ↓
-Itera monitorados com status=active e paused=false
-  ↓
-Para cada monitorado: enqueue_monitored_at(monitored_id, next_check_at)
-  ↓
-Registra contadores (total, enqueued, failed)
-```
-
-### 5. Comparação e Notificações
+### 4. Comparação e Notificações
 ```
 compare_prices_task (fila monitor, disparada automaticamente)
   ↓

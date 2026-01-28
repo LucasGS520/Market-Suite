@@ -65,10 +65,6 @@ TASK_ROUTES = {
         "queue": "notifications",
         "routing_key": "notifications",
     },
-    "market_alert.tasks.priority_queue_tasks.reconcile_priority_queue": {
-        "queue": "monitor",
-        "routing_key": "monitor",
-    },
 }
 
 def _schedule_entry(task: str, schedule, *, queue: str = "monitor", routing_key: str | None = None) -> dict:
