@@ -273,7 +273,12 @@ def create_or_update_competitor_product_scraped(
         normalized_url,
     )
 
-    provided_name = product_data.display_name or getattr(product_data, "name_identification", None)
+    #Aceita múltiplos campos para compatibilidade entre payloads antigos e novos
+    provided_name = (
+        getattr(product_data, "name", None)
+        or getattr(product_data, "display_name", None)
+        or getattr(product_data, "name_identification", None)
+    )
     resolved_name, fallback_name = _prepare_competitor_name(
         provided_name,
         scraped_info.name,
