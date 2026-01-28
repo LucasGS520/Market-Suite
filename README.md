@@ -60,7 +60,6 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 - **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`)**: task que executa indefinidamente no worker dedicado `monitor`, consome a fila de prioridade Redis (sorted sets), coleta monitorado + concorrentes em sequência, recalcula `next_check_at` conforme estabilidade e reenfileira automaticamente. Inicia via env `CONTINUOUS_COLLECTOR_AUTOSTART=1` no worker.
 - **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: idempotente e leve, disparada automaticamente após coleções que detectem mudanças de preço/disponibilidade ou mudanças em concorrentes. Enfileirada na fila `monitor`.
 - **Notificações (`tasks.send_notification_task.send_notification_task`)**: entrega alertas com retry e backoff exponencial, registrando histórico em `notification_attempt` e marcando DLQ quando necessário. Enfileirada na fila `notifications`.
-- **Reconciliação de fila (`tasks.priority_queue_tasks.reconcile_priority_queue`)**: disparada automaticamente quando o coletor contínuo identifica ociosidade, repopula a fila de prioridade com monitorados ativos. Enfileirada na fila `monitor`.
 
 #### Princípios do backend
 - **Exposição de APIs**: o FastAPI em `market_alert` oferece rotas públicas, autenticação JWT e endpoints para monitoramentos, concorrentes e comparações.
@@ -126,7 +125,7 @@ docker compose up -d db redis redis-init api market_scraper celery-worker celery
 
 **Filas Celery separadas:**
 - `celery-worker` (portas 8002): filas `celery,scraping` - tarefas de scraping de produtos
-- `celery-worker-monitor` (porta 8004): fila `monitor` - coletor contínuo + comparações + reconciliação
+- `celery-worker-monitor` (porta 8004): fila `monitor` - coletor contínuo + comparações
 - `celery-worker-notifications` (porta 8003): fila `notifications` - envio de alertas e verificações
 
 - Interrompa com `docker compose down` (utilize `docker compose down -v` para remover volumes, se necessário).
@@ -162,6 +161,13 @@ docker compose up -d db redis redis-init api market_scraper celery-worker celery
 - **Build health**: logs do Vite/Express ajudam a identificar falhas de build ou inicialização.
 - **Métricas de uso**: integração com ferramentas de analytics pode ser habilitada via variáveis de ambiente (não obrigatória por padrão).
 - **Monitoramento de erros**: configure provedores como Sentry ou LogRocket conectando hooks do React às APIs correspondentes.
+
+## Troubleshooting do coletor contínuo
+- **Worker monitor parado**: verifique se o container/processo `celery-worker-monitor` está ativo e se `CONTINUOUS_COLLECTOR_AUTOSTART=1` está definido.
+- **Fila sem itens prontos**: valide o `PRIORITY_QUEUE_KEY`, as métricas `PRIORITY_QUEUE_SIZE` e `PRIORITY_QUEUE_READY_TOTAL`, além dos timestamps `next_check_at`.
+- **Redis indisponível**: confirme conectividade e credenciais; a aplicação registra `continuous_queue_unavailable` quando o Redis falha.
+- **Itens presos em processamento**: o loop reaproveita entradas expiradas com base em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs `continuous_processing_reclaimed`.
+- **Monitorados pausados**: itens com `paused=true` são ignorados pelo coletor; retome manualmente para reativar.
 
 ## Estrutura do respositório
 ```text

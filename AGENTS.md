@@ -36,13 +36,12 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 
 **Workers Celery:**
 - **celery-worker** (fila `celery,scraping`, concorrência 4): executa `collect_product_task` para scraping imediato de um monitorado/concorrente por vez.
-- **celery-worker-monitor** (fila `monitor`, concorrência 2): executa o loop contínuo `run_continuous_collector` + `compare_prices_task` + `reconcile_priority_queue`.
+- **celery-worker-monitor** (fila `monitor`, concorrência 2): executa o loop contínuo `run_continuous_collector` + `compare_prices_task`.
 - **celery-worker-notifications** (fila `notifications`, concorrência 2): executa `send_notification_task` + `verification_tasks`.
 
 **Tasks principais:**
 - **Collector (`tasks.collector_product_task.collect_product_task`, fila `scraping`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock Redis e retorna `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`).
 - **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`, fila `monitor`)**: **task que roda indefinidamente** no worker-monitor, consome a fila de prioridade Redis (sorted sets), coleta monitorado + concorrentes em sequência, recalcula `next_check_at` baseado em estabilidade (frequência adaptativa) e reenfileira automaticamente. Inicia via `CONTINUOUS_COLLECTOR_AUTOSTART=1`.
-- **Reconciliação (`tasks.priority_queue_tasks.reconcile_priority_queue`, fila `monitor`)**: disparada automaticamente pelo loop contínuo quando há ociosidade prolongada, repopula a fila de prioridade com monitorados ativos do DB.
 - **Comparação (`tasks.compare_prices_task.compare_prices_task`, fila `monitor`)**: idempotente e leve; disparada automaticamente após coletas com mudanças de preço/disponibilidade.
 - **Notificações (`tasks.send_notification_task.send_notification_task`, fila `notifications`)**: entrega alertas com retry e backoff exponencial, registra em `notification_attempt`.
 
@@ -102,6 +101,13 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 - Backend: `pytest backend/market_alert -q`, `pytest backend/market_scraper -q` e demais testes em `backend/shared/tests`.
 - Frontend: `pnpm test` (quando configurado) e `pnpm lint`.
 - Valide comandos em ambientes isolados e registre no relatório final as execuções realizadas.
+
+## Troubleshooting do coletor contínuo
+- **Fila vazia ou sem itens prontos**: verifique `PRIORITY_QUEUE_SIZE`, `PRIORITY_QUEUE_READY_TOTAL` e o conjunto ordenado configurado em `PRIORITY_QUEUE_KEY`. Garanta que o monitorado foi enfileirado com `next_check_at` válido.
+- **Worker monitor inativo**: confirme o processo `celery-worker-monitor` ativo e a env `CONTINUOUS_COLLECTOR_AUTOSTART=1`. Sem ela, o loop não inicia automaticamente.
+- **Redis indisponível**: valide conectividade e credenciais; o coletor registra `continuous_queue_unavailable` quando o Redis não responde.
+- **Itens presos em processamento**: o loop reaproveita o conjunto de processamento após o TTL configurado em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs de `continuous_processing_reclaimed`.
+- **Monitorados pausados**: itens com `paused=true` são ignorados e não retornam para a fila; retome manualmente para reativar a coleta.
 
 ## Checklist antes de concluir uma mudança
 1. Atualize ou confirme a existência de docstrings/comentários relevantes em português.

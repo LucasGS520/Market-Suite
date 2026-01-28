@@ -87,7 +87,7 @@ O sistema utiliza **três workers Celery separados**, cada um consumindo uma fil
 - **`tasks.metrics_tasks.collect_celery_metrics`**, **`cleanup_cache`** (agendadas via Beat): coleta métricas e limpa cache.
 
 ### Autostart do Coletor Contínuo
-O worker `celery-worker-monitor` define a variável de ambiente `CONTINUOUS_COLLECTOR_AUTOSTART=1`, que faz com que a task `run_continuous_collector` seja iniciada automaticamente quando o worker inicia. O loop contém lógica de graceful shutdown e respeita soft time limits do Celery.
+O worker `celery-worker-monitor` define a variável de ambiente `CONTINUOUS_COLLECTOR_AUTOSTART=1`, que faz com que a task `run_continuous_collector` seja iniciada automaticamente quando o worker inicia. Em falhas, a task é reexecutada pelo mecanismo de retry configurado no Celery.
 
 ### Scraping e Coleta Contínua
 - **Cliente síncrono:** `services/scraper_client.py` usa `httpx.Client` de vida curta e fluxo linear. Evite helpers assíncronos ou `asyncio.run` dentro das tasks para impedir erros de loop fechado.
@@ -142,7 +142,6 @@ Observação: a implementação foi ajustada para que respostas `304 Not Modifie
 - `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
 - `services/comparison_service.py` – orquestra cálculos de comparação.
 - `tasks/continuous_collector_task.py` – worker contínuo que consome a fila de prioridade e recalcula `next_check_at` por estabilidade.
-- `tasks/priority_queue_tasks.py` – task de reconciliação que repopula a fila de prioridade com monitorados ativos.
 - `tasks/metrics_tasks.py` – publica métricas periódicas da fila e recursos.
 - `tasks/compare_prices_task.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.
 
@@ -218,8 +217,14 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
 ## Orquestração de coletas e rechecagens
 - **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result` com métrica de `lock_skipped` incrementada.
 - **Fila contínua:** `market_alert.tasks.continuous_collector_task.run_continuous_collector` consome o Redis Sorted Set em loop, coleta monitorado + concorrentes em sequência e recalcula `next_check_at` com base na estabilidade de preço do grupo.
-- **Repopulação da fila:** `market_alert.tasks.priority_queue_tasks.reconcile_priority_queue` reenvia monitorados ativos não pausados para a fila de prioridade, usando `next_check_at` ou `utc_now`, sob demanda operacional.
 - **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
+
+## Troubleshooting do coletor contínuo
+- **Worker monitor parado**: confirme o processo/container `celery-worker-monitor` ativo e o `CONTINUOUS_COLLECTOR_AUTOSTART=1` configurado.
+- **Fila sem itens prontos**: verifique `PRIORITY_QUEUE_KEY`, as métricas `PRIORITY_QUEUE_SIZE`/`PRIORITY_QUEUE_READY_TOTAL` e se `next_check_at` está no passado.
+- **Redis indisponível**: logs com `continuous_queue_unavailable` indicam falha de conexão ou credenciais.
+- **Itens presos em processamento**: o loop reaproveita itens expirados usando `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`; revise logs `continuous_processing_reclaimed`.
+- **Monitorados pausados**: itens pausados não retornam à fila; retome manualmente para reativar a coleta.
 
 ## Segurança e Observabilidade
 - **Segurança:**
