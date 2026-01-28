@@ -182,7 +182,7 @@ services:
       - ENV_FILE=.env.market_alert
       - PYTHONPATH=/
       - CONTINUOUS_COLLECTOR_AUTOSTART=1
-      - CONTINUOUS_COLLECTOR_AUTOSTART_TTL=300
+      - CONTINUOUS_COLLECTOR_AUTOSTART_TTL=60
     command:
       - celery
       - "-A"

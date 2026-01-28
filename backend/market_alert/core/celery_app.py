@@ -125,7 +125,11 @@ def _request_continuous_collector_start() -> None:
     if not _continuous_collector_autostart_enabled():
         return
     
-    ttl_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_TTL", "300"))
+    ttl_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_TTL", "60"))
+    logger.info(
+        "continuous_autostart_requested",
+        ttl_seconds=ttl_seconds,
+    )
     lock_result = set_key_with_ttl(
         CONTINUOUS_COLLECTOR_AUTOSTART_KEY,
         value="1",

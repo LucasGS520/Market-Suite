@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 import structlog
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from celery.exceptions import SoftTimeLimitExceeded
 
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_priority_queue import (
@@ -419,6 +420,10 @@ def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable
     name="market_alert.tasks.continuous_collector_task.run_continuous_collector",
     queue="monitor",
     acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_jitter=True,
+    retry_kwargs={"max_retries": 3},
 )
 def run_continuous_collector(self) -> None:
     """ Loop contínuo que consome a fila de prioridade e dispara coletas 
@@ -527,6 +532,10 @@ def run_continuous_collector(self) -> None:
                     _update_stability_metrics(db)
                 _update_queue_metrics(queue_service)
             time.sleep(poll_interval)
+        except SoftTimeLimitExceeded as exc:
+            #Força retry quando o soft time limit encerra a task, mantendo o loop vivo
+            bound_logger.warning("continuous_soft_time_limit_exceeded")
+            raise self.retry(exc=exc) from exc
         except Exception:
             PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
             bound_logger.exception("continuous_loop_error")
