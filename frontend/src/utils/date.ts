@@ -59,6 +59,53 @@ export const formatRelativeTime = (iso?: string | null): string => {
 };
 
 /**
+ * Formata a data da última mudança de preço de forma profissional.
+ * Exibe apenas o tempo relativo de forma clara (minutos, horas, dias, meses).
+ * Evita termos informais como "ontem" ou "anteontem".
+ */
+export const formatLastPriceChangeDate = (iso?: string | null): string => {
+  const targetDate = parseIsoAsUtc(iso);
+  if (!targetDate) return '—';
+
+  const now = new Date();
+  const diffSeconds = Math.round((now.getTime() - targetDate.getTime()) / 1000);
+  const absSeconds = Math.abs(diffSeconds);
+
+  // Para mudanças muito recentes
+  if (absSeconds < 60) {
+    return 'Agora há pouco';
+  }
+
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (Math.abs(diffMinutes) < 60) {
+    const mins = Math.abs(diffMinutes);
+    return `${mins} ${mins === 1 ? 'minuto' : 'minutos'} atrás`;
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 24) {
+    const hours = Math.abs(diffHours);
+    return `${hours} ${hours === 1 ? 'hora' : 'horas'} atrás`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  if (Math.abs(diffDays) < 30) {
+    const days = Math.abs(diffDays);
+    return `${days} ${days === 1 ? 'dia' : 'dias'} atrás`;
+  }
+
+  const diffMonths = Math.round(diffDays / 30);
+  if (Math.abs(diffMonths) < 12) {
+    const months = Math.abs(diffMonths);
+    return `${months} ${months === 1 ? 'mês' : 'meses'} atrás`;
+  }
+
+  const diffYears = Math.round(diffMonths / 12);
+  const years = Math.abs(diffYears);
+  return `${years} ${years === 1 ? 'ano' : 'anos'} atrás`;
+};
+
+/**
  * Converte uma string ISO em data local apenas, sem horário.
  */
 export const formatDateOnly = (iso?: string | null): string => {

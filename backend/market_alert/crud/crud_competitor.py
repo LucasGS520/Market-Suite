@@ -131,6 +131,34 @@ def _derive_competitor_name_from_url(product_url: str) -> str:
     #Mantém um fallback amigável evitando valores vazios no banco
     return "Concorrente pendente"
 
+def _prepare_competitor_name(
+    provided_name: str | None,
+    scraped_name: str | None,
+    product_url: str,
+) -> tuple[str, str]:
+    """ Determina o nome final aplicando prioridade usuário -> scraoping -> URL """
+    fallback = _derive_competitor_name_from_url(product_url)
+    sanitized_provided = sanitize_text(provided_name) if provided_name else None
+    sanitized_scraped = sanitize_text(scraped_name)
+    if sanitized_provided:
+        return sanitized_provided, fallback
+    if sanitized_scraped:
+        return sanitized_scraped, fallback
+    return fallback, fallback
+
+def _should_replace_competitor_with_scraped(
+    existing_name: str | None,
+    fallback_name: str,
+    scraped_name: str | None,
+) -> bool:
+    """ Decide se substituímos o nome atual quando ele é apenas o fallback da URL """
+    sanitized_scraped = sanitize_text(scraped_name)
+    if not sanitized_scraped:
+        return False
+    if existing_name is None:
+        return True
+    return existing_name.strip().casefold() == fallback_name.strip().casefold()
+
 def create_pending_competitor_product(
     db: Session,
     monitored_product_id: UUID,
@@ -245,10 +273,24 @@ def create_or_update_competitor_product_scraped(
         normalized_url,
     )
 
+    provided_name = product_data.display_name or getattr(product_data, "name_identification", None)
+    resolved_name, fallback_name = _prepare_competitor_name(
+        provided_name,
+        scraped_info.name,
+        normalized_url,
+    )
+
     if existing:
         resolved_price = normalize_scraped_price(scraped_info.current_price)
         
         #Atualiza somente campos relevantes
+        if provided_name and existing.name_competitor != resolved_name:
+            existing.name_competitor = resolved_name
+        elif _should_replace_competitor_with_scraped(existing.name_competitor, fallback_name, scraped_info.name):
+            #Substitui o placeholder derivado da URL pelo nome real do scraping
+            existing.name_competitor = sanitize_text(scraped_info.name) or fallback_name
+        elif existing.name_competitor is None:
+            existing.name_competitor = resolved_name
         previous_price = existing.current_price
         previous_status = existing.status
         existing.old_price = existing.current_price
@@ -279,12 +321,6 @@ def create_or_update_competitor_product_scraped(
             existing.availability = availability
             existing.last_status = last_status
             existing.product_url = normalized_url
-
-            #Sanitiza e persiste somente se tivermos um nome útil retornado pelo scraper.
-            if getattr(scraped_info, "name", None):
-                sanitized_name = sanitize_text(scraped_info.name)
-                if sanitized_name:
-                    existing.name_competitor = sanitized_name
 
             history_allowed = should_create_price_history(resolved_price, availability)
             price_history_needed = price_changed and history_allowed
@@ -357,7 +393,7 @@ def create_or_update_competitor_product_scraped(
     
     new = CompetitorProduct(
         monitored_product_id=product_data.monitored_product_id,
-        name_competitor=scraped_info.name,
+        name_competitor=resolved_name,
         product_url=normalized_url,
         current_price=resolved_price,
         old_price=_to_decimal(scraped_info.old_price),

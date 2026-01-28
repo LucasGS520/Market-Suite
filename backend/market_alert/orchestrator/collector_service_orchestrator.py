@@ -60,6 +60,7 @@ def build_competitor_payload(
         "monitored_id": str(competitor.monitored_product_id),
         "url": resolved_url,
         "competitor_id": str(competitor.id),
+        "name": competitor.name_competitor,
         "trace_id": trace_id,
     }
     if user_id:

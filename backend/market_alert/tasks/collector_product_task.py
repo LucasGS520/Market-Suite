@@ -340,6 +340,8 @@ def collect_product(
                             payload_model = CompetitorProductCreateScraping(
                                 monitored_product_id=monitored_id,
                                 product_url=url,
+                                #Preserva o nome personalizado quando vier no payload original
+                                name=payload.get("name") if payload else None,
                             )
                             result = scrape_competitor_product(
                                 db=session_manager,

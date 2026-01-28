@@ -43,7 +43,7 @@ import { AxiosError } from 'axios';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
-import { formatDateOnly, formatDateTime, formatRelativeTime } from '../utils/date';
+import { formatDateOnly, formatDateTime, formatRelativeTime, formatLastPriceChangeDate } from '../utils/date';
 import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus } from '../utils/productStatus';
@@ -537,12 +537,8 @@ const ProductDetail: React.FC = () => {
    * Exibe o tempo relativo da última mudança de preço com fallback seguro
    */
   const renderLastPriceChange = (): string => {
-    const relativeLabel = formatRelativeTime(lastPriceChangeAt);
-    if (!relativeLabel || relativeLabel === '—') {
-      return '—';
-    }
-
-    return relativeLabel;
+    const formattedDate = formatLastPriceChangeDate(lastPriceChangeAt);
+    return formattedDate || '—';
   };
 
   /**

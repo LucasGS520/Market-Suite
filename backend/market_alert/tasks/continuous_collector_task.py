@@ -274,7 +274,7 @@ def _collect_group(
                 competitor_duration_ms = int(
                     (time.perf_counter() - competitor_started_perf) * 1000
                 )
-                COMPETITOR_COLLECT_DURATION_MS.obeserve(competitor_duration_ms)
+                COMPETITOR_COLLECT_DURATION_MS.observe(competitor_duration_ms)
             _record_competitor_metrics(
                 outcome=competitor_outcome,
                 result=competitor_result,
