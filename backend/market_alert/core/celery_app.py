@@ -3,6 +3,8 @@
 #Registra métricas antes de iniciar o HTTP server
 import os
 import logging
+import threading
+import time
 from importlib import import_module
 
 import structlog
@@ -10,8 +12,8 @@ from structlog.typing import BindableLogger, EventDict
 from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
 from prometheus_client import start_http_server
-from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL
-from shared.utils.redis_client import set_key_with_ttl
+from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL, CELERY_CONTINUOUS_AUTOSTART_TOTAL
+from shared.utils.redis_client import get_redis_client, set_key_with_ttl
 
 try:
     from opentelemetry.instrumentation.celery import CeleryInstrumentor
@@ -114,7 +116,36 @@ def _continuous_collector_autostart_enabled() -> bool:
     flag = os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART", "0").strip().lower()
     return flag in {"1", "true", "yes"}
 
-def _request_continuous_collector_start() -> None:
+def _delete_continuous_collector_lock() -> None:
+    """ Remove o lock do autostart para evitar bloqueios indevidos """
+    client = get_redis_client()
+    if client is None:
+        logger.warning("continuous_autostart_lock_delete_skipped", reason="redis_unavailable")
+        return
+
+    try:
+        client.delete(CONTINUOUS_COLLECTOR_AUTOSTART_KEY)
+    except Exception:
+        logger.exception("continuous_autostart_lock_delete_failed")
+
+def _continuous_collector_is_active() -> bool:
+    """ Verifica se há execução ativa do coletor contínuo nos workers """
+    try:
+        inspect = celery_app.control.inspect(timeout=1.0)
+        active_tasks = inspect.active() or {}
+    except Exception:
+        logger.exception("continuous_autostart_inspect_failed")
+        return False
+
+    task_name = "market_alert.tasks.continuous_collector_task.run_continuous_collector"
+    for tasks in active_tasks.values():
+        for task in tasks or []:
+            if task.get("name") == task_name:
+                return True
+
+    return False
+
+def _request_continuous_collector_start(*, action: str = "triggered") -> None:
     """ Dispara a task contínua apenas uma vez quando habilitada por ambiente """
     if not _continuous_collector_autostart_enabled():
         return
@@ -142,9 +173,63 @@ def _request_continuous_collector_start() -> None:
             "market_alert.tasks.continuous_collector_task.run_continuous_collector",
             queue="monitor",
         )
-        logger.info("continuous_autostart_triggered")
+        logger.info("continuous_autostart_triggered", action=action)
+        CELERY_CONTINUOUS_AUTOSTART_TOTAL.labels(
+            service=SERVICE_LABEL,
+            action=action,
+        ).inc()
     except Exception:
+        _delete_continuous_collector_lock()
         logger.exception("continuous_autostart_failed")
+
+def _revalidate_continuous_collector_lock() -> None:
+    """ Revalida periodicamente o lock e reativa o coletor quando necessário """
+    if not _continuous_collector_autostart_enabled():
+        return
+    
+    #O lock pode ficar orfão se o worker cair após gravar a chave, mas antes de subir a task
+    if _continuous_collector_is_active():
+        ttl_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_TTL", "60"))
+        set_key_with_ttl(
+            CONTINUOUS_COLLECTOR_AUTOSTART_KEY,
+            value="1",
+            ttl_seconds=ttl_seconds,
+            only_if_absent=False,
+        )
+        return
+    
+    client = get_redis_client()
+    if client is None:
+        logger.warning("continuous_autostart_recheck_skipped", reason="redis_unavailable")
+        return
+    
+    try:
+        has_lock = bool(client.exists(CONTINUOUS_COLLECTOR_AUTOSTART_KEY))
+    except Exception:
+        logger.exception("continuous_autostart_recheck_failed")
+        return
+    
+    if has_lock:
+        #Remove lock orfão antes de tentar reativar a task
+        _delete_continuous_collector_lock()
+
+    logger.warning("continuous_autostart_reactivated")
+    _request_continuous_collector_start(action="reactivated")
+
+def _start_autostart_revalidation_loop() -> None:
+    """ Mantém um loop leve de revalidação para garantir um coletor contínuo ativo """
+    if not _continuous_collector_autostart_enabled():
+        return
+    
+    interval_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_RECHECK_INTERVAL", "30"))
+
+    def _loop() -> None:
+        while True:
+            time.sleep(interval_seconds)
+            _revalidate_continuous_collector_lock()
+
+    thread = threading.Thread(target=_loop, name="continuous_autostart_revalidation_loop", daemon=True)
+    thread.start()
 
 def _force_import_task_modules() -> None:
     """ Garante importação explícita dos módulos de tasks registrados
@@ -189,6 +274,7 @@ def _start_prometheus_server(**kwargs):
     #Servidor de métricas Prometheus
     start_http_server(port=8002, addr="0.0.0.0")
     _request_continuous_collector_start()
+    _start_autostart_revalidation_loop()
 
 @task_success.connect
 def handle_task_success(sender=None, **kwargs):
