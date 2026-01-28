@@ -13,7 +13,6 @@ from typing import Iterable
 from uuid import UUID, uuid4
 
 import structlog
-from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -23,7 +22,6 @@ from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_LOOP_ERRORS_TOTAL,
     PRIORITY_QUEUE_PROCESSED_TOTAL,
     PRIORITY_QUEUE_READY_TOTAL,
-    PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL,
     PRIORITY_QUEUE_SIZE,
     PRIORITY_QUEUE_STABILITY_TOTAL,
 )
@@ -59,7 +57,6 @@ from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 
 logger = structlog.get_logger("continuous_collector_task")
-EMPTY_STREAK_RECONCILE_THRESHOLD = 12
 
 def _utc_now() -> datetime:
     """ Retorna timestamp em UTC sem microssegundos para logs e métricas """
@@ -111,59 +108,6 @@ def _update_queue_metrics(
     resolved_ready = ready_total if ready_total is not None else queue_service.ready_count()
     PRIORITY_QUEUE_SIZE.set(resolved_size)
     PRIORITY_QUEUE_READY_TOTAL.set(resolved_ready)
-
-def _calculate_idle_sleep(empty_streak: int, queue_size: int) -> float:
-    """ Calcula o tempo de espera progressivo quando não há itens prontos """
-    if queue_size >= 1000:
-        adaptive_sleep = 1.0
-    elif queue_size >= 500:
-        adaptive_sleep = 2.0
-    elif queue_size >= 100:
-        adaptive_sleep = 3.0
-    else:
-        adaptive_sleep = 5.0
-    if empty_streak <= 0:
-        return adaptive_sleep
-    if empty_streak == 1:
-        return max(adaptive_sleep, 1.0)
-    if empty_streak == 2:
-        return max(adaptive_sleep, 2.0)
-    if empty_streak == 3:
-        return max(adaptive_sleep, 5.0)
-    return float(max(adaptive_sleep, min(30, 5 * (empty_streak - 2))))
-
-def _maybe_trigger_reconciliation(
-    *,
-    empty_streak: int,
-    threshold: int,
-    bound_logger: structlog.BoundLogger,
-) -> bool:
-    """ Dispara a reconciliação da fila quando a ociosidade supera o limiar """
-    if empty_streak <= threshold:
-        return False
-    try:
-        celery_app.send_task(
-            "market_alert.tasks.priority_queue_tasks.reconcile_priority_queue",
-            queue="monitor",
-        )
-        PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL.labels(
-            source="continuous_worker",
-            reason="empty_streak",
-        ).inc()
-        bound_logger.info(
-            "continuous_reconcile_triggered",
-            empty_streak=empty_streak,
-            threshold=threshold,
-        )
-        return True
-    except Exception:
-        #Mantém o loop vivo ao lidar com falhas de disparo da reconciliação
-        bound_logger.exception(
-            "continuous_reconcile_trigger_failed",
-            empty_streak=empty_streak,
-            threshold=threshold,
-        )
-        return False
 
 def _should_abort(task_request) -> bool:
     """ Verifica se a task foi sinalizada para abortar """
@@ -475,71 +419,34 @@ def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable
     name="market_alert.tasks.continuous_collector_task.run_continuous_collector",
     queue="monitor",
     acks_late=True,
-    soft_time_limit=3600,
-    time_limit=3700,
 )
 def run_continuous_collector(self) -> None:
     """ Loop contínuo que consome a fila de prioridade e dispara coletas 
     
-    Mantém um budget de execução com `time.monotonic()` para encerrar o worker de
-    forma previsível antes do hard time limit do Celery, preservando o drain da
-    fila de processamento e o fechamento das métricas finais.
+    Faz polling em intervalo fixo para garantir consumo contínuo sem pausas
+    progressivas, mantendo o worker ativo 24/7.
     """
     bound_logger = logger.bind(task_id=getattr(self.request, "id", None))
     queue_service = PriorityQueueService()
     batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
     processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
-    empty_streak = 0
-    reconcile_triggered = False
-    started_at = time.monotonic()
-    max_runtime_seconds = int(getattr(self.request, "soft_time_limit", 3600) or 3600)
-
-    def _budget_exceeded() -> bool:
-        """ Avalia se o budget de execução do loop foi excedido """
-        return (time.monotonic() - started_at) >= max_runtime_seconds
-    
-    def _shutdown_loop(*, reason: str, processed: list[str]) -> None:
-        """ Finaliza o loop com drain da fila auxiliar e métricas consolidadas """
-        if processed:
-            _drain_processing(queue_service, processed)
-        try:
-            with SessionLocal() as db:
-                _update_stability_metrics(db)
-        except Exception:
-            #Evita quebrar o shutdown por falha pontual de métricas
-            bound_logger.exception("continuous_shutdown_metrics_failed")
-        try:
-            _update_queue_metrics(queue_service)
-        except Exception:
-            #Evita quebrar o shutdown caso o Redis esteja indisponível
-            bound_logger.exception("continuous_shutdown_queue_metrics_failed")
-        bound_logger.info(
-            "continuous_worker_shutdown",
-            reason=reason,
-            processed_count=len(processed),
-            elapsed_seconds=int(time.monotonic() - started_at),
-        )
+    poll_interval = float(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
 
     while True:
         processed_ids: list[str] = []
-        if _budget_exceeded():
-            #Encerra antes do limite do Celery para garantir flush de métricas e drain
-            _shutdown_loop(reason="max_runtime_exceeded", processed=processed_ids)
-            break
         if _should_abort(getattr(self, "request", None)):
             bound_logger.warning("continuous_worker_aborted")
-            _shutdown_loop(reason="worker_aborted", processed=processed_ids)
-            break
+            return
         
         try:
             if is_scraping_suspended():
                 bound_logger.warning("continuous_scraping_suspended")
-                time.sleep(10)
+                time.sleep(poll_interval)
                 continue
             
             if not queue_service.is_available():
                 bound_logger.error("continuous_queue_unavailable")
-                time.sleep(settings.CONTINUOUS_WORKER_IDLE_SLEEP)
+                time.sleep(poll_interval)
                 continue
             
             queue_size = queue_service.size()
@@ -565,10 +472,6 @@ def run_continuous_collector(self) -> None:
                     reclaimed_count=len(reclaimed),
                 )
 
-            if _budget_exceeded():
-                #Evita iniciar um novo batch quando o budget já foi consumido
-                _shutdown_loop(reason="max_runtime_exceeded_before_batch", processed=processed_ids)
-                break
             for _ in range(batch_size):
                 next_id = queue_service.pop_due()
                 if not next_id:
@@ -605,8 +508,6 @@ def run_continuous_collector(self) -> None:
                     )
 
                 processed_ids.append(str(monitored.id))
-                empty_streak = 0
-                reconcile_triggered = False
 
                 _requeue_monitored(
                     monitored=monitored,
@@ -625,35 +526,9 @@ def run_continuous_collector(self) -> None:
                 with SessionLocal() as db:
                     _update_stability_metrics(db)
                 _update_queue_metrics(queue_service)
-                time.sleep(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
-            else:
-                empty_streak += 1
-                if not reconcile_triggered:
-                    #Garante reconciliação somente uma vez por streak ocioso
-                    reconcile_triggered = _maybe_trigger_reconciliation(
-                        empty_streak=empty_streak,
-                        threshold=EMPTY_STREAK_RECONCILE_THRESHOLD,
-                        bound_logger=bound_logger,
-                    )
-                idle_sleep = _calculate_idle_sleep(empty_streak, queue_size)
-                _update_queue_metrics(
-                    queue_service,
-                    queue_size=queue_size,
-                    ready_total=ready_total,
-                )
-                bound_logger.info(
-                    "continuous_idle_sleep",
-                    sleep_seconds=idle_sleep,
-                    empty_streak=empty_streak,
-                )
-                time.sleep(idle_sleep)
-        except SoftTimeLimitExceeded:
-            #Respeita o soft time limit do Celery com encerramento controlado
-            bound_logger.warning("continuous_soft_time_limit_exceeded")
-            _shutdown_loop(reason="soft_time_limit_exceeded", processed=processed_ids)
-            break
+            time.sleep(poll_interval)
         except Exception:
             PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
             bound_logger.exception("continuous_loop_error")
-            time.sleep(settings.CONTINUOUS_WORKER_IDLE_SLEEP)
+            time.sleep(poll_interval)
             
