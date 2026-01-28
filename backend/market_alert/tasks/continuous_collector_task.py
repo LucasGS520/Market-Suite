@@ -126,6 +126,22 @@ def _collect_group(
     enqueued_at: datetime | None,
 ) -> tuple[str, datetime | None]:
     """ Coleta monitorado e concorrentes e retorna desfecho e próxima rechecagem """
+    with SessionLocal() as db:
+        refreshed = get_monitored_product_by_id(db, monitored.id)
+        if refreshed:
+            #Garante avaliação com status atual antes de iniciar a coleta do grupo
+            if refreshed.paused or refreshed.status in {MonitoredStatus.failed}:
+                MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="continuous_worker").inc()
+                logger.info(
+                    "continuous_group_skipped_paused",
+                    monitored_id=str(refreshed.id),
+                    status=refreshed.status,
+                )
+                return "skipped_paused", None
+            #Mantém os dados atualizados para o restante do processamento
+            db.expunge(refreshed)
+            monitored = refreshed
+
     trace_id = str(uuid4())
     group_started_at = _utc_now()
     group_started_perf = time.perf_counter()
@@ -530,23 +546,24 @@ def run_continuous_collector(self) -> None:
 
                 processed_ids.append(str(monitored.id))
 
-                requeue_success = _requeue_monitored(
-                    monitored=monitored,
-                    next_check_at=next_check_at,
-                    queue_service=queue_service,
-                )
-                if not requeue_success:
-                    #Mantém no conjunto de processamento para permitir reclaim futuro
-                    PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL.labels(
-                        source="continuous_worker"
-                    ).inc()
-                    bound_logger.warning(
-                        "requeue_failed_but_retained",
-                        monitored_id=str(monitored.id),
+                if outcome != "skipped_paused":
+                    requeue_success = _requeue_monitored(
+                        monitored=monitored,
+                        next_check_at=next_check_at,
+                        queue_service=queue_service,
                     )
-                    if processed_ids and processed_ids[-1] == str(monitored.id):
-                        #Evita erro ao remover IDs quando a lista já foi drenada
-                        processed_ids.pop()
+                    if not requeue_success:
+                        #Mantém no conjunto de processamento para permitir reclaim futuro
+                        PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL.labels(
+                            source="continuous_worker"
+                        ).inc()
+                        bound_logger.warning(
+                            "requeue_failed_but_retained",
+                            monitored_id=str(monitored.id),
+                        )
+                        if processed_ids and processed_ids[-1] == str(monitored.id):
+                            #Evita erro ao remover IDs quando a lista já foi drenada
+                            processed_ids.pop()
 
                 bound_logger.info(
                     "continuous_item_processed",
