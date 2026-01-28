@@ -423,7 +423,7 @@ def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable
     autoretry_for=(Exception,),
     retry_backoff=True,
     retry_jitter=True,
-    retry_kwargs={"max_retries": 3},
+    retry_kwargs={"max_retries": None},
 )
 def run_continuous_collector(self) -> None:
     """ Loop contínuo que consome a fila de prioridade e dispara coletas 
@@ -533,8 +533,11 @@ def run_continuous_collector(self) -> None:
                 _update_queue_metrics(queue_service)
             time.sleep(poll_interval)
         except SoftTimeLimitExceeded as exc:
-            #Força retry quando o soft time limit encerra a task, mantendo o loop vivo
-            bound_logger.warning("continuous_soft_time_limit_exceeded")
+            #Mantém o loop contínuo ao reiniciar a task após soft time limit
+            bound_logger.warning(
+                "continuous_soft_time_limit_exceeded",
+                restart="scheduled",
+            )
             raise self.retry(exc=exc) from exc
         except Exception:
             PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
