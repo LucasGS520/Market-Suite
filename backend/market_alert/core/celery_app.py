@@ -222,8 +222,7 @@ celery_app.conf.update(
     enable_utc=True,
     worker_hijack_root_logger=False,
 
-    #Limites de tempo de execução
-    task_soft_time_limit=30,
+    #Limites de tempo de execução definidos para task
     task_time_limit=60,
 
     #Concorrência global (podendo ser sobrescrito via CLI)
