@@ -19,6 +19,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_priority_queue import (
+    CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL,
     PRIORITY_QUEUE_CONSUME_LATENCY_MS,
     PRIORITY_QUEUE_LOOP_ERRORS_TOTAL,
     PRIORITY_QUEUE_PROCESSED_TOTAL,
@@ -577,13 +578,15 @@ def run_continuous_collector(self) -> None:
                     _update_stability_metrics(db)
                 _update_queue_metrics(queue_service)
             time.sleep(poll_interval)
-        except SoftTimeLimitExceeded as exc:
-            #Mantém o loop contínuo ao reiniciar a task após soft time limit
+        except SoftTimeLimitExceeded:
+            #Evita encerrar a task quando o time limit suave ocorre, reiniciando o ciclo
+            CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL.inc()
             bound_logger.warning(
                 "continuous_soft_time_limit_exceeded",
                 restart="scheduled",
             )
-            raise self.retry(exc=exc) from exc
+            time.sleep(poll_interval)
+            continue
         except Exception:
             PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
             bound_logger.exception("continuous_loop_error")

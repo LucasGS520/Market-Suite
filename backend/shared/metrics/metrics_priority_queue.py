@@ -48,6 +48,11 @@ PRIORITY_QUEUE_LOOP_ERRORS_TOTAL = Counter(
     labelnames=("source",),
 )
 
+CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL = Counter(
+    "continuous_collector_soft_timeouts_total",
+    "Total de timeouts suaves capturados no loop do coletor contínuo",
+)
+
 PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL = Counter(
     "priority_queue_reconcile_triggered_total",
     "Total de reconciliações disparadas para a fila de prioridade",
@@ -68,6 +73,7 @@ __all__ = [
     "PRIORITY_QUEUE_FALLBACK_TOTAL",
     "PRIORITY_QUEUE_PROCESSED_TOTAL",
     "PRIORITY_QUEUE_LOOP_ERRORS_TOTAL",
+    "CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL",
     "PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL",
     "PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL",
 ]
