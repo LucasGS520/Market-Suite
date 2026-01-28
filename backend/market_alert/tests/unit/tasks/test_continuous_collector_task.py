@@ -25,6 +25,24 @@ class EnqueueStub:
         )
         return True
     
+class EnqueueSequenceStub:
+    """ Simula o enqueue com resultados sequenciais para testar retries """
+
+    def __init__(self, results: list[bool]) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.results = results
+
+    def __call__(self, monitored_id, next_check_at, source, queue_service):
+        self.calls.append(
+            {
+                "monitored_id": monitored_id,
+                "next_check_at": next_check_at,
+                "source": source,
+                "queue_service": queue_service,
+            }
+        )
+        return self.results.pop(0)
+    
 def _build_monitored(next_check_at=None) -> MonitoredProduct:
     """ Cria um monitorado mínimo para testes """
     return MonitoredProduct(
@@ -48,12 +66,13 @@ def test_requeue_monitored_define_next_check_at_if_missing(monkeypatch):
 
     monitored = _build_monitored(next_check_at=None)
 
-    continuous_collector_task._requeue_monitored(
+    success = continuous_collector_task._requeue_monitored(
         monitored=monitored,
         next_check_at=None,
         queue_service=None,
     )
 
+    assert success is True
     assert enqueue_stub.calls == [
         {
             "monitored_id": monitored.id,
@@ -73,12 +92,13 @@ def test_requeue_monitored_corrects_next_check_at_past_dates(monkeypatch):
 
     monitored = _build_monitored(next_check_at=fixed_now - timedelta(minutes=10))
 
-    continuous_collector_task._requeue_monitored(
+    success = continuous_collector_task._requeue_monitored(
         monitored=monitored,
         next_check_at=None,
         queue_service=None,
     )
 
+    assert success is True
     assert enqueue_stub.calls == [
         {
             "monitored_id": monitored.id,
@@ -87,3 +107,36 @@ def test_requeue_monitored_corrects_next_check_at_past_dates(monkeypatch):
             "queue_service": None,
         }
     ]
+
+def test_requeue_monitored_retries_with_current_time(monkeypatch):
+    """ Garante que o reenqueue tenta novamente com timestamp atual ao falhar """
+    fixed_now = datetime(2024, 3, 1, tzinfo=timezone.utc)
+    enqueue_stub = EnqueueSequenceStub([False, True])
+
+    monkeypatch.setattr(continuous_collector_task, "_utc_now", lambda: fixed_now)
+    monkeypatch.setattr(continuous_collector_task, "enqueue_monitored_at", enqueue_stub)
+
+    monitored = _build_monitored(next_check_at=fixed_now + timedelta(minutes=5))
+
+    success = continuous_collector_task._requeue_monitored(
+        monitored=monitored,
+        next_check_at=None,
+        queue_service=None,
+    )
+
+    assert success is True
+    assert enqueue_stub.calls == [
+        {
+            "monitored_id": monitored.id,
+            "next_check_at": fixed_now + timedelta(minutes=5),
+            "source": "continuous_worker",
+            "queue_service": None,
+        },
+        {
+            "monitored_id": monitored.id,
+            "next_check_at": fixed_now,
+            "source": "continuous_worker",
+            "queue_service": None,
+        },
+    ]
+    

@@ -53,6 +53,11 @@ PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL = Counter(
     "Total de reconciliações disparadas para a fila de prioridade",
     labelnames=("source","reason"),
 )
+PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL = Counter(
+    "priority_queue_failed_but_retained_total",
+    "Total de reenqueues que falharam e ficaram retidos no processamento",
+    labelnames=("source",),
+)
 
 __all__ = [
     "PRIORITY_QUEUE_SIZE",
@@ -64,4 +69,5 @@ __all__ = [
     "PRIORITY_QUEUE_PROCESSED_TOTAL",
     "PRIORITY_QUEUE_LOOP_ERRORS_TOTAL",
     "PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL",
+    "PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL",
 ]

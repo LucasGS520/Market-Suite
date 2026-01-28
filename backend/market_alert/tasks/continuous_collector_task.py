@@ -22,6 +22,7 @@ from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_CONSUME_LATENCY_MS,
     PRIORITY_QUEUE_LOOP_ERRORS_TOTAL,
     PRIORITY_QUEUE_PROCESSED_TOTAL,
+    PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL,
     PRIORITY_QUEUE_READY_TOTAL,
     PRIORITY_QUEUE_SIZE,
     PRIORITY_QUEUE_STABILITY_TOTAL,
@@ -379,8 +380,8 @@ def _requeue_monitored(
     monitored: MonitoredProduct,
     next_check_at: datetime | None = None,
     queue_service: PriorityQueueService,
-) -> None:
-    """ Reenfileira monitorado e registra falha caso Redis esteja indisponível """
+) -> bool:
+    """ Reenfileira monitorado e informa se houve sucesso no enqueue """
     #Usa a janela calculada pela coleta para garantir o reenqueue correto
     now = _utc_now()
     resolved_next_check_at = next_check_at or monitored.next_check_at or now
@@ -394,13 +395,28 @@ def _requeue_monitored(
         source="continuous_worker",
         queue_service=queue_service,
     ):
-        return
+        return True
     
     logger.error(
         "continuous_requeue_failed",
         monitored_id=str(monitored.id),
         next_check_at=resolved_next_check_at.isoformat(),
     )
+    #Tenta reenfileirar imediatamente para minimizar impacto de falhas transitórias
+    if enqueue_monitored_at(
+        monitored.id,
+        now,
+        source="continuous_worker",
+        queue_service=queue_service,
+    ):
+        logger.warning(
+            "continuous_requeue_retry_succeeded",
+            monitored_id=str(monitored.id),
+            next_check_at=now.isoformat(),
+        )
+        return True
+
+    return False
 
 def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
     """ Carrega monitorado por ID garantindo UUID válido """
@@ -514,11 +530,23 @@ def run_continuous_collector(self) -> None:
 
                 processed_ids.append(str(monitored.id))
 
-                _requeue_monitored(
+                requeue_success = _requeue_monitored(
                     monitored=monitored,
                     next_check_at=next_check_at,
                     queue_service=queue_service,
                 )
+                if not requeue_success:
+                    #Mantém no conjunto de processamento para permitir reclaim futuro
+                    PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL.labels(
+                        source="continuous_worker"
+                    ).inc()
+                    bound_logger.warning(
+                        "requeue_failed_but_retained",
+                        monitored_id=str(monitored.id),
+                    )
+                    if processed_ids and processed_ids[-1] == str(monitored.id):
+                        #Evita erro ao remover IDs quando a lista já foi drenada
+                        processed_ids.pop()
 
                 bound_logger.info(
                     "continuous_item_processed",
