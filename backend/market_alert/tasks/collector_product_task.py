@@ -166,8 +166,8 @@ def _dispatch_comparison(
             bool(getattr(result, "availability_changed", False)),
             trace_id,
         ],
-        #Mantém comparação na fila de monitoramento para ser processada pelo worker dedicado
-        queue="monitor",
+        #Mantém comparação na fila dedicada para não saturar o worker do coletor contínuo
+        queue="compare",
     )
     logger.info(
         "compare_prices_enqueued",

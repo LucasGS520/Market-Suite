@@ -23,15 +23,17 @@ TASK_MODULES = [
     "market_alert.tasks.priority_queue_tasks",
 ]
 
-#Exchanges separados para scraping e monitoramento
+#Exchanges separados para scraping, monitoramento e comparação
 SCRAPING_EXCHANGE = Exchange("scraping", type="direct")
 MONITOR_EXCHANGE = Exchange("monitor", type="direct")
+COMPARE_EXCHANGE = Exchange("compare", type="direct")
 NOTIFICATIONS_EXCHANGE = Exchange("notifications", type="direct")
 
 #Filas conhecidas do serviço
 TASK_QUEUES = (
     Queue("scraping", SCRAPING_EXCHANGE, routing_key="scraping"),
     Queue("monitor", MONITOR_EXCHANGE, routing_key="monitor"),
+    Queue("compare", COMPARE_EXCHANGE, routing_key="compare"),
     Queue("notifications", NOTIFICATIONS_EXCHANGE, routing_key="notifications"),
 )
 
@@ -46,8 +48,8 @@ TASK_ROUTES = {
         "routing_key": "monitor",
     },
     "market_alert.tasks.compare_prices_task.compare_prices_task": {
-        "queue": "monitor",
-        "routing_key": "monitor",
+        "queue": "compare",
+        "routing_key": "compare",
     },
     "market_alert.tasks.notifications_enqueue_task.enqueue_notifications_task": {
         "queue": "notifications",

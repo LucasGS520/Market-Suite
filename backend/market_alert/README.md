@@ -8,7 +8,7 @@ API FastAPI responsável por autenticação, gestão e monitoramento, além de c
 
 ## Principais Responsabilidades
 - **Expor rotas REST** para gerenciamento de usuários, autenticação, produtos monitorados e concorrentes, comparações.
-- **Agendar tarefas Celery** (`scraping`, `monitor`, `metrics`) para coleta de dados contínua e coleta de métricas.
+- **Agendar tarefas Celery** (`scraping`, `monitor`, `compare`, `notifications`, `metrics`) para coleta de dados contínua, comparação e métricas.
 - **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
 - **Registrar métricas e logs estruturados** para Prometheus e Loki.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
@@ -67,12 +67,13 @@ market_alert/
 ## Celery - Arquitetura de Workers e Filas
 
 ### Organização por Workers Dedicados
-O sistema utiliza **três workers Celery separados**, cada um consumindo uma fila específica e executando em containers ou processos independentes:
+O sistema utiliza **quatro workers Celery separados**, cada um consumindo uma fila específica e executando em containers ou processos independentes:
 
 | Worker | Fila(s) | Concorrência | Responsabilidades |
 |--------|---------|--------------|-------------------|
 | **celery-worker** | `celery,scraping` | 4 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
-| **celery-worker-monitor** | `monitor` | 2 | Executa o loop contínuo `run_continuous_collector` + `compare_prices_task` |
+| **celery-worker-monitor** | `monitor` | 2 | Executa o loop contínuo `run_continuous_collector` |
+| **celery-worker-compare** | `compare` | 2 | Executa `compare_prices_task` para comparação assíncrona |
 | **celery-worker-notifications** | `notifications` | 2 | Executa `send_notification_task` + `verification_tasks` |
 
 ### Arquivo principal
@@ -82,12 +83,15 @@ O sistema utiliza **três workers Celery separados**, cada um consumindo uma fil
 ### Tasks de destaque
 - **`tasks.collector_product_task.collect_product_task`** (fila `scraping`): coleta um monitorado ou concorrente por vez com lock Redis.
 - **`tasks.continuous_collector_task.run_continuous_collector`** (fila `monitor`): **task que roda indefinidamente**, consome fila de prioridade Redis, coleta grupos monitorado+concorrentes, recalcula estabilidade e reenfileira.
-- **`tasks.compare_prices_task.compare_prices_task`** (fila `monitor`): dispara automaticamente após coletas com mudanças.
+- **`tasks.compare_prices_task.compare_prices_task`** (fila `compare`): dispara automaticamente após coletas com mudanças.
 - **`tasks.send_notification_task.send_notification_task`** (fila `notifications`): entrega alertas com retry.
 - **`tasks.metrics_tasks.collect_celery_metrics`**, **`cleanup_cache`** (agendadas via Beat): coleta métricas e limpa cache.
 
 ### Autostart do Coletor Contínuo
 O worker `celery-worker-monitor` define a variável de ambiente `CONTINUOUS_COLLECTOR_AUTOSTART=1`, que faz com que a task `run_continuous_collector` seja iniciada automaticamente quando o worker inicia. Em falhas, a task é reexecutada pelo mecanismo de retry configurado no Celery. Mantenha **apenas uma instância ativa** do loop contínuo por ambiente; o lock distribuído do coletor garante exclusividade e evita múltiplos `continuous_loop_iteration` no mesmo intervalo.
+
+### Separação de carga entre monitoramento e comparação
+As comparações foram movidas para a fila `compare`, garantindo que o worker de monitoramento permaneça dedicado ao loop contínuo e evitando saturação quando há muitas mudanças simultâneas.
 
 ### Scraping e Coleta Contínua
 - **Cliente síncrono:** `services/scraper_client.py` usa `httpx.Client` de vida curta e fluxo linear. Evite helpers assíncronos ou `asyncio.run` dentro das tasks para impedir erros de loop fechado.

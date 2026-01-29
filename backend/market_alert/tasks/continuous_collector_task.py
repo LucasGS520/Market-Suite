@@ -319,7 +319,7 @@ def _collect_group(
                 bool(getattr(monitored_result, "availability_changed", False)) if monitored_result else False,
                 trace_id,
             ],
-            queue="monitor",
+            queue="compare",
         )
 
     group_duration_ms = int((time.perf_counter() - group_started_perf) * 1000)

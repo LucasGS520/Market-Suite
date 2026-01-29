@@ -391,7 +391,7 @@ def delete_competitor_entry(
         celery_app.send_task(
             "market_alert.tasks.compare_prices_task.compare_prices_task",
             args=[str(monitored_id)],
-            queue="monitor",
+            queue="compare",
         )
         logger.info(
             "competitor_delete_recalculation_enqueued",

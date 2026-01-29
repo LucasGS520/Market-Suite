@@ -130,7 +130,7 @@ services:
       - monitoring-net
 
 
-  #Worker do Celery para tarefas assíncronas gerais (scraping e comparações)
+  #Worker do Celery para tarefas assíncronas gerais (scraping)
   celery-worker:
     build:
       context: ./backend/market_alert
@@ -197,6 +197,46 @@ services:
       "1000:1000"
     ports:
       - "8004:8002"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro
+    networks:
+      - monitoring-net
+
+  #Worker do Celery dedicado às comparações de preço (fila compare)
+  celery-worker-compare:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/
+    command:
+      - celery
+      - "-A"
+      - "market_alert.core.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=2"
+      - "-Q"
+      - "compare"
+    user:
+      "1000:1000"
+    ports:
+      - "8005:8002"
     depends_on:
       db:
         condition: service_healthy

@@ -2,8 +2,8 @@
 
 Esta task roda de forma assíncrona via Celery. Ela carrega do banco de dados
 um produto monitorado e todos os seus concorrentes, executa a comparação de
-preços e registra métricas para acompanhamento. O fluxo foi simplificado para
-usar a fila padrão do Celery e evitar coordenação distribuída adicional.
+preços e registra métricas para acompanhamento. O fluxo é roteado para a fila
+``compare`` para manter o worker de monitoramento focado no loop contínuo.
 """
 
 import structlog
@@ -48,6 +48,7 @@ logger = structlog.get_logger("compare_prices")
     soft_time_limit=20,
     time_limit=40,
     acks_late=True,
+    queue="compare",
 )
 def compare_prices_task(
     self,
