@@ -53,6 +53,11 @@ CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL = Counter(
     "Total de timeouts suaves capturados no loop do coletor contínuo",
 )
 
+CONTINUOUS_COLLECTOR_TIME_LIMIT_EXCEEDED_TOTAL = Counter(
+    "continuous_collector_time_limit_exceeded_total",
+    "Total de limites de tempo excedidos no coletor contínuo",
+)
+
 PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL = Counter(
     "priority_queue_reconcile_triggered_total",
     "Total de reconciliações disparadas para a fila de prioridade",
@@ -74,6 +79,7 @@ __all__ = [
     "PRIORITY_QUEUE_PROCESSED_TOTAL",
     "PRIORITY_QUEUE_LOOP_ERRORS_TOTAL",
     "CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL",
+    "CONTINUOUS_COLLECTOR_TIME_LIMIT_EXCEEDED_TOTAL",
     "PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL",
     "PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL",
 ]

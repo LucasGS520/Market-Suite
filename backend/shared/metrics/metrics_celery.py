@@ -45,6 +45,12 @@ CELERY_CONTINUOUS_AUTOSTART_TOTAL = Counter(
     ["service", "action"],
 )
 
+CONTINUOUS_AUTOSTART_THROTTLED_TOTAL = Counter(
+    "continuous_autostart_throttled_total",
+    "Total de bloqueios de autostart do coletor contínuo por throttling",
+    ["service", "reason"],
+)
+
 __all__ = [
     "CELERY_TASKS_TOTAL",
     "CELERY_QUEUE_LENGTH",
@@ -52,4 +58,5 @@ __all__ = [
     "CELERY_WORKER_CONCURRENCY",
     "CELERY_TASK_DURATION_SECONDS",
     "CELERY_CONTINUOUS_AUTOSTART_TOTAL",
+    "CONTINUOUS_AUTOSTART_THROTTLED_TOTAL",
 ]

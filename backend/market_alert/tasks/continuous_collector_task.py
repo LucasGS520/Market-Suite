@@ -15,10 +15,12 @@ from uuid import UUID, uuid4
 import structlog
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from biliard.exceptions import TimeLimitExceeded
 from celery.exceptions import SoftTimeLimitExceeded
 
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_priority_queue import (
+    CONTINUOUS_COLLECTOR_TIME_LIMIT_EXCEEDED_TOTAL,
     CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL,
     PRIORITY_QUEUE_CONSUME_LATENCY_MS,
     PRIORITY_QUEUE_LOOP_ERRORS_TOTAL,
@@ -468,6 +470,7 @@ def run_continuous_collector(self) -> None:
     deve herdar hard time limit para evitar encerramento forçado do worker.
     """
     bound_logger = logger.bind(task_id=getattr(self.request, "id", None))
+    started_at = time.monotonic()
     queue_service = PriorityQueueService()
     batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
     processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
@@ -581,12 +584,23 @@ def run_continuous_collector(self) -> None:
                     _update_stability_metrics(db)
                 _update_queue_metrics(queue_service)
             time.sleep(poll_interval)
+        except TimeLimitExceeded:
+            #Registra o limite de tempo excedido para sinalizar reinícios forçados
+            CONTINUOUS_COLLECTOR_TIME_LIMIT_EXCEEDED_TOTAL.inc()
+            bound_logger.warning(
+                "limit_time_collector_exceeded",
+                uptime_seconds=round(time.monotonic() - started_at, 2),
+                reason="time_limit",
+            )
+            time.sleep(poll_interval)
+            continue
         except SoftTimeLimitExceeded:
             #Evita encerrar a task quando o time limit suave ocorre, reiniciando o ciclo
             CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL.inc()
             bound_logger.warning(
                 "continuous_soft_time_limit_exceeded",
-                restart="scheduled",
+                uptime_seconds=round(time.monotonic() - started_at, 2),
+                reason="soft_time_limit",
             )
             time.sleep(poll_interval)
             continue

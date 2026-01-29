@@ -12,7 +12,7 @@ from structlog.typing import BindableLogger, EventDict
 from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
 from prometheus_client import start_http_server
-from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL, CELERY_CONTINUOUS_AUTOSTART_TOTAL
+from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL, CELERY_CONTINUOUS_AUTOSTART_TOTAL, CONTINUOUS_AUTOSTART_THROTTLED_TOTAL
 from shared.utils.redis_client import get_redis_client, set_key_with_ttl
 
 try:
@@ -38,7 +38,12 @@ NOISY_EVENT_NAMES = {
 }
 
 logger = structlog.get_logger("celery_app")
+PROCESS_START_MONOTONIC = time.monotonic()
 
+
+def _get_process_uptime_seconds() -> float:
+    """ Retorna o uptime do processo em segundos para logs de observabilidade """
+    return round(time.monotonic() - PROCESS_START_MONOTONIC, 2)
 
 def drop_repeated_events(
     _logger: BindableLogger,
@@ -189,9 +194,17 @@ def _request_continuous_collector_start(*, action: str = "triggered") -> None:
     
     #Evita reinício em loop quando houve falha recente no coletor contínuo
     if _continuous_collector_autostart_in_cooldown():
+        CONTINUOUS_AUTOSTART_THROTTLED_TOTAL.labels(
+            service=SERVICE_LABEL,
+            reason="cooldown",
+        ).inc()
         logger.warning(
             "continuous_autostart_blocked",
             detail="reinício bloqueado por cooldown",
+            task_id=None,
+            uptime_seconds=_get_process_uptime_seconds(),
+            reason="cooldown",
+            message="Autostart do coletor contínuo bloqueado pelo cooldown configurado.",
         )
         return
     
@@ -214,11 +227,18 @@ def _request_continuous_collector_start(*, action: str = "triggered") -> None:
         logger.warning("continuous_autostart_lock_unavailable")
 
     try:
-        celery_app.send_task(
+        async_result = celery_app.send_task(
             "market_alert.tasks.continuous_collector_task.run_continuous_collector",
             queue="monitor",
         )
-        logger.info("continuous_autostart_triggered", action=action)
+        logger.info(
+            "continuous_autostart_triggered",
+            action=action,
+            task_id=async_result.id,
+            uptime_seconds=_get_process_uptime_seconds(),
+            reason=action,
+            message="Autostart do coletor contínuo disparado com sucesso.",
+        )
         CELERY_CONTINUOUS_AUTOSTART_TOTAL.labels(
             service=SERVICE_LABEL,
             action=action,
