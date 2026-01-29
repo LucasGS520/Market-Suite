@@ -32,6 +32,16 @@ PRICE_COMPARISON_TASK_LATENCY_SECONDS = Histogram(
     buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
 )
 
+COMPARE_PRICES_STARTED_TOTAL = Counter(
+    "compare_prices_started_total",
+    "Total de tasks compare_prices_task iniciadas",
+)
+
+COMPARE_PRICES_COMPLETED_TOTAL = Counter(
+    "compare_prices_completed_total",
+    "Total de tasks compare_prices_task concluídas com sucesso",
+)
+
 COMPARISON_SKIPPED_PAUSED_TOTAL = Counter(
     "comparison_skipped_paused_total",
     "Comparações ignoradas por monitorado pausado",
@@ -48,6 +58,8 @@ __all__ = [
     "PRICE_COMPARISON_FAILURES_TOTAL",
     "PRICE_COMPARISON_DURATION_SECONDS",
     "PRICE_COMPARISON_TASK_LATENCY_SECONDS",
+    "COMPARE_PRICES_STARTED_TOTAL",
+    "COMPARE_PRICES_COMPLETED_TOTAL",
     "COMPARISON_SKIPPED_PAUSED_TOTAL",
     "COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL",
 ]

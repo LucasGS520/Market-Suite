@@ -16,6 +16,8 @@ from shared.utils.logging_utils import mask_identifier
 from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
 from shared.metrics.metrics_price_comparison import (
     COMPARISON_SKIPPED_PAUSED_TOTAL,
+    COMPARE_PRICES_COMPLETED_TOTAL,
+    COMPARE_PRICES_STARTED_TOTAL,
     PRICE_COMPARISON_TASK_LATENCY_SECONDS,
 )
 from shared.metrics.metrics_notifications import (
@@ -58,11 +60,17 @@ def compare_prices_task(
     trace_id: str | None = None,
 ) -> None:
     """ Carrega um produto monitorado e executa a comparação com fluxo enxuto """
+    queue_name = (self.request.delivery_info or {}).get("routing_key", "compare")
     task_logger = logger.bind(
-        task_id=self.request.id, monitored_id=mask_identifier(monitored_id)
+        task_id=self.request.id,
+        queue=queue_name,
+        monitored_id=mask_identifier(monitored_id),
     )
+    #Registra a contagem de início para acompanhamento de backlog
+    COMPARE_PRICES_STARTED_TOTAL.inc()
     start = datetime.now(timezone.utc)
     task_logger.info("compare_prices_started")
+    has_error = False
 
     try:
         with SessionLocal() as db:
@@ -297,6 +305,7 @@ def compare_prices_task(
                     ).inc()
 
     except Exception as exc:
+        has_error = True
         #Log estruturado para acompanhar falhas e motivos antes de propagar
         task_logger.exception(
             "compare_prices_failed",
@@ -310,6 +319,13 @@ def compare_prices_task(
         duration = (datetime.now(timezone.utc) - start).total_seconds()
         SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
         PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
+        if not has_error:
+            COMPARE_PRICES_COMPLETED_TOTAL.inc()
+        task_logger.info(
+            "compare_prices_finished",
+            status="success" if not has_error else "error",
+            duration_seconds=duration,
+        )
 
 def _fetch_recent_prices(
     db: Session,

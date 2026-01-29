@@ -249,6 +249,10 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
   - Métricas expostos em `/metrics`
   - Logs estruturados via `structlog`
   - Métricas Celery disponíveis nos workers configurados, incluindo contadores de scraping e latência (`market_alert_monitoring_tasks_total`, `market_alert_scrape_latency_seconds`).
+  - Métricas obrigatórias em produção para comparação:
+    - `compare_prices_started_total` e `compare_prices_completed_total` (volume de tasks)
+    - `price_comparison_task_latency_seconds` (latência fim a fim)
+    - `celery_queue_length{queue="compare"}` (backlog da fila de comparação)
 
 ## Fluxo de Orquestração Completo
 
