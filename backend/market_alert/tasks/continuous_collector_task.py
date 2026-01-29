@@ -40,6 +40,11 @@ from shared.metrics.metrics_scraper import (
     MONITORED_SKIPPED_PAUSED_TOTAL,
 )
 from shared.utils.redis_client import is_scraping_suspended
+from shared.utils.redis_locks import (
+    acquire_continuous_collector_lock,
+    refresh_continuous_collector_lock,
+    release_continuous_collector_lock,
+)
 
 from market_alert.core.celery_app import celery_app
 from market_alert.core.config_alert import settings
@@ -475,137 +480,171 @@ def run_continuous_collector(self) -> None:
     batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
     processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
     poll_interval = float(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
+    lock_ttl_seconds = int(settings.CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS)
+    lock_refresh_interval = max(1.0, lock_ttl_seconds / 2)
 
-    while True:
-        processed_ids: list[str] = []
-        if _should_abort(getattr(self, "request", None)):
-            bound_logger.warning("continuous_worker_aborted")
-            return
-        
-        try:
-            if is_scraping_suspended():
-                bound_logger.warning("continuous_scraping_suspended")
-                time.sleep(poll_interval)
-                continue
-            
-            if not queue_service.is_available():
-                bound_logger.error("continuous_queue_unavailable")
-                time.sleep(poll_interval)
-                continue
-            
-            queue_size = queue_service.size()
-            ready_total = queue_service.ready_count()
-            _update_queue_metrics(
-                queue_service,
-                queue_size=queue_size,
-                ready_total=ready_total,
-            )
-        
-            bound_logger.info(
-                "continuous_loop_iteration",
-                queue_size=queue_size,
-                ready_total=ready_total,
-                timestamp=_utc_now().isoformat(),
-            )
+    #Garante apenas uma instância ativa do loop contínuo por cluster
+    lock_acquired, lock_owner = acquire_continuous_collector_lock(
+        ttl_seconds=lock_ttl_seconds,
+    )
+    if not lock_acquired:
+        bound_logger.warning(
+            "continuous_collector_lock_denied",
+            lock_owner=lock_owner,
+        )
+        return
+    
+    last_lock_refresh = time.monotonic()
 
-            reclaimed = queue_service.reclaim_stale_processing(processing_ttl)
-            if reclaimed:
-                #Recoloca itens travados para garantir novas tentativas no loop contínuo
-                bound_logger.warning(
-                    "continuous_processing_reclaimed",
-                    reclaimed_count=len(reclaimed),
+    try:
+        while True:
+            processed_ids: list[str] = []
+            if _should_abort(getattr(self, "request", None)):
+                bound_logger.warning("continuous_worker_aborted")
+                return
+            
+            if time.monotonic() - last_lock_refresh >= lock_refresh_interval:
+                if not refresh_continuous_collector_lock(
+                    owner_id=lock_owner,
+                    ttl_seconds=lock_ttl_seconds,
+                ):
+                    bound_logger.warning(
+                        "continuous_collector_lock_lost",
+                        lock_owner=lock_owner,
+                    )
+                    return
+                last_lock_refresh = time.monotonic()
+            
+            try:
+                if is_scraping_suspended():
+                    bound_logger.warning("continuous_scraping_suspended")
+                    time.sleep(poll_interval)
+                    continue
+                
+                if not queue_service.is_available():
+                    bound_logger.error("continuous_queue_unavailable")
+                    time.sleep(poll_interval)
+                    continue
+                
+                queue_size = queue_service.size()
+                ready_total = queue_service.ready_count()
+                _update_queue_metrics(
+                    queue_service,
+                    queue_size=queue_size,
+                    ready_total=ready_total,
                 )
 
-            for _ in range(batch_size):
-                next_id = queue_service.pop_due()
-                if not next_id:
-                    break
-                
-                with SessionLocal() as db:
-                    monitored = _load_monitored(db, next_id)
-                    if monitored is None:
-                        bound_logger.warning("continuous_monitored_missing", monitored_id=next_id)
-                        processed_ids.append(next_id)
-                        continue
-                    
-                    if monitored.paused or monitored.status in {MonitoredStatus.failed}:
-                        MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="continuous_worker").inc()
-                        bound_logger.info(
-                            "continuous_skipped_paused",
-                            monitored_id=str(monitored.id),
-                        )
-                        processed_ids.append(str(monitored.id))
-                        continue
-                
-                enqueued_at = queue_service.get_enqueued_at(next_id)
-                try:
-                    outcome, next_check_at = _collect_group(
-                        monitored=monitored,
-                        enqueued_at=enqueued_at,
-                    )
-                except Exception:
-                    outcome, next_check_at = "error", None
-                    PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
-                    bound_logger.exception(
-                        "continuous_group_failed",
-                        monitored_id=str(monitored.id),
-                    )
-
-                processed_ids.append(str(monitored.id))
-
-                if outcome != "skipped_paused":
-                    requeue_success = _requeue_monitored(
-                        monitored=monitored,
-                        next_check_at=next_check_at,
-                        queue_service=queue_service,
-                    )
-                    if not requeue_success:
-                        #Mantém no conjunto de processamento para permitir reclaim futuro
-                        PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL.labels(
-                            source="continuous_worker"
-                        ).inc()
-                        bound_logger.warning(
-                            "requeue_failed_but_retained",
-                            monitored_id=str(monitored.id),
-                        )
-                        if processed_ids and processed_ids[-1] == str(monitored.id):
-                            #Evita erro ao remover IDs quando a lista já foi drenada
-                            processed_ids.pop()
-
+                #Mantém um log por ciclo enquanto o lock está válido
                 bound_logger.info(
-                    "continuous_item_processed",
-                    monitored_id=str(monitored.id),
-                    outcome=outcome,
+                    "continuous_loop_iteration",
+                    queue_size=queue_size,
+                    ready_total=ready_total,
+                    timestamp=_utc_now().isoformat(),   
                 )
 
-            if processed_ids:
-                _drain_processing(queue_service, processed_ids)
-                with SessionLocal() as db:
-                    _update_stability_metrics(db)
-                _update_queue_metrics(queue_service)
-            time.sleep(poll_interval)
-        except TimeLimitExceeded:
-            #Registra o limite de tempo excedido para sinalizar reinícios forçados
-            CONTINUOUS_COLLECTOR_TIME_LIMIT_EXCEEDED_TOTAL.inc()
-            bound_logger.warning(
-                "limit_time_collector_exceeded",
-                uptime_seconds=round(time.monotonic() - started_at, 2),
-                reason="time_limit",
-            )
-            time.sleep(poll_interval)
-            continue
-        except SoftTimeLimitExceeded:
-            #Evita encerrar a task quando o time limit suave ocorre, reiniciando o ciclo
-            CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL.inc()
-            bound_logger.warning(
-                "continuous_soft_time_limit_exceeded",
-                uptime_seconds=round(time.monotonic() - started_at, 2),
-                reason="soft_time_limit",
-            )
-            time.sleep(poll_interval)
-            continue
-        except Exception:
-            PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
-            bound_logger.exception("continuous_loop_error")
-            time.sleep(poll_interval)
+                reclaimed = queue_service.reclaim_stale_processing(processing_ttl)
+                if reclaimed:
+                    #Recoloca itens travados para garantir novas tentativas no loop contínuo
+                    bound_logger.warning(
+                        "continuous_processing_reclaimed",
+                        reclaimed_count=len(reclaimed),
+                    )
+
+                for _ in range(batch_size):
+                    next_id = queue_service.pop_due()
+                    if not next_id:
+                        break
+                    
+                    with SessionLocal() as db:
+                        monitored = _load_monitored(db, next_id)
+                        if monitored is None:
+                            bound_logger.warning("continuous_monitored_missing", monitored_id=next_id)
+                            processed_ids.append(next_id)
+                            continue
+                        
+                        if monitored.paused or monitored.status in {MonitoredStatus.failed}:
+                            MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="continuous_worker").inc()
+                            bound_logger.info(
+                                "continuous_skipped_paused",
+                                monitored_id=str(monitored.id),
+                            )
+                            processed_ids.append(str(monitored.id))
+                            continue
+                    
+                    enqueued_at = queue_service.get_enqueued_at(next_id)
+                    try:
+                        outcome, next_check_at = _collect_group(
+                            monitored=monitored,
+                            enqueued_at=enqueued_at,
+                        )
+                    except Exception:
+                        outcome, next_check_at = "error", None
+                        PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
+                        bound_logger.exception(
+                            "continuous_group_failed",
+                            monitored_id=str(monitored.id),
+                        )
+                        
+
+                    processed_ids.append(str(monitored.id))
+
+                    if outcome != "skipped_paused":
+                        requeue_success = _requeue_monitored(
+                            monitored=monitored,
+                            next_check_at=next_check_at,
+                            queue_service=queue_service,
+                        )
+                        if not requeue_success:
+                            #Mantém no conjunto de processamento para permitir reclaim futuro
+                            PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL.labels(
+                                source="continuous_worker"
+                            ).inc()
+                            bound_logger.warning(
+                                "requeue_failed_but_retained",
+                                monitored_id=str(monitored.id),
+                            )
+                            if processed_ids and processed_ids[-1] == str(monitored.id):
+                                #Evita erro ao remover IDs quando a lista já foi drenada
+                                processed_ids.pop()
+
+                    bound_logger.info(
+                        "continuous_item_processed",
+                        monitored_id=str(monitored.id),
+                        outcome=outcome,
+                    )
+
+                if processed_ids:
+                    _drain_processing(queue_service, processed_ids)
+                    with SessionLocal() as db:
+                        _update_stability_metrics(db)
+                    _update_queue_metrics(queue_service)
+                time.sleep(poll_interval)
+            except TimeLimitExceeded:
+                #Registra o limite de tempo excedido para sinalizar reinícios forçados
+                CONTINUOUS_COLLECTOR_TIME_LIMIT_EXCEEDED_TOTAL.inc()
+                bound_logger.warning(
+                    "limit_time_collector_exceeded",
+                    uptime_seconds=round(time.monotonic() - started_at, 2),
+                    reason="time_limit",
+                )
+
+                time.sleep(poll_interval)
+                continue
+            except SoftTimeLimitExceeded:
+                #Evita encerrar a task quando o time limit suave ocorre, reiniciando o ciclo
+                CONTINUOUS_COLLECTOR_SOFT_TIMEOUTS_TOTAL.inc()
+                bound_logger.warning(
+                    "continuous_soft_time_limit_exceeded",
+                    uptime_seconds=round(time.monotonic() - started_at, 2),
+                    reason="soft_time_limit",
+                )
+                time.sleep(poll_interval)
+                continue
+            except Exception:
+                PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
+                bound_logger.exception("continuous_loop_error")
+                time.sleep(poll_interval)
+
+    finally:
+        release_continuous_collector_lock(owner_id=lock_owner)
             

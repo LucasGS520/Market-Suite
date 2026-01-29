@@ -135,6 +135,9 @@ class Settings(ConfigBase):
     CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS: int = int(
         os.getenv("CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS", str(15 * 60))
     ) #TTL para recuperar itens travados no conjunto de processamento
+    CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS: int = int(
+        os.getenv("CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS", "45")
+    ) #TTL do lock para garantir instância única do coletor contínuo
 
     #Chaves Redis do agendamento contínuo
     PRIORITY_QUEUE_KEY: str = os.getenv(

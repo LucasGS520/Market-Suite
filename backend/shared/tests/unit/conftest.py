@@ -65,11 +65,14 @@ class FakeRedis:
         if redis_key in self.data:
             del self.data[redis_key]
 
-    def eval(self, script, num_keys, redis_key, expected_value):
-        """Reproduz script de liberação de lock validando o dono informado."""
+    def eval(self, script, num_keys, redis_key, expected_value, ttl_ms=None):
+        """Reproduz scripts simples de lock validando o dono informado."""
 
         stored_value = self.data.get(redis_key)
         if stored_value == expected_value:
+            if ttl_ms is not None:
+                self.data[f"ttl:{redis_key}"] = ttl_ms / 1000
+                return 1
             self.data.pop(redis_key, None)
             return 1
 
