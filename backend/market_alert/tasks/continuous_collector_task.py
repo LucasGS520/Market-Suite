@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 import structlog
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from biliard.exceptions import TimeLimitExceeded
+from billiard.exceptions import TimeLimitExceeded
 from celery.exceptions import SoftTimeLimitExceeded
 
 from shared.infra.db import SessionLocal

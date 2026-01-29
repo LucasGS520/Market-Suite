@@ -374,11 +374,6 @@ celery_app.conf.update(
     enable_utc=True,
     worker_hijack_root_logger=False,
 
-    #Política de timeouts: tasks comuns usam limites globais; tasks longas definem override explícito.
-    #Mantemos soft_time_limit abaixo do hard limit para permitir cleanup antes do encerramento forçado.
-    task_soft_time_limit=50,
-    task_time_limit=60,
-
     #Concorrência global (podendo ser sobrescrito via CLI)
     worker_concurrency=int(os.getenv("CELERY_WORKER_CONCURRENCY", "12")),
 
