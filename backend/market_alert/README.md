@@ -224,7 +224,7 @@ NOTIFICATION_BACKOFF_MULTIPLIER=2
 - **Fila sem itens prontos**: verifique `PRIORITY_QUEUE_KEY`, as métricas `PRIORITY_QUEUE_SIZE`/`PRIORITY_QUEUE_READY_TOTAL` e se `next_check_at` está no passado.
 - **Redis indisponível**: logs com `continuous_queue_unavailable` indicam falha de conexão ou credenciais.
 - **Itens presos em processamento**: o loop reaproveita itens expirados usando `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`; revise logs `continuous_processing_reclaimed`.
-- **Reinícios por limites de tempo**: acompanhe `continuous_collector_soft_timeouts_total` e `continuous_collector_time_limit_exceeded_total` para confirmar se o coletor foi reiniciado por limites de execução.
+- **Reinícios por limites de tempo**: acompanhe `continuous_collector_soft_timeouts_total` e `continuous_collector_time_limit_exceeded_total` para confirmar se o coletor foi reiniciado por limites de execução. O coletor contínuo usa `soft_time_limit=None` e `time_limit=None` por ser um loop infinito; ajustes de timeout devem ser feitos explicitamente na task quando necessário.
 - **Autostart com throttling**: aumentos em `continuous_autostart_throttled_total` indicam bloqueio por cooldown; valide o TTL de autostart e a estabilidade do Redis.
 - **Monitorados pausados**: itens pausados não retornam à fila; retome manualmente para reativar a coleta.
 
