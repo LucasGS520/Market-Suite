@@ -457,12 +457,15 @@ def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable
     retry_backoff=True,
     retry_jitter=True,
     retry_kwargs={"max_retries": None},
+    time_limit=None,
+    soft_time_limit=None,
 )
 def run_continuous_collector(self) -> None:
-    """ Loop contínuo que consome a fila de prioridade e dispara coletas 
+    """ Loop contínuo que consome a fila de prioridade e dispara coletas
     
     Faz polling em intervalo fixo para garantir consumo contínuo sem pausas
-    progressivas, mantendo o worker ativo 24/7.
+    progressivas, mantendo o worker ativo 24/7. Esta task é contínua e não
+    deve herdar hard time limit para evitar encerramento forçado do worker.
     """
     bound_logger = logger.bind(task_id=getattr(self.request, "id", None))
     queue_service = PriorityQueueService()
