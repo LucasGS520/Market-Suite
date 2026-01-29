@@ -30,6 +30,7 @@ from market_alert.core.celery_schedule import (
 
 SERVICE_LABEL = "market_alert_worker"
 CONTINUOUS_COLLECTOR_AUTOSTART_KEY = "market_alert:continuous_collector:autostart"
+CONTINUOUS_COLLECTOR_AUTOSTART_COOLDOWN_KEY = "market_alert:continuous_collector:autostart:cooldown"
 NOISY_EVENT_NAMES = {
     "channel_vars_missing",
     "collected_celery_metrics",
@@ -116,6 +117,42 @@ def _continuous_collector_autostart_enabled() -> bool:
     flag = os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART", "0").strip().lower()
     return flag in {"1", "true", "yes"}
 
+def _continuous_collector_autostart_in_cooldown() -> bool:
+    """ Indica se há cooldown ativo para evitar reinícios sucessivos do coletor """
+    client = get_redis_client()
+    if client is None:
+        logger.warning("continuous_autostart_cooldown_check_skipped", reason="redis_unavailable")
+        return False
+    
+    try:
+        return bool(client.exists(CONTINUOUS_COLLECTOR_AUTOSTART_COOLDOWN_KEY))
+    except Exception:
+        logger.exception("continuous_autostart_cooldown_check_failed")
+        return False
+    
+def _register_continuous_collector_cooldown(*, reason: str) -> None:
+    """ Registra um cooldown após falha para evitar reinícios em loop """
+    cooldown_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_COOLDOWN_SECONDS", "120"))
+    result = set_key_with_ttl(
+        CONTINUOUS_COLLECTOR_AUTOSTART_COOLDOWN_KEY,
+        value="1",
+        ttl_seconds=cooldown_seconds,
+        only_if_absent=True,
+    )
+    if result is None:
+        logger.warning(
+            "continuous_autostart_cooldown_unavailable",
+            reason="redis_unavailable",
+            detail=reason,
+        )
+        return
+    
+    logger.info(
+        "continuous_autostart_cooldown_registered",
+        ttl_seconds=cooldown_seconds,
+        detail=reason,
+    )
+
 def _delete_continuous_collector_lock() -> None:
     """ Remove o lock do autostart para evitar bloqueios indevidos """
     client = get_redis_client()
@@ -150,6 +187,14 @@ def _request_continuous_collector_start(*, action: str = "triggered") -> None:
     if not _continuous_collector_autostart_enabled():
         return
     
+    #Evita reinício em loop quando houve falha recente no coletor contínuo
+    if _continuous_collector_autostart_in_cooldown():
+        logger.warning(
+            "continuous_autostart_blocked",
+            detail="reinício bloqueado por cooldown",
+        )
+        return
+    
     ttl_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_TTL", "60"))
     logger.info(
         "continuous_autostart_requested",
@@ -180,6 +225,7 @@ def _request_continuous_collector_start(*, action: str = "triggered") -> None:
         ).inc()
     except Exception:
         _delete_continuous_collector_lock()
+        _register_continuous_collector_cooldown(reason="falha ao iniciar coletor contínuo")
         logger.exception("continuous_autostart_failed")
 
 def _revalidate_continuous_collector_lock() -> None:
