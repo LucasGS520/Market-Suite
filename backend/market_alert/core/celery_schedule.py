@@ -14,23 +14,26 @@ from kombu import Exchange, Queue
 #Módulos de tasks carregados pelo worker
 TASK_MODULES = [
     "market_alert.tasks.collector_product_task",
+    "market_alert.tasks.continuous_collector_task",
     "market_alert.tasks.metrics_tasks",
     "market_alert.tasks.compare_prices_task",
-    "market_alert.tasks.recheck_scheduler_task",
     "market_alert.tasks.notifications_enqueue_task",
     "market_alert.tasks.send_notification_task",
     "market_alert.tasks.verification_tasks",
+    "market_alert.tasks.priority_queue_tasks",
 ]
 
-#Exchanges separados para scraping e monitoramento
+#Exchanges separados para scraping, monitoramento e comparação
 SCRAPING_EXCHANGE = Exchange("scraping", type="direct")
 MONITOR_EXCHANGE = Exchange("monitor", type="direct")
+COMPARE_EXCHANGE = Exchange("compare", type="direct")
 NOTIFICATIONS_EXCHANGE = Exchange("notifications", type="direct")
 
 #Filas conhecidas do serviço
 TASK_QUEUES = (
     Queue("scraping", SCRAPING_EXCHANGE, routing_key="scraping"),
     Queue("monitor", MONITOR_EXCHANGE, routing_key="monitor"),
+    Queue("compare", COMPARE_EXCHANGE, routing_key="compare"),
     Queue("notifications", NOTIFICATIONS_EXCHANGE, routing_key="notifications"),
 )
 
@@ -40,9 +43,13 @@ TASK_ROUTES = {
         "queue": "scraping",
         "routing_key": "scraping",
     },
-    "market_alert.tasks.recheck_scheduler_task.schedule_rechecks": {
+    "market_alert.tasks.continuous_collector_task.run_continuous_collector": {
         "queue": "monitor",
         "routing_key": "monitor",
+    },
+    "market_alert.tasks.compare_prices_task.compare_prices_task": {
+        "queue": "compare",
+        "routing_key": "compare",
     },
     "market_alert.tasks.notifications_enqueue_task.enqueue_notifications_task": {
         "queue": "notifications",
@@ -85,12 +92,6 @@ BEAT_SCHEDULE = {
     "collect-db-metrics-every-1min": _schedule_entry(
         "market_alert.tasks.metrics_tasks.collect_db_metrics",
         crontab(minute="*/1"),
-    ),
-    "recheck-scraping-every-5min": _schedule_entry(
-        "market_alert.tasks.recheck_scheduler_task.schedule_rechecks",
-        crontab(minute="*/5"),
-        queue="monitor",
-        routing_key="monitor",
     ),
     "cleanup-cache-daily": _schedule_entry(
         "market_alert.tasks.metrics_tasks.cleanup_cache",

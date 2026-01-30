@@ -15,14 +15,16 @@ graph TD
     FE --> |HTTP/JSON| API[market_alert]
     API --> |HTTP (ParserRequest)| Scraper[market_scraper]
     API --> |Filas Celery| Worker[Celery Worker]
-    Worker --> Beat[Celery Beat]
+    API --> |Fila monitor| MonitorWorker[Celery Worker Monitor]
     API --> DB[(PostgreSQL)]
     Worker --> DB
+    MonitorWorker --> DB
     API --> Cache[(Redis)]
     Worker --> Cache
+    MonitorWorker --> Cache
     API --> Prometheus
     Worker --> Prometheus
-    Beat --> Prometheus
+    MonitorWorker --> Prometheus
     Scraper --> Prometheus
     Prometheus --> Grafana[(Dashboards)]
     API --> Loki[(Logs estruturados)]
@@ -54,16 +56,16 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 7. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 
 ### Tarefas Celery do `market_alert`
-- **Collector (`tasks.collector_product_task.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir.
-- **Agendador de rechecagem (`tasks.recheck_scheduler_task.schedule_rechecks`)**: Beat que varre monitorados com `next_check_at` vencido, recalcula o próximo horário com base em `check_interval` (ou `RECHECK_INTERVAL_DEFAULT`) e enfileira diretamente a `collect_product_task` com jitter controlado.
-- **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: permanece idempotente e leve, usada pelo collector e acionamentos manuais para recalcular históricos e campos derivados.
-- **Notificações (`fila notifications`)**: entrega alertas enfileirados com retry e backoff, registrando histórico em `notification_attempt` e marcando DLQ quando necessário.
+- **Collector (`tasks.collector_product_task.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir. Enfileirado na fila `scraping`.
+- **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`)**: task que executa indefinidamente no worker dedicado `monitor`, consome a fila de prioridade Redis (sorted sets), coleta monitorado + concorrentes em sequência, recalcula `next_check_at` conforme estabilidade e reenfileira automaticamente. Inicia via env `CONTINUOUS_COLLECTOR_AUTOSTART=1` no worker.
+- **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: idempotente e leve, disparada automaticamente após coleções que detectem mudanças de preço/disponibilidade ou mudanças em concorrentes. Enfileirada na fila `monitor`.
+- **Notificações (`tasks.send_notification_task.send_notification_task`)**: entrega alertas com retry e backoff exponencial, registrando histórico em `notification_attempt` e marcando DLQ quando necessário. Enfileirada na fila `notifications`.
 
 #### Princípios do backend
 - **Exposição de APIs**: o FastAPI em `market_alert` oferece rotas públicas, autenticação JWT e endpoints para monitoramentos, concorrentes e comparações.
 - **Contrato único**: esquemas em `backend/shared/schemas/schemas_scraper.py` padronizam comunicação API ↔ scraper.
 - **Separação de responsabilidades**: apenas o `market_scraper` processa HTML, enquanto o `market_alert` persiste dados e aplica lógica de negócios.
-- **Processamento assíncrono**: workers Celery e Beat ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização, métricas e observabilidade.
+- **Processamento assíncrono**: workers Celery ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização, métricas e observabilidade.
 - **Simplicidade operacional**: priorizamos contratos previsíveis, removendo idempotência distribuída nos disparos manuais.
 - **Extensibilidade controlada**: novos marketplaces exigem evoluções no `market_scraper` e nos contratos compartilhados antes de tocar fluxos críticos.
 - **Biblioteca compartilhada**: `backend/shared` concentra schemas Pydantic, utilidades, métricas, observabilidade e integrações externas consumidas pelos demais serviços.
@@ -111,26 +113,36 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 
 ### Docker Compose
 ```bash
+# Subir dependências primeiro
 docker compose up -d db redis redis-init
-docker compose up -d api market_scraper celery-worker celery-worker-notifications celery_beat
-# Após dependências, subir serviços de aplicação e observabilidade
-docker compose up -d api market_scraper celery-worker celery-worker-notifications celery_beat frontend grafana prometheus loki promtail
+
+# Subir serviços da aplicação (ordem não importa após dependências)
+docker compose up -d api market_scraper celery-worker celery-worker-monitor celery-worker-notifications frontend
+
+# Para subir apenas backend sem frontend
+docker compose up -d db redis redis-init api market_scraper celery-worker celery-worker-monitor celery-worker-notifications
 ```
+
+**Filas Celery separadas:**
+- `celery-worker` (portas 8002): filas `celery,scraping` - tarefas de scraping de produtos
+- `celery-worker-monitor` (porta 8004): fila `monitor` - coletor contínuo + comparações
+- `celery-worker-notifications` (porta 8003): fila `notifications` - envio de alertas e verificações
 
 - Interrompa com `docker compose down` (utilize `docker compose down -v` para remover volumes, se necessário).
 - Variáveis comuns residem em `.env.common`; arquivos específicos estão em `backend/market_alert/.env.market_alert`, `backend/market_scraper/.env.market_scraper` e `frontend/.env` (quando aplicável).
+- Persistência do Redis: o serviço usa AOF + smapshots e grava em `redis-data`, garantindo fila e cache entre reinícios. Remover volumes (`docker compose down -v`) apaga o estado persistido. Em ambiente com disco limitado ou alto volume de gravações, considere o impacto de I/O e monitore espaço para evitar indisponibilidade por falta de armazenamento.
 
 ### Ambiente local (sem Docker)
 #### Backend
 1. `python -m venv .venv && source .venv/bin/activate`
 2. `pip install -r requirements.txt`
 3. Configure arquivos `.env` mencionados acima.
-4. Inicie serviços:
+4. Inicie serviços em terminais separados:
    - API FastAPI: `uvicorn backend.market_alert.main:app --reload --port 8000`
-   - Worker Celery principal: `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=4 -Q celery,scraping,monitor`
-   - Worker Celery de notificações: `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=2 -Q notifications`--pool=threads --concurrency=4 -Q celery,scraping,monitor,notifications`
-   - Celery Beat com métricas: `python backend/market_alert/beat_with_metrics.py`
    - Scraper FastAPI: `uvicorn backend.market_scraper.main:app --reload --port 8010`
+   - Worker Celery (scraping): `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=4 -Q celery,scraping`
+   - Worker Celery (monitor/coletor contínuo): `CONTINUOUS_COLLECTOR_AUTOSTART=1 celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=2 -Q monitor`
+   - Worker Celery (notificações): `celery -A backend.market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=2 -Q notifications`
 
 #### Frontend
 1. `cd frontend`
@@ -141,7 +153,7 @@ docker compose up -d api market_scraper celery-worker celery-worker-notification
 
 ## Observabilidade e operação contínua
 ### Backend
-- **Métricas Prometheus**: endpoints `/metrics` expostos pela API (`:8000`), Beat (`:8001`), Worker (`:8002`) e Scraper (`:8010`). Métricas definidas em [`backend/shared/metrics`](backend/shared/metrics).
+- **Métricas Prometheus**: endpoints `/metrics` expostos pela API (`:8000`), worker principal (`:8002`), worker do coletor contínuo (`:8004`) e Scraper (`:8010`). Métricas definidas em [`backend/shared/metrics`](backend/shared/metrics).
 - **Logs estruturados**: todos os serviços usam `structlog` com saída JSON. Em Compose, Loki + Promtail coletam e disponibilizam via Grafana (`http://localhost:3000`).
 - **Tracing opcional**: pontos de integração podem enviar spans para provedores OTLP quando configurado nas variáveis de ambiente.
 
@@ -149,6 +161,13 @@ docker compose up -d api market_scraper celery-worker celery-worker-notification
 - **Build health**: logs do Vite/Express ajudam a identificar falhas de build ou inicialização.
 - **Métricas de uso**: integração com ferramentas de analytics pode ser habilitada via variáveis de ambiente (não obrigatória por padrão).
 - **Monitoramento de erros**: configure provedores como Sentry ou LogRocket conectando hooks do React às APIs correspondentes.
+
+## Troubleshooting do coletor contínuo
+- **Worker monitor parado**: verifique se o container/processo `celery-worker-monitor` está ativo e se `CONTINUOUS_COLLECTOR_AUTOSTART=1` está definido.
+- **Fila sem itens prontos**: valide o `PRIORITY_QUEUE_KEY`, as métricas `PRIORITY_QUEUE_SIZE` e `PRIORITY_QUEUE_READY_TOTAL`, além dos timestamps `next_check_at`.
+- **Redis indisponível**: confirme conectividade e credenciais; a aplicação registra `continuous_queue_unavailable` quando o Redis falha.
+- **Itens presos em processamento**: o loop reaproveita entradas expiradas com base em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs `continuous_processing_reclaimed`.
+- **Monitorados pausados**: itens com `paused=true` são ignorados pelo coletor; retome manualmente para reativar.
 
 ## Estrutura do respositório
 ```text

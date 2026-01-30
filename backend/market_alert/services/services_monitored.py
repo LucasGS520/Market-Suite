@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 import structlog
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from backend.shared.schemas.shared_schemas_products import (
     MonitoredProductCreateScraping,
@@ -33,7 +34,7 @@ from market_alert.crud.crud_comparison import (
     get_latest_summaries_for_products,
     get_latest_summary,
 )
-from market_alert.models import User
+from market_alert.models import MonitoredProduct, User
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
     MonitoredProductResponse,
@@ -44,11 +45,31 @@ from market_alert.schemas.schemas_products import (
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_competitors import create_competitor_scrape_request
-from market_alert.orchestrator.collector_service_orchestrator import enqueue_monitored_collection
+from market_alert.services.services_priority_queue_manager import enqueue_monitored_now
+from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
+from market_alert.utils.interval_calculator_products import calculate_next_check_at
 
 
 logger = structlog.get_logger("monitored_service")
+
+def _enqueue_resume_collection(monitored: MonitoredProduct, user: User) -> None:
+    """ Agenda coleta imediata com comparação forçada para retomadas """
+    payload = build_monitored_payload(
+        monitored,
+        user_id=user.id,
+        trace_id=str(uuid4()),
+    )
+    payload["force_compare"] = "true"
+    try:
+        enqueue_collect(payload)
+    except Exception:
+        #Evita bloquear a retomada caso a fila de scraping esteja indisponível
+        logger.warning(
+            "monitored_resume_collect_enqueue_failed",
+            monitored_id=str(monitored.id),
+            user_id=str(user.id),
+        )
 
 def _raise_from_monitored_error(exc: Exception) -> None:
     """ Converte exceções de domínio em respostas HTTP coerentes """
@@ -186,7 +207,7 @@ def get_monitored_product(
 def pause_monitored_product_entry(
     *, db: Session, product_id: UUID, user: User
 ) -> MonitoredProductResponse:
-    """ Pausa monitorado e devolve estado atualizado """
+    """ Pausa monitorado, remove da fila e devolve estado atualizado """
     try:
         monitored = pause_monitored(db, product_id, user)
     except Exception as exc:
@@ -207,7 +228,7 @@ def pause_monitored_product_entry(
 def resume_monitored_product_entry(
     *, db: Session, product_id: UUID, user: User
 ) -> MonitoredProductResponse:
-    """ Retoma monitorado atualizando janela de rechecagem otimista """
+    """ Retoma monitorado, recalcula janela e reinsere na fila """
     try:
         monitored = resume_monitored(db, product_id, user)
     except Exception as exc:  # noqa: BLE001 - conversão controlada para HTTP
@@ -218,6 +239,7 @@ def resume_monitored_product_entry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado")
 
     logger.info("monitored_resumed", product_id=str(product_id), user_id=str(user.id))
+    _enqueue_resume_collection(monitored, user)
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
     return build_monitored_response(
@@ -231,7 +253,7 @@ def resume_monitored_product_entry(
 def update_monitored_pause_state(
     *, db: Session, product_id: UUID, user: User, payload: MonitoredPausedUpdateRequest
 ) -> MonitoredProductResponse:
-    """ Ajusta a pausa de forma idempotente e devolve o estado consolidado """
+    """ Ajusta a pausa, sincroniza fila de prioridade e devolve o estado consolidado """
     try:
         monitored = (
             pause_monitored(db, product_id, user)
@@ -247,6 +269,8 @@ def update_monitored_pause_state(
 
     action = "paused" if payload.paused else "resumed"
     logger.info(f"monitored_{action}", product_id=str(product_id), user_id=str(user.id))
+    if not payload.paused:
+        _enqueue_resume_collection(monitored, user)
 
     summary = get_latest_summary(db, product_id)
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
@@ -274,11 +298,13 @@ def schedule_monitored_scrape(
     product_data: MonitoredProductCreateScraping,
     request: Request | None = None,
 ) -> MonitoredScrapeCreationResponse:
-    """ Valida e agenda scraping de produto monitorado e concorrente inicial
+    """ Valida, cria monitorado e enfileira coleta imediata na fila continua.
     
     O serviço centraliza logs e validações para reduzir duplicação entre rotas,
     garantindo verificação de URL, duplicidade e rate-limit antes de agendar a
-    coleta assíncrona do monitorado e, quando enviado, do concorrente inicial.
+    coleta assíncrona do monitorado, mantendo o registro na fila de prioridade
+    para rechecagens contínuas. Quando enviado, também cria o concorrente
+    inicial.
     """
     log_context: dict[str, str | None] = {
         "user_id": str(user.id),
@@ -356,9 +382,42 @@ def schedule_monitored_scrape(
         product_url=normalized_url,
     )
 
-    #Agendamento via Celery garante processamento assíncrono do scraping
-    enqueue_monitored_collection(pending, user_id=user.id)
+    reference_time = datetime.now(timezone.utc)
+    pending.next_check_at = calculate_next_check_at(pending, collected_at=reference_time)
+    db.commit()
+    db.refresh(pending)
 
+    try:
+        #Dispara coleta imediata na fila scraping para devolver resposta incial rapidamente
+        immediate_trace_id = str(uuid4())
+        immediate_payload = build_monitored_payload(
+            pending,
+            user_id=user.id,
+            trace_id=immediate_trace_id,
+        )
+        enqueue_collect(immediate_payload)
+        logger.info(
+            "monitored_immediate_enqueued",
+            monitored_id=str(pending.id),
+            trace_id=immediate_trace_id,
+        )
+        #Mantém monitorado na fila contínua para rechecagens subsequentes
+        enqueued = enqueue_monitored_now(pending.id, source="new_monitored")
+        if not enqueued:
+            logger.warning(
+                "monitored_enqueue_failed_fallback",
+                monitored_id=str(pending.id),
+                reason="priority_queue_unavailable",
+            )
+    except Exception:
+        #Evita bloquear a criação quando Redis estiver indisponível
+        logger.warning(
+            "monitored_enqueue_exception_fallback",
+            monitored_id=str(pending.id),
+            exc_info=True,
+        )
+
+    competitor_warning: str | None = None
     if product_data.initial_competitor:
         competitor_payload = CompetitorProductCreateScraping(
             monitored_product_id=pending.id,
@@ -371,22 +430,36 @@ def schedule_monitored_scrape(
             "origin": "monitored_onboarding",
         }
 
-        create_competitor_scrape_request(
-            db=db,
-            user=user,
-            product_data=competitor_payload,
-            request_context={
-                key: value for key, value in competitor_context.items() if value is not None
-            },
-        )
+        try:
+            create_competitor_scrape_request(
+                db=db,
+                user=user,
+                product_data=competitor_payload,
+                request_context={
+                    key: value for key, value in competitor_context.items() if value is not None
+                },
+            )
+        except HTTPException as exc:
+            #Comentário preserva o monitorado criado, mas informa o alerta do concorrente inicial
+            competitor_warning = str(exc.detail)
+            logger.warning(
+                "monitored_initial_competitor_failed",
+                monitored_id=str(pending.id),
+                detail=competitor_warning,
+            )
 
     logger.info(
-        "monitored_scrape_scheduled", monitored_id=str(pending.id), url=normalized_url
+        "monitored_scrape_scheduled",
+        monitored_id=str(pending.id),
+        url=normalized_url,
+        next_check_at=pending.next_check_at,
     )
 
     return MonitoredScrapeCreationResponse(
         id=pending.id,
         url=pending.normalized_url,
         created_at=pending.created_at,
-        message="Scraping agendado. O produto será salvo em breve.",
+        next_check_at=pending.next_check_at,
+        message="Coleta iniciada, dados aparecerão em breve.",
+        competitor_warning=competitor_warning,
     )

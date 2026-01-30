@@ -45,6 +45,58 @@
       "options": {
         "legend": { "showLegend": false }
       }
+    },
+    {
+      "id": 3,
+      "title": "Backlog da Fila de Comparações",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 7, "w": 12, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(celery_queue_lenght{queue=\"compare\"})",
+          "legendFormat": "Pendentes",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "orange", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      }
+    },
+    {
+      "id": 4,
+      "title": "Latência Média da Task Compare (s)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 7, "w": 12, "h": 4 },
+      "targets": [
+        {
+          "expr": "avg(rate(price_comparison_task_latency_seconds_sum[1m]) / rate(price_comparison_task_latency_seconds_count[1m]))",
+          "legendFormat": "Latência média",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "nullValueMode": "connected" }
+      },
+      "options": {
+        "legend": { "showLegend": false }
+      }
     }
   ],
   "time": { "from": "now-1h", "to": "now" },

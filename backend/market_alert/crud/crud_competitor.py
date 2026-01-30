@@ -15,16 +15,25 @@ from fastapi import HTTPException, status
 
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
-from shared.utils.url_validation import canonicalize_product_url, normalize_product_url_for_storage
+from shared.utils.url_validation import normalize_competitor_url, normalize_product_url_for_storage
 from shared.metrics.metrics_products import PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
+from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
 logger = structlog.get_logger("crud_competitor")
+
+def _normalize_competitor_storage_url(product_url: str) -> str:
+    """ Normaliza URL de concorrente garantindo consistência com o armazenamento """
+    normalized = normalize_competitor_url(product_url)
+    if normalized:
+        return normalized
+    #Mantém um fallback mínimo para evitar escrita de URLs vazias no banco
+    return str(product_url or "").strip()
 
 def _to_decimal(value: Decimal | float | int | str | None) -> Decimal | None:
     """ Converte valor para `Decimal` preservando `None` e falhas de parsing """
@@ -43,20 +52,38 @@ def _different_price(previous_price: Decimal | float | int | str | None, current
     current = _to_decimal(current_price)
     return previous != current
 
+def _update_competitor_price_change_tracking(
+    competitor: CompetitorProduct,
+    new_price: Decimal | None,
+    old_price: Decimal | None,
+    collected_at: datetime,
+) -> None:
+    """ Atualiza o registro de mudança de preço do concorrente quando necessário """
+    collected_reference = collected_at.astimezone(timezone.utc) if collected_at.tzinfo else collected_at.replace(tzinfo=timezone.utc)
+    if _different_price(old_price, new_price):
+        competitor.last_price_change_at = collected_reference
+        logger.info(
+            "competitor_price_change_detected",
+            competitor_id=str(competitor.id),
+            monitored_id=str(competitor.monitored_product_id),
+            old_price=str(old_price) if old_price is not None else None,
+            new_price=str(new_price) if new_price is not None else None,
+            collected_at=collected_reference.isoformat(),
+        )
+
 def get_competitor_by_monitored_and_url(
     db: Session,
     monitored_product_id: UUID,
     product_url: str,
 ) -> CompetitorProduct | None:
     """ Recupera concorrente usando URL canônica vinculada ao monitorado """
-    normalized_url = normalize_product_url_for_storage(str(product_url))
-    if not normalized_url:
+    if not product_url:
         return None
     return (
         db.query(CompetitorProduct)
         .filter(
             CompetitorProduct.monitored_product_id == monitored_product_id,
-            CompetitorProduct.product_url == normalized_url,
+            CompetitorProduct.product_url == product_url,
         )
         .first()
     )
@@ -69,6 +96,21 @@ def get_competitor_by_id(db: Session, competitor_id: UUID) -> CompetitorProduct 
         .filter(CompetitorProduct.id == competitor_id)
         .first()
     )
+
+def update_competitors_pause_state(
+    db: Session,
+    monitored_product_id: UUID,
+    *,
+    is_paused: bool,
+) -> int:
+    """ Atualiza o estado de pausa de concorrentes vinculados a um monitorado """
+    #Mantém concorrentes sincronizados com o monitorado sem alterar o fluxo de coleta
+    updated = (
+        db.query(CompetitorProduct)
+        .filter(CompetitorProduct.monitored_product_id == monitored_product_id)
+        .update({CompetitorProduct.is_paused: is_paused}, synchronize_session=False)
+    )
+    return int(updated or 0)
 
 def _derive_competitor_name_from_url(product_url: str) -> str:
     """Gera um nome provisório a partir da URL para preencher o cadastro pendente."""
@@ -89,12 +131,41 @@ def _derive_competitor_name_from_url(product_url: str) -> str:
     #Mantém um fallback amigável evitando valores vazios no banco
     return "Concorrente pendente"
 
+def _prepare_competitor_name(
+    provided_name: str | None,
+    scraped_name: str | None,
+    product_url: str,
+) -> tuple[str, str]:
+    """ Determina o nome final aplicando prioridade usuário -> scraoping -> URL """
+    fallback = _derive_competitor_name_from_url(product_url)
+    sanitized_provided = sanitize_text(provided_name) if provided_name else None
+    sanitized_scraped = sanitize_text(scraped_name)
+    if sanitized_provided:
+        return sanitized_provided, fallback
+    if sanitized_scraped:
+        return sanitized_scraped, fallback
+    return fallback, fallback
+
+def _should_replace_competitor_with_scraped(
+    existing_name: str | None,
+    fallback_name: str,
+    scraped_name: str | None,
+) -> bool:
+    """ Decide se substituímos o nome atual quando ele é apenas o fallback da URL """
+    sanitized_scraped = sanitize_text(scraped_name)
+    if not sanitized_scraped:
+        return False
+    if existing_name is None:
+        return True
+    return existing_name.strip().casefold() == fallback_name.strip().casefold()
+
 def create_pending_competitor_product(
     db: Session,
     monitored_product_id: UUID,
     product_url: str,
     *,
     display_name: str | None = None,
+    is_paused: bool | None = None,
 ) -> CompetitorProduct:
     """ Cria um concorrente pendente garantindo unicidade por monitorado e URL.
     
@@ -113,12 +184,16 @@ def create_pending_competitor_product(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Monitoramento pausado. Retome o produto para adicionar concorrentes.",
         )
+    resolved_is_paused = is_paused if is_paused is not None else bool(getattr(monitored, "paused", False))
     normalized_url = normalize_product_url_for_storage(str(product_url))
     if not normalized_url:
-        try:
-            normalized_url = canonicalize_product_url(str(product_url))
-        except ValueError:
-            normalized_url = str(product_url).strip()
+        normalized_url = _normalize_competitor_storage_url(str(product_url))
+    if monitored and normalized_url == monitored.product_url:
+        #Evita concorrente auto-referenciado ao salvar direto no CRUD
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="URL do concorrente não pode ser igual ao monitorado.",
+        )
     existing = get_competitor_by_monitored_and_url(db, monitored_product_id, normalized_url)
 
     if existing:
@@ -138,7 +213,8 @@ def create_pending_competitor_product(
         seller_rating=None,
         currency=None,
         thumbnail=None,
-        status=ProductStatus.pending,
+        status=ProductStatus.available,
+        is_paused=resolved_is_paused,
         last_checked=None,
         last_scraped_at=None,
     )
@@ -154,13 +230,6 @@ def create_pending_competitor_product(
         raise
 
     db.refresh(pending)
-
-    from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
-    try:
-        enqueue_competitor_collection(pending)
-    except Exception:
-        #Ignora falhas de enfileiramento para não quebrar a criação
-        pass
 
     return pending
 
@@ -184,15 +253,13 @@ def create_or_update_competitor_product_scraped(
     currency: str | None = None,
     etag: str | None = None,
     last_modified: datetime | None = None,
+    collected_at: datetime | None = None,
 ) -> CompetitorProduct:
     """ Atualiza ou cria um produto concorrente a partir dos dados extraídos pelo scraping """
     normalized_url = normalize_product_url_for_storage(str(product_data.product_url))
     if not normalized_url:
         #Mantém fallback para registros antigos que já passaram pela validação externa
-        try:
-            normalized_url = canonicalize_product_url(str(product_data.product_url))
-        except ValueError:
-            normalized_url = str(product_data.product_url).strip()
+        normalized_url = _normalize_competitor_storage_url(product_data.product_url)
 
     if last_checked.tzinfo is None:
         last_checked = last_checked.replace(tzinfo=timezone.utc)
@@ -206,19 +273,42 @@ def create_or_update_competitor_product_scraped(
         normalized_url,
     )
 
+    #Aceita múltiplos campos para compatibilidade entre payloads antigos e novos
+    provided_name = (
+        getattr(product_data, "name", None)
+        or getattr(product_data, "display_name", None)
+        or getattr(product_data, "name_identification", None)
+    )
+    resolved_name, fallback_name = _prepare_competitor_name(
+        provided_name,
+        scraped_info.name,
+        normalized_url,
+    )
+
     if existing:
         resolved_price = normalize_scraped_price(scraped_info.current_price)
         
         #Atualiza somente campos relevantes
+        if provided_name and existing.name_competitor != resolved_name:
+            existing.name_competitor = resolved_name
+        elif _should_replace_competitor_with_scraped(existing.name_competitor, fallback_name, scraped_info.name):
+            #Substitui o placeholder derivado da URL pelo nome real do scraping
+            existing.name_competitor = sanitize_text(scraped_info.name) or fallback_name
+        elif existing.name_competitor is None:
+            existing.name_competitor = resolved_name
         previous_price = existing.current_price
         previous_status = existing.status
         existing.old_price = existing.current_price
         availability = scraped_info.availability
         last_status = scraped_info.last_status or existing.last_status
         unavailable_by_data = availability is False or resolved_price is None
+        if availability is False and resolved_price is not None:
+            unavailable_by_data = False
 
         price_changed = _different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
+
+        collected_reference = collected_at or last_checked
 
         try:
             existing.current_price = resolved_price
@@ -230,17 +320,12 @@ def create_or_update_competitor_product_scraped(
             existing.etag = etag or existing.etag
             existing.last_modified = last_modified or existing.last_modified
             existing.last_checked = last_checked
-            existing.last_scraped_at = last_checked
+            existing.last_scraped_at = collected_reference
+            existing.collected_at = collected_reference
             existing.status = ProductStatus.unavailable if unavailable_by_data else ProductStatus.available
             existing.availability = availability
             existing.last_status = last_status
             existing.product_url = normalized_url
-
-            #Sanitiza e persiste somente se tivermos um nome útil retornado pelo scraper.
-            if getattr(scraped_info, "name", None):
-                sanitized_name = sanitize_text(scraped_info.name)
-                if sanitized_name:
-                    existing.name_competitor = sanitized_name
 
             history_allowed = should_create_price_history(resolved_price, availability)
             price_history_needed = price_changed and history_allowed
@@ -274,6 +359,13 @@ def create_or_update_competitor_product_scraped(
                     last_checked,
                 )
 
+            _update_competitor_price_change_tracking(
+                existing,
+                new_price=resolved_price,
+                old_price=previous_price,
+                collected_at=collected_reference,
+            )
+
             db.commit()
         except Exception:
             #Rollback evita sessões sujas quando o chamador controla a transação externamente
@@ -301,10 +393,12 @@ def create_or_update_competitor_product_scraped(
     availability = scraped_info.availability
     last_status = scraped_info.last_status
     unavailable_by_data = availability is False or resolved_price is None
+    if availability is False and resolved_price is not None:
+        unavailable_by_data = False
     
     new = CompetitorProduct(
         monitored_product_id=product_data.monitored_product_id,
-        name_competitor=scraped_info.name,
+        name_competitor=resolved_name,
         product_url=normalized_url,
         current_price=resolved_price,
         old_price=_to_decimal(scraped_info.old_price),
@@ -315,12 +409,19 @@ def create_or_update_competitor_product_scraped(
         status=ProductStatus.unavailable if unavailable_by_data else ProductStatus.available,
         last_checked=last_checked,
         last_scraped_at=last_checked,
+        collected_at=collected_at or last_checked,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
         availability=availability,
         last_status=last_status,
         )
+    _update_competitor_price_change_tracking(
+        new,
+        new_price=resolved_price,
+        old_price=None,
+        collected_at=collected_at or last_checked
+    )
     try:
         db.add(new)
         db.flush()
@@ -407,13 +508,43 @@ def get_competitors_by_monitored_id(
 def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) -> List[CompetitorProduct]:
     """ Remove todos os produtos concorrentes vinculados a um produto monitorado """
     competitors = get_competitors_by_monitored_id(db, monitored_product_id, include_paused=True)
+    queue_service = PriorityQueueService()
     for item in competitors:
+        removed = queue_service.remove(str(item.id))
+        if removed:
+            logger.info(
+                "competitor_removed_from_priority_queue",
+                competitor_id=str(item.id),
+                reason="competitor_delete",
+            )
+        else:
+            #Mantém remoção de concorrente mesmo sem Redis disponível
+            logger.warning(
+                "competitor_priority_queue_remove_failed",
+                competitor_id=str(item.id),
+                reason="competitor_delete",
+            )
         db.delete(item)
     db.commit()
     return competitors
 
 def delete_competitor(db: Session, competitor: CompetitorProduct) -> None:
     """ Remove concorrente específico garantindo flush para cascatas """
+    queue_service = PriorityQueueService()
+    removed = queue_service.remove(str(competitor.id))
+    if removed:
+        logger.info(
+            "competitor_removed_from_priority_queue",
+            competitor_id=str(competitor.id),
+            reason="competitor_delete",
+        )
+    else:
+        #Evita falha de deleção quando Redis estiver indisponível
+        logger.warning(
+            "competitor_priority_queue_remove_failed",
+            competitor_id=str(competitor.id),
+            reason="competitor_delete",
+        )
     db.delete(competitor)
     db.flush()
 

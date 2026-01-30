@@ -43,15 +43,29 @@ import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
 } from '@mui/icons-material';
+import { AxiosError } from 'axios';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
-import type { MonitoredProduct, MonitoredProductCreateScraping } from '../types';
+import type { 
+  ApiErrorResponse,
+  MonitoredProduct,
+  MonitoredProductCreateScraping,
+  MonitoredScrapeCreationResponse,
+} from '../types';
 import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus, statusToBadge } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 import { useToast } from '../hooks/useToast';
+
+/**
+ * Extrai a mensagem detalhada de erro retornada pelo API quando disponível
+ */
+const getApiErrorDetail = (error: unknown): string | undefined => {
+  const axiosError = error as AxiosError<ApiErrorResponse>;
+  return axiosError.response?.data?.detail;
+};
 
 /**
  * Componente principal da página de Produtos Monitorados.
@@ -162,7 +176,7 @@ const Products: React.FC = () => {
   // Mutation para criação de produto monitorado.
   const createProductMutation = useMutation({
     mutationFn: productsService.createMonitoredProduct,
-    onSuccess: () => {
+    onSuccess: (data: MonitoredScrapeCreationResponse) => {
       // Invalida cache para forçar refresh da lista atualizada
       queryClient.invalidateQueries({ queryKey: ['monitoredProducts'] });
       queryClient.invalidateQueries({ queryKey: ['monitoredProducts', '__all__'] });
@@ -171,18 +185,31 @@ const Products: React.FC = () => {
       setNewProductUrl('');
       setNewProductName('');
       setNewCompetitorUrl('');
+      const successMessage = 
+        data.message ||
+        'Produto criado e scraping em andamento. A lista será atualizada automaticamente.';
       showToast({
         key: 'monitoring:product:create',
-        message: 'Produto criado e scraping em andamento. A lista será atualizada automaticamente.',
+        message: successMessage,
         severity: 'info',
         replace: true,
       });
+      const competitorWarning = data.competitor_warning || data.competitor_error;
+      if (competitorWarning) {
+        showToast({
+          key: 'monitoring:product:create:competitor',
+          message: `Produto criado com sucesso, mas o concorrente não pôde ser adicionado: ${competitorWarning}`,
+          severity: 'warning',
+          replace: true,
+        });
+      }
     },
-    onError: () => {
+    onError: (error) => {
       // Mantém mensagem amigável para orientar ajuste de URL ou reautenticação
+      const apiMessage = getApiErrorDetail(error);
       showToast({
         key: 'monitoring:product:create:error',
-        message: 'Não foi possível criar o produto. Verifique a URL e tente novamente.',
+        message: apiMessage || 'Não foi possível criar o produto. Verifique a URL e tente novamente.',
         severity: 'error',
         persist: true,
         replace: true,

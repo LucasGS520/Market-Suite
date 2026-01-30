@@ -1,6 +1,5 @@
 """ Operações CRUD para produtos monitorados pelo sistema """
 
-import random
 from typing import List, Optional, Tuple
 
 from uuid import UUID
@@ -30,9 +29,15 @@ from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_price_history import PriceHistory
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.crud import crud_price_history
+from market_alert.crud import crud_competitor, crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
+from market_alert.services.services_priority_queue import PriorityQueueService
+from market_alert.services.services_priority_queue_manager import (
+    enqueue_monitored_now,
+    remove_from_priority_queue,
+)
+from market_alert.utils.interval_calculator_products import calculate_next_check_at, STABILITY_UNSTABLE
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
@@ -85,34 +90,27 @@ def _different_price(previous_price: Decimal | float | int | str | None, current
     current = _to_decimal(current_price)
     return previous != current
 
-def _compute_next_check_at(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
-    """ Calcula o próximo agendamento respeitando configuração dinâmica do item.
+def _update_price_change_tracking(
+    monitored: MonitoredProduct,
+    new_price: Decimal | None,
+    old_price: Decimal | None,
+    collected_at: datetime,
+) -> None:
+    """ Atualiza rastreio de mudança de preço e marca coleta em grupo """
+    collected_reference = collected_at.astimezone(timezone.utc) if collected_at.tzinfo else collected_at.replace(tzinfo=timezone.utc)
+    monitored.group_collected_at = collected_reference
 
-    A função usa o atributo opcional ``check_interval`` quando presente e,
-    caso o valor seja inválido ou ausente, aplica ``RECHECK_INTERVAL_DEFAULT``
-    como fallback. O cálculo sempre considera timezone UTC para garantir
-    previsibilidade entre workers e Beat.
-    """
-    base_time = reference or datetime.now(timezone.utc)
-    if base_time.tzinfo is None:
-        base_time = base_time.replace(tzinfo=timezone.utc)
-    interval_seconds = getattr(monitored, "check_interval", None)
-    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
-        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
-    return base_time + timedelta(seconds=interval_seconds)
-
-def _compute_resume_window(monitored: MonitoredProduct, reference: datetime | None = None) -> datetime:
-    """ Calcula janela curta para retomada aplicando jitter controlado """
-    base_time = reference or datetime.now(timezone.utc)
-    if base_time.tzinfo is None:
-        base_time = base_time.replace(tzinfo=timezone.utc)
-    interval_seconds = getattr(monitored, "check_interval", None)
-    if not isinstance(interval_seconds, int) or interval_seconds <= 0:
-        interval_seconds = settings.RECHECK_INTERVAL_DEFAULT
-
-    delay_seconds = min(interval_seconds, 5)
-    jitter_seconds = random.uniform(0, 5)
-    return base_time + timedelta(seconds=delay_seconds + jitter_seconds)
+    if _different_price(old_price, new_price):
+        #Resetamos estabilidade para acelerar rechecagem após mudança de preço
+        monitored.last_price_change_at = collected_reference
+        monitored.stability_score = STABILITY_UNSTABLE
+        logger.info(
+            "monitored_price_change_detected",
+            monitored_id=str(monitored.id),
+            old_price=str(old_price) if old_price is not None else None,
+            new_price=str(new_price) if new_price is not None else None,
+            collected_at=collected_reference.isoformat(),
+        )
 
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
@@ -217,7 +215,6 @@ def create_pending_monitored_product(
     product_url: str,
 ) -> MonitoredProduct:
     """ Cria registro pendente garantindo unicidade por usuário e URL """
-
     normalized_url = normalize_product_url_for_storage(product_url)
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
 
@@ -253,7 +250,7 @@ def create_pending_monitored_product(
     )
 
     #Calcula o próximo agendamento após istanciar o objeto para reutilizar referências e evitar uso de variáveis inexistentes
-    pending.next_check_at = _compute_next_check_at(pending, reference=reference_time)
+    pending.next_check_at = calculate_next_check_at(pending, collected_at=reference_time)
     db.add(pending)
 
     try:
@@ -279,6 +276,7 @@ def create_or_update_monitored_product_scraped(
     etag: str | None = None,
     last_modified: datetime | None = None,
     scraped_name: str | None = None,
+    collected_at: datetime | None = None,
 ) -> MonitoredProduct:
     """ Cria ou atualiza um produto monitorado a partir de dados de scraping """
     normalized_url = normalize_product_url_for_storage(product_data.product_url)
@@ -326,6 +324,8 @@ def create_or_update_monitored_product_scraped(
             resolved_price=str(resolved_price) if resolved_price is not None else None,
             price_changed=price_changed,
         )
+        collected_reference = collected_at or last_checked
+
         try:
             existing.current_price = resolved_price
 
@@ -337,7 +337,8 @@ def create_or_update_monitored_product_scraped(
             existing.last_modified = last_modified or existing.last_modified
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
-            existing.next_check_at = _compute_next_check_at(existing, reference=last_checked)
+            existing.collected_at = collected_reference
+            existing.next_check_at = calculate_next_check_at(existing, collected_at=last_checked)
             existing.status = MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active
             existing.availability = availability
             existing.last_status = last_status
@@ -374,6 +375,13 @@ def create_or_update_monitored_product_scraped(
                     resolved_currency,
                     last_checked,
                 )
+
+            _update_price_change_tracking(
+                existing,
+                new_price=resolved_price,
+                old_price=previous_price,
+                collected_at=collected_reference,
+            )
 
             db.commit()
         except Exception:
@@ -416,6 +424,7 @@ def create_or_update_monitored_product_scraped(
         status=MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active,
         last_checked=last_checked,
         last_scraped_at=last_checked,
+        collected_at=collected_at or last_checked,
         next_check_at=None,
         currency=resolved_currency,
         etag=etag,
@@ -423,7 +432,13 @@ def create_or_update_monitored_product_scraped(
         availability=availability,
         last_status=last_status,
     )
-    new.next_check_at = _compute_next_check_at(new, reference=last_checked)
+    new.next_check_at = calculate_next_check_at(new, collected_at=last_checked)
+    _update_price_change_tracking(
+        new,
+        new_price=resolved_price,
+        old_price=None,
+        collected_at=collected_at or last_checked,
+    )
     
     try:
         db.add(new)
@@ -685,49 +700,101 @@ def get_monitored_product_by_id(db: Session, product_id: UUID) -> Optional[Monit
     )
 
 def pause_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
-    """ Pausa monitorado de forma idempotente garantindo lock curto """
-    lock_owner: str | None = None
-    try:
-        monitored = _ensure_monitored_access(db, monitored_id, user)
-        lock_owner = _acquire_monitored_lock(monitored_id)
+    """ Pausa monitorado de forma idempotente e sincroniza a fila contínua """
+    monitored = _ensure_monitored_access(db, monitored_id, user)
+    now = datetime.now(timezone.utc)
+    was_paused = bool(monitored.paused)
 
-        if monitored.paused:
-            db.commit()
-            db.refresh(monitored)
-            return monitored
-
-        now = datetime.now(timezone.utc)
+    if not was_paused:
         monitored.paused = True
         monitored.paused_at = now
-        db.commit()
-        db.refresh(monitored)
+
+    competitors_updated = crud_competitor.update_competitors_pause_state(
+        db,
+        monitored.id,
+        is_paused=True,
+    )
+
+    db.commit()
+    db.refresh(monitored)
+
+    if competitors_updated:
+        logger.info(
+            "competitors_paused",
+            monitored_id=str(monitored.id),
+            count=competitors_updated,
+        )
+
+    logger.info(
+        "monitored_pause_state_updated",
+        monitored_id=str(monitored.id),
+        paused_at=monitored.paused_at.isoformat() if monitored.paused_at else None,
+        user_id=str(user.id),
+        already_paused=was_paused,
+    )
+
+    if not was_paused:
         MONITORED_PAUSED_TOTAL.inc()
-        return monitored
-    finally:
-        if lock_owner:
-            release_product_lock(monitored_id, lock_owner)
+
+    try:
+        remove_from_priority_queue(monitored.id, source="user_paused")
+    except Exception as exc:
+        #Evita bloquear a pausa quando Redis estiver indisponível
+        logger.warning(
+            "monitored_priority_queue_remove_failed",
+            monitored_id=str(monitored.id),
+            error=str(exc),
+        )
+
+    return monitored
 
 def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
-    """ Retoma monitorado recalculando janela de rechecagem com jitter """
-    lock_owner: str | None = None
+    """ Retoma monitorado, recalcula janela e reativa concorrentes """
+    monitored = _ensure_monitored_access(db, monitored_id, user)
+    reference = datetime.now(timezone.utc)
+    was_paused = bool(monitored.paused)
+    monitored.paused = False
+    monitored.paused_at = None
+    monitored.next_check_at = calculate_next_check_at(monitored, collected_at=reference)
+
+    competitors_updated = crud_competitor.update_competitors_pause_state(
+        db,
+        monitored.id,
+        is_paused=False,
+    )
+
+    db.commit()
+    db.refresh(monitored)
+
+    logger.info(
+        "monitored_resume_state_updated",
+        monitored_id=str(monitored.id),
+        next_check_at=monitored.next_check_at.isoformat() if monitored.next_check_at else None,
+        user_id=str(user.id),
+        was_paused=was_paused,
+    )
+
+    if was_paused:
+        MONITORED_RESUMED_TOTAL.inc()
+
+    if competitors_updated:
+        logger.info(
+            "competitors_resumed",
+            monitored_id=str(monitored.id),
+            count=competitors_updated,
+        )
+    
     try:
-        monitored = _ensure_monitored_access(db, monitored_id, user)
-        lock_owner = _acquire_monitored_lock(monitored_id)
+        enqueue_monitored_now(monitored.id, source="user_resumed")
+    except Exception as exc:
+        #Mantém a retomada mesmo que o Redis não responda
+        logger.warning(
+            "monitored_resume_queue_enqueue_failed",
+            monitored_id=str(monitored.id),
+            error=str(exc),
+        )
 
-        was_paused = bool(monitored.paused)
-        reference = datetime.now(timezone.utc)
-        monitored.paused = False
-        monitored.paused_at = None
-        monitored.next_check_at = _compute_resume_window(monitored, reference=reference)
-
-        db.commit()
-        db.refresh(monitored)
-        if was_paused:
-            MONITORED_RESUMED_TOTAL.inc()
-        return monitored
-    finally:
-        if lock_owner:
-            release_product_lock(monitored_id, lock_owner)
+    return monitored
 
 def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
     """ Remove monitorado utilizando sessão dedicada para isolar a transação """
@@ -738,6 +805,21 @@ def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
         dedicated_session = SessionLocal()
         monitored = _ensure_monitored_access(dedicated_session, monitored_id, user)
         lock_owner = _acquire_monitored_lock(monitored_id)
+        queue_service = PriorityQueueService()
+        removed = queue_service.remove(str(monitored_id))
+        if removed:
+            logger.info(
+                "monitored_removed_from_priority_queue",
+                monitored_id=str(monitored_id),
+                reason="monitored_deleted",
+            )
+        else:
+            #Garante a deleção mesmo que o redis esteja indisponível
+            logger.warning(
+                "monitored_priority_queue_remove_failed",
+                monitored_id=str(monitored_id),
+                reason="monitored_deleted",
+            )
 
         dedicated_session.delete(monitored)
         dedicated_session.commit()

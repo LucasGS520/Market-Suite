@@ -141,6 +141,17 @@ def normalize_product_url_for_storage(url: str) -> str:
         return canonicalize_product_url(raw_value)
     except ValueError:
         return ""
+    
+def normalize_competitor_url(url: str) -> str:
+    """ Normaliza URL de concorrente garantindo consistência com o scraping e o CRUD """
+    raw_value = str(url or "").strip()
+    if not raw_value:
+        return ""
+    try:
+        return canonicalize_product_url(raw_value)
+    except ValueError:
+        #Mantém fallback seguro para preservar compatibilidade com URLs legadas já persistidas
+        return raw_value
 
 __all__ = [
     "UrlIssue",
@@ -148,6 +159,7 @@ __all__ = [
     "normalize_and_validate_product_url",
     "canonicalize_product_url",
     "normalize_product_url_for_storage",
+    "normalize_competitor_url",
     "check_url_compatibility",
 ]
     

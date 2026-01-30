@@ -39,16 +39,25 @@ import {
   Pause as PauseIcon,
   OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
+import { AxiosError } from 'axios';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
-import { formatDateOnly, formatDateTime, formatRelativeTime } from '../utils/date';
+import { formatDateOnly, formatDateTime, formatRelativeTime, formatLastPriceChangeDate } from '../utils/date';
 import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
-import { CompetitorProduct, MonitoredProduct } from '../types';
+import { ApiErrorResponse, CompetitorProduct, MonitoredProduct } from '../types';
 import { useToast } from '../hooks/useToast';
+
+/**
+ * Obtém o detalhe do erro enviado pela API, quando presente
+ */
+const getApiErrorDetail = (error: unknown): string | undefined => {
+  const axiosError = error as AxiosError<ApiErrorResponse>;
+  return axiosError.response?.data?.detail;
+};
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -135,11 +144,12 @@ const ProductDetail: React.FC = () => {
         replace: true,
       });
     },
-    onError: () => {
+    onError: (error) => {
       // Orienta o usuário a revisar a URL ou a sessão antes de tentar novamente
+      const apiMessage = getApiErrorDetail(error);
       showToast({
         key: `monitoring:product:${id}:competitor:create:error`,
-        message: 'Não foi possível adicionar concorrente. Revise a URL e tente novamente.',
+        message: apiMessage || 'Não foi possível adicionar concorrente. Revise a URL e tente novamente.',
         severity: 'error',
         persist: true,
         replace: true,
@@ -495,10 +505,53 @@ const ProductDetail: React.FC = () => {
   const monitoredStatus = resolveMonitoredStatus(product);
   const detailCardOpacity = monitoringPaused ? 0.5 : monitoredStatus === 'inactive' ? 0.8 : 1;
   const competitorActionsBlocked = monitoringPaused;
-  // Usa o timestamp real de scraping por produto, evitando exibir apenas o horário do batch do Beat
-  const lastCollectedAt = product.last_scraped_at || product.last_checked || product.created_at;
+  // Usa o timestamp real de checagem/persistência para refletir coletas com ou sem mudança.
+  const lastCollectedAt = product.last_checked ?? product.last_scraped_at;
   const lastPriceChangeAt = product.last_price_change_global_at || product.last_price_change_at;
+  const alertsCount = 
+    typeof summary?.alerts_count === 'number'
+      ? summary.alerts_count
+      : summaryAlerts.length > 0
+        ? summaryAlerts.length
+        : product.alerts_sent ?? null;
   const actionBusy = pauseMonitoredMutation.isPending || resumeMonitoredMutation.isPending || deleteMonitoredMutation.isPending;
+
+  /**
+   * Resolve rótulo de estabilidade para a UI, mantendo consistência com o backend.
+   */
+  const resolveStabilityLabel = (stability?: MonitoredProduct['stability']): string => {
+    const stabilityMap: Record<NonNullable<MonitoredProduct['stability']>, string> = {
+      unstable: 'Instável',
+      stable: 'Estável',
+      very_stable: 'Muito Estável',
+    };
+
+    if (!stability) {
+      return '—';
+    }
+
+    return stabilityMap[stability] ?? '—';
+  };
+
+  /**
+   * Exibe o tempo relativo da última mudança de preço com fallback seguro
+   */
+  const renderLastPriceChange = (): string => {
+    const formattedDate = formatLastPriceChangeDate(lastPriceChangeAt);
+    return formattedDate || '—';
+  };
+
+  /**
+   * Exibe a data da última coleta com indicação de mudança de preço no ciclo mais recente
+   */
+  const renderLastCollection = (): JSX.Element => {
+    const formatted = renderDateTime(lastCollectedAt);
+    if (!formatted || formatted === '—') {
+      return <Typography variant="body1">—</Typography>;
+    }
+
+    return <Typography variant="body1">{formatted}</Typography>;
+  };
 
   return (
     <Layout>
@@ -718,17 +771,17 @@ const ProductDetail: React.FC = () => {
                     <Table sx={{ tableLayout: 'fixed' }}>
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ maxWidth: 420, width: 420 }}>Produto</TableCell>
-                          <TableCell align="right" sx={{ width: 160 }}>
+                          <TableCell sx={{ width: '40%' }}>Produto</TableCell>
+                          <TableCell align="right" sx={{ width: '15%' }}>
                             Preço
                           </TableCell>
-                          <TableCell align="center" sx={{ width: 180 }}>
+                          <TableCell align="center" sx={{ width: '20%' }}>
                             Disponibilidade
                           </TableCell>
-                          <TableCell align="center" sx={{ width: 140 }}>
+                          <TableCell align="center" sx={{ width: '13%' }}>
                             Status
                           </TableCell>
-                          <TableCell align="center" sx={{ width: 160 }}>
+                          <TableCell align="center" sx={{ width: '12%' }}>
                             Ações
                           </TableCell>
                         </TableRow>
@@ -760,7 +813,7 @@ const ProductDetail: React.FC = () => {
                               text={resolvedName}
                               variant="body2"
                               lines={2}
-                              maxWidth={380}
+                              maxWidth={280}
                               tooltip={false}
                               sx={{ fontStyle: isPendingName ? 'italic' : 'normal' }}
                             />
@@ -784,7 +837,7 @@ const ProductDetail: React.FC = () => {
                                   : undefined,
                               }}
                             >
-                              <TableCell sx={{ maxWidth: 420, width: 420 }}>
+                              <TableCell sx={{ width: '40%' }}>
                                 <Box display="flex" alignItems="center" gap={1}>
                                   {competitor.thumbnail && (
                                     <Box
@@ -794,13 +847,13 @@ const ProductDetail: React.FC = () => {
                                       sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 1 }}
                                     />
                                   )}
-                                  <Box sx={{ maxWidth: 380, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                                  <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
                                     {wrappedName}
                                     <TruncatedText
                                       text={new URL(competitor.url).hostname}
                                       variant="caption"
                                       color="text.secondary"
-                                      maxWidth={360}
+                                      maxWidth={280}
                                       tooltip={true}
                                     />
                                     {isPendingName && (
@@ -808,14 +861,14 @@ const ProductDetail: React.FC = () => {
                                         text="Coletando nome..."
                                         variant="caption"
                                         color="text.secondary"
-                                        maxWidth={360}
+                                        maxWidth={280}
                                         tooltip={false}
                                       />
                                     )}
                                   </Box>
                                 </Box>
                               </TableCell>
-                              <TableCell align="right" sx={{ verticalAlign: 'middle', width: 160 }}>
+                              <TableCell align="right" sx={{ verticalAlign: 'middle', width: '15%' }}>
                                 {renderPrice(
                                   competitor.current_price,
                                   competitor.availability,
@@ -1036,15 +1089,13 @@ const ProductDetail: React.FC = () => {
                     <Typography variant="body2" color="text.secondary">
                       Última coleta
                     </Typography>
-                    <Typography variant="body1">{renderDateTime(lastCollectedAt)}</Typography>
+                    {renderLastCollection()}
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
                       Última mudança de preço
                     </Typography>
-                    <Typography variant="body1">
-                      {formatRelativeTime(lastPriceChangeAt)}
-                    </Typography>
+                    <Typography variant="body1">{renderLastPriceChange()}</Typography>
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
@@ -1054,9 +1105,15 @@ const ProductDetail: React.FC = () => {
                   </Box>
                   <Box display="flex" justifyContent="space-between">
                     <Typography variant="body2" color="text.secondary">
+                      Status
+                    </Typography>
+                    <Typography variant="body1">{resolveStabilityLabel(product.stability)}</Typography>
+                  </Box>
+                  <Box display="flex" justifyContent="space-between">
+                    <Typography variant="body2" color="text.secondary">
                       Alertas enviados
                     </Typography>
-                    <Typography variant="body1">{product.alerts_sent ?? '—'}</Typography>
+                    <Typography variant="body1">{alertsCount ?? '—'}</Typography>
                   </Box>
                 </Box>                
               </CardContent>

@@ -196,7 +196,7 @@ def evaluate(
     *,
     db: Session,
     user: User,
-    alert_rule: list[AlertRule],
+    alert_rules: list[AlertRule],
 ) -> list[NotificationCandidate]:
     """ Avalia snapshots e retorna notificações candidatas por canal """
     if monitored.paused:
@@ -228,7 +228,7 @@ def evaluate(
         }
         rules_by_channel = {
             rule.channel: rule
-            for rule in alert_rule
+            for rule in alert_rules
             if rule.alert_type == alert_type
         }
 
@@ -239,7 +239,7 @@ def evaluate(
 
         for channel in channels:
             preference = preferences_by_channel.get(channel)
-            alert_rule = rules_by_channel.get(channel)
+            alert_rule_for_channel = rules_by_channel.get(channel)
             if preference and not preference.enabled:
                 NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="preference_disabled").inc()
                 continue
@@ -272,7 +272,7 @@ def evaluate(
             
             cooldown_seconds = _cooldown_seconds(
                 preference=preference,
-                alert_rule=alert_rule,
+                alert_rule=alert_rule_for_channel,
             )
             last_sent_at = get_last_sent_at(
                 db,
@@ -319,12 +319,12 @@ def evaluate(
                     event_type=event_type,
                     payload=payload,
                     dedup_hash=dedup_hash,
-                    priority=_resolve_priority(alert_rule),
+                    priority=_resolve_priority(alert_rule_for_channel),
                     recipient=recipient,
                     subject=subject,
                     message=message,
                     cooldown_seconds=cooldown_seconds,
-                    alert_rule=alert_rule,
+                    alert_rule=alert_rule_for_channel,
                     preference=preference,
                 )
             )

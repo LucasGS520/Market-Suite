@@ -28,7 +28,7 @@ def collect_celery_metrics():
     """ Task periódica que inspeciona filas e workers do celery (Redis) """
     try:
         #Coleta de tarefas pendentes
-        queues = ["celery", "scraping", "monitor"]
+        queues = ["celery", "scraping", "monitor", "compare"]
 
         #Pendentes já reservados pelos workers (insp.reserved) e agendados (insp.scheduled)
         insp: Inspect = celery_app.control.inspect()

@@ -69,7 +69,7 @@ def create_event_log(
         source=source,
         monitored_product_id=monitored_product_id,
         user_id=user_id,
-        occurred_at=normalized_ocurred_at,
+        ocurred_at=normalized_ocurred_at,
     )
     db.add(event)
     if commit:

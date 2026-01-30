@@ -116,6 +116,6 @@ def test_run_competitor_scrape_agenda_comparacao_sem_mudanca(monkeypatch):
 
     assert outcome == "no_change"
     assert reason == "not_modified"
-    assert compare_stub.calls == [{"args": [str(monitored_id)], "queue": "monitor"}]
+    assert compare_stub.calls == [{"args": [str(monitored_id)], "queue": "compare"}]
     assert counter_stub.inc_calls == 1
     assert counter_stub.labels_calls == [{"kind": "competitor"}]

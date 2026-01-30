@@ -83,6 +83,58 @@ def test_get_comparison_summary_for_user_defaults_missing_count(monkeypatch) -> 
     assert response.competitors_count == 0
     assert response.monitored_product_id == monitored_id
 
+def test_get_comparison_summary_for_user_reads_database_when_missing_snapshot(monkeypatch) -> None:
+    """ Busca contagem no banco quando não há resumo persistido """
+    monitored_id = uuid.uuid4()
+    monkeypatch.setattr(
+        services_comparison,
+        "ensure_user_can_view_monitored",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        services_comparison, "get_latest_summary", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        services_comparison, "count_competitors_by_monitored", lambda *_args, **_kwargs: 2
+    )
+    monkeypatch.setattr(
+        services_comparison, "get_comparison_by_id", lambda *_args, **_kwargs: None
+    )
+
+    response = get_comparison_summary_for_user(
+        db=None, monitored_id=monitored_id, user=object()
+    )
+
+    assert response.competitors_count == 2
+    assert response.monitored_product_id == monitored_id
+
+def test_get_comparison_summary_for_user_uses_legacy_competitors_count(
+    monkeypatch,
+) -> None:
+    """Usa contagem legada quando o snapshot não possui total persistido."""
+
+    monitored_id = uuid.uuid4()
+    stored = _DummySummary({"competitors_with_price_count": 3})
+
+    monkeypatch.setattr(
+        services_comparison,
+        "ensure_user_can_view_monitored",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        services_comparison, "get_latest_summary", lambda *_args, **_kwargs: stored
+    )
+    monkeypatch.setattr(
+        services_comparison, "get_comparison_by_id", lambda *_args, **_kwargs: None
+    )
+
+    response = get_comparison_summary_for_user(
+        db=None, monitored_id=monitored_id, user=object()
+    )
+
+    assert response.competitors_count == 3
+    assert response.monitored_product_id == monitored_id
+
 def test_build_comparison_summary_without_data() -> None:
     """ Garante que valores nulos são mantidos quando não há comparação salva """
 
@@ -171,6 +223,23 @@ def test_compute_summary_without_competitor_prices_keeps_null_fields() -> None:
     assert summary["position_rank"] is None
     assert summary["comparison_insights"] is None
     assert summary["competitiveness_status"] is None
+
+def test_build_comparison_summary_separates_total_and_with_price_count() -> None:
+    """Mantém total de concorrentes mesmo quando apenas alguns possuem preço."""
+
+    comparison = _DummyComparison(
+        data={
+            "monitored_price": "120.00",
+            "discrepancies": [
+                {"price": "100.00"},
+            ],
+        }
+    )
+
+    summary = build_comparison_summary(comparison, competitors_count=2)
+
+    assert summary["competitors_count"] == 2
+    assert summary["competitors_with_price_count"] == 1
     
 def test_build_comparison_summary_with_stored_snapshot() -> None:
     """ Usa resumo persistido quando disponível """

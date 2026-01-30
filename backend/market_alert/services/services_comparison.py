@@ -24,7 +24,7 @@ from shared.metrics.metrics_price_comparison import (
 )
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, count_competitors_by_monitored
 from market_alert.crud.crud_comparison import (
     create_price_comparison,
     get_comparison_by_id,
@@ -95,7 +95,13 @@ def get_comparison_summary_for_user(
     stored_summary = get_latest_summary(db, monitored_product_id=monitored_id)
     comparison = None
 
-    competitors_count = _extract_competitors_count(stored_summary)
+    if stored_summary is None:
+        #Busca direto no banco para evitar resumo vazio quando ainda não há snapshot salvo
+        competitors_count = count_competitors_by_monitored(
+            db, monitored_id, include_paused=True
+        )
+    else:
+        competitors_count = _extract_competitors_count(stored_summary)
 
     if stored_summary and stored_summary.comparison_id:
         comparison = get_comparison_by_id(db, stored_summary.comparison_id)
@@ -154,6 +160,8 @@ def run_price_comparison(
             db, monitored_id, include_paused=True, include_inactive=True
         )
         competitors = _deduplicate_competitors(competitors)
+        #Define total antes dos filtros para persistir a contagem completa
+        total_competitors = len(competitors)
         
         available_competitors = [
             competitor
@@ -165,10 +173,13 @@ def run_price_comparison(
             and not getattr(competitor, "is_paused", False)
         ]
 
-        filtered_out = len(competitors) - len(available_competitors)
+        filtered_out = total_competitors - len(available_competitors)
         if filtered_out:
             logger.info(
-                "comparison_filtered_competitors", filtered=filtered_out, total=len(competitors)
+                "comparison_filtered_competitors",
+                filtered=filtered_out,
+                total=total_competitors,
+                available=len(available_competitors),
             )
 
         inactive_reason = _resolve_monitored_inactive_reason(monitored)
@@ -177,7 +188,7 @@ def run_price_comparison(
                 "comparison_skipped_inactive_monitored",
                 monitored_id=str(monitored_id),
                 reason=inactive_reason,
-                competitors_count=len(available_competitors),
+                competitors_count=total_competitors,
             )
             payload_stub = {
                 "monitored_price": None,
@@ -192,7 +203,7 @@ def run_price_comparison(
                 payload_stub,
                 timestamp=comparison.timestamp,
                 comparison_id=comparison.id,
-                competitors_count=len(available_competitors),
+                competitors_count=total_competitors,
             )
             summary_payload["competitors_with_price_count"] = 0
             summary_payload["competitiveness_status"] = None
@@ -223,7 +234,8 @@ def run_price_comparison(
         logger.info(
             "comparison_started",
             monitored_id=str(monitored_id),
-            competitors_count=len(available_competitors),
+            competitors_count=total_competitors,
+            competitors_with_price_count=len(available_competitors),
         )
 
         tol = tolerance if tolerance is not None else Decimal(str(settings.PRICE_TOLERANCE))
@@ -249,7 +261,7 @@ def run_price_comparison(
             encoded_result,
             timestamp=comparison.timestamp,
             comparison_id=comparison.id,
-            competitors_count=len(available_competitors),
+            competitors_count=total_competitors,
         )
         encoded_summary = jsonable_encoder(summary_payload)
         if not available_competitors:
@@ -333,7 +345,10 @@ def _extract_competitors_count(
     aggregates = stored_summary.aggregates if isinstance(stored_summary.aggregates, dict) else {}
 
     try:
-        return int(aggregates.get("competitors_count", 0))
+        raw_count = aggregates.get("competitors_count")
+        if raw_count is None:
+            raw_count = aggregates.get("competitors_with_price_count", 0)
+        return int(raw_count)
     except (TypeError, ValueError):
         #Padroniza a contagem em zero quando o valor não puder ser interpretado como inteiro
         return 0

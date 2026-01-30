@@ -10,6 +10,7 @@ from market_alert.models.models_products import MonitoredProduct, CompetitorProd
 from market_alert.models.models_users import User
 from market_alert.core.password import hash_password
 from market_alert.routes import routes_competitors
+from market_alert.orchestrator import collector_service_orchestrator
 
 
 def test_create_competitor_scrape_autorizado_agenda_task(
@@ -36,15 +37,17 @@ def test_create_competitor_scrape_autorizado_agenda_task(
 
     captured = {}
 
-    def fake_delay(*args, **kwargs):
-        """ Captura os argumentos enviados para o Celery sem executar a task """
-
-        captured["args"] = args
-        captured["kwargs"] = kwargs
+    def fake_enqueue(competitor, *, user_id, countdown=None):
+        """ Captura o enfileiramento imediato sem executar a task """
+        captured["competitor_id"] = str(competitor.id)
+        captured["monitored_id"] = str(competitor.monitored_product_id)
+        captured["user_id"] = str(user_id)
+        captured["countdown"] = countdown
 
     monkeypatch.setattr(
-        "market_alert.services.services_competitors.collect_competitor_task.delay",
-        fake_delay,
+        collector_service_orchestrator,
+        "enqueue_competitor_collection",
+        fake_enqueue,
     )
 
     monkeypatch.setattr(
@@ -73,11 +76,9 @@ def test_create_competitor_scrape_autorizado_agenda_task(
     )
     assert str(stored.id) == payload["id"]
     assert stored.product_url == "https://mercadolivre.com.br/MLB-123"
-    assert captured["kwargs"] == {
-        "monitored_product_id": str(monitored_id),
-        "url": "https://mercadolivre.com.br/MLB-123",
-    }
-
+    assert captured["competitor_id"] == str(stored.id)
+    assert captured["monitored_id"] == str(monitored_id)
+    assert captured["user_id"] == str(test_user.id)
 
 def test_create_competitor_scrape_usuario_diferente_recebe_erro(
     client,
@@ -110,14 +111,14 @@ def test_create_competitor_scrape_usuario_diferente_recebe_erro(
 
     called = {"count": 0}
 
-    def fake_delay(*args, **kwargs):
+    def fake_enqueue(competitor, *, user_id, countdown=None):
         """ Indica que a task não deveria ser executada quando não autorizado """
-
         called["count"] += 1
 
     monkeypatch.setattr(
-        "market_alert.services.services_competitors.collect_competitor_task.delay",
-        fake_delay,
+        collector_service_orchestrator,
+        "enqueue_competitor_collection",
+        fake_enqueue,
     )
 
     response = client.post(
@@ -156,14 +157,14 @@ def test_create_competitor_scrape_duplicate_returns_conflict(
 
     called = {"count": 0}
 
-    def fake_delay(*args, **kwargs):
+    def fake_enqueue(competitor, *, user_id, countdown=None):
         """Captura chamadas de agendamento para garantir que não haja duplicidade."""
-
         called["count"] += 1
 
     monkeypatch.setattr(
-        "market_alert.services.services_competitors.collect_competitor_task.delay",
-        fake_delay,
+        collector_service_orchestrator,
+        "enqueue_competitor_collection",
+        fake_enqueue,
     )
     monkeypatch.setattr(
         "market_alert.services.services_competitors.enforce_competitor_scrape_rate_limit",
@@ -201,6 +202,49 @@ def test_create_competitor_scrape_duplicate_returns_conflict(
     )
     assert total == 1
     assert called["count"] == 1
+
+def test_create_competitor_scrape_blocks_self_reference(
+    client,
+    db_session,
+    test_user,
+    prepare_test_database,
+    monkeypatch,
+):
+    """ Garante que não seja possível cadastrar concorrente com URL idêntica ao monitorado """
+
+    monitored = MonitoredProduct(
+        user_id=test_user.id,
+        name_identification="Monitor 4K",
+        monitoring_type=MonitoringType.scraping,
+        product_url="https://example.com/produto-monitorado",
+        normalized_url="https://example.com/produto-monitorado",
+        status=MonitoredStatus.active,
+    )
+    db_session.add(monitored)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "market_alert.services.services_competitors.enforce_competitor_scrape_rate_limit",
+        lambda _user_id: None,
+    )
+
+    response = client.post(
+        "/competitors/scrape",
+        jason={
+            "monitored_product_id": str(monitored.id),
+            "product_url": "https://example.com/produto-monitorado",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "URL do concorrente não pode ser igual ao monitorado."
+
+    total = (
+        db_session.query(CompetitorProduct)
+        .filter(CompetitorProduct.monitored_product_id == monitored.id)
+        .count()
+    )
+    assert total == 0
     
 def test_create_competitor_scrape_respects_rate_limit(
     client,
@@ -224,9 +268,8 @@ def test_create_competitor_scrape_respects_rate_limit(
 
     called = {"count": 0}
 
-    def fake_delay(*args, **kwargs):
+    def fake_enqueue(competitor, *, user_id, countdown=None):
         """Impede que a task seja agendada quando o rate limit bloqueia a requisição"""
-
         called["count"] += 1
 
     def fake_rate_limit(_user_id):
@@ -238,8 +281,9 @@ def test_create_competitor_scrape_respects_rate_limit(
         )
 
     monkeypatch.setattr(
-        "market_alert.services.services_competitors.collect_competitor_task.delay",
-        fake_delay,
+        collector_service_orchestrator,
+        "enqueue_competitor_collection",
+        fake_enqueue,
     )
     monkeypatch.setattr(
         "market_alert.services.services_competitors.enforce_competitor_scrape_rate_limit",

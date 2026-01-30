@@ -34,7 +34,9 @@ class MonitoredScrapeCreationResponse(BaseModel):
     id: UUID = Field(..., description="Identificador do produto monitorado")
     url: HttpUrl = Field(..., description="URL normalizada usada no monitoramento")
     created_at: datetime = Field(..., description="Momento de criação do registro")
+    next_check_at: datetime = Field(..., description="Próximo horário previsto para a primeira rechecagem")
     message: str = Field(..., description="Resumo amigável do agendamento")
+    competitor_warning: str | None = Field(None, description="Aviso opcional quando o concorrente inicial não pôde ser criado")
 
 class CompetitorScrapeCreationResponse(BaseModel):
     """ Retorno mínimo ao agendar scraping de um concorrente """
@@ -70,12 +72,12 @@ class MonitoredProductResponse(ProductResponse):
     thumbnail: str | None = Field(None, description="Miniatura mais recente identificada pelo fluxo de scraping")
     created_at: datetime | None = Field(None, description="Momento de criação do monitoramento (timestamp do cadastro)")
     last_scraped_at: datetime | None = Field(None, description="Momento da última extração concluída para o produto")
+    last_collected_at: datetime | None = Field(None, description="Momento da última tentativa de coleta registrada, mesmo sem extração concluída")
     next_check_at: datetime | None = Field(None, description="Próximo horário previsto para rechecagem do produto")
     last_price_change_at: datetime | None = Field(None, description="Última vez em que o preço monitorado mudou")
-    last_price_change_global_at: datetime | None = Field(
-        None,
-        description=("Última mudança de preço considerando histórico do monitorado e de todos os concorrentes vinculados"),
-    )
+    stability: str | None = Field(None, description="Classificação de estabilidade derivada da pontuação interna, usada para ajustar frequências de coleta")
+    monitored_since: datetime | None = Field(None, description="Momento em que o monitoramento foi iniciado (alias para `created_at`)")
+    last_price_change_global_at: datetime | None = Field(None, description=("Última mudança de preço considerando histórico do monitorado e de todos os concorrentes vinculados"))
     competitiveness_status: CompetitivenessStatus | None = Field(None, description="Classificação de competitividade calculada a partir das comparações")
     is_featured: bool = Field(False, description="Indica se o item deve ser exibido como destaque")
     paused: bool = Field(False, description="Indica se o monitoramento está pausado para evitar novas coletas")

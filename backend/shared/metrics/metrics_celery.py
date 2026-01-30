@@ -39,10 +39,24 @@ CELERY_TASK_DURATION_SECONDS = Histogram(
     buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
+CELERY_CONTINUOUS_AUTOSTART_TOTAL = Counter(
+    "celery_continuous_autostart_total",
+    "Total de reativações ou disparos do autostart do coletor contínuo",
+    ["service", "action"],
+)
+
+CONTINUOUS_AUTOSTART_THROTTLED_TOTAL = Counter(
+    "continuous_autostart_throttled_total",
+    "Total de bloqueios de autostart do coletor contínuo por throttling",
+    ["service", "reason"],
+)
+
 __all__ = [
     "CELERY_TASKS_TOTAL",
     "CELERY_QUEUE_LENGTH",
     "CELERY_WORKERS_TOTAL",
     "CELERY_WORKER_CONCURRENCY",
     "CELERY_TASK_DURATION_SECONDS",
+    "CELERY_CONTINUOUS_AUTOSTART_TOTAL",
+    "CONTINUOUS_AUTOSTART_THROTTLED_TOTAL",
 ]

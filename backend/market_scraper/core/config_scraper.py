@@ -29,7 +29,7 @@ class Settings(ConfigBase):
     ) #Limites de itens armazenados em memória
 
     SCRAPER_STEP_TIMEOUT_SECONDS: float = float(
-        os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "8.0")
+        os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "15.0")
     ) #Tempo máximo por etapa do pipeline
     SCRAPER_PIPELINE_TIMEOUT_SECONDS: float = float(
         os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "20.0")

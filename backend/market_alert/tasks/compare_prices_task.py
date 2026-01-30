@@ -2,8 +2,8 @@
 
 Esta task roda de forma assíncrona via Celery. Ela carrega do banco de dados
 um produto monitorado e todos os seus concorrentes, executa a comparação de
-preços e registra métricas para acompanhamento. O fluxo foi simplificado para
-usar a fila padrão do Celery e evitar coordenação distribuída adicional.
+preços e registra métricas para acompanhamento. O fluxo é roteado para a fila
+``compare`` para manter o worker de monitoramento focado no loop contínuo.
 """
 
 import structlog
@@ -15,6 +15,9 @@ from sqlalchemy.orm import Session
 from shared.utils.logging_utils import mask_identifier
 from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
 from shared.metrics.metrics_price_comparison import (
+    COMPARISON_SKIPPED_PAUSED_TOTAL,
+    COMPARE_PRICES_COMPLETED_TOTAL,
+    COMPARE_PRICES_STARTED_TOTAL,
     PRICE_COMPARISON_TASK_LATENCY_SECONDS,
 )
 from shared.metrics.metrics_notifications import (
@@ -47,6 +50,7 @@ logger = structlog.get_logger("compare_prices")
     soft_time_limit=20,
     time_limit=40,
     acks_late=True,
+    queue="compare",
 )
 def compare_prices_task(
     self,
@@ -56,14 +60,38 @@ def compare_prices_task(
     trace_id: str | None = None,
 ) -> None:
     """ Carrega um produto monitorado e executa a comparação com fluxo enxuto """
+    queue_name = (self.request.delivery_info or {}).get("routing_key", "compare")
     task_logger = logger.bind(
-        task_id=self.request.id, monitored_id=mask_identifier(monitored_id)
+        task_id=self.request.id,
+        queue=queue_name,
+        monitored_id=mask_identifier(monitored_id),
     )
+    #Registra a contagem de início para acompanhamento de backlog
+    COMPARE_PRICES_STARTED_TOTAL.inc()
     start = datetime.now(timezone.utc)
     task_logger.info("compare_prices_started")
+    has_error = False
 
-    with SessionLocal() as db:
-        try:
+    try:
+        with SessionLocal() as db:
+            monitored = (
+                db.query(MonitoredProduct)
+                .filter(MonitoredProduct.id == UUID(monitored_id))
+                .first()
+            )
+            if monitored is None:
+                task_logger.warning("compare_prices_monitored_missing")
+                return
+            
+            if monitored.paused:
+                #Evita cálculos de comparação quando o monitorado está pausado
+                COMPARISON_SKIPPED_PAUSED_TOTAL.inc()
+                task_logger.warning(
+                    "compare_prices_skipped_paused",
+                    monitored_id=mask_identifier(monitored_id),
+                )
+                return
+            
             result = run_price_comparison(db, UUID(monitored_id))
 
             summary = result.get("summary") or {}
@@ -78,7 +106,6 @@ def compare_prices_task(
                 summary = {"reason": "no_available_competitors", "items": []}
             result["summary"] = summary
 
-
             #Log do resultado resumido para fácil consulta
             task_logger.info(
                 "compare_prices_completed",
@@ -86,9 +113,11 @@ def compare_prices_task(
                 highest=result["highest_competitor"],
             )
 
-            resolved_trace_id = trace_id or self.request.id or str(uuid4())
+        resolved_trace_id = trace_id or self.request.id or str(uuid4())
+        #Mantém uma nova sessão para evitar transação aberta da comparação
+        with SessionLocal() as db_notifications:
             monitored = (
-                db.query(MonitoredProduct)
+                db_notifications.query(MonitoredProduct)
                 .filter(MonitoredProduct.id == UUID(monitored_id))
                 .first()
             )
@@ -113,7 +142,10 @@ def compare_prices_task(
                 )
                 return
             
-            price_previous, price_current = _fetch_recent_prices(db, monitored.id)
+            price_previous, price_current = _fetch_recent_prices(
+                db_notifications,
+                monitored.id,
+            )
             availability_previous = None
             if availability_changed and monitored.availability is not None:
                 # NÃO HÁ HISTÓRICO DE DISPONIBILIDADE, ENTÃO APENAS REGISTRA O VALOR ANTERIOR
@@ -133,7 +165,11 @@ def compare_prices_task(
                     ((price_current - price_previous) / price_previous) * 100
                 )
 
-            user = db.query(User).filter(User.id == monitored.user_id).first()
+            user = (
+                db_notifications.query(User)
+                .filter(User.id == monitored.user_id)
+                .first()
+            )
             if user is None:
                 task_logger.warning(
                     "compare_prices_notifications_missing_user",
@@ -159,12 +195,12 @@ def compare_prices_task(
             }
 
             preferences = list_user_notification_preferences(
-                db,
+                db_notifications,
                 user_id=monitored.user_id,
                 monitored_product_id=monitored.id,
             )
             alert_rules = list_alert_rules(
-                db,
+                db_notifications,
                 user_id=monitored.user_id,
                 monitored_product_id=monitored.id,
             )
@@ -174,7 +210,7 @@ def compare_prices_task(
                 previous_snapshot,
                 current_snapshot,
                 preferences,
-                db=db,
+                db=db_notifications,
                 user=user,
                 alert_rules=alert_rules,
             )
@@ -189,9 +225,10 @@ def compare_prices_task(
                     "event_type": event_type.value,
                 }
                 notification_ids: list[str] = []
-                with db.begin():
+                try:
+                    #Evita transação aninhada: SessionLocal já inicia uma transação implícita
                     event = create_event_log(
-                        db,
+                        db_notifications,
                         event_type=event_type,
                         trace_id=resolved_trace_id,
                         payload=payload,
@@ -207,7 +244,7 @@ def compare_prices_task(
 
                     for candidate in candidates_by_event.get(event_type, []):
                         notification = create_notification(
-                            db,
+                            db_notifications,
                             event_id=event.id,
                             user_id=monitored.user_id,
                             channel=candidate.channel,
@@ -238,18 +275,22 @@ def compare_prices_task(
 
                         if candidate.alert_rule:
                             update_alert_rule_last_triggered(
-                                db,
+                                db_notifications,
                                 alert_rule=candidate.alert_rule,
                                 triggered_at=datetime.now(timezone.utc),
                                 commit=False,
                             )
                         if candidate.preference:
                             update_preference_last_notified(
-                                db,
+                                db_notifications,
                                 preference=candidate.preference,
                                 notified_at=datetime.now(timezone.utc),
                                 commit=False,
                             )
+                    db_notifications.commit()
+                except Exception:
+                    db_notifications.rollback()
+                    raise
 
                 if notification_ids:
                     celery_app.send_task(
@@ -263,20 +304,28 @@ def compare_prices_task(
                         outcome="no_notifications",
                     ).inc()
 
-        except Exception as exc:
-            #Log estruturado para acompanhar falhas e motivos antes de propagar
-            task_logger.exception(
-                "compare_prices_failed",
-                product_id=mask_identifier(monitored_id),
-                reason=str(exc),
-            )
-            raise
+    except Exception as exc:
+        has_error = True
+        #Log estruturado para acompanhar falhas e motivos antes de propagar
+        task_logger.exception(
+            "compare_prices_failed",
+            product_id=mask_identifier(monitored_id),
+            reason=str(exc),
+        )
+        raise
 
-        finally:
-            #Observa métricas de latência e contagem
-            duration = (datetime.now(timezone.utc) - start).total_seconds()
-            SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
-            PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
+    finally:
+        #Observa métricas de latência e contagem
+        duration = (datetime.now(timezone.utc) - start).total_seconds()
+        SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
+        PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
+        if not has_error:
+            COMPARE_PRICES_COMPLETED_TOTAL.inc()
+        task_logger.info(
+            "compare_prices_finished",
+            status="success" if not has_error else "error",
+            duration_seconds=duration,
+        )
 
 def _fetch_recent_prices(
     db: Session,

@@ -13,6 +13,7 @@ from typing import Mapping
 from uuid import UUID
 
 import structlog
+from sqlalchemy.orm import Session
 from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
     MonitoredProductCreateScraping,
@@ -43,11 +44,12 @@ from market_alert.core.celery_app import celery_app
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
+from market_alert.enums.enums_products import MonitoredStatus
 
 
 logger = structlog.get_logger("collector_product_task")
 
-def _validate_payload(payload: Mapping[str, str] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
+def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
     """ Valida campos mínimos, retornando tipo, IDs e URL.
 
     A validação impede que a tarefa tente acessar campos ausentes e garante
@@ -144,39 +146,91 @@ def _dispatch_comparison(
     monitored_id: UUID | None,
     result: ScrapeResult | None,
     trace_id: str | None,
+    *,
+    force: bool = False,
 ) -> None:
     """ Agenda comparação apenas quando scraping trouxe alteração relevante """
     if monitored_id is None or result is None:
         return
     
     changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
-    if changed:
-        #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
-        celery_app.send_task(
-            "market_alert.tasks.compare_prices_task.compare_prices_task",
-            args=[
-                str(monitored_id),
-                bool(getattr(result, "price_changed", False)),
-                bool(getattr(result, "availability_changed", False)),
-                trace_id,
-            ],
-            queue="monitor",
-        )
+    if not (force or changed):
+        return
+    
+    #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
+    celery_app.send_task(
+        "market_alert.tasks.compare_prices_task.compare_prices_task",
+        args=[
+            str(monitored_id),
+            bool(getattr(result, "price_changed", False)),
+            bool(getattr(result, "availability_changed", False)),
+            trace_id,
+        ],
+        #Mantém comparação na fila dedicada para não saturar o worker do coletor contínuo
+        queue="compare",
+    )
+    logger.info(
+        "compare_prices_enqueued",
+        monitored_id=str(monitored_id),
+        trace_id=trace_id,
+        forced=force,
+        changed=changed,
+    )
+
+def _parse_force_compare_(value: str | None) -> bool:
+    """ Normaliza o flag de disparo forçado para comparação """
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+def _activate_pending_monitored(
+    db: Session,
+    monitored_id: UUID | None,
+    *,
+    task_logger,
+    trace_id: str | None,
+) -> None:
+    """ Atualiza monitorado pendente para ativo após coleta bem-sucedida """
+    if monitored_id is None:
+        return
+    
+    monitored = (
+        db.query(MonitoredProduct)
+        .filter(MonitoredProduct.id == monitored_id)
+        .first()
+    )
+    if monitored is None:
+        return
+    
+    if monitored.status != MonitoredStatus.pending:
+        return
+    
+    monitored.status = MonitoredStatus.active
+    db.commit()
+    db.refresh(monitored)
+    task_logger.info(
+        "monitored_status_activated",
+        monitored_id=str(monitored_id),
+        trace_id=trace_id,
+    )
 
 def collect_product(
-    payload: Mapping[str, str] | None,
+    payload: Mapping[str, str | None] | None,
     *,
     use_lock: bool = True,
     dispatch_comparison: bool = True,
     lock_ttl_seconds: int | None = None,
     logger_bound=None,
+    db: Session | None = None,
 ) -> tuple[str, ScrapeResult | None]:
     """ Executa coleta de produto de forma reutilizável para tasks e orquestradores.
 
     A função aplica validação de payload, coordena lock distribuído quando
     ``use_lock`` estiver habilitado e registra métricas consistentes. O TTL
     do lock segue ``PRODUCT_LOCK_TTL_SECONDS`` ou o valor informado em
-    ``lock_ttl_seconds``.
+    ``lock_ttl_seconds``. Quando ``db`` é fornecida, reutilizamos a sessão
+    compartilhada para garantir consistência transacional e reduzir overhead
+    de conexões, mantendo commits e refresh no mesmo contexto.
     """
     SCRAPER_IN_FLIGHT.inc()
     #Mede latência com relógio monotônico para evitar valores negativos
@@ -185,7 +239,9 @@ def collect_product(
 
     kind, monitored_id, competitor_id, url = _validate_payload(payload)
     trace_id = payload.get("trace_id") if payload else None
+    enqueued_at = payload.get("enqueued_at") if payload else None
     lock_target = competitor_id or monitored_id
+    force_compare = _parse_force_compare_(payload.get("force_compare") if payload else None)
 
     lock_status = "not_used"
     
@@ -194,6 +250,7 @@ def collect_product(
     lock_owner: str | None = None
 
     try:
+        collected_at = datetime.now(timezone.utc)
         if payload is None or lock_target is None or url is None:
             reason = "invalid_payload"
             task_logger.error("invalid_payload", kind=kind)
@@ -209,6 +266,13 @@ def collect_product(
                     COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
                 else:
                     reason = "lock_skipped"
+                    #Garante retorno explícito para rastrear locks no worker contínuo
+                    result = ScrapeResult(
+                        status="no_result",
+                        product_id=str(lock_target) if lock_target else None,
+                        http_status=200,
+                        error_code="lock_skipped",
+                    )
                     task_logger.info(
                         "collect_skipped_lock",
                         kind=kind,
@@ -226,11 +290,13 @@ def collect_product(
                 except Exception:
                     user_uuid = None
 
-                with SessionLocal() as db:
+                def _collect_with_db(session_manager: Session) -> None:
+                    nonlocal monitored_id, reason, result
+
                     competitor_row: CompetitorProduct | None = None
                     if competitor_id is not None:
                         competitor_row = (
-                            db.query(CompetitorProduct)
+                            session_manager.query(CompetitorProduct)
                             .filter(CompetitorProduct.id == competitor_id)
                             .first()
                         )
@@ -251,21 +317,44 @@ def collect_product(
                         )
                     elif competitor_id is not None:
                         monitored_id = monitored_id or competitor_row.monitored_product_id if competitor_row else monitored_id
-                        payload_model = CompetitorProductCreateScraping(
-                            monitored_product_id=monitored_id,
-                            product_url=url,
+                        monitored_paused = bool(
+                            competitor_row.monitored_product and competitor_row.monitored_product.paused
                         )
-                        result = scrape_competitor_product(
-                            db=db,
-                            user_id=user_uuid or monitored_id or competitor_id,
-                            url=url,
-                            payload=payload_model,
-                        )
+                        if competitor_row.is_paused or monitored_paused:
+                            reason = "paused"
+                            #Evita scraping quando o concorrente ou o monitorado está pausado
+                            MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="collector").inc()
+                            task_logger.info(
+                                "collector_skipped_paused",
+                                competitor_id=str(competitor_id),
+                                monitored_id=str(monitored_id) if monitored_id else None,
+                                trace_id=trace_id,
+                            )
+                            result = ScrapeResult(
+                                status="no_result",
+                                product_id=str(competitor_id),
+                                http_status=200,
+                                error_code="paused",
+                            )
+                        else:
+                            payload_model = CompetitorProductCreateScraping(
+                                monitored_product_id=monitored_id,
+                                product_url=url,
+                                #Preserva o nome personalizado quando vier no payload original
+                                name=payload.get("name") if payload else None,
+                            )
+                            result = scrape_competitor_product(
+                                db=session_manager,
+                                user_id=user_uuid or monitored_id or competitor_id,
+                                url=url,
+                                payload=payload_model,
+                                collected_at=collected_at,
+                            )
                     else:
                         monitored_row: MonitoredProduct | None = None
                         if monitored_id is not None:
                             monitored_row = (
-                                db.query(MonitoredProduct)
+                                session_manager.query(MonitoredProduct)
                                 .filter(MonitoredProduct.id == monitored_id)
                                 .first()
                             )
@@ -282,7 +371,7 @@ def collect_product(
                                 status="no_result",
                                 product_id=str(monitored_id) if monitored_id else None,
                                 http_status=200,
-                                error_code=None,
+                                error_code="paused",
                             )
                         else:
                             payload_model = MonitoredProductCreateScraping(
@@ -290,11 +379,28 @@ def collect_product(
                                 product_url=url,
                             )
                             result = scrape_monitored_product(
-                                db=db,
+                                db=session_manager,
                                 url=url,
                                 user_id=user_uuid or monitored_id,
                                 payload=payload_model,
+                                collected_at=collected_at,
                             )
+                            if result and result.status in {"success", "not_modified"}:
+                                #Garante a transição para ativo mesmo que o fluxo anterior não tenha persistido
+                                _activate_pending_monitored(
+                                    session_manager,
+                                    monitored_id,
+                                    task_logger=task_logger,
+                                    trace_id=trace_id,
+                                )
+
+                #Mantém a sessão compartilhada quando fornecida para preservar consistência transacional.
+                if db is None:
+                    with SessionLocal() as session_manager:
+                        _collect_with_db(session_manager)
+                else:
+                    _collect_with_db(db)
+                            
     except ScraperError as exc:
         reason = "scraper_error"
         task_logger.warning("scraper_error", kind=kind, error=str(exc))
@@ -311,7 +417,14 @@ def collect_product(
             lock_owner=lock_owner,
         )
         if use_lock and lock_status == "acquired":
-            release_product_lock(lock_target, lock_owner)
+            #Tentativa explícita de liberar o lock para evitar contenção após falhas
+            released = release_product_lock(lock_target, lock_owner)
+            if not released:
+                task_logger.warning(
+                    "collect_lock_release_failed",
+                    product_id=str(lock_target) if lock_target else None,
+                    trace_id=trace_id,
+                )
         SCRAPER_IN_FLIGHT.dec()
         COLLECTOR_DURATION_MS.labels(kind=kind, outcome=outcome).observe(duration_ms)
         task_logger.info(
@@ -324,9 +437,10 @@ def collect_product(
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
             trace_id=trace_id,
+            enqueued_at=enqueued_at,
         )
         if dispatch_comparison:
-            _dispatch_comparison(monitored_id, result, trace_id)
+            _dispatch_comparison(monitored_id, result, trace_id, force=force_compare)
 
     return outcome, result
 
@@ -336,8 +450,10 @@ def collect_product(
     name="market_alert.tasks.collector_product_task.collect_product_task",
     queue="scraping",
     acks_late=True,
+    soft_time_limit=90,
+    time_limit=120,
 )
-def collect_product_task(self, payload: Mapping[str, str] | None = None) -> str:
+def collect_product_task(self, payload: Mapping[str, str | None] | None = None) -> str:
     """Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
 
     A task valida o payload mínimo, aplica o lock Redis para o produto alvo e

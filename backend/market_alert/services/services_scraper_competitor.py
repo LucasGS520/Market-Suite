@@ -12,7 +12,7 @@ from backend.shared.schemas.shared_schemas_products import CompetitorProductCrea
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
-from shared.utils.url_validation import canonicalize_product_url
+from shared.utils.url_validation import normalize_competitor_url
 from market_alert.crud.crud_competitor import (
     create_or_update_competitor_product_scraped,
     get_competitor_by_monitored_and_url,
@@ -49,11 +49,21 @@ def _get_existing(
         normalized_url,
     )
 
+def _normalize_competitor_scrape_url(url: str) -> str:
+    """ Normalize a URL do concorrente para alinhar fetch e persistência """
+    normalized = normalize_competitor_url(url)
+    if not normalized:
+        #Garante previsibilidade mesmo quando a URL original é inválida
+        return str(url).strip()
+    return normalized
+
 def scrape_competitor_product(
     db: Session,
     user_id: UUID,
     url: str,
     payload: CompetitorProductCreateScraping,
+    *,
+    collected_at: datetime | None = None,
 ) -> ScrapeResult:
     """ Executa scraping de concorrentes de forma síncrona e determinística 
     
@@ -62,10 +72,7 @@ def scrape_competitor_product(
     URLs são canônicas antes da coleta para evitar duplicação e permitir
     reaproveitamento de cabeçalhos condicionais.
     """
-    try:
-        normalized_url = canonicalize_product_url(str(url))
-    except ValueError:
-        normalized_url = str(url)
+    normalized_url = _normalize_competitor_scrape_url(str(url))
     normalized_payload = payload.model_copy(update={"product_url": normalized_url})
     existing = _get_existing(db, normalized_payload, normalized_url)
     etag, last_modified = resolve_conditional_headers(existing)
@@ -84,19 +91,22 @@ def scrape_competitor_product(
         )
 
     status_code = response.status_code
-    now = datetime.now(timezone.utc)
+    now = collected_at or datetime.now(timezone.utc)
 
     if status_code == 304:
         if existing:
             #Atualiza marcações de checagem para manter cadência mesmo sem alterações de conteúdo.
             existing.last_checked = now
-            existing.last_scraped_at = now
+            existing.collected_at = now
             db.commit()
+            persisted_at = datetime.now(timezone.utc)
             logger.info(
                 "competitor_not_modified",
                 product_id=str(existing.id),
                 normalized_url=normalized_url,
                 last_checked=now.isoformat(),
+                collected_at=now.isoformat(),
+                persisted_at=persisted_at.isoformat(),
             )
 
         return ScrapeResult(
@@ -130,14 +140,19 @@ def scrape_competitor_product(
 
     availability_flag = bool(availability) if availability is not None else None
     price_value = None
-    if payload_model.current_price is not None and availability_flag is not False:
+    if payload_model.current_price is not None:
         price_value = ensure_price(payload_model, normalized_url)
-    elif availability_flag is False:
+        if price_value is not None:
+            availability_flag = True
+    if availability_flag is False and price_value is None:
         logger.info(
             "competitor_unavailable_payload",
             url=normalized_url,
             last_status=last_status,
         )
+    if price_value is not None and availability_flag is None:
+        #Interferência defensiva para garantir disponibilidade quando há preço válido
+        availability_flag = True
 
     scraped_info = CompetitorScrapedInfo(
         name=ensure_name(payload_model, normalized_url),
@@ -161,6 +176,16 @@ def scrape_competitor_product(
         currency=sanitized_currency,
         etag=metadata.etag,
         last_modified=metadata.last_modified,
+        collected_at=now,
+    )
+
+    persisted_at = datetime.now(timezone.utc)
+    logger.info(
+        "competitor_scrape_persisted",
+        competitor_id=str(competitor.id),
+        monitored_id=str(competitor.monitored_product_id),
+        collected_at=now.isoformat(),
+        persisted_at=persisted_at.isoformat(),
     )
 
     return ScrapeResult(

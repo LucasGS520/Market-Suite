@@ -60,6 +60,7 @@ export interface MonitoredProduct {
   created_at?: string; // Data de criação do monitoramento
   last_price_change_at?: string; // Última mudança de preço registrada
   last_price_change_global_at?: string; // Última mudança global considerando monitorado e concorrentes
+  stability?: 'unstable' | 'stable' | 'very_stable'; // Classificação de estabilidade calculada pelo backend
   alerts_sent?: number | null; // Total de alertas enviados relacionados ao produto
   availability?: boolean; // Disponibilidade do produto
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
@@ -135,6 +136,7 @@ export interface PriceComparisonSummary {
   competitiveness_status?: CompetitivenessStatus; // Status de competitividade
   discrepancies?: Array<Record<string, unknown>>; // Lista de discrepâncias detectadas
   alerts?: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
+  alerts_count?: number; //Total de alertas calculadas no resumo (quando exposto pelo backend)
   ignored_due_to_inactive?: boolean; // Indica se comparação foi ignorada por indisponibilidade
 }
 
@@ -228,6 +230,16 @@ export interface ScrapeCreationResponse {
   id: string; // ID do job criado
   url: string; // URL alvo do scraping
   created_at: string; // Timestamp de criação
+  message?: string; // Mensagem amigável retornada pelo backend
+}
+
+/**
+ * Resposta de scraping ao criar um monitorado com aviso opcional de concorrente
+ */
+export interface MonitoredScrapeCreationResponse extends ScrapeCreationResponse {
+  next_check_at?: string; // Próxima verificação estimada quando aplicável
+  competitor_warning?: string; // Aviso quando o concorrente inicial falha
+  competitor_error?: string; // Campo opcional para compatibilidade com versões futuras
 }
 
 /**

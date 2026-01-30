@@ -22,6 +22,7 @@ from market_alert.schemas.schemas_products import (
     CompetitorProductResponse,
     MonitoredProductResponse,
 )
+from market_alert.utils.product_stats_formatter import get_product_stats
 from shared.utils import sanitize_text
 
 
@@ -149,8 +150,10 @@ def build_monitored_response(
             **normalized_summary,
         )
 
+    stats_payload = get_product_stats(monitored)
+    #Prioriza datas informadas pelo fluxo de comparação, mas mantém fallback do modelo
     resolved_last_change = _normalize_timestamp(
-        global_last_price_change_at or last_price_change_at
+        global_last_price_change_at or last_price_change_at or stats_payload.get("last_price_change_at")
     )
 
     normalized_last_status = monitored.last_status or monitored.status.value
@@ -179,7 +182,10 @@ def build_monitored_response(
         thumbnail=monitored.thumbnail,
         created_at=_normalize_timestamp(monitored.created_at),
         last_scraped_at=_normalize_timestamp(monitored.last_scraped_at),
-        next_check_at=_normalize_timestamp(monitored.next_check_at),
+        last_collected_at=_normalize_timestamp(stats_payload.get("last_collected_at")),
+        next_check_at=_normalize_timestamp(stats_payload.get("next_check_at")),
+        stability=stats_payload.get("stability"),
+        monitored_since=_normalize_timestamp(stats_payload.get("monitored_since")),
         paused=bool(getattr(monitored, "paused", False)),
         paused_at=_normalize_timestamp(getattr(monitored, "paused_at", None)),
         last_price_change_at=resolved_last_change,
@@ -230,6 +236,6 @@ def build_competitor_response(
         last_checked=_normalize_timestamp(competitor.last_checked),
         source=source,
         availability=availability,
-        last_status=competitor.status.value,
+        last_status=competitor.last_status,
         is_paused=competitor.is_paused,
     )

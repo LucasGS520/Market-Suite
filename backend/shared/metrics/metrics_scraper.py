@@ -156,6 +156,24 @@ COLLECTOR_DURATION_MS = Histogram(
     buckets=[25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
 )
 
+#Métricas específicas do fluxo contínuo de concorrentes
+COMPETITOR_COLLECT_OUTCOME_TOTAL = Counter(
+    "competitor_collect_outcome_total",
+    "Total de desfechos de coleta de concorrentes no worker contínuo",
+    ["outcome"],
+)
+
+COMPETITOR_COLLECT_DURATION_MS = Histogram(
+    "competitor_collect_duration_ms",
+    "Duração das coletas de concorrentes no worker contínuo (milissegundos)",
+    buckets=[25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
+)
+
+COMPETITOR_COLLECT_IN_FLIGHT = Gauge(
+    "competitor_collect_in_flight",
+    "Número de coletas de concorrentes em andamento no worker contínuo",
+)
+
 #Métricas específicas do ciclo de rechecagem
 RECHECK_DISPATCH_TOTAL = Counter(
     "recheck_dispatch_total",
@@ -214,6 +232,17 @@ RECHECK_FINALIZE_FAILED_TOTAL = Counter(
     "recheck_finalize_failed_total",
     "Falhas ao limpar estado de rechecagem e recalcular next_check_at",
     ["reason"],
+)
+
+CONTINUOUS_COMPETITOR_SKIPPED_TOTAL = Counter(
+    "continuous_competitor_skipped_total",
+    "Concorrentes ignorados pelo worker contínuo de coleta",
+    ["reason"],
+)
+
+CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL = Counter(
+    "continuous_competitor_parse_failure_total",
+    "Falhas de parsing registradas pelo worker contínuo de coleta",
 )
 
 SCRAPER_CACHE_LOOKUPS_TOTAL = Counter(

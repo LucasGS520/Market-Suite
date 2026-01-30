@@ -27,18 +27,29 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 
 ## Visão arquitetural rápida
 - **Frontend (`frontend/`)**: aplicação React 18 servida por Vite, com servidor Express para produção. Consome a API pública e oferece dashboards responsivos.
-- **Backend (`backend/`)**: agrega `market_alert` (API FastAPI, Celery Worker e Beat) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, métricas, contratos Pydantic, clientes externos).
+- **Backend (`backend/`)**: agrega `market_alert` (API FastAPI + 3 Workers Celery dedicados) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, métricas, contratos Pydantic, clientes externos).
 - **Infraestrutura de apoio**: PostgreSQL, Redis, Prometheus, Grafana, Loki e Alertmanager são orquestrados via `docker-compose.yml`.
-- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery → worker conversa com o `market_scraper`, Redis e PostgreSQL → eventos de domínio geram notificações persistidas → observabilidade coleta métricas/logs → dashboards são atualizados.
+- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery em filas específicas → workers dedicados consomem e processam → scraper coleta dados → eventos de domínio geram notificações → observabilidade coleta métricas/logs → dashboards são atualizados.
+- **Agendamento contínuo**: o worker `celery-worker-monitor` executa indefinidamente `run_continuous_collector`, que consome a fila de prioridade Redis (sorted sets), coleta monitorados + concorrentes, recalcula estabilidade e reenfileira automaticamente com próximo `next_check_at`.
 
-### Responsabilidades das tarefas Celery (`market_alert`)
-- **Collector (`tasks.collector_product_task.collect_product_task`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock no Redis e retorna um `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`) contendo `http_status`, `price_changed`/`availability_changed` e `error_code` quando aplicável.
-- **Agendador de rechecagem (`tasks.recheck_scheduler_task.schedule_rechecks`)**: Beat que varre `next_check_at` vencidos, atualiza o próximo horário calculado a partir de `check_interval` (ou `RECHECK_INTERVAL_DEFAULT`) e enfileira a própria `collect_product_task` com jitter leve.
-- **Comparação (`tasks.compare_prices_task.compare_prices_task`)**: idempotente e leve; usada pelo collector em cenários assíncronos e em acionamentos manuais para recalcular histórico/comparativos.
-- **Notificações (`tasks.notifications_enqueue_task.enqueue_notifications_task`)**: normaliza notificações pendentes, calcula backoff exponencial e mantém consistência de retries antes de novos disparos.
-- **Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando flags em banco e mantendo TTL automático como único mecanismo de exclusão mútua.
-- **Pausa de monitoramento**: monitorados com `paused=true` devem ser ignorados por agendador e collector, incrementando `monitored_skipped_paused` e mantendo histórico íntegro até retomada explícita.
-- **Contratos de desfecho**: quando o lock não é adquirido o collector retorna `no_result` (mantendo métrica de lock skipped) para preservar o contrato enxuto; rechecagens sem mudança (`not_modified`) não geram novo `PriceHistory` e já atualizam `next_check_at`.
+### Responsabilidades das tarefas Celery (`market_alert`) e Organização de Workers
+
+**Workers Celery:**
+- **celery-worker** (fila `celery,scraping`, concorrência 4): executa `collect_product_task` para scraping imediato de um monitorado/concorrente por vez.
+- **celery-worker-monitor** (fila `monitor`, concorrência 2): executa o loop contínuo `run_continuous_collector` + `compare_prices_task`.
+- **celery-worker-notifications** (fila `notifications`, concorrência 2): executa `send_notification_task` + `verification_tasks`.
+
+**Tasks principais:**
+- **Collector (`tasks.collector_product_task.collect_product_task`, fila `scraping`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock Redis e retorna `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`).
+- **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`, fila `monitor`)**: **task que roda indefinidamente** no worker-monitor, consome a fila de prioridade Redis (sorted sets), coleta monitorado + concorrentes em sequência, recalcula `next_check_at` baseado em estabilidade (frequência adaptativa) e reenfileira automaticamente. Inicia via `CONTINUOUS_COLLECTOR_AUTOSTART=1`.
+- **Comparação (`tasks.compare_prices_task.compare_prices_task`, fila `monitor`)**: idempotente e leve; disparada automaticamente após coletas com mudanças de preço/disponibilidade.
+- **Notificações (`tasks.send_notification_task.send_notification_task`, fila `notifications`)**: entrega alertas com retry e backoff exponencial, registra em `notification_attempt`.
+
+**Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando race conditions e usando Redis como único mecanismo de exclusão mútua (sem flags em banco).
+
+**Pausa de monitoramento**: monitorados com `paused=true` são ignorados por collector e loop contínuo, incrementando `monitored_skipped_paused` e mantendo histórico íntegro até retomada explícita.
+
+**Contratos de desfecho**: quando lock não é adquirido, collector retorna `no_result` com métrica `lock_skipped`; respostas `not_modified` não geram novo `PriceHistory` e atualizam apenas `last_checked`.
 
 ## Diretrizes de Desenvolvimento para Agentes
 - **Linguagem, Docstrings e comentários**: mantenha docstrings e comentários em português, descrevendo propósito, parâmetros, retornos e exceções. Evite comentários redundantes; foque em contexto e decisões. Siga esse padrão para comentários e Docstrings: (Ex: #Comentário Padrão vem seguido da Hastag, """ Docstrings possui espaço após incio e fim """).
@@ -49,7 +60,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Workers Celery**: utilize pool `prefork` ao subir workers (`celery -A market_alert.core.celery_app worker -P prefork ...`) para que `time.sleep` em backoffs não bloqueie pools cooperativos. Para notificações, mantenha um worker dedicado consumindo a fila `notifications`. Caso migre de pool, substitua esperas bloqueantes por `countdown` ou sleeps compatíveis.
 - **Pesquisa no código**: prefira `rg` (ripgrep) para buscas rápidas; se indisponível, use `grep -Rni` com exclusões de diretórios (`.venv`, `.git`, caches). Exemplos: `rg -n "metrics|/metrics"`, `rg -n "collect_.*_task" market_alert`.
 - **Commits**: mantenha mensagens claras no formato `<tipo>: <resumo>` do tipo de mudança (ex.: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`), sempre traga a frase utilizada para o commit ao final da resposta (Ex: feat: Add nova instrução ao AGENTS.md). Faça mudanças pequenas e coesas; referência arquivos/rotas afetadas. Evite criar branches sem necessidade ou renomear arquivos amplamente.
-- **Orquestração de scraping**: use sempre a task central `market_alert.tasks.collector_product_task.collect_product_task` e o serviço `services/collector_service_orchestrator.py` para enfileirar monitorados e concorrentes. Evite chamadas diretas ao scraper; as rechecagens periódicas passam pelo agendador `tasks.recheck_scheduler_task.schedule_rechecks`, que enfileira diretamente na fila `scraping`.
+- **Orquestração de scraping**: use sempre a task central `market_alert.tasks.collector_product_task.collect_product_task` que será enfileirada na fila `scraping`. O worker `celery-worker-monitor` consome a fila de prioridade Redis e dispara coletas via `collect_product_task` automaticamente. Evite chamadas diretas ao scraper; o padrão orquestrador centraliza tudo.
 - **Alterações de interface**: evite quebras em contratos de API, schemas Pydantic ou assinaturas de tasks Celery. Preserve retrocompatibilidade e documente qualquer deprecação. e atualize `AGENTS.md`, `README.md` e testes.
 - **Banco e migrações**: alterações de schema devem passar por Alembic; nunca execute deleções em massa sem salvaguardas.
 - **Observabilidade**: registre logs estruturados, atualize métricas e revise Prometheus quando necessário.
@@ -91,6 +102,13 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 - Frontend: `pnpm test` (quando configurado) e `pnpm lint`.
 - Valide comandos em ambientes isolados e registre no relatório final as execuções realizadas.
 
+## Troubleshooting do coletor contínuo
+- **Fila vazia ou sem itens prontos**: verifique `PRIORITY_QUEUE_SIZE`, `PRIORITY_QUEUE_READY_TOTAL` e o conjunto ordenado configurado em `PRIORITY_QUEUE_KEY`. Garanta que o monitorado foi enfileirado com `next_check_at` válido.
+- **Worker monitor inativo**: confirme o processo `celery-worker-monitor` ativo e a env `CONTINUOUS_COLLECTOR_AUTOSTART=1`. Sem ela, o loop não inicia automaticamente.
+- **Redis indisponível**: valide conectividade e credenciais; o coletor registra `continuous_queue_unavailable` quando o Redis não responde.
+- **Itens presos em processamento**: o loop reaproveita o conjunto de processamento após o TTL configurado em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs de `continuous_processing_reclaimed`.
+- **Monitorados pausados**: itens com `paused=true` são ignorados e não retornam para a fila; retome manualmente para reativar a coleta.
+
 ## Checklist antes de concluir uma mudança
 1. Atualize ou confirme a existência de docstrings/comentários relevantes em português.
 2. Ajuste contratos, schemas ou métricas conforme necessário e estejam bem sincronizados com o projeto geral.
@@ -98,6 +116,15 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 4. Valide se novas portas/variáveis foram documentadas.
 5. Revise o `README.md` e demais READMEs específicos para garantir consistência.
 6. Confirme que contratos críticos consumidos pelo frontend permanecem coerentes.
+
+## Manutenção contínua - AGENTS.md Atualizado
+- Revisar este documento a cada sprint ou nova versão, e sempre que for realizado novas tarefas e mudanças no projeto.
+- Documentar mudanças relevantes sempre que atualizar fluxos de autenticação, scraping, comparação, observabilidade ou arquitetura.
+- Adicionar instruções sobre novos serviços, filas, métricas, variáveis de ambiente, pipelines ou convenções.
+- Remover comandos desatualizados e alinhar com os READMEs específicos.
+- Comparar o conteúdo com o `README.md` para evitar redundâncias: mantenha aqui instruções operacionais para agentes; no `README.md`, mantenha setup humano e visão geral.
+
+> Nota: Um guia desatualizado prejudica a confiabilidade do agente e pode levar a ações incorretas.
 
 ## Manutenção contínua - AGENTS.md Atualizado
 - Revisar este documento a cada sprint ou nova versão, e sempre que for realizado novas tarefas e mudanças no projeto.

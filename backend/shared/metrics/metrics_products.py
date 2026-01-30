@@ -32,6 +32,11 @@ COMPETITOR_DELETE_FAILURES_TOTAL = Counter(
     "Falhas ao tentar remover concorrente de forma segura",
 )
 
+COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL = Counter(
+    "competitor_change_affected_stability_total",
+    "Total de vezes em que mudanças de concorrentes reduziram a estabilidade do produto monitorado",
+)
+
 PRICE_HISTORY_CREATED_TOTAL = Counter(
     "price_history_created_total",
     "Total de registros de histórico de preço persistidos por tipo de dono",
@@ -59,4 +64,5 @@ __all__ = [
     "MONITORED_DELETED_TOTAL",
     "COMPETITOR_DELETED_TOTAL",
     "COMPETITOR_DELETE_FAILURES_TOTAL",
+    "COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL",
 ]
