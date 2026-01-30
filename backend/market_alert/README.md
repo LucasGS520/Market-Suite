@@ -316,7 +316,7 @@ Graceful shutdown: drain fila de processamento, flush métricas
 
 ### 4. Comparação e Notificações
 ```
-compare_prices_task (fila monitor, disparada automaticamente)
+compare_prices_task (fila compare, disparada automaticamente)
   ↓
 Recalcula competitividade do monitorado vs concorrentes
   ↓
