@@ -18,6 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from billiard.exceptions import TimeLimitExceeded
 from celery.exceptions import SoftTimeLimitExceeded
+from celery.canvas import Signature
 
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_priority_queue import (
@@ -28,6 +29,7 @@ from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_PROCESSED_TOTAL,
     PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL,
     PRIORITY_QUEUE_PENDING_REQUEUE_TOTAL,
+    PRIORITY_QUEUE_REQUEUED_FROM_PROCESSING_TOTAL,
     PRIORITY_QUEUE_READY_TOTAL,
     PRIORITY_QUEUE_SIZE,
     PRIORITY_QUEUE_STABILITY_TOTAL,
@@ -72,6 +74,18 @@ class CollectDispatchDecision:
 def _utc_now() -> datetime:
     """ Retorna timestamp em UTC sem microssegundos para logs e métricas """
     return datetime.now(timezone.utc).replace(microsecond=0)
+
+def _resolve_next_check_at(
+    monitored: MonitoredProduct,
+    next_check_at: datetime | None,
+) -> tuple[datetime, datetime]:
+    """ Resolve o próximo check garantindo data válida e retorna também o horário base """
+    now = _utc_now()
+    resolved_next_check_at = next_check_at or monitored.next_check_at or now
+    if resolved_next_check_at < now:
+        #Evita reenqueue com horário no passado para impedir loops ociosos
+        resolved_next_check_at = now
+    return resolved_next_check_at, now
 
 def _normalize_enqueued_at(enqueued_at: datetime | None) -> datetime | None:
     """ Normaliza o timestamp de enfileiramento para UTC """
@@ -136,6 +150,8 @@ def _dispatch_collect_task(
     monitored_id: str,
     trace_id: str,
     competitor_id: str | None = None,
+    on_complete: Signature | None = None,
+    on_error: Signature | None = None,
 ) -> bool:
     """ Dispara coleta assíncrona mantendo métricas e logs do coletor contínuo """
     try:
@@ -143,6 +159,8 @@ def _dispatch_collect_task(
             "market_alert.tasks.collector_product_task.collect_product_task",
             kwargs={"payload": payload},
             queue="scraping",
+            link=on_complete,
+            link_error=on_error,
         )
         CONTINUOUS_COLLECT_DISPATCH_TOTAL.labels(kind=kind, status="enqueued").inc()
         logger.info(
@@ -238,6 +256,16 @@ def _collect_group(
         kind="monitored",
         monitored_id=str(monitored.id),
         trace_id=trace_id,
+        on_complete=celery_app.signature(
+            "market_alert.tasks.continuous_collector_task.finalize_processing_requeue",
+            args=[str(monitored.id)],
+            kwargs={"trace_id": trace_id},
+        ).set(queue="monitor"),
+        on_error=celery_app.signature(
+            "market_alert.tasks.continuous_collector_task.finalize_processing_requeue_error",
+            args=[str(monitored.id)],
+            kwargs={"trace_id": trace_id},
+        ).set(queue="monitor"),
     )
     if not monitored_enqueued:
         return CollectDispatchDecision(
@@ -292,14 +320,10 @@ def _requeue_monitored(
     monitored: MonitoredProduct,
     next_check_at: datetime | None = None,
     queue_service: PriorityQueueService,
-) -> bool:
+) -> tuple[bool, datetime]:
     """ Reenfileira monitorado e informa se houve sucesso no enqueue """
     #Usa a janela calculada pela coleta para garantir o reenqueue correto
-    now = _utc_now()
-    resolved_next_check_at = next_check_at or monitored.next_check_at or now
-    if resolved_next_check_at < now:
-        #Evita reenqueue com horário no passado para impedir loops ociosos
-        resolved_next_check_at = now
+    resolved_next_check_at, now = _resolve_next_check_at(monitored, next_check_at)
     #Centraliza o reenqueue para registrar métricas e logs padronizados
     if enqueue_monitored_at(
         monitored.id,
@@ -307,7 +331,7 @@ def _requeue_monitored(
         source="continuous_worker",
         queue_service=queue_service,
     ):
-        return True
+        return True, resolved_next_check_at
     
     logger.error(
         "continuous_requeue_failed",
@@ -326,9 +350,9 @@ def _requeue_monitored(
             monitored_id=str(monitored.id),
             next_check_at=now.isoformat(),
         )
-        return True
+        return True, now
 
-    return False
+    return False, resolved_next_check_at
 
 def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
     """ Carrega monitorado por ID garantindo UUID válido """
@@ -342,6 +366,97 @@ def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable
     """ Remove itens processados do conjunto auxiliar de processamento """
     queue_service.drain_processing(product_ids)
 
+def _handle_processing_requeue(
+    *,
+    monitored_id: str,
+    collect_outcome: str | None,
+    reason: str,
+    trace_id: str | None = None,
+) -> None:
+    """ Conclui o fluxo de processamento movendo o item de volta para o ready """
+    queue_service = PriorityQueueService()
+    normalized_reason = reason or collect_outcome or "unknown"
+
+    with SessionLocal() as db:
+        monitored = _load_monitored(db, monitored_id)
+        if monitored is None:
+            logger.warning(
+                "continuous_processing_missing",
+                monitored_id=monitored_id,
+                reason="monitored_missing",
+                trace_id=trace_id,
+            )
+            queue_service.drain_processing([monitored_id])
+            return
+        
+        resolved_next_check_at, _ = _resolve_next_check_at(monitored, None)
+        requeued, effective_next_check_at = _requeue_monitored(
+            monitored=monitored,
+            next_check_at=resolved_next_check_at,
+            queue_service=queue_service,
+        )
+
+    if requeued:
+        queue_service.drain_processing([monitored_id])
+        PRIORITY_QUEUE_REQUEUED_FROM_PROCESSING_TOTAL.labels(
+            source="continuous_worker",
+            reason=normalized_reason,
+        ).inc()
+        logger.info(
+            "continuous_processing_returned_to_ready",
+            monitored_id=monitored_id,
+            next_check_at=effective_next_check_at.isoformat(),
+            reason=normalized_reason,
+            outcome=collect_outcome,
+            trace_id=trace_id,
+        )
+        return
+    
+    PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL.labels(source="continuous_worker").inc()
+    logger.warning(
+        "continuous_processing_requeue_failed",
+        monitored_id=monitored_id,
+        next_check_at=effective_next_check_at.isoformat(),
+        reason=normalized_reason,
+        outcome=collect_outcome,
+        trace_id=trace_id,
+    )
+
+@celery_app.task(
+    name="market_alert.tasks.continuous_collector_task.finalize_processing_requeue",
+    queue="monitor",
+)
+def finalize_processing_requeue(
+    collect_outcome: str,
+    monitored_id: str,
+    trace_id: str | None = None,
+) -> None:
+    """ Reenfileira monitorado após a coleta finalizar e remove do processamento """
+    _handle_processing_requeue(
+        monitored_id=monitored_id,
+        collect_outcome=collect_outcome,
+        reason=collect_outcome,
+        trace_id=trace_id,
+    )
+
+@celery_app.task(
+    name="market_alert.tasks.continuous_collector_task.finalize_processing_requeue_error",
+    queue="monitor",
+)
+def finalize_processing_requeue_error(
+    request,
+    exc,
+    traceback,
+    monitored_id: str,
+    trace_id: str | None = None,
+) -> None:
+    """ Reenfileira monitorado quando a task de coleta falha inesperadamente """
+    _handle_processing_requeue(
+        monitored_id=monitored_id,
+        collect_outcome=None,
+        reason="collect_task_exception",
+        trace_id=trace_id,
+    )
 
 @celery_app.task(
     bind=True,
@@ -492,7 +607,7 @@ def run_continuous_collector(self) -> None:
                         processed_ids.append(str(monitored.id))
 
                     if decision.should_requeue:
-                        requeue_success = _requeue_monitored(
+                        requeue_success, _ = _requeue_monitored(
                             monitored=monitored,
                             next_check_at=decision.next_check_at,
                             queue_service=queue_service,

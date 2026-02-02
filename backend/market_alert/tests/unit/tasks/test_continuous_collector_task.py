@@ -66,13 +66,14 @@ def test_requeue_monitored_define_next_check_at_if_missing(monkeypatch):
 
     monitored = _build_monitored(next_check_at=None)
 
-    success = continuous_collector_task._requeue_monitored(
+    success, resolved_next_check_at = continuous_collector_task._requeue_monitored(
         monitored=monitored,
         next_check_at=None,
         queue_service=None,
     )
 
     assert success is True
+    assert resolved_next_check_at == fixed_now
     assert enqueue_stub.calls == [
         {
             "monitored_id": monitored.id,
@@ -92,13 +93,14 @@ def test_requeue_monitored_corrects_next_check_at_past_dates(monkeypatch):
 
     monitored = _build_monitored(next_check_at=fixed_now - timedelta(minutes=10))
 
-    success = continuous_collector_task._requeue_monitored(
+    success, resolved_next_check_at = continuous_collector_task._requeue_monitored(
         monitored=monitored,
         next_check_at=None,
         queue_service=None,
     )
 
     assert success is True
+    assert resolved_next_check_at == fixed_now
     assert enqueue_stub.calls == [
         {
             "monitored_id": monitored.id,
@@ -118,13 +120,14 @@ def test_requeue_monitored_retries_with_current_time(monkeypatch):
 
     monitored = _build_monitored(next_check_at=fixed_now + timedelta(minutes=5))
 
-    success = continuous_collector_task._requeue_monitored(
+    success, resolved_next_check_at = continuous_collector_task._requeue_monitored(
         monitored=monitored,
         next_check_at=None,
         queue_service=None,
     )
 
     assert success is True
+    assert resolved_next_check_at == fixed_now
     assert enqueue_stub.calls == [
         {
             "monitored_id": monitored.id,
