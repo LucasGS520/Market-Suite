@@ -169,6 +169,12 @@ COLLECTOR_DURATION_MS = Histogram(
     buckets=[25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
 )
 
+COMPARE_DISPATCH_DEBOUNCED_TOTAL = Counter(
+    "compare_dispatch_debounced_total",
+    "Comparações suprimidas por debounce Redis antes do enfileiramento",
+    ["reason"],
+)
+
 #Métricas específicas do fluxo contínuo de concorrentes
 COMPETITOR_COLLECT_OUTCOME_TOTAL = Counter(
     "competitor_collect_outcome_total",
@@ -404,6 +410,7 @@ __all__ = [
     "COLLECT_LOCK_SKIPPED_TOTAL",
     "COLLECT_SUCCESS_TOTAL",
     "COLLECTOR_DURATION_MS",
+    "COMPARE_DISPATCH_DEBOUNCED_TOTAL",
     "CONTINUOUS_COLLECT_DISPATCH_TOTAL",
     "RECHECK_DISPATCH_TOTAL",
     "RECHECK_MONITORED_RESULT_TOTAL",

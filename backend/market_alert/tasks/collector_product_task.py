@@ -37,10 +37,11 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL,
     COLLECT_LOCK_SKIPPED_TOTAL,
     COLLECT_SUCCESS_TOTAL,
+    COMPARE_DISPATCH_DEBOUNCED_TOTAL,
     MONITORED_SKIPPED_PAUSED_TOTAL,
     SCRAPER_IN_FLIGHT,
 )
-from shared.utils.redis_client import is_scraping_suspended
+from shared.utils.redis_client import is_scraping_suspended, set_key_with_ttl
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.celery_app import celery_app
@@ -56,6 +57,7 @@ LOCK_RETRY_BASE_SECONDS = 5
 LOCK_RETRY_MAX_SECONDS = 60
 LOCK_RETRY_MAX_RETRIES = 3
 LOCK_RETRY_JITTER_RATIO = 0.2
+COMPARE_DEBOUNCE_TTL_SECONDS = 600
 
 def _compute_lock_retry_delay(
     attempt: int,
@@ -181,6 +183,31 @@ def _dispatch_comparison(
     if not (force or changed):
         return
     
+    debounce_key = f"compare:debounce:{monitored_id}"
+    debounce_registered = set_key_with_ttl(
+        debounce_key,
+        "1",
+        COMPARE_DEBOUNCE_TTL_SECONDS,
+        only_if_absent=True,
+    )
+    if debounce_registered is False:
+        #Evita duplicidade de comparação em janela curta para o mesmo monitorado
+        COMPARE_DISPATCH_DEBOUNCED_TOTAL.labels(reason="debounce_active").inc()
+        logger.info(
+            "compare_prices_debounced",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+            ttl_seconds=COMPARE_DEBOUNCE_TTL_SECONDS,
+        )
+        return
+    if debounce_registered is None:
+        #Mantém o fluxo mesmo sem Redis para não perder comparações relevantes
+        logger.warning(
+            "compare_debounce_unavailable",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+        )
+
     #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
     celery_app.send_task(
         "market_alert.tasks.compare_prices_task.compare_prices_task",
