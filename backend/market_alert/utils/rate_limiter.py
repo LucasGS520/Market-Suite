@@ -7,7 +7,7 @@ from typing import Callable, Tuple
 
 from redis import Redis
 
-from shared.utils.redis_client import consume_leaky_bucket
+from shared.utils.redis_client import consume_leaky_bucket, consume_token_bucket
 
 
 logger = logging.getLogger(__name__)
@@ -36,22 +36,19 @@ class RateLimiter:
             return None
         
     def allow(self, host: str) -> bool:
-        """ Incrementa contador para o host e indica se há capacidade """
+        """ Avalia o limite por host usando *token bucket* em Redis """
         client = self._client()
         if client is None:
             return True
         
         key = f"{self._namespace}:{host}"
-        try:
-            pipeline = client.pipeline(True)
-            pipeline.incr(key)
-            pipeline.expire(key, self._window_seconds)
-            current, _ = pipeline.execute()
-        except Exception as exc:
-            logger.warning("rate_limiter_redis_failure: %s", exc)
-            return True
-        
-        return int(current) <= self._max_requests
+        allowed, _ = consume_token_bucket(
+            key,
+            capacity=self._max_requests,
+            refill_rate_per_second=self._max_requests / self._window_seconds,
+            client=client,
+        )
+        return allowed
     
 def parse_rate_limit_config(rate_limit: str) -> Tuple[int, int] | None:
     """ Interpreta configurações no formato ``valor/unidade`` retornando capacidade e janela 

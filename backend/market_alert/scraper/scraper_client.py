@@ -134,6 +134,7 @@ def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
         )
     return sanitized
 
+#Definição global para reaproveitar o bucket entre instâncias e evitar picos
 rate_limiter = RateLimiter(
     get_redis_client,
     max_requests=settings.SCRAPER_HOST_RATE_LIMIT,
@@ -183,6 +184,7 @@ class ScraperClient:
                 status_code=503,
             )
         
+        #Aplicamos token bucket por host para diluir bursts e reduzir 429 do scraper
         if not rate_limiter.allow(host):
             raise ScraperClientError(
                 "Limite de requisições para host excedido",

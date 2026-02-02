@@ -71,14 +71,17 @@ O sistema utiliza **quatro workers Celery separados**, cada um consumindo uma fi
 
 | Worker | Fila(s) | Concorrência | Responsabilidades |
 |--------|---------|--------------|-------------------|
-| **celery-worker-scraping** | `celery,scraping` | 8 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
+| **celery-worker-scraping** | `celery,scraping` | 4 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
 | **celery-worker-monitor** | `monitor` | 4 | Executa o loop contínuo `run_continuous_collector` |
-| **celery-worker-compare** | `compare` | 4 | Executa `compare_prices_task` para comparação assíncrona |
-| **celery-worker-notifications** | `notifications` | 4 | Executa `send_notification_task` + `verification_tasks` |
+| **celery-worker-compare** | `compare` | 2 | Executa `compare_prices_task` para comparação assíncrona |
+| **celery-worker-notifications** | `notifications` | 2 | Executa `send_notification_task` + `verification_tasks` |
 
 ### Arquivo principal
 - **`core/celery_app.py`**: instancia e configura o app Celery, registra métricas, inicializa conectores.
 - **`core/celery_schedule.py`**: centraliza declarações de filas, rotas e agendamentos Beat.
+
+### Impacto da concorrência Workers
+Reduzir a concorrência do `celery-worker-*` diminui picos de requisições simultâneas contra o `market_scraper` e hosts externos, ajudando a mitigar `429` e falhas por excesso de requisições. Em contrapartida, o tempo total para processar filas de scraping pode aumentar em momentos de alta demanda.
 
 ### Tasks de destaque
 - **`tasks.collector_product_task.collect_product_task`** (fila `scraping`): coleta um monitorado ou concorrente por vez com lock Redis.
