@@ -174,6 +174,12 @@ COMPETITOR_COLLECT_IN_FLIGHT = Gauge(
     "Número de coletas de concorrentes em andamento no worker contínuo",
 )
 
+CONTINUOUS_COLLECT_DISPATCH_TOTAL = Counter(
+    "continuous_collect_dispatch_total",
+    "Total de coletas enfileiradas pelo coletor contínuo",
+    ["kind", "status"],
+)
+
 #Métricas específicas do ciclo de rechecagem
 RECHECK_DISPATCH_TOTAL = Counter(
     "recheck_dispatch_total",
@@ -383,6 +389,7 @@ __all__ = [
     "COLLECT_LOCK_SKIPPED_TOTAL",
     "COLLECT_SUCCESS_TOTAL",
     "COLLECTOR_DURATION_MS",
+    "CONTINUOUS_COLLECT_DISPATCH_TOTAL",
     "RECHECK_DISPATCH_TOTAL",
     "RECHECK_MONITORED_RESULT_TOTAL",
     "RECHECK_COMPETITOR_RESULT_TOTAL",
