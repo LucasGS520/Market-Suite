@@ -71,7 +71,7 @@ O sistema utiliza **quatro workers Celery separados**, cada um consumindo uma fi
 
 | Worker | Fila(s) | Concorrência | Responsabilidades |
 |--------|---------|--------------|-------------------|
-| **celery-worker** | `celery,scraping` | 8 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
+| **celery-worker-scraping** | `celery,scraping` | 8 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
 | **celery-worker-monitor** | `monitor` | 4 | Executa o loop contínuo `run_continuous_collector` |
 | **celery-worker-compare** | `compare` | 4 | Executa `compare_prices_task` para comparação assíncrona |
 | **celery-worker-notifications** | `notifications` | 4 | Executa `send_notification_task` + `verification_tasks` |
@@ -274,7 +274,7 @@ Responde 202 com id e dados mínimos
 
 ### 2. Coleta Imediata (na fila scraping)
 ```
-collect_product_task (worker: celery-worker)
+collect_product_task (worker: celery-worker-scraping)
   ↓
 Valida payload (tipo, IDs, URL)
   ↓
@@ -339,7 +339,7 @@ send_notification_task (worker: celery-worker-notifications)
   ```bash
   docker compose up -d db redis redis-init
   docker compose up -d migrations
-  docker compose up -d api market_scraper celery-worker celery-worker-monitor celery-worker-notifications
+  docker compose up -d api market_scraper celery-worker-scraping celery-worker-monitor celery-worker-notifications
   ```
 
 - **Sem Docker:**

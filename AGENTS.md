@@ -35,10 +35,10 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 ### Responsabilidades das tarefas Celery (`market_alert`) e Organização de Workers
 
 **Workers Celery:**
-- **celery-worker** (fila `celery,scraping`, concorrência 4): executa `collect_product_task` para scraping imediato de um monitorado/concorrente por vez.
-- **celery-worker-monitor** (fila `monitor`, concorrência 2): executa o loop contínuo `run_continuous_collector`.
-- **celery-worker-compare** (fila `compare`, concorrência 2): executa `compare_prices_task` após coletas com mudanças.
-- **celery-worker-notifications** (fila `notifications`, concorrência 2): executa `send_notification_task` + `verification_tasks`.
+- **celery-worker-scraping** (fila `celery,scraping`, concorrência 8): executa `collect_product_task` para scraping imediato de um monitorado/concorrente por vez.
+- **celery-worker-monitor** (fila `monitor`, concorrência 4): executa o loop contínuo `run_continuous_collector`.
+- **celery-worker-compare** (fila `compare`, concorrência 4): executa `compare_prices_task` após coletas com mudanças.
+- **celery-worker-notifications** (fila `notifications`, concorrência 4): executa `send_notification_task` + `verification_tasks`.
 
 **Tasks principais:**
 - **Collector (`tasks.collector_product_task.collect_product_task`, fila `scraping`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock Redis e retorna `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`).

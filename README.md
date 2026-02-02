@@ -117,14 +117,14 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 docker compose up -d db redis redis-init
 
 # Subir serviços da aplicação (ordem não importa após dependências)
-docker compose up -d api market_scraper celery-worker celery-worker-monitor celery-worker-compare celery-worker-notifications frontend
+docker compose up -d api market_scraper celery-worker-scraping celery-worker-monitor celery-worker-compare celery-worker-notifications frontend
 
 # Para subir apenas backend sem frontend
-docker compose up -d db redis redis-init api market_scraper celery-worker celery-worker-monitor celery-worker-compare celery-worker-notifications
+docker compose up -d db redis redis-init api market_scraper celery-worker-scraping celery-worker-monitor celery-worker-compare celery-worker-notifications
 ```
 
 **Filas Celery separadas:**
-- `celery-worker` (portas 8002): filas `celery,scraping` - tarefas de scraping de produtos
+- `celery-worker-scraping` (portas 8002): filas `celery,scraping` - tarefas de scraping de produtos
 - `celery-worker-monitor` (porta 8004): fila `monitor` - coletor contínuo
 - `celery-worker-compare` (porta 8005): fila `compare` - comparações de preço pós-coleta
 - `celery-worker-notifications` (porta 8003): fila `notifications` - envio de alertas e verificações
