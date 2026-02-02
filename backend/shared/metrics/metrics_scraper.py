@@ -113,6 +113,12 @@ COLLECTOR_NO_DATA_TOTAL = Counter(
     ["kind"],
 )
 
+COLLECTOR_NO_DATA_REASON_TOTAL = Counter(
+    "collector_no_data_reason_total",
+    "Motivos detalhados para coletas sem dados utilizáveis",
+    ["kind", "reason"],
+)
+
 COLLECTOR_ERROR_TOTAL = Counter(
     "collector_error_total",
     "Falhas do coletor ao tentar obter dados",
@@ -400,6 +406,7 @@ __all__ = [
     "COLLECTOR_SUCCESS_NEW_DATA_TOTAL",
     "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL",
     "COLLECTOR_NO_DATA_TOTAL",
+    "COLLECTOR_NO_DATA_REASON_TOTAL",
     "COLLECTOR_ERROR_TOTAL",
     "COLLECTOR_LOCK_ACQUIRED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_TOTAL",

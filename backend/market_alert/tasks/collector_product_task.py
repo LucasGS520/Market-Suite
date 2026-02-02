@@ -31,6 +31,7 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_LOCK_RETRY_DELAY_SECONDS,
     COLLECTOR_LOCK_RETRY_TOTAL,
     COLLECTOR_NO_DATA_TOTAL,
+    COLLECTOR_NO_DATA_REASON_TOTAL,
     COLLECTOR_SUCCESS_NEW_DATA_TOTAL,
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL,
     COLLECTOR_DURATION_MS,
@@ -125,6 +126,7 @@ def _record_metrics(
     mas sempre retorna um status contratual.
     """
     if lock_status == "skipped":
+        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason or "lock_skipped").inc()
         COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
         COLLECT_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
         COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL.labels(kind=kind, owner=lock_owner or "unknown").inc()
@@ -132,6 +134,7 @@ def _record_metrics(
         return "no_result"
     
     if reason == "scraping_suspended":
+        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason).inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
 
@@ -140,6 +143,7 @@ def _record_metrics(
         return "error"
     
     if reason == "missing_target":
+        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason).inc()
         COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL.labels(kind=kind).inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
@@ -153,6 +157,7 @@ def _record_metrics(
         return "error"
     
     if result.status == "no_result":
+        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason or "validation").inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
 
@@ -167,6 +172,26 @@ def _record_metrics(
 
     COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
     return "error"
+
+def _resolve_no_result_reason(result: ScrapeResult | None) -> str:
+    """ Determina uma razão decritiva para status ``no_result`` """
+    if result is None:
+        return "validation"
+    
+    error_code = (result.error_code or "").strip().lower()
+    if "robot" in error_code:
+        return "robots"
+    
+    if error_code in {"rate_limit", "too_many_requests", "429"} or result.http_status == 429:
+        return "rate_limit"
+    
+    if "timeout" in error_code or result.http_status in {408, 504}:
+        return "timeout"
+    
+    if error_code == "no_result":
+        return "validation"
+    
+    return "validation"
 
 def _dispatch_comparison(
     monitored_id: UUID | None,
@@ -460,6 +485,9 @@ def collect_product(
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        if result is not None and result.status == "no_result" and reason is None:
+            #Garante que ``no_result`` sempre carregue motivo descritivo para diagnóstico
+            reason = _resolve_no_result_reason(result)
         outcome = _record_metrics(
             kind,
             result,
