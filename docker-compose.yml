@@ -147,7 +147,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=4"
+      - "--concurrency=8"
       - "-Q"
       - "celery,scraping"
     user: 
@@ -190,7 +190,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=2"
+      - "--concurrency=4"
       - "-Q"
       - "monitor"
     user:
@@ -230,7 +230,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=2"
+      - "--concurrency=4"
       - "-Q"
       - "compare"
     user:
@@ -270,7 +270,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=2"
+      - "--concurrency=4"
       - "-Q"
       - "notifications"
     user:

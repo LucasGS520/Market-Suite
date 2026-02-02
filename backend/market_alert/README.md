@@ -71,10 +71,10 @@ O sistema utiliza **quatro workers Celery separados**, cada um consumindo uma fi
 
 | Worker | Fila(s) | Concorrência | Responsabilidades |
 |--------|---------|--------------|-------------------|
-| **celery-worker** | `celery,scraping` | 4 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
-| **celery-worker-monitor** | `monitor` | 2 | Executa o loop contínuo `run_continuous_collector` |
-| **celery-worker-compare** | `compare` | 2 | Executa `compare_prices_task` para comparação assíncrona |
-| **celery-worker-notifications** | `notifications` | 2 | Executa `send_notification_task` + `verification_tasks` |
+| **celery-worker** | `celery,scraping` | 8 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
+| **celery-worker-monitor** | `monitor` | 4 | Executa o loop contínuo `run_continuous_collector` |
+| **celery-worker-compare** | `compare` | 4 | Executa `compare_prices_task` para comparação assíncrona |
+| **celery-worker-notifications** | `notifications` | 4 | Executa `send_notification_task` + `verification_tasks` |
 
 ### Arquivo principal
 - **`core/celery_app.py`**: instancia e configura o app Celery, registra métricas, inicializa conectores.
