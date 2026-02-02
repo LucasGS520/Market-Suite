@@ -8,6 +8,7 @@ apenas o lock Redis aplicado aqui é utilizado para exclusão mútua.
 from __future__ import annotations
 
 import time
+import random
 from datetime import datetime, timezone
 from typing import Mapping
 from uuid import UUID
@@ -27,6 +28,8 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_LOCK_ACQUIRED_TOTAL,
     COLLECTOR_LOCK_SKIPPED_TOTAL,
     COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL,
+    COLLECTOR_LOCK_RETRY_DELAY_SECONDS,
+    COLLECTOR_LOCK_RETRY_TOTAL,
     COLLECTOR_NO_DATA_TOTAL,
     COLLECTOR_SUCCESS_NEW_DATA_TOTAL,
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL,
@@ -48,6 +51,27 @@ from market_alert.enums.enums_products import MonitoredStatus
 
 
 logger = structlog.get_logger("collector_product_task")
+
+LOCK_RETRY_BASE_SECONDS = 5
+LOCK_RETRY_MAX_SECONDS = 60
+LOCK_RETRY_MAX_RETRIES = 3
+LOCK_RETRY_JITTER_RATIO = 0.2
+
+def _compute_lock_retry_delay(
+    attempt: int,
+    *,
+    base_seconds: int = LOCK_RETRY_BASE_SECONDS,
+    max_seconds: int = LOCK_RETRY_MAX_SECONDS,
+    jitter_ratio: float = LOCK_RETRY_JITTER_RATIO,
+) -> int:
+    """ Calcula atraso para retry com backoff exponencial e jitter leve """
+    sanitized_attempt = max(1, attempt)
+    exponential_delay = base_seconds * (2 ** (sanitized_attempt - 1))
+    capped_delay = min(exponential_delay, max_seconds)
+    #Aplica jitter leve para evitar colisão de reexecuções simultâneas
+    jitter_multiplier = 1 + ((random.random() * 2) - 1) * jitter_ratio
+    delay = int(max(1, capped_delay * jitter_multiplier))
+    return delay
 
 def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
     """ Valida campos mínimos, retornando tipo, IDs e URL.
@@ -446,7 +470,7 @@ def collect_product(
 
 @celery_app.task(
     bind=True,
-    max_retries=0,
+    max_retries=LOCK_RETRY_MAX_RETRIES,
     name="market_alert.tasks.collector_product_task.collect_product_task",
     queue="scraping",
     acks_late=True,
@@ -460,12 +484,51 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     invoca o serviço de scraping adequado. Não executa orquestrações extras,
     mantendo a granularidade por item e favorecendo retries simples. Quando o
     lock não pode ser adquirido, retorna ``no_result`` para manter o contrato
-    de status enxuto previsto pelo pipeline.
+    de status enxuto previsto pelo pipeline e agenda retry com backoff leve.
     """
-    outcome, _ = collect_product(
+    outcome, result = collect_product(
         payload,
         use_lock=True,
         dispatch_comparison=True,
         logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
     )
+    if payload is not None:
+        kind, monitored_id, competitor_id, _ = _validate_payload(payload)
+        lock_target = competitor_id or monitored_id
+        trace_id = payload.get("trace_id")
+    else:
+        kind = "unknown"
+        lock_target = None
+        trace_id = None
+
+    if payload and lock_target and outcome == "no_result":
+        error_code = getattr(result, "error_code", None)
+        if error_code == "lock_skipped":
+            attempt = int(getattr(self.request, "retries", 0)) + 1
+            delay = _compute_lock_retry_delay(attempt)
+            COLLECTOR_LOCK_RETRY_TOTAL.labels(kind=kind).inc()
+            COLLECTOR_LOCK_RETRY_DELAY_SECONDS.labels(kind=kind).observe(delay)
+            logger.warning(
+                "collect_lock_retry_scheduled",
+                kind=kind,
+                product_id=str(lock_target),
+                trace_id=trace_id,
+                attempt=attempt,
+                delay_seconds=delay,
+            )
+            try:
+                #Evita disparar exceção para manter o retorno compatível com o contrato
+                self.retry(
+                    countdown=delay,
+                    max_retries=LOCK_RETRY_MAX_RETRIES,
+                    throw=False,
+                )
+            except self.MaxRetriesExceededError:
+                logger.warning(
+                    "collect_lock_retry_exhausted",
+                    kind=kind,
+                    product_id=str(lock_target),
+                    trace_id=trace_id,
+                    attempt=attempt,
+                )
     return outcome

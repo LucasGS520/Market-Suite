@@ -7,6 +7,7 @@ import pytest
 
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
+from market_alert.tasks import collector_product_task
 from market_alert.tasks.scraper_tasks import (
     _compute_retry_delay,
     _result_availability_changed,
@@ -135,4 +136,26 @@ def test_compute_retry_delay_caps_maximum():
 
     #Tentativas posteriores devem respeitar o teto configurado
     assert _compute_retry_delay(base=30, attempt=3, limit=90) == 90
+    
+def test_collect_product_task_lock_skipped_dispara_retry(monkeypatch):
+    """ Lock já ocupado deve agendar retry com atraso calculado. """
+
+    payload = {"monitored_id": VALID_UUID, "url": "http://produto"}
+    captured = {}
+
+    def fake_retry(*_, **kwargs):
+        captured.update(kwargs)
+        return None
+    
+    monkeypatch.setattr(collector_product_task, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(collector_product_task, "acquire_product_lock", lambda *_a, **_k: (False, "owner"))
+    monkeypatch.setattr(collector_product_task, "_compute_lock_retry_delay", lambda *_a, **_k: 15)
+    collect_product_task.request = SimpleNamespace(retries=0, id="task-id")
+    monkeypatch.setattr(collector_product_task, "retry", fake_retry)
+
+    outcome = collect_product_task.run(payload)
+
+    assert outcome == "no_result"
+    assert captured["countdown"] == 15
+    assert captured["max_retries"] == collector_product_task.LOCK_RETRY_MAX_RETRIES
     
