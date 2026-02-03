@@ -161,3 +161,8 @@ lerna-debug.log*
 # Backups and local scripts (do not version)
 /backups/
 /scripts/
+
+# Metrics and monitoring backups (temporary - do not version)
+/metrics_backup/
+/monitoring_backup/
+METRICS_INVENTORY.md
