@@ -1,6 +1,6 @@
-""" Métricas Prometheus para fluxos de notificações e alertas. """
+""" Métricas Prometheus para fluxos de notificações e alertas.  (no-op stubs)"""
 
-from prometheus_client import Counter, Histogram
+from ._noop_metrics import Counter, Histogram
 
 
 NOTIFICATION_EVENTS_TOTAL = Counter(

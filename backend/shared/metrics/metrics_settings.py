@@ -1,6 +1,6 @@
-""" Métricas relacionadas às atualizações de configurações do usuário """
+""" Métricas relacionadas às atualizações de configurações do usuário  (no-op stubs)"""
 
-from prometheus_client import Counter
+from ._noop_metrics import Counter
 
 SETTINGS_PROFILE_UPDATES_TOTAL = Counter(
     "settings_profile_updates_total",

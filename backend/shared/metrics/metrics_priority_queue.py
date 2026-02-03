@@ -1,6 +1,6 @@
-""" Métricas para o agendamento contínuo via fila de prioridade """
+""" Métricas para o agendamento contínuo via fila de prioridade  (no-op stubs)"""
 
-from prometheus_client import Counter, Gauge, Histogram
+from ._noop_metrics import Counter, Gauge, Histogram
 
 PRIORITY_QUEUE_SIZE = Gauge(
     "priority_queue_size",

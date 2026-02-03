@@ -6,7 +6,7 @@ Cada métrica é rotulada pelo nome da biblioteca responsável pelo
 processamento, permitindo identificar gargalos ou falhas específicas.
 """
 
-from prometheus_client import Counter, Histogram
+from ._noop_metrics import Counter, Histogram
 
 #Contador de sucesso por biblioteca utilizada no parsing
 PARSER_SUCCESS_TOTAL = Counter(

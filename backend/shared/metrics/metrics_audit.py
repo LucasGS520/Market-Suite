@@ -1,6 +1,6 @@
-""" Métricas Prometheus para auditoria de logs de scraping """
+""" Métricas Prometheus para auditoria de logs de scraping  (no-op stubs)"""
 
-from prometheus_client import Counter, Histogram
+from ._noop_metrics import Counter, Histogram
 
 AUDIT_RECORDS_TOTAL = Counter(
     "audit_records_total",

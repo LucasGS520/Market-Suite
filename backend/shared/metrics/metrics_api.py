@@ -1,6 +1,6 @@
-""" Métricas específicas de erros da API """
+""" Métricas no-op para API (stubs) """
 
-from prometheus_client import Counter
+from ._noop_metrics import Counter
 
 API_ERRORS_TOTAL = Counter(
     "api_errors_total",

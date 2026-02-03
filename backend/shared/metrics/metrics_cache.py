@@ -4,7 +4,7 @@ Abrange acertos, falhas e limpeza de entradas tanto
 de forma geral quanto por endpoint específico.
 """
 
-from prometheus_client import Counter
+from ._noop_metrics import Counter
 
 CACHE_HITS_TOTAL = Counter(
     "cache_hits_total",

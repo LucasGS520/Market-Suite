@@ -1,6 +1,6 @@
-""" Métricas relacionadas ao uso do Redis """
+""" Métricas relacionadas ao uso do Redis  (no-op stubs)"""
 
-from prometheus_client import Gauge, Counter
+from ._noop_metrics import Gauge, Counter
 
 REDIS_QUEUE_MESSAGES = Gauge(
     "redis_queue_messages",

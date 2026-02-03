@@ -1,6 +1,6 @@
-"""Métricas específicas para fluxos de produtos e concorrentes."""
+"""Métricas específicas para fluxos de produtos e concorrentes. (no-op stubs)"""
 
-from prometheus_client import Counter
+from ._noop_metrics import Counter
 
 MONITORED_PAUSED_TOTAL = Counter(
     "monitored_paused_total",

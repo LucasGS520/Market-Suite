@@ -6,7 +6,7 @@ Celery, permitindo observar volume de tarefas, tamanho
 das filas e duração das execuções.
 """
 
-from prometheus_client import Counter, Gauge, Histogram
+from ._noop_metrics import Counter, Gauge, Histogram
 
 CELERY_TASKS_TOTAL = Counter(
     "celery_tasks_total",

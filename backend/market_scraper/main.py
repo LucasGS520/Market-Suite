@@ -8,7 +8,7 @@ com o restante da plataforma.
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
+from shared.metrics._noop_prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 
 #Importação relativa para execução como pacote
 from .routes import routes_health, routes_scraper

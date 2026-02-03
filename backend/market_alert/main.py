@@ -1,6 +1,6 @@
 """ Aplicação principal FastAPI com configuração de métricas e rotas """
 
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
+from shared.metrics._noop_prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor

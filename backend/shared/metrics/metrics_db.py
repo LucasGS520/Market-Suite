@@ -1,6 +1,6 @@
-""" Métricas de observação do banco de dados """
+""" Métricas de observação do banco de dados  (no-op stubs)"""
 
-from prometheus_client import Gauge
+from ._noop_metrics import Gauge
 
 DB_POOL_SIZE = Gauge(
     "db_pool_size",

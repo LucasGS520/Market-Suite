@@ -1,6 +1,6 @@
-""" Métricas para rotinas de comparação de preços """
+""" Métricas para rotinas de comparação de preços  (no-op stubs)"""
 
-from prometheus_client import Counter, Histogram
+from ._noop_metrics import Counter, Histogram
 
 PRICE_COMPARISONS_TOTAL = Counter(
     "price_comparisons_total",

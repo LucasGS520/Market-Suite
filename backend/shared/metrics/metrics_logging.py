@@ -1,6 +1,6 @@
-""" Métricas referentes ao volume de logs gerados """
+""" Métricas referentes ao volume de logs gerados  (no-op stubs)"""
 
-from prometheus_client import Counter
+from ._noop_metrics import Counter
 
 LOG_ENTRIES_TOTAL = Counter(
     "log_entries_total",

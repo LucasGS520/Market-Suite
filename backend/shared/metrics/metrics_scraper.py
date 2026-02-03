@@ -6,7 +6,7 @@ observabilidade mantendo visibilidade sobre sucesso por etapa, latência,
 interações com cache e verificações de robots.txt.
 """
 
-from prometheus_client import Counter, Gauge, Histogram
+from ._noop_metrics import Counter, Gauge, Histogram
 
 
 #Métricas focadas no pipeline determinístico do scraper

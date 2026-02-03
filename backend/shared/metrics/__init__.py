@@ -1,7 +1,8 @@
-""" Pacote centralizador de métricas Prometheus.
+""" Pacote centralizador de métricas (no-op stubs).
 
-Este pacote expõe as métricas agrupadas por domínio para que os
-serviços possam importá-las de forma organizada
+Este pacote expõe stubs no-op das métricas agrupadas por domínio.
+Quando ENABLE_METRICS=0, todas as operações de métrica são ignoradas
+sem overhead, mas mantendo compatibilidade de API com código existente.
 """
 
 from . import (

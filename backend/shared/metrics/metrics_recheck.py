@@ -1,6 +1,6 @@
-""" Métricas para agendamentos adaptativos de rechecagem """
+""" Métricas para agendamentos adaptativos de rechecagem  (no-op stubs)"""
 
-from prometheus_client import Counter
+from ._noop_metrics import Counter
 
 RECHECK_SCHEDULED_TOTAL = Counter(
     "recheck_scheduled_total",

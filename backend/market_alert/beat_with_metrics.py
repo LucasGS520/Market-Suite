@@ -1,7 +1,7 @@
 """Executor do Celery Beat com endpoint de métricas Prometheus."""
 
 from shared import metrics
-from prometheus_client import start_http_server
+from shared.metrics._noop_prometheus_client import start_http_server
 from market_alert.core.celery_app import celery_app
 
 if __name__ == "__main__":

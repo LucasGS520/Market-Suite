@@ -1,6 +1,6 @@
-""" Métricas relacionadas à autenticação de usuários """
+""" Métricas relacionadas à autenticação de usuários  (no-op stubs)"""
 
-from prometheus_client import Counter
+from ._noop_metrics import Counter
 
 LOGIN_ERRORS_TOTAL = Counter(
     "login_errors_total",

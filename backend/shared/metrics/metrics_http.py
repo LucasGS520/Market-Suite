@@ -1,6 +1,6 @@
-""" Métricas de servidor HTTP exposto via FastAPI """
+""" Métricas de servidor HTTP exposto via FastAPI  (no-op stubs)"""
 
-from prometheus_client import Counter, Histogram
+from ._noop_metrics import Counter, Histogram
 
 HTTP_REQUESTS_TOTAL = Counter(
     "http_requests_total",
