@@ -134,7 +134,7 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 
 ## Checklist antes de concluir uma mudança
 1. Atualize ou confirme a existência de docstrings/comentários relevantes em português.
-2. Ajuste contratos, schemas ou métricas conforme necessário e estejam bem sincronizados com o projeto geral.
+2. Ajuste contratos e schemas conforme necessário e estejam bem sincronizados com o projeto geral.
 3. Execute testes pertinentes e registre resultados.
 4. Valide se novas portas/variáveis foram documentadas.
 5. Revise o `README.md` e demais READMEs específicos para garantir consistência.
