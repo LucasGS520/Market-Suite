@@ -1,0 +1,97 @@
+{
+  "uid": "marketalert_db_auth",
+  "title": "Métricas DB e Autenticação - MarketAlert",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "timezone": "",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Tamanho do Pool de DB",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 6 },
+      "targets": [
+        { "expr": "db_pool_size", "legendFormat": "Pool Size", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0, "nullValueMode": "connected"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Conexões em Uso",
+      "type": "gauge",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 6 },
+      "targets": [
+        { "expr": "db_pool_checkouts", "legendFormat": "Checkouts", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "nullValueMode": "connected"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Erros de Login Totais",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 6 },
+      "targets": [
+        { "expr": "sum(login_errors_total)", "legendFormat": "Erros", "refId": "A" }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Tamanho do Pool ao Longo do Tempo",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 6 },
+      "targets": [
+        { "expr": "db_pool_size", "legendFormat": "Pool Size", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Conexões em Uso ao Longo do Tempo",
+      "datasource": "Prometheus",
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 6 },
+      "targets": [
+        { "expr": "db_pool_checkouts", "legendFormat": "Checkouts", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "nullValueMode": "connected"
+        }
+      },
+      "options": {
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      }
+    }
+  ],
+  "time": { "from": "now-1h", "to": "now" },
+  "annotations": { "list": [] },
+  "tags": ["db", "auth", "marketalert"],
+  "templating": { "list": [] },
+  "links": []
+}

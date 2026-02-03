@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: "MarketAlert Dashboards"
+    orgId: 1
+    folder: "MarketAlert"
+    folderUid: "marketalert"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/dashboards-json
