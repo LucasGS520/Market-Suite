@@ -65,7 +65,48 @@ redis.call('SET', key, string.format('%.4f|%.4f', tokens, now), 'EX', ttl)
 return {allowed, tokens}
 """
 
+_TOKEN_BUCKET_SCRIPT = """
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local refill_rate = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local ttl = tonumber(ARGV[4])
+
+local state = redis.call('GET', key)
+local tokens = capacity
+local last = now
+
+if state then
+    local separator = string.find(state, '|')
+    if separator then
+        tokens = tonumber(string.sub(state, 1, separator - 1)) or capacity
+        last = tonumber(string.sub(state, separator + 1)) or now
+    else
+        tokens = tonumber(state) or capacity
+    end
+    local elapsed = now - last
+    if elapsed > 0 then
+        local refill = elapsed * refill_rate
+        tokens = tokens + refill
+        if tokens > capacity then
+            tokens = capacity
+        end
+    end
+end
+
+local allowed = 0
+if tokens >= 1 then
+    tokens = tokens - 1
+    allowed = 1
+end
+
+redis.call('SET', key, string.format('%.4f|%.4f', tokens, now), 'EX', ttl)
+
+return {allowed, tokens}
+"""
+
 _registered_scripts: dict[int, Any] = {}
+_registered_token_bucket_scripts: dict[int, Any] = {}
 
 def get_redis_client() -> redis.Redis | None:
     """ Retorna um cliente Redis isolado por thread
@@ -95,7 +136,6 @@ def get_redis_client() -> redis.Redis | None:
 
 def set_key_with_ttl(key: str, value: Any, ttl_seconds: int, *, only_if_absent: bool = False) -> bool | None:
     """ Define uma chave no Redis com TTL controlado """
-
     client = get_redis_client()
     if client is None:
         return None
@@ -169,7 +209,6 @@ def consume_leaky_bucket(
         ``(permitido, tokens_atualizados)``. O segundo valor pode ser ``None``
         quando o Redis estiver indisponível.
     """
-
     client = get_redis_client()
     if client is None:
         logger.warning("leaky_bucket_disabled", reason="redis_unavailable", key=key)
@@ -200,10 +239,74 @@ def consume_leaky_bucket(
     except Exception as exc:  # pragma: no cover - proteção contra falhas externas
         logger.warning("leaky_bucket_execution_failed", key=key, error=str(exc))
         return True, None
+    
+def consume_token_bucket(
+    key: str,
+    *,
+    capacity: int,
+    refill_rate_per_second: float,
+    ttl_seconds: int | None = None,
+    now: float | None = None,
+    client: redis.Redis | None = None,
+) -> Tuple[bool, float | None]:
+    """ Aplica *token bucket* no Redis para limitar vazão por chave
+
+    Quando o Redis estiver indisponível, a função permite a requisição
+    para evitar travamento do fluxo de scraping
+
+    Parâmetros
+    ----------
+    key:
+        Chave única que identifica o bucket (ex.: ``rate:host:example``).
+    capacity:
+        Capacidade máxima de tokens acumulados
+    refill_rate_per_second:
+        Taxa de reposição de tokens por segundo
+    ttl_seconds:
+        Tempo de vida da chave no Redis. Se omitido, usa duas janelas completas
+    now:
+        Timestamp atual em segundos, útil para testes determinísticos
+    client:
+        Cliente Redis opcional para reaproveitar conexões existentes
+
+    Retorno
+    -------
+    tuple[bool, float | None]
+        ``(permitido, tokens_restantes)``. O segundo valor é ``None`` em falhas.
+    """
+    redis_client = client or get_redis_client()
+    if redis_client is None:
+        logger.warning("token_bucket_disabled", reason="redis_unavailable", key=key)
+        return True, None
+    
+    if capacity <= 0 or refill_rate_per_second <= 0:
+        logger.warning("token_bucket_invalid_parameters", key=key)
+        return True, None
+    
+    current_time = now or time.time()
+    ttl = ttl_seconds
+    if ttl is None:
+        window_seconds = max(1.0, capacity / refill_rate_per_second)
+        ttl = max(1, int(math.ceil(window_seconds * 2)))
+
+    try:
+        client_id = id(redis_client)
+        script = _registered_token_bucket_scripts.get(client_id)
+        if script is None:
+            script = redis_client.register_script(_TOKEN_BUCKET_SCRIPT)
+            _registered_token_bucket_scripts[client_id] = script
+
+        allowed, tokens = script(
+            keys=[key],
+            args=[capacity, refill_rate_per_second, current_time, ttl],
+        )
+        return bool(int(allowed)), float(tokens)
+    except Exception as exc:
+        logger.warning("token_bucket_execution_failed", key=key, error=str(exc))
+        return True, None
 
 def key_exists(key: str) -> bool:
     """ Verifica de forma resiliente se uma chave existe no Redis """
-
     client = get_redis_client()
     if client is None:
         return False
@@ -224,7 +327,6 @@ def key_exists(key: str) -> bool:
 
 def delete_key(key: str) -> None:
     """ Remove uma chave específica, ignorando falhas de conexão """
-
     client = get_redis_client()
     if client is None:
         return

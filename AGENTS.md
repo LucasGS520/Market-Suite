@@ -27,22 +27,23 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 
 ## Visão arquitetural rápida
 - **Frontend (`frontend/`)**: aplicação React 18 servida por Vite, com servidor Express para produção. Consome a API pública e oferece dashboards responsivos.
-- **Backend (`backend/`)**: agrega `market_alert` (API FastAPI + 3 Workers Celery dedicados) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, métricas, contratos Pydantic, clientes externos).
+- **Backend (`backend/`)**: agrega `market_alert` (API FastAPI + 4 Workers Celery dedicados) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, métricas, contratos Pydantic, clientes externos).
 - **Infraestrutura de apoio**: PostgreSQL, Redis, Prometheus, Grafana, Loki e Alertmanager são orquestrados via `docker-compose.yml`.
 - **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery em filas específicas → workers dedicados consomem e processam → scraper coleta dados → eventos de domínio geram notificações → observabilidade coleta métricas/logs → dashboards são atualizados.
-- **Agendamento contínuo**: o worker `celery-worker-monitor` executa indefinidamente `run_continuous_collector`, que consome a fila de prioridade Redis (sorted sets), coleta monitorados + concorrentes, recalcula estabilidade e reenfileira automaticamente com próximo `next_check_at`.
+- **Agendamento contínuo**: o worker `celery-worker-monitor` executa indefinidamente `run_continuous_collector`, que consome a fila de prioridade Redis (sorted sets), dispara coletas assíncronas de monitorados + concorrentes na fila `scraping` e mantém o reenqueue pendente até a coleta finalizar.
 
 ### Responsabilidades das tarefas Celery (`market_alert`) e Organização de Workers
 
 **Workers Celery:**
-- **celery-worker** (fila `celery,scraping`, concorrência 4): executa `collect_product_task` para scraping imediato de um monitorado/concorrente por vez.
-- **celery-worker-monitor** (fila `monitor`, concorrência 2): executa o loop contínuo `run_continuous_collector` + `compare_prices_task`.
+- **celery-worker-scraping** (fila `celery,scraping`, concorrência 4): executa `collect_product_task` para scraping imediato de um monitorado/concorrente por vez.
+- **celery-worker-monitor** (fila `monitor`, concorrência 4): executa o loop contínuo `run_continuous_collector`.
+- **celery-worker-compare** (fila `compare`, concorrência 2): executa `compare_prices_task` após coletas com mudanças.
 - **celery-worker-notifications** (fila `notifications`, concorrência 2): executa `send_notification_task` + `verification_tasks`.
 
 **Tasks principais:**
 - **Collector (`tasks.collector_product_task.collect_product_task`, fila `scraping`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock Redis e retorna `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`).
-- **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`, fila `monitor`)**: **task que roda indefinidamente** no worker-monitor, consome a fila de prioridade Redis (sorted sets), coleta monitorado + concorrentes em sequência, recalcula `next_check_at` baseado em estabilidade (frequência adaptativa) e reenfileira automaticamente. Inicia via `CONTINUOUS_COLLECTOR_AUTOSTART=1`.
-- **Comparação (`tasks.compare_prices_task.compare_prices_task`, fila `monitor`)**: idempotente e leve; disparada automaticamente após coletas com mudanças de preço/disponibilidade.
+- **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`, fila `monitor`)**: **task que roda indefinidamente** no worker-monitor, consome a fila de prioridade Redis (sorted sets), despacha monitorado + concorrentes para a fila `scraping` e mantém o item em processamento até a coleta terminar. Inicia via `CONTINUOUS_COLLECTOR_AUTOSTART=1`.
+- **Comparação (`tasks.compare_prices_task.compare_prices_task`, fila `compare`)**: idempotente e leve; disparada automaticamente após coletas com mudanças de preço/disponibilidade.
 - **Notificações (`tasks.send_notification_task.send_notification_task`, fila `notifications`)**: entrega alertas com retry e backoff exponencial, registra em `notification_attempt`.
 
 **Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando race conditions e usando Redis como único mecanismo de exclusão mútua (sem flags em banco).
@@ -72,7 +73,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 ## Interação entre serviços
 - Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/src/lib/api.ts`) injeta JWT no header `Authorization` e tenta renovar a sessão via `/auth/refresh` quando recebe `401`.
 - A tela `/settings` consome endpoints protegidos `/settings`, `/settings/profile` e `/settings/notifications`, separando preferências persistidas (perfil/canais) de ajustes visuais locais.
-- Workers Celery consomem filas `celery`, `scraping`, `monitor` e `notifications`, armazenando resultados no PostgreSQL, reprocessando comparações e enfileirando entregas de alertas.
+- Workers Celery consomem filas `celery`, `scraping`, `monitor`, `compare` e `notifications`, armazenando resultados no PostgreSQL, reprocessando comparações e enfileirando entregas de alertas.
 - O `ScraperClient` (`backend/market_alert/services/scraper_client.py`) envia requisições `POST /scraper/parse` ao `market_scraper`, que executa pipeline `FetchHTML → DomainSpecificParser → JsonLdParser → HtmlMetadataParser → GenericFallbackParser`.
 - Resultados de scraping são persistidos e utilizados para calcular difusão de preços e atualizar dashboards.
 
@@ -103,10 +104,10 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 - Valide comandos em ambientes isolados e registre no relatório final as execuções realizadas.
 
 ## Troubleshooting do coletor contínuo
-- **Fila vazia ou sem itens prontos**: verifique `PRIORITY_QUEUE_SIZE`, `PRIORITY_QUEUE_READY_TOTAL` e o conjunto ordenado configurado em `PRIORITY_QUEUE_KEY`. Garanta que o monitorado foi enfileirado com `next_check_at` válido.
+- **Fila vazia ou sem itens prontos**: verifique `PRIORITY_QUEUE_SIZE`, `PRIORITY_QUEUE_READY_TOTAL` e o conjunto ordenado configurado em `PRIORITY_QUEUE_KEY`. Garanta que o monitorado foi enfileirado com `next_check_at` válido e que não está preso em processamento aguardando requeue pós-coleta.
 - **Worker monitor inativo**: confirme o processo `celery-worker-monitor` ativo e a env `CONTINUOUS_COLLECTOR_AUTOSTART=1`. Sem ela, o loop não inicia automaticamente.
 - **Redis indisponível**: valide conectividade e credenciais; o coletor registra `continuous_queue_unavailable` quando o Redis não responde.
-- **Itens presos em processamento**: o loop reaproveita o conjunto de processamento após o TTL configurado em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs de `continuous_processing_reclaimed`.
+- **Itens presos em processamento**: o loop reaproveita o conjunto de processamento após o TTL configurado em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs de `continuous_processing_reclaimed` e a métrica `priority_queue_pending_requeue_total`.
 - **Monitorados pausados**: itens com `paused=true` são ignorados e não retornam para a fila; retome manualmente para reativar a coleta.
 
 ## Checklist antes de concluir uma mudança

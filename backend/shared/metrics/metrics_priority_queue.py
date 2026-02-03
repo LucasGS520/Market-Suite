@@ -69,6 +69,18 @@ PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL = Counter(
     labelnames=("source",),
 )
 
+PRIORITY_QUEUE_PENDING_REQUEUE_TOTAL = Counter(
+    "priority_queue_pending_requeue_total",
+    "Total de itens mantidos no processamento aguardando requeue pós-coleta",
+    labelnames=("source",),
+)
+
+PRIORITY_QUEUE_REQUEUED_FROM_PROCESSING_TOTAL = Counter(
+    "priority_queue_requeued_from_processing_total",
+    "Total de itens que retornaram do processamento para a fila ready",
+    labelnames=("source", "reason"),
+)
+
 __all__ = [
     "PRIORITY_QUEUE_SIZE",
     "PRIORITY_QUEUE_READY_TOTAL",
@@ -82,4 +94,6 @@ __all__ = [
     "CONTINUOUS_COLLECTOR_TIME_LIMIT_EXCEEDED_TOTAL",
     "PRIORITY_QUEUE_RECONCILE_TRIGGERED_TOTAL",
     "PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL",
+    "PRIORITY_QUEUE_PENDING_REQUEUE_TOTAL",
+    "PRIORITY_QUEUE_REQUEUED_FROM_PROCESSING_TOTAL",
 ]

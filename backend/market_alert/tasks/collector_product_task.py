@@ -8,11 +8,13 @@ apenas o lock Redis aplicado aqui é utilizado para exclusão mútua.
 from __future__ import annotations
 
 import time
+import random
 from datetime import datetime, timezone
 from typing import Mapping
 from uuid import UUID
 
 import structlog
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
@@ -27,17 +29,21 @@ from shared.metrics.metrics_scraper import (
     COLLECTOR_LOCK_ACQUIRED_TOTAL,
     COLLECTOR_LOCK_SKIPPED_TOTAL,
     COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL,
+    COLLECTOR_LOCK_RETRY_DELAY_SECONDS,
+    COLLECTOR_LOCK_RETRY_TOTAL,
     COLLECTOR_NO_DATA_TOTAL,
+    COLLECTOR_NO_DATA_REASON_TOTAL,
     COLLECTOR_SUCCESS_NEW_DATA_TOTAL,
     COLLECTOR_SUCCESS_NO_CHANGE_TOTAL,
     COLLECTOR_DURATION_MS,
     COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL,
     COLLECT_LOCK_SKIPPED_TOTAL,
     COLLECT_SUCCESS_TOTAL,
+    COMPARE_DISPATCH_DEBOUNCED_TOTAL,
     MONITORED_SKIPPED_PAUSED_TOTAL,
     SCRAPER_IN_FLIGHT,
 )
-from shared.utils.redis_client import is_scraping_suspended
+from shared.utils.redis_client import is_scraping_suspended, set_key_with_ttl
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.celery_app import celery_app
@@ -48,6 +54,29 @@ from market_alert.enums.enums_products import MonitoredStatus
 
 
 logger = structlog.get_logger("collector_product_task")
+
+LOCK_RETRY_BASE_SECONDS = 5
+LOCK_RETRY_MAX_SECONDS = 60
+LOCK_RETRY_MAX_RETRIES = 3
+LOCK_RETRY_JITTER_RATIO = 0.2
+COMPARE_DEBOUNCE_TTL_SECONDS = 600
+COMPARE_DISPATCH_COUNTDOWN_SECONDS = 3
+
+def _compute_lock_retry_delay(
+    attempt: int,
+    *,
+    base_seconds: int = LOCK_RETRY_BASE_SECONDS,
+    max_seconds: int = LOCK_RETRY_MAX_SECONDS,
+    jitter_ratio: float = LOCK_RETRY_JITTER_RATIO,
+) -> int:
+    """ Calcula atraso para retry com backoff exponencial e jitter leve """
+    sanitized_attempt = max(1, attempt)
+    exponential_delay = base_seconds * (2 ** (sanitized_attempt - 1))
+    capped_delay = min(exponential_delay, max_seconds)
+    #Aplica jitter leve para evitar colisão de reexecuções simultâneas
+    jitter_multiplier = 1 + ((random.random() * 2) - 1) * jitter_ratio
+    delay = int(max(1, capped_delay * jitter_multiplier))
+    return delay
 
 def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
     """ Valida campos mínimos, retornando tipo, IDs e URL.
@@ -99,6 +128,7 @@ def _record_metrics(
     mas sempre retorna um status contratual.
     """
     if lock_status == "skipped":
+        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason or "lock_skipped").inc()
         COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
         COLLECT_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
         COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL.labels(kind=kind, owner=lock_owner or "unknown").inc()
@@ -106,6 +136,7 @@ def _record_metrics(
         return "no_result"
     
     if reason == "scraping_suspended":
+        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason).inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
 
@@ -114,6 +145,7 @@ def _record_metrics(
         return "error"
     
     if reason == "missing_target":
+        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason).inc()
         COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL.labels(kind=kind).inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
@@ -127,6 +159,7 @@ def _record_metrics(
         return "error"
     
     if result.status == "no_result":
+        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason or "validation").inc()
         COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
 
@@ -142,21 +175,77 @@ def _record_metrics(
     COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
     return "error"
 
+def _resolve_no_result_reason(result: ScrapeResult | None) -> str:
+    """ Determina uma razão decritiva para status ``no_result`` """
+    if result is None:
+        return "validation"
+    
+    error_code = (result.error_code or "").strip().lower()
+    if "robot" in error_code:
+        return "robots"
+    
+    if error_code in {"rate_limit", "too_many_requests", "429"} or result.http_status == 429:
+        return "rate_limit"
+    
+    if "timeout" in error_code or result.http_status in {408, 504}:
+        return "timeout"
+    
+    if error_code == "no_result":
+        return "validation"
+    
+    return "validation"
+
 def _dispatch_comparison(
     monitored_id: UUID | None,
     result: ScrapeResult | None,
     trace_id: str | None,
     *,
     force: bool = False,
+    countdown_seconds: int = COMPARE_DISPATCH_COUNTDOWN_SECONDS,
 ) -> None:
     """ Agenda comparação apenas quando scraping trouxe alteração relevante """
     if monitored_id is None or result is None:
+        return
+    
+    if result.persisted_at is None:
+        #Evita enfileirar comparação antes do commit terminar de persistir dados
+        logger.warning(
+            "compare_dispatch_skipped_missing_persisted_at",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+            status=result.status,
+        )
         return
     
     changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
     if not (force or changed):
         return
     
+    debounce_key = f"compare:debounce:{monitored_id}"
+    debounce_registered = set_key_with_ttl(
+        debounce_key,
+        "1",
+        COMPARE_DEBOUNCE_TTL_SECONDS,
+        only_if_absent=True,
+    )
+    if debounce_registered is False:
+        #Evita duplicidade de comparação em janela curta para o mesmo monitorado
+        COMPARE_DISPATCH_DEBOUNCED_TOTAL.labels(reason="debounce_active").inc()
+        logger.info(
+            "compare_prices_debounced",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+            ttl_seconds=COMPARE_DEBOUNCE_TTL_SECONDS,
+        )
+        return
+    if debounce_registered is None:
+        #Mantém o fluxo mesmo sem Redis para não perder comparações relevantes
+        logger.warning(
+            "compare_debounce_unavailable",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+        )
+
     #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
     celery_app.send_task(
         "market_alert.tasks.compare_prices_task.compare_prices_task",
@@ -168,6 +257,8 @@ def _dispatch_comparison(
         ],
         #Mantém comparação na fila dedicada para não saturar o worker do coletor contínuo
         queue="compare",
+        #Pequeno atraso para reduzir janelas de leitura suja após commit
+        countdown=countdown_seconds,
     )
     logger.info(
         "compare_prices_enqueued",
@@ -175,7 +266,40 @@ def _dispatch_comparison(
         trace_id=trace_id,
         forced=force,
         changed=changed,
+        countdown_seconds=countdown_seconds,
     )
+
+def _schedule_comparison_after_commit(
+    session_manager: Session,
+    monitored_id: UUID | None,
+    result: ScrapeResult | None,
+    trace_id: str | None,
+    *,
+    force: bool,
+) -> None:
+    """ Registra callback para disparar comparação após commit da sessão """
+    transaction = session_manager.get_transaction()
+
+    def _dispatch_callback() -> None:
+        _dispatch_comparison(
+            monitored_id,
+            result,
+            trace_id,
+            force=force,
+        )
+
+    if transaction is not None and hasattr(transaction, "on_commit"):
+        #Usa hook nativo do SQLAlchemy 2 para garantir execução pós-commit
+        transaction.on_commit(_dispatch_callback)
+        return
+    
+    if transaction is not None:
+        #Fallback registra evento quando o hook on_commit não está disponível
+        event.listen(session_manager, "after_commit", lambda _session: _dispatch_callback(), once=True)
+        return
+    
+    #Sem transação ativa, a persistência já ocorreu
+    _dispatch_callback()
 
 def _parse_force_compare_(value: str | None) -> bool:
     """ Normaliza o flag de disparo forçado para comparação """
@@ -398,8 +522,24 @@ def collect_product(
                 if db is None:
                     with SessionLocal() as session_manager:
                         _collect_with_db(session_manager)
+                        if dispatch_comparison:
+                            _schedule_comparison_after_commit(
+                                session_manager,
+                                monitored_id,
+                                result,
+                                trace_id,
+                                force=force_compare,
+                            )
                 else:
                     _collect_with_db(db)
+                    if dispatch_comparison:
+                        _schedule_comparison_after_commit(
+                            db,
+                            monitored_id,
+                            result,
+                            trace_id,
+                            force=force_compare,
+                        )
                             
     except ScraperError as exc:
         reason = "scraper_error"
@@ -409,6 +549,9 @@ def collect_product(
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        if result is not None and result.status == "no_result" and reason is None:
+            #Garante que ``no_result`` sempre carregue motivo descritivo para diagnóstico
+            reason = _resolve_no_result_reason(result)
         outcome = _record_metrics(
             kind,
             result,
@@ -439,14 +582,12 @@ def collect_product(
             trace_id=trace_id,
             enqueued_at=enqueued_at,
         )
-        if dispatch_comparison:
-            _dispatch_comparison(monitored_id, result, trace_id, force=force_compare)
 
     return outcome, result
 
 @celery_app.task(
     bind=True,
-    max_retries=0,
+    max_retries=LOCK_RETRY_MAX_RETRIES,
     name="market_alert.tasks.collector_product_task.collect_product_task",
     queue="scraping",
     acks_late=True,
@@ -460,12 +601,51 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     invoca o serviço de scraping adequado. Não executa orquestrações extras,
     mantendo a granularidade por item e favorecendo retries simples. Quando o
     lock não pode ser adquirido, retorna ``no_result`` para manter o contrato
-    de status enxuto previsto pelo pipeline.
+    de status enxuto previsto pelo pipeline e agenda retry com backoff leve.
     """
-    outcome, _ = collect_product(
+    outcome, result = collect_product(
         payload,
         use_lock=True,
         dispatch_comparison=True,
         logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
     )
+    if payload is not None:
+        kind, monitored_id, competitor_id, _ = _validate_payload(payload)
+        lock_target = competitor_id or monitored_id
+        trace_id = payload.get("trace_id")
+    else:
+        kind = "unknown"
+        lock_target = None
+        trace_id = None
+
+    if payload and lock_target and outcome == "no_result":
+        error_code = getattr(result, "error_code", None)
+        if error_code == "lock_skipped":
+            attempt = int(getattr(self.request, "retries", 0)) + 1
+            delay = _compute_lock_retry_delay(attempt)
+            COLLECTOR_LOCK_RETRY_TOTAL.labels(kind=kind).inc()
+            COLLECTOR_LOCK_RETRY_DELAY_SECONDS.labels(kind=kind).observe(delay)
+            logger.warning(
+                "collect_lock_retry_scheduled",
+                kind=kind,
+                product_id=str(lock_target),
+                trace_id=trace_id,
+                attempt=attempt,
+                delay_seconds=delay,
+            )
+            try:
+                #Evita disparar exceção para manter o retorno compatível com o contrato
+                self.retry(
+                    countdown=delay,
+                    max_retries=LOCK_RETRY_MAX_RETRIES,
+                    throw=False,
+                )
+            except self.MaxRetriesExceededError:
+                logger.warning(
+                    "collect_lock_retry_exhausted",
+                    kind=kind,
+                    product_id=str(lock_target),
+                    trace_id=trace_id,
+                    attempt=attempt,
+                )
     return outcome

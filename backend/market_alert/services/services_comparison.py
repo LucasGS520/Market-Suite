@@ -6,6 +6,7 @@ frontend.
 """
 
 from uuid import UUID
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -34,6 +35,7 @@ from market_alert.crud.crud_comparison import (
     upsert_price_comparison_summary,
 )
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
+from market_alert.models.models_price_history import PriceHistory
 from market_alert.models.models_products import CompetitorProduct
 from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
 from market_alert.models import User
@@ -102,6 +104,15 @@ def get_comparison_summary_for_user(
         )
     else:
         competitors_count = _extract_competitors_count(stored_summary)
+        if _should_refresh_competitors_count(
+            db=db,
+            monitored_id=monitored_id,
+            summary_timestamp=stored_summary.timestamp,
+        ):
+            #Recalcula a contagem para refletir concorrentes adicionados após o snapshot
+            competitors_count = count_competitors_by_monitored(
+                db, monitored_id, include_paused=True
+            )
 
     if stored_summary and stored_summary.comparison_id:
         comparison = get_comparison_by_id(db, stored_summary.comparison_id)
@@ -163,15 +174,33 @@ def run_price_comparison(
         #Define total antes dos filtros para persistir a contagem completa
         total_competitors = len(competitors)
         
-        available_competitors = [
-            competitor
-            for competitor in competitors
-            if competitor.current_price is not None
-            and competitor.availability is not False
-            and getattr(competitor, "status", ProductStatus.available)
-            not in {ProductStatus.unavailable, ProductStatus.removed}
-            and not getattr(competitor, "is_paused", False)
-        ]
+        filtered_reasons: dict[str, int] = {}
+        available_competitors: list[CompetitorProduct] = []
+        for competitor in competitors:
+            if getattr(competitor, "is_paused", False):
+                filtered_reasons["paused"] = filtered_reasons.get("paused", 0) + 1
+                continue
+            
+            status_value = getattr(competitor, "status", ProductStatus.available)
+            if status_value in {ProductStatus.unavailable, ProductStatus.removed}:
+                filtered_reasons["status_unavailable"] = filtered_reasons.get("status_unavailable", 0) + 1
+                continue
+            
+            resolved_price, price_source = _resolve_competitor_comparison_price(db, competitor)
+            if resolved_price is None:
+                filtered_reasons["missing_price"] = filtered_reasons.get("missing_price", 0) + 1
+                continue
+            
+            if competitor.availability is False:
+                filtered_reasons["availability_false"] = filtered_reasons.get("availability_false", 0) + 1
+                continue
+            
+            if competitor.current_price is None:
+                #Usa o último preço do histórico apenas para comparação, sem persistir no banco
+                competitor.current_price = resolved_price
+                competitor._comparison_price_source = price_source
+
+            available_competitors.append(competitor)
 
         filtered_out = total_competitors - len(available_competitors)
         if filtered_out:
@@ -180,6 +209,7 @@ def run_price_comparison(
                 filtered=filtered_out,
                 total=total_competitors,
                 available=len(available_competitors),
+                reasons=filtered_reasons,
             )
 
         inactive_reason = _resolve_monitored_inactive_reason(monitored)
@@ -318,6 +348,27 @@ def _deduplicate_competitors(competitors: List[CompetitorProduct]) -> List[Compe
 
     return list(deduped.values())
 
+def _resolve_competitor_comparison_price(
+    db: Session,
+    competitor: CompetitorProduct,
+) -> tuple[Decimal | None, str]:
+    """ Recupera o preço preferencial para comparação com fallback em histórico.
+
+    Quando o preço atual está vazio, buscamos o último registro de histórico
+    para reduzir falsos negativos em comparações recém-atualizados.
+    """
+    if competitor.current_price is not None:
+        return competitor.current_price, "current_price"
+    
+    latest_price = (
+        db.query(PriceHistory.price)
+        .filter(PriceHistory.competitor_product_id == competitor.id)
+        .order_by(desc(PriceHistory.checked_at), desc(PriceHistory.created_at))
+        .limit(1)
+        .scalar()
+    )
+    return _to_decimal(latest_price), "price_history"
+
 def _to_decimal(value: Any) -> Optional[Decimal]:
     """ Converte valores do JSON armazenado para Decimal quando possível """
     if value is None:
@@ -352,6 +403,40 @@ def _extract_competitors_count(
     except (TypeError, ValueError):
         #Padroniza a contagem em zero quando o valor não puder ser interpretado como inteiro
         return 0
+    
+def _should_refresh_competitors_count(
+    *,
+    db: Session,
+    monitored_id: UUID,
+    summary_timestamp: Any | None,
+) -> bool:
+    """ Indica quando a contagem de concorrentes deve ser recalculada.
+
+    A lógica verifica se existe concorrente criado após o resumo salvo.
+    Quando timestamp do resumo ou o campo de criação não está disponível,
+    assume que a contagem pode estar desatualizada para garantir coerência na UI.
+    """
+    if summary_timestamp is None:
+        #Sem timestamp confiável, evitamos reutilizar contagem possívelmente desatualizada
+        return True
+    
+    if not hasattr(CompetitorProduct, "created_at"):
+        #Fallback defensivo caso o modelo não exponha data de criação
+        return True
+    
+    latest_created_at = (
+        db.query(func.max(CompetitorProduct.created_at))
+        .filter(CompetitorProduct.monitored_product_id == monitored_id)
+        .scalar()
+    )
+    if latest_created_at is None:
+        return False
+    
+    try:
+        return latest_created_at > summary_timestamp
+    except TypeError:
+        #Evita falhas com datas naive/aware e força recálculo seguro
+        return True
     
 def _empty_summary(competitors_count: int) -> Dict[str, Any]:
     """ Cria estrutura base do resumo competitivo com valores padrão """
@@ -758,6 +843,9 @@ def build_comparison_summary(
                 continue
             
             merged_payload[key] = value
+
+        #Garante que a contagem reflita o valor recalculado, mesmo com snapshot presente
+        merged_payload["competitors_count"] = competitors_count
 
         return _apply_summary_defaults(
             merged_payload,

@@ -10,6 +10,7 @@ instâncias de :class:`ParserRequest` e valida o retorno por meio de
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, ClassVar, Literal, Mapping, Optional
 from uuid import UUID
@@ -170,6 +171,7 @@ class ScrapeResult:
     http_status: int | None = None
     error_code: str | None = None
     retry_after: int | None = None
+    persisted_at: datetime | None = None
 
     def __getitem__(self, item: str):
         """ Permite acesso estilo dicionário para compatibilidade retroativa """

@@ -131,7 +131,7 @@ services:
 
 
   #Worker do Celery para tarefas assíncronas gerais (scraping)
-  celery-worker:
+  celery-worker-scraping:
     build:
       context: ./backend/market_alert
       dockerfile: Dockerfile
@@ -190,7 +190,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=2"
+      - "--concurrency=4"
       - "-Q"
       - "monitor"
     user:

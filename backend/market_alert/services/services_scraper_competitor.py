@@ -93,6 +93,8 @@ def scrape_competitor_product(
     status_code = response.status_code
     now = collected_at or datetime.now(timezone.utc)
 
+    persisted_at: datetime | None = None
+
     if status_code == 304:
         if existing:
             #Atualiza marcações de checagem para manter cadência mesmo sem alterações de conteúdo.
@@ -113,6 +115,7 @@ def scrape_competitor_product(
             status="not_modified",
             product_id=str(existing.id) if existing else None,
             http_status=304,
+            persisted_at=persisted_at,
         )
 
     if status_code == 422 and response.error_code == "no_result":
@@ -194,4 +197,5 @@ def scrape_competitor_product(
         price_changed=bool(getattr(competitor, "_price_changed", True)),
         availability_changed=bool(getattr(competitor, "_availability_changed", True)),
         http_status=200,
+        persisted_at=persisted_at,
     )

@@ -9,6 +9,7 @@ import pytest
 from backend.market_alert.scraper.scraper_client import ScraperClientError
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.exceptions import ScraperError
+from market_alert.tasks import collector_product_task
 from market_alert.tasks.scraper_tasks import collect_competitor_task, collect_product_task
 
 
@@ -304,6 +305,28 @@ def test_collect_product_task_no_result_sem_id_nao_registra(monkeypatch):
     )
 
     assert calls == []
+
+def test_collect_product_task_lock_skipped_agenda_retry(monkeypatch):
+    """ Lock ocupado agenda retry sem executar scraping """
+
+    payload = {"monitored_id": VALID_UUID, "url": "https://mercadolivre.com.br/abc"}
+    captured = {}
+
+    def fake_retry(*_, **kwargs):
+        captured.update(kwargs)
+        return None
+    
+    _patch_task_attr(monkeypatch, "is_scraping_suspended", lambda: False)
+    _patch_task_attr(monkeypatch, "acquire_product_lock", lambda *_a, **_k: (False, "owner"))
+    _patch_task_attr(monkeypatch, "_compute_lock_retry_delay", lambda *_a, **_k: 12)
+    collect_product_task.request = SimpleNamespace(retries=1, id="task-id")
+    monkeypatch.setattr(collect_product_task, "retry", fake_retry)
+
+    outcome = collect_product_task.run(payload)
+
+    assert outcome == "no_result"
+    assert captured["countdown"] == 12
+    assert captured["max_retries"] == collector_product_task.LOCK_RETRY_MAX_RETRIES
 
 def test_collect_competitor_task_not_modified(monkeypatch):
     """Resposta 304 deve ainda manter o payload intacto ao delegar."""

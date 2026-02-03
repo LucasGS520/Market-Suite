@@ -8,6 +8,7 @@ as janelas de rechecagem com base na estabilidade observada.
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from billiard.exceptions import TimeLimitExceeded
 from celery.exceptions import SoftTimeLimitExceeded
+from celery.canvas import Signature
 
 from shared.infra.db import SessionLocal
 from shared.metrics.metrics_priority_queue import (
@@ -26,17 +28,14 @@ from shared.metrics.metrics_priority_queue import (
     PRIORITY_QUEUE_LOOP_ERRORS_TOTAL,
     PRIORITY_QUEUE_PROCESSED_TOTAL,
     PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL,
+    PRIORITY_QUEUE_PENDING_REQUEUE_TOTAL,
+    PRIORITY_QUEUE_REQUEUED_FROM_PROCESSING_TOTAL,
     PRIORITY_QUEUE_READY_TOTAL,
     PRIORITY_QUEUE_SIZE,
     PRIORITY_QUEUE_STABILITY_TOTAL,
 )
-from shared.metrics.metrics_products import COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL
 from shared.metrics.metrics_scraper import (
-    COMPETITOR_COLLECT_DURATION_MS,
-    COMPETITOR_COLLECT_IN_FLIGHT,
-    COMPETITOR_COLLECT_OUTCOME_TOTAL,
-    CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL,
-    CONTINUOUS_COMPETITOR_SKIPPED_TOTAL,
+    CONTINUOUS_COLLECT_DISPATCH_TOTAL,
     MONITORED_SKIPPED_PAUSED_TOTAL,
 )
 from shared.utils.redis_client import is_scraping_suspended
@@ -49,28 +48,44 @@ from shared.utils.redis_locks import (
 from market_alert.core.celery_app import celery_app
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
-from market_alert.crud.crud_monitored import get_monitored_product_by_id, get_last_price_change_for_monitored
+from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, build_competitor_payload
 from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.services.services_priority_queue_manager import enqueue_monitored_at
-from market_alert.tasks.collector_product_task import collect_product
 from market_alert.utils.interval_calculator_products import (
-    calculate_next_check_at,
-    calculate_stability_score,
     STABILITY_STABLE,
     STABILITY_UNSTABLE,
     STABILITY_VERY_STABLE,
 )
-from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 
 logger = structlog.get_logger("continuous_collector_task")
 
+@dataclass(frozen=True)
+class CollectDispatchDecision:
+    """ Resultado do disparo assíncrono com orientação de reenfileiramento """
+    outcome: str
+    next_check_at: datetime | None
+    should_requeue: bool
+    retain_processing: bool
+
 def _utc_now() -> datetime:
     """ Retorna timestamp em UTC sem microssegundos para logs e métricas """
     return datetime.now(timezone.utc).replace(microsecond=0)
+
+def _resolve_next_check_at(
+    monitored: MonitoredProduct,
+    next_check_at: datetime | None,
+) -> tuple[datetime, datetime]:
+    """ Resolve o próximo check garantindo data válida e retorna também o horário base """
+    now = _utc_now()
+    resolved_next_check_at = next_check_at or monitored.next_check_at or now
+    if resolved_next_check_at < now:
+        #Evita reenqueue com horário no passado para impedir loops ociosos
+        resolved_next_check_at = now
+    return resolved_next_check_at, now
 
 def _normalize_enqueued_at(enqueued_at: datetime | None) -> datetime | None:
     """ Normaliza o timestamp de enfileiramento para UTC """
@@ -128,12 +143,51 @@ def _should_abort(task_request) -> bool:
         return False
     return bool(abort_fn())
 
+def _dispatch_collect_task(
+    *,
+    payload: dict[str, str | None],
+    kind: str,
+    monitored_id: str,
+    trace_id: str,
+    competitor_id: str | None = None,
+    on_complete: Signature | None = None,
+    on_error: Signature | None = None,
+) -> bool:
+    """ Dispara coleta assíncrona mantendo métricas e logs do coletor contínuo """
+    try:
+        celery_app.send_task(
+            "market_alert.tasks.collector_product_task.collect_product_task",
+            kwargs={"payload": payload},
+            queue="scraping",
+            link=on_complete,
+            link_error=on_error,
+        )
+        CONTINUOUS_COLLECT_DISPATCH_TOTAL.labels(kind=kind, status="enqueued").inc()
+        logger.info(
+            "continuous_collect_dispatched",
+            kind=kind,
+            monitored_id=monitored_id,
+            competitor_id=competitor_id,
+            trace_id=trace_id,
+        )
+        return True
+    except Exception:
+        CONTINUOUS_COLLECT_DISPATCH_TOTAL.labels(kind=kind, status="failed").inc()
+        logger.exception(
+            "continuous_collect_enqueue_failed",
+            kind=kind,
+            monitored_id=monitored_id,
+            competitor_id=competitor_id,
+            trace_id=trace_id,
+        )
+        return False
+
 def _collect_group(
     *,
     monitored: MonitoredProduct,
     enqueued_at: datetime | None,
-) -> tuple[str, datetime | None]:
-    """ Coleta monitorado e concorrentes e retorna desfecho e próxima rechecagem """
+) -> CollectDispatchDecision:
+    """ Dispara coletas do monitorado e concorrentes retornando decisão de reenqueue """
     with SessionLocal() as db:
         refreshed = get_monitored_product_by_id(db, monitored.id)
         if refreshed:
@@ -145,7 +199,12 @@ def _collect_group(
                     monitored_id=str(refreshed.id),
                     status=refreshed.status,
                 )
-                return "skipped_paused", None
+                return CollectDispatchDecision(
+                    outcome="skipped_paused",
+                    next_check_at=None,
+                    should_requeue=False,
+                    retain_processing=False,
+                )
             #Mantém os dados atualizados para o restante do processamento
             db.expunge(refreshed)
             monitored = refreshed
@@ -153,7 +212,6 @@ def _collect_group(
     trace_id = str(uuid4())
     group_started_at = _utc_now()
     group_started_perf = time.perf_counter()
-    next_check_at: datetime | None = None
 
     if monitored.paused or monitored.status in {MonitoredStatus.failed}:
         #Evita coletas em itens pausados para respeitar contrato de pausa
@@ -162,7 +220,12 @@ def _collect_group(
             monitored_id=str(monitored.id),
             status=monitored.status,
         )
-        return "skipped_paused", None
+        return CollectDispatchDecision(
+            outcome="skipped_paused",
+            next_check_at=None,
+            should_requeue=False,
+            retain_processing=False,
+        )
     
     logger.info(
         "continuous_group_started",
@@ -181,237 +244,86 @@ def _collect_group(
     _record_enqueue_latency(enqueued_at, group_started_at)
 
     with SessionLocal() as db:
-        #Usa uma sessão compartilhada para manter commits e refresh no mesmo contexto
-        try:
-            outcome, monitored_result = collect_product(
-                monitored_payload,
-                use_lock=True,
-                dispatch_comparison=False,
-                logger_bound=logger.bind(monitored_id=str(monitored.id), trace_id=trace_id),
-                db=db,
-            )
-        except Exception:
-            #Mantém o loop vivo ao capturar falhas inesperadas do coletor do monitorado
-            logger.exception(
-                "continuous_monitored_collect_failed",
-                monitored_id=str(monitored.id),
-                trace_id=trace_id,
-            )
-            outcome, monitored_result = "error", None
-
         competitors = get_competitors_by_monitored_id(
             db,
             monitored.id,
             include_paused=False,
             include_inactive=True, #Inclui itens indisponíveis para rechecagem
         )
-        competitor_change_detected = False
-        for competitor in competitors:
-            db.refresh(competitor)
-            previous_change_at = competitor.last_price_change_at
-            competitor_started_perf = time.perf_counter()
-            competitor_payload = build_competitor_payload(
-                competitor,
-                user_id=monitored.user_id,
-                enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
-            )
-            competitor_payload["trace_id"] = trace_id
-            try:
-                COMPETITOR_COLLECT_IN_FLIGHT.inc()
-                competitor_outcome, competitor_result = collect_product(
-                    competitor_payload,
-                    use_lock=True,
-                    dispatch_comparison=False,
-                    logger_bound=logger.bind(
-                        monitored_id=str(monitored.id),
-                        competitor_id=str(competitor.id),
-                        trace_id=trace_id,
-                    ),
-                    db=db,
-                )
-            except Exception:
-                #Isola falhas de concorrentes para não comprometer grupo inteiro
-                logger.exception(
-                    "continuous_competitor_collect_failed",
-                    monitored_id=str(monitored.id),
-                    competitor_id=str(competitor.id),
-                    trace_id=trace_id,
-                )
-                competitor_outcome, competitor_result = "error", None
-            finally:
-                #Mantém o gauge consistente mesmo quando ocorrem falhas inesperadas
-                COMPETITOR_COLLECT_IN_FLIGHT.dec()
-                competitor_duration_ms = int(
-                    (time.perf_counter() - competitor_started_perf) * 1000
-                )
-                COMPETITOR_COLLECT_DURATION_MS.observe(competitor_duration_ms)
-            _record_competitor_metrics(
-                outcome=competitor_outcome,
-                result=competitor_result,
-                monitored_id=str(monitored.id),
-                competitor_id=str(competitor.id),
-                trace_id=trace_id,
-            )
-            db.refresh(competitor)
-            if competitor.last_price_change_at != previous_change_at:
-                competitor_change_detected = True
-            logger.info(
-                "continuous_competitor_collected",
-                monitored_id=str(monitored.id),
-                competitor_id=str(competitor.id),
-                duration_ms=competitor_duration_ms,
-                trace_id=trace_id,
-            )
 
-        group_finished_at = _utc_now()
-        refreshed = get_monitored_product_by_id(db, monitored.id)
-        if refreshed:
-            refreshed.group_collected_at = group_finished_at
-            refreshed.last_price_change_at = get_last_price_change_for_monitored(
-                db,
-                refreshed.id,
-            )
-            if competitor_change_detected:
-                #Reduzimos estabilidade para acelerar novas coletas após mudanças do concorrente.
-                refreshed.stability_score = STABILITY_UNSTABLE
-                COMPETITOR_CHANGE_AFFECTED_STABILITY_TOTAL.inc()
-                logger.info(
-                    "monitored_stability_reset_by_competitor",
-                    monitored_id=str(refreshed.id),
-                    collected_at=group_finished_at.isoformat(),
-                )
-            else:
-                refreshed.stability_score = calculate_stability_score(
-                    refreshed,
-                    reference_time=group_finished_at,
-                )
-            refreshed.next_check_at = calculate_next_check_at(
-                refreshed,
-                collected_at=group_finished_at,
-            )
-            next_check_at = refreshed.next_check_at
-            if next_check_at is None or next_check_at < group_finished_at:
-                #Protege o reenque com um timestamp válido para manter a fila ativa
-                next_check_at = group_finished_at
-                refreshed.next_check_at = next_check_at
-            db.commit()
-
-    if monitored_result and monitored_result.status:
-        PRIORITY_QUEUE_PROCESSED_TOTAL.labels(source="continuous", outcome=monitored_result.status).inc()
-    else:
-        PRIORITY_QUEUE_PROCESSED_TOTAL.labels(source="continuous", outcome=outcome).inc()
-
-    if monitored_result is not None:
-        has_change = bool(
-            getattr(monitored_result, "price_changed", False)
-            or getattr(monitored_result, "availability_changed", False)
+    monitored_enqueued = _dispatch_collect_task(
+        payload=monitored_payload,
+        kind="monitored",
+        monitored_id=str(monitored.id),
+        trace_id=trace_id,
+        on_complete=celery_app.signature(
+            "market_alert.tasks.continuous_collector_task.finalize_processing_requeue",
+            args=[str(monitored.id)],
+            kwargs={"trace_id": trace_id},
+        ).set(queue="monitor"),
+        on_error=celery_app.signature(
+            "market_alert.tasks.continuous_collector_task.finalize_processing_requeue_error",
+            args=[str(monitored.id)],
+            kwargs={"trace_id": trace_id},
+        ).set(queue="monitor"),
+    )
+    if not monitored_enqueued:
+        return CollectDispatchDecision(
+            outcome="enqueue_failed",
+            next_check_at=_utc_now(),
+            should_requeue=True,
+            retain_processing=False,
         )
-    else:
-        has_change = False
 
-    if has_change or competitor_change_detected:
-        #Dispara comparação apenas uma vez após coletar todo o grupo
-        celery_app.send_task(
-            "market_alert.tasks.compare_prices_task.compare_prices_task",
-            args=[
-                str(monitored.id),
-                bool(getattr(monitored_result, "price_changed", False)) if monitored_result else False,
-                bool(getattr(monitored_result, "availability_changed", False)) if monitored_result else False,
-                trace_id,
-            ],
-            queue="compare",
+    competitor_failures = 0
+    for competitor in competitors:
+        competitor_payload = build_competitor_payload(
+            competitor,
+            user_id=monitored.user_id,
+            enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
         )
+        competitor_payload["trace_id"] = trace_id
+        dispatched = _dispatch_collect_task(
+            payload=competitor_payload,
+            kind="competitor",
+            monitored_id=str(monitored.id),
+            competitor_id=str(competitor.id),
+            trace_id=trace_id,
+        )
+        if not dispatched:
+            competitor_failures += 1
 
     group_duration_ms = int((time.perf_counter() - group_started_perf) * 1000)
+    competitor_total = len(competitors)
     logger.info(
-        "continuous_group_finished",
+        "continuous_group_dispatched",
         monitored_id=str(monitored.id),
+        competitors_total=competitor_total,
+        competitors_failed=competitor_failures,
         duration_ms=group_duration_ms,
         trace_id=trace_id,
     )
 
-    if next_check_at is None:
-        #Garante que o reagendamento sempre tenha base temporal válida
-        next_check_at = _utc_now()
-
-    return outcome, next_check_at
-
-def _record_competitor_metrics(
-    *,
-    outcome: str,
-    result: ScrapeResult | None,
-    monitored_id: str,
-    competitor_id: str,
-    trace_id: str,
-) -> None:
-    """ Registra métricas específicas de concorrentes processados no loop contínuo """
-    outcome_label = _resolve_competitor_outcome_label(outcome=outcome, result=result)
-    if outcome_label:
-        COMPETITOR_COLLECT_OUTCOME_TOTAL.labels(outcome=outcome_label).inc()
-    
-    if result is None:
-        if outcome == "error":
-            CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL.inc()
-        return
-    
-    if result.error_code == "lock_skipped":
-        CONTINUOUS_COMPETITOR_SKIPPED_TOTAL.labels(reason="lock").inc()
-        logger.info(
-            "continuous_competitor_skipped_lock",
-            monitored_id=monitored_id,
-            competitor_id=competitor_id,
-            trace_id=trace_id,
-        )
-        return
-
-    if result.error_code == "paused":
-        CONTINUOUS_COMPETITOR_SKIPPED_TOTAL.labels(reason="paused").inc()
-        logger.info(
-            "continuous_competitor_skipped_paused",
-            monitored_id=monitored_id,
-            competitor_id=competitor_id,
-            trace_id=trace_id,
-        )
-        return
-    
-    if result.status == "no_result" and result.error_code == "no_result":
-        CONTINUOUS_COMPETITOR_PARSE_FAILURE_TOTAL.inc()
-        logger.info(
-            "continuous_competitor_parse_failure",
-            monitored_id=monitored_id,
-            competitor_id=competitor_id,
-            trace_id=trace_id,
-        )
-
-def _resolve_competitor_outcome_label(
-    *,
-    outcome: str,
-    result: ScrapeResult | None,
-) -> str | None:
-    """ Normaliza o label de desfecho de concorrentes para métricas consolidadas """
-    if result is None:
-        return "error" if outcome == "error" else None
-    if result.error_code == "lock_skipped":
-        return "lock_skipped"
-    if result.status in {"success", "not_modified", "no_result", "error"}:
-        return result.status
-    if outcome in {"success", "not_modified", "no_result", "error"}:
-        return outcome
-    return None
+    if competitor_failures:
+        outcome = "enqueued_partial"
+    else:
+        outcome = "enqueued"
+    return CollectDispatchDecision(
+        outcome=outcome,
+        next_check_at=None,
+        should_requeue=False,
+        retain_processing=True,
+    )
 
 def _requeue_monitored(
     *,
     monitored: MonitoredProduct,
     next_check_at: datetime | None = None,
     queue_service: PriorityQueueService,
-) -> bool:
+) -> tuple[bool, datetime]:
     """ Reenfileira monitorado e informa se houve sucesso no enqueue """
     #Usa a janela calculada pela coleta para garantir o reenqueue correto
-    now = _utc_now()
-    resolved_next_check_at = next_check_at or monitored.next_check_at or now
-    if resolved_next_check_at < now:
-        #Evita reenqueue com horário no passado para impedir loops ociosos
-        resolved_next_check_at = now
+    resolved_next_check_at, now = _resolve_next_check_at(monitored, next_check_at)
     #Centraliza o reenqueue para registrar métricas e logs padronizados
     if enqueue_monitored_at(
         monitored.id,
@@ -419,7 +331,7 @@ def _requeue_monitored(
         source="continuous_worker",
         queue_service=queue_service,
     ):
-        return True
+        return True, resolved_next_check_at
     
     logger.error(
         "continuous_requeue_failed",
@@ -438,9 +350,9 @@ def _requeue_monitored(
             monitored_id=str(monitored.id),
             next_check_at=now.isoformat(),
         )
-        return True
+        return True, now
 
-    return False
+    return False, resolved_next_check_at
 
 def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
     """ Carrega monitorado por ID garantindo UUID válido """
@@ -454,6 +366,97 @@ def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable
     """ Remove itens processados do conjunto auxiliar de processamento """
     queue_service.drain_processing(product_ids)
 
+def _handle_processing_requeue(
+    *,
+    monitored_id: str,
+    collect_outcome: str | None,
+    reason: str,
+    trace_id: str | None = None,
+) -> None:
+    """ Conclui o fluxo de processamento movendo o item de volta para o ready """
+    queue_service = PriorityQueueService()
+    normalized_reason = reason or collect_outcome or "unknown"
+
+    with SessionLocal() as db:
+        monitored = _load_monitored(db, monitored_id)
+        if monitored is None:
+            logger.warning(
+                "continuous_processing_missing",
+                monitored_id=monitored_id,
+                reason="monitored_missing",
+                trace_id=trace_id,
+            )
+            queue_service.drain_processing([monitored_id])
+            return
+        
+        resolved_next_check_at, _ = _resolve_next_check_at(monitored, None)
+        requeued, effective_next_check_at = _requeue_monitored(
+            monitored=monitored,
+            next_check_at=resolved_next_check_at,
+            queue_service=queue_service,
+        )
+
+    if requeued:
+        queue_service.drain_processing([monitored_id])
+        PRIORITY_QUEUE_REQUEUED_FROM_PROCESSING_TOTAL.labels(
+            source="continuous_worker",
+            reason=normalized_reason,
+        ).inc()
+        logger.info(
+            "continuous_processing_returned_to_ready",
+            monitored_id=monitored_id,
+            next_check_at=effective_next_check_at.isoformat(),
+            reason=normalized_reason,
+            outcome=collect_outcome,
+            trace_id=trace_id,
+        )
+        return
+    
+    PRIORITY_QUEUE_FAILED_BUT_RETAINED_TOTAL.labels(source="continuous_worker").inc()
+    logger.warning(
+        "continuous_processing_requeue_failed",
+        monitored_id=monitored_id,
+        next_check_at=effective_next_check_at.isoformat(),
+        reason=normalized_reason,
+        outcome=collect_outcome,
+        trace_id=trace_id,
+    )
+
+@celery_app.task(
+    name="market_alert.tasks.continuous_collector_task.finalize_processing_requeue",
+    queue="monitor",
+)
+def finalize_processing_requeue(
+    collect_outcome: str,
+    monitored_id: str,
+    trace_id: str | None = None,
+) -> None:
+    """ Reenfileira monitorado após a coleta finalizar e remove do processamento """
+    _handle_processing_requeue(
+        monitored_id=monitored_id,
+        collect_outcome=collect_outcome,
+        reason=collect_outcome,
+        trace_id=trace_id,
+    )
+
+@celery_app.task(
+    name="market_alert.tasks.continuous_collector_task.finalize_processing_requeue_error",
+    queue="monitor",
+)
+def finalize_processing_requeue_error(
+    request,
+    exc,
+    traceback,
+    monitored_id: str,
+    trace_id: str | None = None,
+) -> None:
+    """ Reenfileira monitorado quando a task de coleta falha inesperadamente """
+    _handle_processing_requeue(
+        monitored_id=monitored_id,
+        collect_outcome=None,
+        reason="collect_task_exception",
+        trace_id=trace_id,
+    )
 
 @celery_app.task(
     bind=True,
@@ -573,25 +576,40 @@ def run_continuous_collector(self) -> None:
                     
                     enqueued_at = queue_service.get_enqueued_at(next_id)
                     try:
-                        outcome, next_check_at = _collect_group(
+                        decision = _collect_group(
                             monitored=monitored,
                             enqueued_at=enqueued_at,
                         )
                     except Exception:
-                        outcome, next_check_at = "error", None
+                        decision = CollectDispatchDecision(
+                            outcome="error",
+                            next_check_at=_utc_now(),
+                            should_requeue=True,
+                            retain_processing=False,
+                        )
                         PRIORITY_QUEUE_LOOP_ERRORS_TOTAL.labels(source="continuous").inc()
                         bound_logger.exception(
                             "continuous_group_failed",
                             monitored_id=str(monitored.id),
                         )
                         
+                    PRIORITY_QUEUE_PROCESSED_TOTAL.labels(
+                        source="continuous",
+                        outcome=decision.outcome,
+                    )
 
-                    processed_ids.append(str(monitored.id))
+                    if decision.retain_processing:
+                        #Mantém o item em processamento até a coleta terminar
+                        PRIORITY_QUEUE_PENDING_REQUEUE_TOTAL.labels(
+                            source="continuous_worker"
+                        ).inc()
+                    else:
+                        processed_ids.append(str(monitored.id))
 
-                    if outcome != "skipped_paused":
-                        requeue_success = _requeue_monitored(
+                    if decision.should_requeue:
+                        requeue_success, _ = _requeue_monitored(
                             monitored=monitored,
-                            next_check_at=next_check_at,
+                            next_check_at=decision.next_check_at,
                             queue_service=queue_service,
                         )
                         if not requeue_success:
@@ -610,7 +628,7 @@ def run_continuous_collector(self) -> None:
                     bound_logger.info(
                         "continuous_item_processed",
                         monitored_id=str(monitored.id),
-                        outcome=outcome,
+                        outcome=decision.outcome,
                     )
 
                 if processed_ids:

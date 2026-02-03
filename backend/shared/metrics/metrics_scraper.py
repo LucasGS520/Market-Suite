@@ -113,6 +113,12 @@ COLLECTOR_NO_DATA_TOTAL = Counter(
     ["kind"],
 )
 
+COLLECTOR_NO_DATA_REASON_TOTAL = Counter(
+    "collector_no_data_reason_total",
+    "Motivos detalhados para coletas sem dados utilizáveis",
+    ["kind", "reason"],
+)
+
 COLLECTOR_ERROR_TOTAL = Counter(
     "collector_error_total",
     "Falhas do coletor ao tentar obter dados",
@@ -143,6 +149,19 @@ COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL = Counter(
     ["kind", "owner"],
 )
 
+COLLECTOR_LOCK_RETRY_TOTAL = Counter(
+    "collector_lock_retry_total",
+    "Retries agendados quando o lock Redis não pôde ser adquirido",
+    ["kind"],
+)
+
+COLLECTOR_LOCK_RETRY_DELAY_SECONDS = Histogram(
+    "collector_lock_retry_delay_seconds",
+    "Atraso aplicado nos retries de lock do coletor (segundos)",
+    ["kind"],
+    buckets=[1, 2, 5, 10, 20, 30, 60, 120],
+)
+
 COLLECT_SUCCESS_TOTAL = Counter(
     "collect_success_total",
     "Coletas concluídas com sucesso e dados utilizáveis",
@@ -154,6 +173,12 @@ COLLECTOR_DURATION_MS = Histogram(
     "Duração da coleta por produto (milissegundos)",
     ["kind", "outcome"],
     buckets=[25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000],
+)
+
+COMPARE_DISPATCH_DEBOUNCED_TOTAL = Counter(
+    "compare_dispatch_debounced_total",
+    "Comparações suprimidas por debounce Redis antes do enfileiramento",
+    ["reason"],
 )
 
 #Métricas específicas do fluxo contínuo de concorrentes
@@ -172,6 +197,12 @@ COMPETITOR_COLLECT_DURATION_MS = Histogram(
 COMPETITOR_COLLECT_IN_FLIGHT = Gauge(
     "competitor_collect_in_flight",
     "Número de coletas de concorrentes em andamento no worker contínuo",
+)
+
+CONTINUOUS_COLLECT_DISPATCH_TOTAL = Counter(
+    "continuous_collect_dispatch_total",
+    "Total de coletas enfileiradas pelo coletor contínuo",
+    ["kind", "status"],
 )
 
 #Métricas específicas do ciclo de rechecagem
@@ -375,14 +406,19 @@ __all__ = [
     "COLLECTOR_SUCCESS_NEW_DATA_TOTAL",
     "COLLECTOR_SUCCESS_NO_CHANGE_TOTAL",
     "COLLECTOR_NO_DATA_TOTAL",
+    "COLLECTOR_NO_DATA_REASON_TOTAL",
     "COLLECTOR_ERROR_TOTAL",
     "COLLECTOR_LOCK_ACQUIRED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_TOTAL",
     "COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL",
+    "COLLECTOR_LOCK_RETRY_TOTAL",
+    "COLLECTOR_LOCK_RETRY_DELAY_SECONDS",
     "COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL",
     "COLLECT_LOCK_SKIPPED_TOTAL",
     "COLLECT_SUCCESS_TOTAL",
     "COLLECTOR_DURATION_MS",
+    "COMPARE_DISPATCH_DEBOUNCED_TOTAL",
+    "CONTINUOUS_COLLECT_DISPATCH_TOTAL",
     "RECHECK_DISPATCH_TOTAL",
     "RECHECK_MONITORED_RESULT_TOTAL",
     "RECHECK_COMPETITOR_RESULT_TOTAL",
