@@ -53,6 +53,7 @@ def _handle_response(
     `price_changed` e `availability_changed`. 
     """
     status_code = fetch_result.status_code
+    persisted_at: datetime | None = None
     if status_code == 304:
         if existing_id:
             try:
@@ -93,7 +94,12 @@ def _handle_response(
                     persisted_at=persisted_at.isoformat(),
                 )
 
-        return ScrapeResult(status="not_modified", product_id=str(existing_id) if existing_id else None, http_status=304)
+        return ScrapeResult(
+            status="not_modified",
+            product_id=str(existing_id) if existing_id else None,
+            http_status=304,
+            persisted_at=persisted_at,
+        )
     
     if status_code == 422 and fetch_result.error_code == "no_result":
         return ScrapeResult(
@@ -179,6 +185,7 @@ def _handle_response(
         price_changed=price_changed,
         availability_changed=availability_changed,
         http_status=200,
+        persisted_at=persisted_at,
     )
 
 def scrape_monitored_product(

@@ -14,6 +14,7 @@ from typing import Mapping
 from uuid import UUID
 
 import structlog
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
@@ -59,6 +60,7 @@ LOCK_RETRY_MAX_SECONDS = 60
 LOCK_RETRY_MAX_RETRIES = 3
 LOCK_RETRY_JITTER_RATIO = 0.2
 COMPARE_DEBOUNCE_TTL_SECONDS = 600
+COMPARE_DISPATCH_COUNTDOWN_SECONDS = 3
 
 def _compute_lock_retry_delay(
     attempt: int,
@@ -199,9 +201,20 @@ def _dispatch_comparison(
     trace_id: str | None,
     *,
     force: bool = False,
+    countdown_seconds: int = COMPARE_DISPATCH_COUNTDOWN_SECONDS,
 ) -> None:
     """ Agenda comparação apenas quando scraping trouxe alteração relevante """
     if monitored_id is None or result is None:
+        return
+    
+    if result.persisted_at is None:
+        #Evita enfileirar comparação antes do commit terminar de persistir dados
+        logger.warning(
+            "compare_dispatch_skipped_missing_persisted_at",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+            status=result.status,
+        )
         return
     
     changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
@@ -244,6 +257,8 @@ def _dispatch_comparison(
         ],
         #Mantém comparação na fila dedicada para não saturar o worker do coletor contínuo
         queue="compare",
+        #Pequeno atraso para reduzir janelas de leitura suja após commit
+        countdown=countdown_seconds,
     )
     logger.info(
         "compare_prices_enqueued",
@@ -251,7 +266,40 @@ def _dispatch_comparison(
         trace_id=trace_id,
         forced=force,
         changed=changed,
+        countdown_seconds=countdown_seconds,
     )
+
+def _schedule_comparison_after_commit(
+    session_manager: Session,
+    monitored_id: UUID | None,
+    result: ScrapeResult | None,
+    trace_id: str | None,
+    *,
+    force: bool,
+) -> None:
+    """ Registra callback para disparar comparação após commit da sessão """
+    transaction = session_manager.get_transaction()
+
+    def _dispatch_callback() -> None:
+        _dispatch_comparison(
+            monitored_id,
+            result,
+            trace_id,
+            force=force,
+        )
+
+    if transaction is not None and hasattr(transaction, "on_commit"):
+        #Usa hook nativo do SQLAlchemy 2 para garantir execução pós-commit
+        transaction.on_commit(_dispatch_callback)
+        return
+    
+    if transaction is not None:
+        #Fallback registra evento quando o hook on_commit não está disponível
+        event.listen(session_manager, "after_commit", lambda _session: _dispatch_callback(), once=True)
+        return
+    
+    #Sem transação ativa, a persistência já ocorreu
+    _dispatch_callback()
 
 def _parse_force_compare_(value: str | None) -> bool:
     """ Normaliza o flag de disparo forçado para comparação """
@@ -474,8 +522,24 @@ def collect_product(
                 if db is None:
                     with SessionLocal() as session_manager:
                         _collect_with_db(session_manager)
+                        if dispatch_comparison:
+                            _schedule_comparison_after_commit(
+                                session_manager,
+                                monitored_id,
+                                result,
+                                trace_id,
+                                force=force_compare,
+                            )
                 else:
                     _collect_with_db(db)
+                    if dispatch_comparison:
+                        _schedule_comparison_after_commit(
+                            db,
+                            monitored_id,
+                            result,
+                            trace_id,
+                            force=force_compare,
+                        )
                             
     except ScraperError as exc:
         reason = "scraper_error"
@@ -518,8 +582,6 @@ def collect_product(
             trace_id=trace_id,
             enqueued_at=enqueued_at,
         )
-        if dispatch_comparison:
-            _dispatch_comparison(monitored_id, result, trace_id, force=force_compare)
 
     return outcome, result
 
