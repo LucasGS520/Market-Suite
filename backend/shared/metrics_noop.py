@@ -14,7 +14,17 @@ from contextlib import contextmanager
 
 
 class _NoOpMetric:
-    """ Base para métricas no-op que implementa interface comum """
+    """ Base para métricas no-op que implementa interface comum
+    
+    Aceita os mesmos parâmetros do prometheus_client para compatibilidade:
+    - name: Nome da métrica
+    - documentation: Texto de documentação
+    - labelnames: Lista de nomes de labels
+    - registry: Registry (ignorado nos stubs)
+    - namespace: Namespace para prefixo (ignorado nos stubs)
+    - subsystem: Subsistema para prefixo (ignorado nos stubs)
+    - unit: Unidade da métrica (ignorado nos stubs)
+    """
 
     def __init__(self, name: str, documentation: str, labelnames: Optional[List[str]] = None, *args, **kwargs):
         """ Aceita todos os argumentos do prometheus_client mas ignora """
