@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from prometheus_client.parser import text_string_to_metric_families
+
+# Importa parser condicionalmente (apenas usado em teste de métricas)
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client.parser import text_string_to_metric_families
 
 from market_scraper.main import app
 from market_scraper.services import pipeline_steps
@@ -33,6 +38,8 @@ def _load_html(fixture_key: str) -> str:
 
 def _extract_metric(metrics_payload: str, metric: str, labels: dict[str, str]) -> float | None:
     """ Recupera o valor numérico de uma métrica Prometheus pelo conjunto de labels """
+    if not _ENABLE_METRICS:
+        return None
     for family in text_string_to_metric_families(metrics_payload):
         for sample in family.samples:
             if sample.name != metric:
@@ -43,6 +50,8 @@ def _extract_metric(metrics_payload: str, metric: str, labels: dict[str, str]) -
 
 def _reset_pipeline_metrics() -> None:
     """ Zera os contadores utilizados no cenários de integração """
+    if not _ENABLE_METRICS:
+        return
     for metric in (
         SCRAPER_STEP_SUCCESS_TOTAL,
         SCRAPER_STEP_FALLBACK_TOTAL,
