@@ -1,11 +1,11 @@
 # Market Suite
-Market Suite é uma suíte de monitoramento de preços composta por dois grandes módulos — `backend/` e `frontend/` — apoiados por infraestrutura compartilhada de dados, mensageria e observabilidade. 
+Market Suite é uma suíte de monitoramento de preços composta por dois grandes módulos — `backend/` e `frontend/` — apoiados por infraestrutura compartilhada de dados e mensageria. 
 A plataforma combina API pública, processamento assíncrono e microserviço de scraping especializado, permitindo acompanhar produtos e comparar ofertas.
 
 ## Serviços e responsabilidades
 A suíte é organizada em duas camadas principais:
 
-- **Backend**: engloba API, workers Celery, microserviço de scraping e utilidades compartilhadas em Python. Cada serviço roda em contêiner próprio, mas compartilha contratos, métricas e convenções em `backend/shared/`.
+- **Backend**: engloba API, workers Celery, microserviço de scraping e utilidades compartilhadas em Python. Cada serviço roda em contêiner próprio, mas compartilha contratos e convenções em `backend/shared/`.
 - **Frontend**: aplicação React + Vite que consome a API pública, oferece interface responsiva para configurar monitoramentos e consolida indicadores operacionais.
 
 ## Visão Arquitetural
@@ -22,14 +22,6 @@ graph TD
     API --> Cache[(Redis)]
     Worker --> Cache
     MonitorWorker --> Cache
-    API --> Prometheus
-    Worker --> Prometheus
-    MonitorWorker --> Prometheus
-    Scraper --> Prometheus
-    Prometheus --> Grafana[(Dashboards)]
-    API --> Loki[(Logs estruturados)]
-    Worker --> Loki
-    Scraper --> Loki
     FE --> |Build estático| CDN[(Servidor Express/Vite)]
 ```
 
@@ -41,7 +33,7 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 |---------|------------------|-----------------------|
 | **backend/market_alert** | expõe a API pública FastAPI, agenda tarefas Celery, persiste dados em PostgreSQL e consome o scraper via cliente dedicado | [`backend/market_alert/README.md`](backend/market_alert/README.md) |
 | **backend/market_scraper** | valida URLs, realiza download das páginas, executa pipeline de parsing multiestágio e devolve `ParserResponse` | [`backend/market_scraper/README.md`](backend/market_scraper/README.md) |
-| **backend/shared** | reúne contratos Pydantic, métricas, configuração, clientes externos e utilidades comuns | [`backend/shared/`](backend/shared/) |
+| **backend/shared** | reúne contratos Pydantic, configuração, clientes externos e utilidades comuns | [`backend/shared/`](backend/shared/) |
 
 > Nota operacional: a inferência de disponibilidade agora antecede a validação do parser e preserva `last_status` informado pelo scraper. A listagem `GET /monitored/` também exibe itens sem preço coletado para sinalizar anúncios pausados ou indisponíveis.
 
@@ -53,7 +45,7 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
    - O contrato do `ParserResponse` expõe sempre `price|currency` (admite `null`), `availability`/`last_status` e cabeçalhos (`etag`, `not_modified`) para sinalizar indisponibilidade sem gravar preços `0.00`.
 5. **Persistência e regras de negócio**: workers Celery consolidam dados no PostgreSQL (`backend/market_alert/repositories`), recalculam comparações e armazenam histórico de coletas.
 6. **Eventos e notificações**: eventos de domínio são persistidos em `event_log`, avaliados por regras configuráveis e geram notificações com idempotência, retries e auditoria.
-7. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
+7. **Resiliência**: o fluxo atual privilegia simplicidade com logs estruturados. As regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 
 ### Tarefas Celery do `market_alert`
 - **Collector (`tasks.collector_product_task.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir. Enfileirado na fila `scraping`.
@@ -65,10 +57,10 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 - **Exposição de APIs**: o FastAPI em `market_alert` oferece rotas públicas, autenticação JWT e endpoints para monitoramentos, concorrentes e comparações.
 - **Contrato único**: esquemas em `backend/shared/schemas/schemas_scraper.py` padronizam comunicação API ↔ scraper.
 - **Separação de responsabilidades**: apenas o `market_scraper` processa HTML, enquanto o `market_alert` persiste dados e aplica lógica de negócios.
-- **Processamento assíncrono**: workers Celery ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização, métricas e observabilidade.
+- **Processamento assíncrono**: workers Celery ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização e configuração.
 - **Simplicidade operacional**: priorizamos contratos previsíveis, removendo idempotência distribuída nos disparos manuais.
 - **Extensibilidade controlada**: novos marketplaces exigem evoluções no `market_scraper` e nos contratos compartilhados antes de tocar fluxos críticos.
-- **Biblioteca compartilhada**: `backend/shared` concentra schemas Pydantic, utilidades, métricas, observabilidade e integrações externas consumidas pelos demais serviços.
+- **Biblioteca compartilhada**: `backend/shared` concentra schemas Pydantic, utilidades e integrações externas consumidas pelos demais serviços.
 
 ## Frontend
 ### Arquitetura do frontend
@@ -86,7 +78,6 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 3. **Consumo de dados**: hooks do `react-query` buscam produtos monitorados, concorrentes e comparações via endpoints do backend, mantendo cache e estados de carregamento.
 4. **Ações do usuário**: interações como cadastro de monitoramentos, disparo de coletas e atualização de perfil chamam serviços da API e exibem feedback em toasts/modal.
 5. **Dashboard de indicadores**: com indicadores consolidados, utilizando componentes responsivos baseados em Radix UI.
-6. **Observabilidade do cliente**: eventos relevantes (ex.: erros de rede, ações críticas) são enviados a provedores de logging/browser analytics quando configurados.
 
 #### Princípios do frontend
 - **UX responsiva**: componentes baseados em Radix UI e Tailwind garantem adaptação a diferentes dispositivos.
@@ -155,13 +146,11 @@ docker compose up -d db redis redis-init api market_scraper celery-worker-scrapi
 
 ## Observabilidade e operação contínua
 ### Backend
-- **Métricas Prometheus**: endpoints `/metrics` expostos pela API (`:8000`), worker principal (`:8002`), worker do coletor contínuo (`:8004`), worker de comparação (`:8005`) e Scraper (`:8010`). Métricas definidas em [`backend/shared/metrics`](backend/shared/metrics).
-- **Logs estruturados**: todos os serviços usam `structlog` com saída JSON. Em Compose, Loki + Promtail coletam e disponibilizam via Grafana (`http://localhost:3000`).
-- **Tracing opcional**: pontos de integração podem enviar spans para provedores OTLP quando configurado nas variáveis de ambiente.
+- **Logs estruturados**: todos os serviços usam `structlog` com saída JSON para facilitar depuração e análise.
+- **Métricas desabilitadas por padrão**: o sistema de métricas Prometheus foi desabilitado (`ENABLE_METRICS=0`). Os imports continuam funcionando mas são no-op. Para reabilitar, configure `ENABLE_METRICS=1` e restaure as dependências necessárias.
 
 ### Frontend
 - **Build health**: logs do Vite/Express ajudam a identificar falhas de build ou inicialização.
-- **Métricas de uso**: integração com ferramentas de analytics pode ser habilitada via variáveis de ambiente (não obrigatória por padrão).
 - **Monitoramento de erros**: configure provedores como Sentry ou LogRocket conectando hooks do React às APIs correspondentes.
 
 ## Troubleshooting do coletor contínuo
