@@ -4,7 +4,14 @@ Abrange acertos, falhas e limpeza de entradas tanto
 de forma geral quanto por endpoint específico.
 """
 
-from prometheus_client import Counter
+import os
+
+# Importa métricas apropriadas baseado em ENABLE_METRICS
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client import Counter
+else:
+    from shared.metrics_noop import Counter
 
 CACHE_HITS_TOTAL = Counter(
     "cache_hits_total",

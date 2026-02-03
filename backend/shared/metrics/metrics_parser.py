@@ -6,7 +6,14 @@ Cada métrica é rotulada pelo nome da biblioteca responsável pelo
 processamento, permitindo identificar gargalos ou falhas específicas.
 """
 
-from prometheus_client import Counter, Histogram
+import os
+
+# Importa métricas apropriadas baseado em ENABLE_METRICS
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client import Counter, Histogram
+else:
+    from shared.metrics_noop import Counter, Histogram
 
 #Contador de sucesso por biblioteca utilizada no parsing
 PARSER_SUCCESS_TOTAL = Counter(

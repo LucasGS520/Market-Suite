@@ -1,6 +1,13 @@
 """ Aplicação principal FastAPI com configuração de métricas e rotas """
 
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
+import os
+
+# Importa prometheus_client condicionalmente
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
+else:
+    from shared.metrics_noop import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -77,18 +84,23 @@ def configure_logging():
         """ Handler que incrementa métricas por volume de logs """
 
         def emit(self, record: logging.LogRecord) -> None:
+            if not _ENABLE_METRICS:
+                return
             level = record.levelname.lower()
             try:
                 LOG_ENTRIES_TOTAL.labels(level=level).inc()
             except Exception:
                 pass
 
-    metrics_handler = MetricsLogHandler()
-
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
-    root.addHandler(metrics_handler)
+    
+    # Só adiciona o handler de métricas se métricas estiverem habilitadas
+    if _ENABLE_METRICS:
+        metrics_handler = MetricsLogHandler()
+        root.addHandler(metrics_handler)
+    
     root.setLevel(logging.INFO)
 
 
@@ -113,6 +125,10 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         """ Middleware que mede latência e conta requisições """
+        if not _ENABLE_METRICS:
+            # Se métricas desabilitadas, apenas passa requisição adiante
+            return await call_next(request)
+            
         start = time.time()
         response = await call_next(request)
         latency = time.time() - start
@@ -168,7 +184,8 @@ def create_app() -> FastAPI:
             LoggingInstrumentor().instrument(set_logging_format=True)
 
     #Adiciona middleware de métricas e limiter
-    app.add_middleware(MetricsMiddleware)
+    if _ENABLE_METRICS:
+        app.add_middleware(MetricsMiddleware)
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
     app.add_middleware(SlowAPIMiddleware)
@@ -177,6 +194,9 @@ def create_app() -> FastAPI:
     @app.get("/metrics")
     async def metrics_endpoint() -> Response:
         """ Gera o payload com todas as métricas do DEFAULT_REGISTRY """
+        if not _ENABLE_METRICS:
+            return Response(content=b"# Metrics disabled\n", media_type=CONTENT_TYPE_LATEST)
+        
         #Atualiza DB pool metrics
         engine = get_engine()
         #Atualiza gauges de pool

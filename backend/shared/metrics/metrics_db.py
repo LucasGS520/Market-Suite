@@ -1,6 +1,13 @@
 """ Métricas de observação do banco de dados """
 
-from prometheus_client import Gauge
+import os
+
+# Importa métricas apropriadas baseado em ENABLE_METRICS
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client import Gauge
+else:
+    from shared.metrics_noop import Gauge
 
 DB_POOL_SIZE = Gauge(
     "db_pool_size",

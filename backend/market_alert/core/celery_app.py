@@ -11,7 +11,14 @@ import structlog
 from structlog.typing import BindableLogger, EventDict
 from celery import Celery
 from celery.signals import task_success, task_failure, worker_ready
-from prometheus_client import start_http_server
+
+# Importa prometheus_client condicionalmente
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client import start_http_server
+else:
+    from shared.metrics_noop import start_http_server
+
 from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL, CELERY_CONTINUOUS_AUTOSTART_TOTAL, CONTINUOUS_AUTOSTART_THROTTLED_TOTAL
 from shared.utils.redis_client import get_redis_client, set_key_with_ttl
 
@@ -337,14 +344,17 @@ _warn_lock_ttl_configuration()
 @worker_ready.connect
 def _start_prometheus_server(**kwargs):
     """ Inicia o servidor Prometheus assim que o worker estiver pronto """
-    #Servidor de métricas Prometheus
-    start_http_server(port=8002, addr="0.0.0.0")
+    #Servidor de métricas Prometheus (apenas se habilitado)
+    if _ENABLE_METRICS:
+        start_http_server(port=8002, addr="0.0.0.0")
     _request_continuous_collector_start()
     _start_autostart_revalidation_loop()
 
 @task_success.connect
 def handle_task_success(sender=None, **kwargs):
     """ Métricas de contagem de sucesso """
+    if not _ENABLE_METRICS:
+        return
     #Incrementa contagem de tasks concluídas
     CELERY_TASKS_TOTAL.labels(
         service=SERVICE_LABEL,
@@ -356,6 +366,8 @@ def handle_task_success(sender=None, **kwargs):
 @task_failure.connect
 def handle_task_failure(sender=None, **kwargs):
     """ Métricas de contagem de falha """
+    if not _ENABLE_METRICS:
+        return
     #Incrementa em caso de falha de task
     CELERY_TASKS_TOTAL.labels(
         service=SERVICE_LABEL,

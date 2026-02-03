@@ -5,10 +5,17 @@ de saúde, scraping e expõe a rota de métricas compartilhada
 com o restante da plataforma.
 """
 
+import os
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
+
+# Importa prometheus_client condicionalmente
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
+else:
+    from shared.metrics_noop import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 
 #Importação relativa para execução como pacote
 from .routes import routes_health, routes_scraper
@@ -33,6 +40,9 @@ app.include_router(routes_scraper.router, prefix="/scraper")
 @app.get("/metrics")
 async def metrics_endpoint() -> Response:
     """ Expõe as métricas do ``DEFAULT_REGISTRY`` para coleta pelo Prometheus """
+    if not _ENABLE_METRICS:
+        return Response(b"# Metrics disabled\n", media_type=CONTENT_TYPE_LATEST)
+    
     payload = generate_latest(REGISTRY)
     #Retornamos a resposta diretamente para respeitar o contrato esperado pelo Prometheus
     return Response(payload, media_type=CONTENT_TYPE_LATEST)

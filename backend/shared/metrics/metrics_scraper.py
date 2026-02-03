@@ -6,7 +6,14 @@ observabilidade mantendo visibilidade sobre sucesso por etapa, latência,
 interações com cache e verificações de robots.txt.
 """
 
-from prometheus_client import Counter, Gauge, Histogram
+import os
+
+# Importa métricas apropriadas baseado em ENABLE_METRICS
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client import Counter, Gauge, Histogram
+else:
+    from shared.metrics_noop import Counter, Gauge, Histogram
 
 
 #Métricas focadas no pipeline determinístico do scraper

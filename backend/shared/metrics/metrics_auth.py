@@ -1,6 +1,20 @@
 """ Métricas relacionadas à autenticação de usuários """
 
-from prometheus_client import Counter
+import os
+
+# Importa Counter apropriado baseado em ENABLE_METRICS
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    import os
+
+# Importa métricas apropriadas baseado em ENABLE_METRICS
+_ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+if _ENABLE_METRICS:
+    from prometheus_client import Counter
+else:
+    from shared.metrics_noop import Counter
+else:
+    from shared.metrics_noop import Counter
 
 LOGIN_ERRORS_TOTAL = Counter(
     "login_errors_total",

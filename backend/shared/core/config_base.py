@@ -78,6 +78,9 @@ class ConfigBase(BaseSettings):
         os.getenv("COMPARISON_LAST_SUCCESS_TTL", str(86400))
     ) #Expiração do registro
 
+    #Controle de observabilidade
+    ENABLE_METRICS: bool = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"} #Ativa coleta de métricas
+
     #Configurações extras do Pydantic
     model_config = ConfigDict(
         env_file=ENV_FILE,

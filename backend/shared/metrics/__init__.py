@@ -1,9 +1,24 @@
 """ Pacote centralizador de métricas Prometheus.
 
 Este pacote expõe as métricas agrupadas por domínio para que os
-serviços possam importá-las de forma organizada
+serviços possam importá-las de forma organizada.
+
+Quando ENABLE_METRICS=0, retorna implementações no-op que preservam
+a API mas não coletam dados.
 """
 
+import os
+
+# Verifica se métricas estão habilitadas
+ENABLE_METRICS = os.getenv("ENABLE_METRICS", "0") in {"1", "true", "True", "yes"}
+
+# Se métricas desabilitadas, usa stubs no-op
+if ENABLE_METRICS:
+    from prometheus_client import Counter, Gauge, Histogram, Summary, Info, Enum
+else:
+    from shared.metrics_noop import Counter, Gauge, Histogram, Summary, Info, Enum
+
+# Importa os módulos de métricas (sempre necessário para preservar a API)
 from . import (
     metrics_celery,
     metrics_scraper,
@@ -43,7 +58,8 @@ from .metrics_settings import *
 from .metrics_priority_queue import *
 
 __all__ = (
-    metrics_celery.__all__
+    ["ENABLE_METRICS", "Counter", "Gauge", "Histogram", "Summary", "Info", "Enum"]
+    + metrics_celery.__all__
     + metrics_scraper.__all__
     + metrics_cache.__all__
     + metrics_audit.__all__
