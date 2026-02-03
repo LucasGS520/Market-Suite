@@ -6,6 +6,7 @@ frontend.
 """
 
 from uuid import UUID
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -102,6 +103,15 @@ def get_comparison_summary_for_user(
         )
     else:
         competitors_count = _extract_competitors_count(stored_summary)
+        if _should_refresh_competitors_count(
+            db=db,
+            monitored_id=monitored_id,
+            summary_timestamp=stored_summary.timestamp,
+        ):
+            #Recalcula a contagem para refletir concorrentes adicionados após o snapshot
+            competitors_count = count_competitors_by_monitored(
+                db, monitored_id, include_paused=True
+            )
 
     if stored_summary and stored_summary.comparison_id:
         comparison = get_comparison_by_id(db, stored_summary.comparison_id)
@@ -352,6 +362,40 @@ def _extract_competitors_count(
     except (TypeError, ValueError):
         #Padroniza a contagem em zero quando o valor não puder ser interpretado como inteiro
         return 0
+    
+def _should_refresh_competitors_count(
+    *,
+    db: Session,
+    monitored_id: UUID,
+    summary_timestamp: Any | None,
+) -> bool:
+    """ Indica quando a contagem de concorrentes deve ser recalculada.
+
+    A lógica verifica se existe concorrente criado após o resumo salvo.
+    Quando timestamp do resumo ou o campo de criação não está disponível,
+    assume que a contagem pode estar desatualizada para garantir coerência na UI.
+    """
+    if summary_timestamp is None:
+        #Sem timestamp confiável, evitamos reutilizar contagem possívelmente desatualizada
+        return True
+    
+    if not hasattr(CompetitorProduct, "created_at"):
+        #Fallback defensivo caso o modelo não exponha data de criação
+        return True
+    
+    latest_created_at = (
+        db.query(func.max(CompetitorProduct.created_at))
+        .filter(CompetitorProduct.monitored_product_id == monitored_id)
+        .scalar()
+    )
+    if latest_created_at is None:
+        return False
+    
+    try:
+        return latest_created_at > summary_timestamp
+    except TypeError:
+        #Evita falhas com datas naive/aware e força recálculo seguro
+        return True
     
 def _empty_summary(competitors_count: int) -> Dict[str, Any]:
     """ Cria estrutura base do resumo competitivo com valores padrão """
@@ -758,6 +802,9 @@ def build_comparison_summary(
                 continue
             
             merged_payload[key] = value
+
+        #Garante que a contagem reflita o valor recalculado, mesmo com snapshot presente
+        merged_payload["competitors_count"] = competitors_count
 
         return _apply_summary_defaults(
             merged_payload,
