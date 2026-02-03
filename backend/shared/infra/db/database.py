@@ -12,7 +12,6 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from shared.core.config_base import ConfigBase
-from shared.metrics.metrics_db import DB_POOL_CHECKOUTS, DB_POOL_SIZE
 
 
 class DBSettings(ConfigBase):
@@ -29,31 +28,6 @@ engine = create_engine(_settings.DATABASE_URL, echo=DEBUG, pool_pre_ping=True)
 
 #Configurando sessões de banco de Dados
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# ---------- Instrumentação do pool de conexões ----------
-@event.listens_for(engine, "connect")
-def connect(dbapi_conn, connection_record):
-    """ Atualiza o tamanho do pool a cada nova conexão """
-    try:
-        DB_POOL_SIZE.set(engine.pool.size())
-    except Exception:
-        pass
-
-@event.listens_for(engine, "checkout")
-def checkout(dbapi_conn, connection_record, connection_proxy):
-    """ Registra o número de conexões ativas """
-    try:
-        DB_POOL_CHECKOUTS.set(engine.pool.checkedout())
-    except Exception:
-        pass
-
-@event.listens_for(engine, "checkin")
-def checkin(dbapi_conn, connection_record):
-    """ Atualiza o contador quando a conexão é devolvida ao pool """
-    try:
-        DB_POOL_CHECKOUTS.set(engine.pool.checkedout())
-    except Exception:
-        pass
 
 
 # ---------- Função para obter a sessão do banco de dados para cada requisição ----------

@@ -1,1 +1,0 @@
-""" Testes de integração gerais e compartilhados do projeto """
