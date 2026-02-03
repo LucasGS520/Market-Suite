@@ -166,3 +166,4 @@ lerna-debug.log*
 /metrics_backup/
 /monitoring_backup/
 METRICS_INVENTORY.md
+METRICS_REMOVAL_SUMMARY.md
