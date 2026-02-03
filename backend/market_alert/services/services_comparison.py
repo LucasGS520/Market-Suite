@@ -6,7 +6,7 @@ frontend.
 """
 
 from uuid import UUID
-from sqlalchemy import func
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -35,6 +35,7 @@ from market_alert.crud.crud_comparison import (
     upsert_price_comparison_summary,
 )
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
+from market_alert.models.models_price_history import PriceHistory
 from market_alert.models.models_products import CompetitorProduct
 from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
 from market_alert.models import User
@@ -173,15 +174,33 @@ def run_price_comparison(
         #Define total antes dos filtros para persistir a contagem completa
         total_competitors = len(competitors)
         
-        available_competitors = [
-            competitor
-            for competitor in competitors
-            if competitor.current_price is not None
-            and competitor.availability is not False
-            and getattr(competitor, "status", ProductStatus.available)
-            not in {ProductStatus.unavailable, ProductStatus.removed}
-            and not getattr(competitor, "is_paused", False)
-        ]
+        filtered_reasons: dict[str, int] = {}
+        available_competitors: list[CompetitorProduct] = []
+        for competitor in competitors:
+            if getattr(competitor, "is_paused", False):
+                filtered_reasons["paused"] = filtered_reasons.get("paused", 0) + 1
+                continue
+            
+            status_value = getattr(competitor, "status", ProductStatus.available)
+            if status_value in {ProductStatus.unavailable, ProductStatus.removed}:
+                filtered_reasons["status_unavailable"] = filtered_reasons.get("status_unavailable", 0) + 1
+                continue
+            
+            resolved_price, price_source = _resolve_competitor_comparison_price(db, competitor)
+            if resolved_price is None:
+                filtered_reasons["missing_price"] = filtered_reasons.get("missing_price", 0) + 1
+                continue
+            
+            if competitor.availability is False:
+                filtered_reasons["availability_false"] = filtered_reasons.get("availability_false", 0) + 1
+                continue
+            
+            if competitor.current_price is None:
+                #Usa o último preço do histórico apenas para comparação, sem persistir no banco
+                competitor.current_price = resolved_price
+                competitor._comparison_price_source = price_source
+
+            available_competitors.append(competitor)
 
         filtered_out = total_competitors - len(available_competitors)
         if filtered_out:
@@ -190,6 +209,7 @@ def run_price_comparison(
                 filtered=filtered_out,
                 total=total_competitors,
                 available=len(available_competitors),
+                reasons=filtered_reasons,
             )
 
         inactive_reason = _resolve_monitored_inactive_reason(monitored)
@@ -327,6 +347,27 @@ def _deduplicate_competitors(competitors: List[CompetitorProduct]) -> List[Compe
             deduped[reference] = competitor
 
     return list(deduped.values())
+
+def _resolve_competitor_comparison_price(
+    db: Session,
+    competitor: CompetitorProduct,
+) -> tuple[Decimal | None, str]:
+    """ Recupera o preço preferencial para comparação com fallback em histórico.
+
+    Quando o preço atual está vazio, buscamos o último registro de histórico
+    para reduzir falsos negativos em comparações recém-atualizados.
+    """
+    if competitor.current_price is not None:
+        return competitor.current_price, "current_price"
+    
+    latest_price = (
+        db.query(PriceHistory.price)
+        .filter(PriceHistory.competitor_product_id == competitor.id)
+        .order_by(desc(PriceHistory.checked_at), desc(PriceHistory.created_at))
+        .limit(1)
+        .scalar()
+    )
+    return _to_decimal(latest_price), "price_history"
 
 def _to_decimal(value: Any) -> Optional[Decimal]:
     """ Converte valores do JSON armazenado para Decimal quando possível """

@@ -71,6 +71,24 @@ def _update_competitor_price_change_tracking(
             collected_at=collected_reference.isoformat(),
         )
 
+def _resolve_scraped_availability_status(
+    availability: bool | None,
+    resolved_price: Decimal | None,
+) -> tuple[bool | None, ProductStatus, bool]:
+    """ Hrmoniza disponibilidade e status a partir do payload de scraping.
+
+    A regra prioriza o preço como indicador de disponibilidade para evitar que
+    concorrentes com preço válido sejam marcados como indisponíveis.
+    """
+    normalized_availability = availability
+    if resolved_price is not None and availability in {None, False}:
+        #Preço válido indica item disponível, mesmo com sinalização incompleta do scraper
+        normalized_availability = True
+
+    unavailable_by_data = resolved_price is None or normalized_availability is False
+    status = ProductStatus.unavailable if unavailable_by_data else ProductStatus.available
+    return normalized_availability, status, unavailable_by_data
+
 def get_competitor_by_monitored_and_url(
     db: Session,
     monitored_product_id: UUID,
@@ -301,9 +319,17 @@ def create_or_update_competitor_product_scraped(
         existing.old_price = existing.current_price
         availability = scraped_info.availability
         last_status = scraped_info.last_status or existing.last_status
-        unavailable_by_data = availability is False or resolved_price is None
+        resolved_availability, resolved_status, unavailable_by_data = _resolve_scraped_availability_status(
+            availability,
+            resolved_price,
+        )
         if availability is False and resolved_price is not None:
-            unavailable_by_data = False
+            logger.info(
+                "competitor_availability_overridden_by_price",
+                product_id=str(existing.id),
+                availability=availability,
+                resolved_price=str(resolved_price),
+            )
 
         price_changed = _different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
@@ -322,12 +348,12 @@ def create_or_update_competitor_product_scraped(
             existing.last_checked = last_checked
             existing.last_scraped_at = collected_reference
             existing.collected_at = collected_reference
-            existing.status = ProductStatus.unavailable if unavailable_by_data else ProductStatus.available
-            existing.availability = availability
+            existing.status = resolved_status
+            existing.availability = resolved_availability
             existing.last_status = last_status
             existing.product_url = normalized_url
 
-            history_allowed = should_create_price_history(resolved_price, availability)
+            history_allowed = should_create_price_history(resolved_price, resolved_availability)
             price_history_needed = price_changed and history_allowed
 
             if not history_allowed:
@@ -335,9 +361,9 @@ def create_or_update_competitor_product_scraped(
                 logger.info(
                     "product_marked_unavailable",
                     product_id=str(existing.id),
-                    availability=availability,
+                    availability=resolved_availability,
                     last_status=last_status,
-                    availability_inferred=availability is None,
+                    availability_inferred=resolved_availability is None,
                     price_missing=resolved_price is None,
                 )
 
@@ -392,9 +418,17 @@ def create_or_update_competitor_product_scraped(
     resolved_currency = currency or scraped_info.currency
     availability = scraped_info.availability
     last_status = scraped_info.last_status
-    unavailable_by_data = availability is False or resolved_price is None
+    resolved_availability, resolved_status, unavailable_by_data = _resolve_scraped_availability_status(
+        availability,
+        resolved_price,
+    )
     if availability is False and resolved_price is not None:
-        unavailable_by_data = False
+        logger.info(
+            "competitor_availability_overridden_by_price",
+            product_id="pending",
+            availability=availability,
+            resolved_price=str(resolved_price),
+        )
     
     new = CompetitorProduct(
         monitored_product_id=product_data.monitored_product_id,
@@ -406,14 +440,14 @@ def create_or_update_competitor_product_scraped(
         seller=scraped_info.seller,
         seller_rating=scraped_info.seller_rating,
         thumbnail=scraped_info.thumbnail,
-        status=ProductStatus.unavailable if unavailable_by_data else ProductStatus.available,
+        status=resolved_status,
         last_checked=last_checked,
         last_scraped_at=last_checked,
         collected_at=collected_at or last_checked,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
-        availability=availability,
+        availability=resolved_availability,
         last_status=last_status,
         )
     _update_competitor_price_change_tracking(
@@ -425,15 +459,15 @@ def create_or_update_competitor_product_scraped(
     try:
         db.add(new)
         db.flush()
-        history_allowed = should_create_price_history(resolved_price, availability)
+        history_allowed = should_create_price_history(resolved_price, resolved_availability)
         if not history_allowed:
             PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="competitor").inc()
             logger.info(
                 "product_marked_unavailable",
                 product_id=str(new.id),
-                availability=availability,
+                availability=resolved_availability,
                 last_status=last_status,
-                availability_inferred=availability is None,
+                availability_inferred=resolved_availability is None,
                 price_missing=resolved_price is None,
             )
         if resolved_price is not None and history_allowed:
