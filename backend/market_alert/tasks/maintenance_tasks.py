@@ -26,26 +26,42 @@ def cleanup_cache() -> None:
     
     try:
         cursor = 0
+        unlink_batch_size = 200
+        pending_unlink_keys = []
         #Percorre chaves iniciadas com "cache": utilizando SCAN para evitar bloqueios
         while True:
             cursor, keys = redis_client.scan(cursor=cursor, match="cache:*", count=100)
-            for key in keys:
-                ttl = redis_client.ttl(key)
-                # -2 significa que a chave não existe mais; -1 indica ausência de expiração
-                if ttl == -2:
-                    continue
-                #Registra contadores separados para diagnosticar chaves sem expiração versus expirados
-                if ttl == -1:
-                    redis_client.delete(key)
-                    removed += 1
-                    no_expiration += 1
-                    continue
-                if ttl == 0 or ttl < 0:
-                    redis_client.delete(key)
-                    removed += 1
-                    expired += 1
+            if keys:
+                ttl_pipeline = redis_client.pipeline()
+                for key in keys:
+                    ttl_pipeline.ttl(key)
+                ttls = ttl_pipeline.execute()
+                for key, ttl in zip(keys, ttls):
+                    #Registra contadores separados para diagnosticar chaves sem expiração versus expirados
+                    if ttl == -1:
+                        pending_unlink_keys.append(key)
+                        removed += 1
+                        no_expiration += 1
+                        continue
+                    if ttl <= 0:
+                        pending_unlink_keys.append(key)
+                        removed += 1
+                        expired += 1
+                while len(pending_unlink_keys) >= unlink_batch_size:
+                    batch = pending_unlink_keys[:unlink_batch_size]
+                    pending_unlink_keys = pending_unlink_keys[unlink_batch_size:]
+                    unlink_pipeline = redis_client.pipeline()
+                    #O pipeline reduz latência e carga no Redis ao agrupar comandos UNLINK
+                    unlink_pipeline.unlink(*batch)
+                    unlink_pipeline.execute()
             if cursor == 0:
                 break
+
+        if pending_unlink_keys:
+            unlink_pipeline = redis_client.pipeline()
+            #O pipeline reduz latência e carga no Redis ao agrupar comandos UNLINK
+            unlink_pipeline.unlink(*pending_unlink_keys)
+            unlink_pipeline.execute()
             
         logger.info(
             "cleanup_cache_success",
