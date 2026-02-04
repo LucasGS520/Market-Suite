@@ -11,9 +11,7 @@ import structlog
 from shared.infra.db import SessionLocal
 
 from market_alert.core.celery_app import celery_app
-from market_alert.crud.crud_notifications import (
-    get_pending_notifications,
-)
+from market_alert.crud.crud_notifications import get_pending_notifications
 from market_alert.models import Notification
 from market_alert.tasks.send_notification_task import send_notification_task
 

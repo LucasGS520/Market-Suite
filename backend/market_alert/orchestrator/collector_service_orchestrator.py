@@ -15,10 +15,8 @@ from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
 
-from shared import metrics
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
-from shared.metrics.metrics_scraper import MONITORED_SKIPPED_PAUSED_TOTAL
 from shared.utils.url_validation import normalize_competitor_url
 
 
@@ -94,9 +92,8 @@ def enqueue_monitored_collection(
     trace_id: str | None = None,
 ) -> None:
     """ Abstrai o enfileiramento de monitorados e registra contexto em log """
-    #Se o monitorado estiver pausado, não enfileira e incrementa métrica
+    #Se o monitorado estiver pausado, não enfileira para preservar o contrato de pausa
     if getattr(monitored, "paused", False):
-        MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="orchestrator").inc()
         logger.info(
             "enqueue_skipped_monitored_paused",
             monitored_id=str(monitored.id),
@@ -154,7 +151,6 @@ def enqueue_competitors_for_monitored(
                 monitored_id=str(monitored_id),
                 batch_size=resolved_batch_size,
             )
-            metrics.RECHECK_ENQUEUE_SKIPPED_BY_LIMIT_TOTAL.inc()
             return
 
         competitors = get_competitors_by_monitored_id(db, monitored_id, include_paused=False)
@@ -175,7 +171,6 @@ def enqueue_competitors_for_monitored(
                         competitor,
                         countdown=countdown,
                     )
-                    metrics.RECHECK_COMPETITORS_ENQUEUED_TOTAL.inc()
                 except Exception:
                     logger.error(
                         "enqueue_competitor_failed",
@@ -183,14 +178,12 @@ def enqueue_competitors_for_monitored(
                         competitor_id=str(competitor.id),
                         exc_info=True,
                     )
-                    metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
     except Exception:
         logger.error(
             "enqueue_competitors_unexpected_error",
             monitored_id=str(monitored_id),
             exc_info=True,
         )
-        metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
 
 
 __all__ = [

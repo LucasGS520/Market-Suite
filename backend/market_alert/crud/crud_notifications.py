@@ -10,7 +10,6 @@ import structlog
 
 from shared.utils.redis_client import get_redis_client, set_key_with_ttl
 from shared.utils.redis_locks import acquire_notification_lock, release_notification_lock
-from shared.metrics.metrics_notifications import NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL
 
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_notifications import (
@@ -228,11 +227,9 @@ def create_notification(
     )
     lock_acquired, lock_owner = acquire_notification_lock(dedup_hash, ttl_seconds=60)
     if not lock_acquired:
-        NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="lock_unavailable").inc()
         return None
 
     if cooldown_seconds > 0 and _redis_has_key(cooldown_key):
-        NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="cooldown_redis").inc()
         release_notification_lock(dedup_hash, lock_owner)
         return None
     
@@ -242,12 +239,10 @@ def create_notification(
         cooldown_seconds=cooldown_seconds,
         now=now,
     ):
-        NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="cooldown_db").inc()
         release_notification_lock(dedup_hash, lock_owner)
         return None
     
     if _has_recent_sent_notification(db, dedup_hash=dedup_hash, now=now):
-        NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="sent_window").inc()
         release_notification_lock(dedup_hash, lock_owner)
         return None
     
@@ -260,7 +255,6 @@ def create_notification(
             only_if_absent=True,
         )
         if dedup_result is False:
-            NOTIFICATIONS_DEDUPE_SKIPPED_TOTAL.labels(reason="dedup_key").inc()
             release_notification_lock(dedup_hash, lock_owner)
             return None
     

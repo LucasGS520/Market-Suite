@@ -182,7 +182,7 @@ const normalizeMonitoredProduct = (product: MonitoredProduct): MonitoredProduct 
 export const productsService = {
   /**
    * Obtém estatísticas do dashboard
-   * Retorna métricas e contadores usados na visão geral do sistema.
+   * Retorna indicadores e contadores usados na visão geral do sistema.
    */
   async getDashboardStats(): Promise<DashboardStats> {
     const response = await apiClient.get<DashboardStats>('/dashboard/stats');

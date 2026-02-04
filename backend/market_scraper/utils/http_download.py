@@ -1,7 +1,7 @@
 """ Utilitários de download HTTP usados pelo pipeline do scraper
 
 O módulo isola toda a lógica responsável por obter o HTML de uma URL,
-incluindo construção de headers, métricas e tratamento de erros. Esse
+incluindo construção de headers e tratamento de erros. Esse
 isolamento facilita testes e reutilização sem acoplar diretamente às
 etapas do pipeline.
 """
@@ -26,18 +26,13 @@ from market_scraper.utils.http_retry import (
     build_retrying_operation,
 )
 from market_scraper.utils.http_utils import ContentDecodeError, build_timeout, decode_http_body
-from shared.metrics.metrics_scraper import (
-    SCRAPER_HTTP_CLIENT_ERROR_TOTAL,
-    SCRAPER_HTTP_DECODE_ERROR_TOTAL,
-    SCRAPER_UA_ROTATION_TOTAL,
-)
 
 
 logger = structlog.get_logger("http_download")
 _UA_STRATEGY_LABEL = "round_robin"
 
 def extract_domain(url: str) -> str | None:
-    """ Extrai domínio normalizado da URL para uso em métricas e logs """
+    """ Extrai domínio normalizado da URL para uso em logs """
     parsed = urlparse(url)
     return parsed.hostname
 
@@ -45,10 +40,6 @@ async def download_html(url: str, *, timeout: float) -> str:
     """ Baixa o HTML usando ``httpx`` aplicando limites rígidos de segurança """
     user_agent = user_agents.get_user_agent(url)
     domain = extract_domain(url)
-    SCRAPER_UA_ROTATION_TOTAL.labels(
-        strategy=_UA_STRATEGY_LABEL,
-        domain=domain or "unknown",
-    ).inc()
 
     referer = build_referer(
         url,
@@ -113,11 +104,6 @@ async def download_html(url: str, *, timeout: float) -> str:
     except ContentDecodeError as exc:
         encoding = exc.encoding or (response.headers.get("Content-Encoding") or "unknown")
         domain_label = domain or "unknown"
-        SCRAPER_HTTP_DECODE_ERROR_TOTAL.labels(
-            domain=domain_label,
-            encoding=encoding,
-            reason=exc.reason,
-        ).inc()
         logger.warning(
             "http_decode_error",
             domain=domain_label,
@@ -143,7 +129,6 @@ def _log_response_metadata(*, response: httpx.Response, url: str, domain: str | 
 def _log_client_error(*, response: httpx.Response, url: str, domain: str | None, user_agent: str) -> None:
     """ Registra contexto resumido de respostas 4xx para diagnóstico rápido """
     domain_label = domain or "unknown"
-    SCRAPER_HTTP_CLIENT_ERROR_TOTAL.labels(domain=domain_label, status=str(response.status_code)).inc()
 
     body_excerpt = None
     if settings.SCRAPER_LOG_4XX_BODY:

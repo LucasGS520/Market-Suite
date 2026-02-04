@@ -2,8 +2,8 @@
 
 Esta task roda de forma assíncrona via Celery. Ela carrega do banco de dados
 um produto monitorado e todos os seus concorrentes, executa a comparação de
-preços e registra métricas para acompanhamento. O fluxo é roteado para a fila
-``compare`` para manter o worker de monitoramento focado no loop contínuo.
+preços. O fluxo é roteado para a fila ``compare`` para manter o worker de monitoramento 
+focado no loop contínuo.
 """
 
 import structlog
@@ -13,18 +13,6 @@ from datetime import datetime, timezone
 from shared.infra.db import SessionLocal
 from sqlalchemy.orm import Session
 from shared.utils.logging_utils import mask_identifier
-from shared.metrics.metrics_scraper import SCRAPING_LATENCY_SECONDS
-from shared.metrics.metrics_price_comparison import (
-    COMPARISON_SKIPPED_PAUSED_TOTAL,
-    COMPARE_PRICES_COMPLETED_TOTAL,
-    COMPARE_PRICES_STARTED_TOTAL,
-    PRICE_COMPARISON_TASK_LATENCY_SECONDS,
-)
-from shared.metrics.metrics_notifications import (
-    NOTIFICATION_ALERTS_CREATED_TOTAL,
-    NOTIFICATION_EVENTS_TOTAL,
-    NOTIFICATION_IDEMPOTENCY_HITS_TOTAL,
-)
 
 from market_alert.core.celery_app import celery_app
 from market_alert.core.config_alert import settings
@@ -66,8 +54,6 @@ def compare_prices_task(
         queue=queue_name,
         monitored_id=mask_identifier(monitored_id),
     )
-    #Registra a contagem de início para acompanhamento de backlog
-    COMPARE_PRICES_STARTED_TOTAL.inc()
     start = datetime.now(timezone.utc)
     task_logger.info("compare_prices_started")
     has_error = False
@@ -85,7 +71,6 @@ def compare_prices_task(
             
             if monitored.paused:
                 #Evita cálculos de comparação quando o monitorado está pausado
-                COMPARISON_SKIPPED_PAUSED_TOTAL.inc()
                 task_logger.warning(
                     "compare_prices_skipped_paused",
                     monitored_id=mask_identifier(monitored_id),
@@ -237,10 +222,6 @@ def compare_prices_task(
                         user_id=user.id,
                         commit=False,
                     )
-                    NOTIFICATION_EVENTS_TOTAL.labels(
-                        event_type=event_type.value,
-                        outcome="evaluated",
-                    ).inc()
 
                     for candidate in candidates_by_event.get(event_type, []):
                         notification = create_notification(
@@ -263,15 +244,8 @@ def compare_prices_task(
                             commit=False,
                         )
                         if notification is None:
-                            NOTIFICATION_IDEMPOTENCY_HITS_TOTAL.labels(
-                                channel=candidate.channel.value,
-                            ).inc()
                             continue
                         notification_ids.append(str(notification.id))
-                        NOTIFICATION_ALERTS_CREATED_TOTAL.labels(
-                            alert_type=event_type.value,
-                            channel=candidate.channel.value,
-                        ).inc()
 
                         if candidate.alert_rule:
                             update_alert_rule_last_triggered(
@@ -298,11 +272,6 @@ def compare_prices_task(
                         args=[notification_ids],
                         queue="notifications",
                     )
-                else:
-                    NOTIFICATION_EVENTS_TOTAL.labels(
-                        event_type=event_type.value,
-                        outcome="no_notifications",
-                    ).inc()
 
     except Exception as exc:
         has_error = True
@@ -315,12 +284,7 @@ def compare_prices_task(
         raise
 
     finally:
-        #Observa métricas de latência e contagem
         duration = (datetime.now(timezone.utc) - start).total_seconds()
-        SCRAPING_LATENCY_SECONDS.labels(source="comparator").observe(duration)
-        PRICE_COMPARISON_TASK_LATENCY_SECONDS.observe(duration)
-        if not has_error:
-            COMPARE_PRICES_COMPLETED_TOTAL.inc()
         task_logger.info(
             "compare_prices_finished",
             status="success" if not has_error else "error",

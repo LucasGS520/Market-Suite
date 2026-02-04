@@ -1,6 +1,6 @@
-""" Configura a aplicação Celery do `market_alert` e registra tasks e métricas """
+""" Configura a aplicação Celery do `market_alert` e registra tasks """
 
-#Registra métricas antes de iniciar o HTTP server
+#Inicializa a aplicação do worker antes de iniciar serviços auxiliares
 import os
 import logging
 import threading
@@ -10,15 +10,8 @@ from importlib import import_module
 import structlog
 from structlog.typing import BindableLogger, EventDict
 from celery import Celery
-from celery.signals import task_success, task_failure, worker_ready
-from prometheus_client import start_http_server
-from shared.metrics.metrics_celery import CELERY_TASKS_TOTAL, CELERY_CONTINUOUS_AUTOSTART_TOTAL, CONTINUOUS_AUTOSTART_THROTTLED_TOTAL
+from celery.signals import worker_ready
 from shared.utils.redis_client import get_redis_client, set_key_with_ttl
-
-try:
-    from opentelemetry.instrumentation.celery import CeleryInstrumentor
-except Exception:
-    CeleryInstrumentor = None
 
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_schedule import (
@@ -33,8 +26,6 @@ CONTINUOUS_COLLECTOR_AUTOSTART_KEY = "market_alert:continuous_collector:autostar
 CONTINUOUS_COLLECTOR_AUTOSTART_COOLDOWN_KEY = "market_alert:continuous_collector:autostart:cooldown"
 NOISY_EVENT_NAMES = {
     "channel_vars_missing",
-    "collected_celery_metrics",
-    "collect_audit_metrics_noop",
 }
 
 logger = structlog.get_logger("celery_app")
@@ -42,7 +33,7 @@ PROCESS_START_MONOTONIC = time.monotonic()
 
 
 def _get_process_uptime_seconds() -> float:
-    """ Retorna o uptime do processo em segundos para logs de observabilidade """
+    """ Retorna o uptime do processo em segundos para logs operacionais """
     return round(time.monotonic() - PROCESS_START_MONOTONIC, 2)
 
 def drop_repeated_events(
@@ -112,10 +103,6 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=TASK_MODULES,
 )
-
-if CeleryInstrumentor:
-    #Instrumenta o Celery para observabilidade distribuída
-    CeleryInstrumentor().instrument()
 
 def _continuous_collector_autostart_enabled() -> bool:
     """ Determina se o coletor contínuo deve iniciar automaticamente no worker """
@@ -194,10 +181,6 @@ def _request_continuous_collector_start(*, action: str = "triggered") -> None:
     
     #Evita reinício em loop quando houve falha recente no coletor contínuo
     if _continuous_collector_autostart_in_cooldown():
-        CONTINUOUS_AUTOSTART_THROTTLED_TOTAL.labels(
-            service=SERVICE_LABEL,
-            reason="cooldown",
-        ).inc()
         logger.warning(
             "continuous_autostart_blocked",
             detail="reinício bloqueado por cooldown",
@@ -239,10 +222,6 @@ def _request_continuous_collector_start(*, action: str = "triggered") -> None:
             reason=action,
             message="Autostart do coletor contínuo disparado com sucesso.",
         )
-        CELERY_CONTINUOUS_AUTOSTART_TOTAL.labels(
-            service=SERVICE_LABEL,
-            action=action,
-        ).inc()
     except Exception:
         _delete_continuous_collector_lock()
         _register_continuous_collector_cooldown(reason="falha ao iniciar coletor contínuo")
@@ -335,34 +314,10 @@ def _warn_lock_ttl_configuration() -> None:
 _warn_lock_ttl_configuration()
 
 @worker_ready.connect
-def _start_prometheus_server(**kwargs):
-    """ Inicia o servidor Prometheus assim que o worker estiver pronto """
-    #Servidor de métricas Prometheus
-    start_http_server(port=8002, addr="0.0.0.0")
+def _start_worker_server(**kwargs):
+    """ Inicia rotinas de suporte assim que o worker estiver pronto """
     _request_continuous_collector_start()
     _start_autostart_revalidation_loop()
-
-@task_success.connect
-def handle_task_success(sender=None, **kwargs):
-    """ Métricas de contagem de sucesso """
-    #Incrementa contagem de tasks concluídas
-    CELERY_TASKS_TOTAL.labels(
-        service=SERVICE_LABEL,
-        task_name=sender.name,
-        status="success",
-    ).inc()
-
-#Incrementa em toda a falha de task
-@task_failure.connect
-def handle_task_failure(sender=None, **kwargs):
-    """ Métricas de contagem de falha """
-    #Incrementa em caso de falha de task
-    CELERY_TASKS_TOTAL.labels(
-        service=SERVICE_LABEL,
-        task_name=sender.name,
-        status="failure",
-    ).inc()
-
 
 #Configurações adicionais do Celery
 #Define serialização, fuso horário e limites

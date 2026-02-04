@@ -3,7 +3,7 @@
 O módulo centraliza heurísticas usadas pelo collector e CRUDs para decidir
 quando registrar histórico de preço e para remover valores inválidos como
 ``0``. A intenção é manter uma regra única de disponibilidade/preço em toda
-suite, evitando gravações inconsistentes e facilitando observabilidade.
+suite, evitando gravações inconsistentes e facilitando auditoria.
 """
 
 from __future__ import annotations

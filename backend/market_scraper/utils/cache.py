@@ -1,8 +1,8 @@
-""" Gerencia o cache em memória do scraper com LRU/TTL e métricas
+""" Gerencia o cache em memória do scraper com LRU/TTL
 
 O módulo mantém a API pública ``get``/``set``/``invalidate``/``clear``
 para o restante do pipeline enquanto encapsula ``cachetools.TTLCache``
-com controles adicionais de métricas. Implementações alternativas foram
+com controles adicionais de expiração. Implementações alternativas foram
 retiradas para simplificar operação: toda execução usa o backend em
 memória documentado.
 """
@@ -17,12 +17,7 @@ from cachetools import Cache, TTLCache
 import structlog
 
 from market_scraper.core.config_scraper import settings
-from shared.metrics.metrics_scraper import (
-    SCRAPER_CACHE_EVICTIONS_TOTAL,
-    SCRAPER_CACHE_HIT_RATE,
-    SCRAPER_CACHE_LOOKUPS_TOTAL,
-    SCRAPER_CACHE_SIZE,
-)
+
 
 class _InstrumentedTTLCache(TTLCache):
     """ Estende ``TTLCache`` para registrar remoções e TTL por item """
@@ -105,73 +100,36 @@ class _InstrumentedTTLCache(TTLCache):
             self._fallback_warning_emitted = True
 
 class InMemoryTTLCacheAdapter:
-    """ Adapter em memória com LRU/TTL e instrumentação de métricas """
+    """ Adapter em memória com LRU/TTL e expiração configurável """
     def __init__(self, max_entries: int, default_ttl_seconds: int) -> None:
         self._cache = _InstrumentedTTLCache(max_entries, default_ttl_seconds)
-        self._cache.configure_eviction_callback(self._record_eviction)
         self._lock = threading.RLock()
-        self._hits = 0
-        self._misses = 0
-        SCRAPER_CACHE_SIZE.set(0)
-        SCRAPER_CACHE_HIT_RATE.set(0)
-
-    def _record_eviction(self, count: int, reason: str) -> None:
-        """ Atualiza contadores quando itens são removidos do cache """
-        if reason == "capacity":
-            SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason=reason).inc(count)
-        SCRAPER_CACHE_SIZE.set(len(self._cache))
-
-    def _update_hit_rate(self) -> None:
-        """ Recalcula gauge de taxa de acerto com base em hits e misses """
-        total = self._hits + self._misses
-        rate = (self._hits / total) if total else 0.0
-        SCRAPER_CACHE_HIT_RATE.set(rate)
 
     def get(self, url: str) -> Optional[Any]:
-        """ Busca conteudo armazenado registrando métricas de hit/miss """
+        """ Busca conteudo armazenado preservando a política LRU/TTL """
         with self._lock:
-            removed_by_ttl = self._cache.expire()
-            if removed_by_ttl > 0:
-                #Atualiza métricas manualmente porque o callback ignora remoções por TTL
-                SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired").inc(removed_by_ttl)
-                SCRAPER_CACHE_SIZE.set(len(self._cache))
+            self._cache.expire()
             try:
                 value = self._cache[url]
             except KeyError:
-                self._misses += 1
-                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(outcome="miss").inc()
-                self._update_hit_rate()
                 return None
             else:
-                self._hits += 1
-                SCRAPER_CACHE_LOOKUPS_TOTAL.labels(outcome="hit").inc()
-                self._update_hit_rate()
                 return value
         
     def set(self, url: str, value: Any, ttl_seconds: int) -> None:
         """ Armazena valores respeitando TTL informado e política LRU """
         with self._lock:
-            removed_by_ttl = self._cache.set_with_ttl(url, value, ttl_seconds)
-            if removed_by_ttl > 0:
-                SCRAPER_CACHE_EVICTIONS_TOTAL.labels(reason="expired").inc(removed_by_ttl)
-            SCRAPER_CACHE_SIZE.set(len(self._cache))
+            self._cache.set_with_ttl(url, value, ttl_seconds)
 
     def invalidate(self, url: str) -> None:
         """ Remove entrada específica do cache em memória """
         with self._lock:
-            removed = self._cache.pop(url, None)
-            if removed is not None:
-                SCRAPER_CACHE_SIZE.set(len(self._cache))
+            self._cache.pop(url, None)
 
     def clear(self) -> None:
         """ Limpa completamente o cache em memória para manutenção """
         with self._lock:
             self._cache.clear()
-            #Reinicia contadores para que métricas representem estado vazio
-            self._hits = 0
-            self._misses = 0
-            self._update_hit_rate()
-            SCRAPER_CACHE_SIZE.set(0)
 
 _CACHE_ADAPTER = InMemoryTTLCacheAdapter(
     max_entries=settings.SCRAPER_CACHE_MAX_ENTRIES,

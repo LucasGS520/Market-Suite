@@ -16,7 +16,6 @@ from fastapi import HTTPException, status
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_competitor_url, normalize_product_url_for_storage
-from shared.metrics.metrics_products import PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
@@ -357,7 +356,6 @@ def create_or_update_competitor_product_scraped(
             price_history_needed = price_changed and history_allowed
 
             if not history_allowed:
-                PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="competitor").inc()
                 logger.info(
                     "product_marked_unavailable",
                     product_id=str(existing.id),
@@ -461,7 +459,6 @@ def create_or_update_competitor_product_scraped(
         db.flush()
         history_allowed = should_create_price_history(resolved_price, resolved_availability)
         if not history_allowed:
-            PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="competitor").inc()
             logger.info(
                 "product_marked_unavailable",
                 product_id=str(new.id),
@@ -591,7 +588,7 @@ def paginate_competitors(
     include_paused: bool = True,
     include_inactive: bool = True,
 ) -> tuple[int, int, int, List[CompetitorProduct]]:
-    """ Retorna concorrentes paginados preservando contagens para métricas """
+    """ Retorna concorrentes paginados preservando contagens para a resposta """
     base_query = db.query(CompetitorProduct).filter(
         CompetitorProduct.monitored_product_id == monitored_product_id,
     )

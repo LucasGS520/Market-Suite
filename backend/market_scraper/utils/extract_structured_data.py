@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 from json import JSONDecodeError
-from time import perf_counter
 from typing import Any, Dict, Optional
 
 import extruct
@@ -19,12 +18,6 @@ import structlog
 from selectolax.parser import HTMLParser
 from w3lib.html import get_base_url
 
-from shared.metrics.metrics_parser import (
-    PARSER_DURATION_SECONDS,
-    PARSER_FAILURE_TOTAL,
-    PARSER_FALLBACK_TOTAL,
-    PARSER_SUCCESS_TOTAL,
-)
 from shared.utils.logging_utils import sanitize_log_data
 
 
@@ -107,7 +100,6 @@ def extract_structured_data(html: str, url: Optional[str] = None) -> Dict[str, A
         vazias esperadas pelas etapas seguintes do pipeline.
     """
     base_url = get_base_url(html, url)
-    start_time = perf_counter()
     try:
         result = extruct.extract(
             html,
@@ -116,34 +108,15 @@ def extract_structured_data(html: str, url: Optional[str] = None) -> Dict[str, A
             uniform=True,
         )
         if _has_payload(result):
-            PARSER_SUCCESS_TOTAL.labels(library="extruct").inc()
             return result
-        PARSER_FALLBACK_TOTAL.labels(library="selectolax").inc()
-        fallback_start = perf_counter()
         fallback_result = _extract_with_selectolax(html)
-        fallback_duration = perf_counter() - fallback_start
-        PARSER_DURATION_SECONDS.labels(library="selectolax").observe(fallback_duration)
-        if _has_payload(fallback_result):
-            PARSER_SUCCESS_TOTAL.labels(library="selectolax").inc()
-        else:
-            PARSER_FAILURE_TOTAL.labels(library="selectolax").inc()
         return fallback_result
     except (JSONDecodeError, ValueError) as exc:
-        PARSER_FAILURE_TOTAL.labels(library="extruct").inc()
         logger.exception(
             "erro_extracao_dados_estruturados",
             error=sanitize_log_data(str(exc)),
         )
-        fallback_start = perf_counter()
         fallback_result = _extract_with_selectolax(html)
-        fallback_duration = perf_counter() - fallback_start
-        PARSER_FALLBACK_TOTAL.labels(library="selectolax").inc()
-        PARSER_DURATION_SECONDS.labels(library="selectolax").observe(fallback_duration)
         if _has_payload(fallback_result):
-            PARSER_SUCCESS_TOTAL.labels(library="selectolax").inc()
             return fallback_result
-        PARSER_FAILURE_TOTAL.labels(library="selectolax").inc()
         return _empty_payload()
-    finally:
-        duration = perf_counter() - start_time
-        PARSER_DURATION_SECONDS.labels(library="extruct").observe(duration)

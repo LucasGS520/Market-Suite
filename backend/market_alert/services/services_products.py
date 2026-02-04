@@ -18,10 +18,7 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryResponse
-from market_alert.schemas.schemas_products import (
-    CompetitorProductResponse,
-    MonitoredProductResponse,
-)
+from market_alert.schemas.schemas_products import CompetitorProductResponse, MonitoredProductResponse
 from market_alert.utils.product_stats_formatter import get_product_stats
 from shared.utils import sanitize_text
 

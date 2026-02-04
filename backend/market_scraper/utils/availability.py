@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from typing import Callable, Iterable, Tuple
 import structlog
-from shared.metrics.metrics_scraper import SCRAPER_AVAILABILITY_HEURISTICS_TOTAL
 
 
 logger = structlog.get_logger("availability_detector")
@@ -94,8 +93,7 @@ _DETECTORS: tuple[tuple[str, DetectorCallable], ...] = (
 )
 
 def _register_heuristic(reason: str, *, domain: str | None) -> None:
-    """ Incrementa a métrica de heurísticas aplicadas """
-    SCRAPER_AVAILABILITY_HEURISTICS_TOTAL.labels(reason=reason).inc()
+    """ Registra em log a heurística aplicada """
     logger.info(
         "availability_heuristic_applied",
         domain=domain or "unknown",

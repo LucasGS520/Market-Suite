@@ -15,12 +15,6 @@ import structlog
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url_for_storage
-from shared.metrics.metrics_products import (
-    MONITORED_DELETED_TOTAL,
-    MONITORED_PAUSED_TOTAL,
-    MONITORED_RESUMED_TOTAL,
-    PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL,
-)
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 from shared.infra.db import SessionLocal
 
@@ -348,7 +342,6 @@ def create_or_update_monitored_product_scraped(
             price_history_needed = price_changed and history_allowed
 
             if not history_allowed:
-                PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="monitored").inc()
                 logger.info(
                     "product_marked_unavailable",
                     product_id=str(existing.id),
@@ -445,7 +438,6 @@ def create_or_update_monitored_product_scraped(
         db.flush()
         history_allowed = should_create_price_history(resolved_price, availability)
         if not history_allowed:
-            PRICE_HISTORY_SKIPPED_UNAVAILABLE_TOTAL.labels(owner="monitored").inc()
             logger.info(
                 "product_marked_unavailable",
                 product_id=str(new.id),
@@ -733,9 +725,6 @@ def pause_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPro
         already_paused=was_paused,
     )
 
-    if not was_paused:
-        MONITORED_PAUSED_TOTAL.inc()
-
     try:
         remove_from_priority_queue(monitored.id, source="user_paused")
     except Exception as exc:
@@ -773,9 +762,6 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
         user_id=str(user.id),
         was_paused=was_paused,
     )
-
-    if was_paused:
-        MONITORED_RESUMED_TOTAL.inc()
 
     if competitors_updated:
         logger.info(
@@ -823,7 +809,7 @@ def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
 
         dedicated_session.delete(monitored)
         dedicated_session.commit()
-        MONITORED_DELETED_TOTAL.inc()
+
     finally:
         if dedicated_session:
             dedicated_session.close()

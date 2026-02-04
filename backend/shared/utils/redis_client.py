@@ -16,7 +16,6 @@ from typing import Any, Tuple
 import redis
 
 from shared.core.config_base import ConfigBase
-from shared import metrics
 
 
 #Armazena instâncias isoladas de Redis por thread
@@ -129,7 +128,6 @@ def get_redis_client() -> redis.Redis | None:
             )
             client = _thread_local.client
         except Exception as err:
-            metrics.REDIS_CONNECTION_ERRORS_TOTAL.inc()
             logger.error("falha_inicializacao_redis", erro=str(err))
             return None
     return client
@@ -347,11 +345,9 @@ def is_scraping_suspended() -> bool:
     """ Verifica se a flag de suspensão de scraping está ativa """
     client = get_redis_client()
     if client is None:
-        metrics.SCRAPING_SUSPENDED_FLAG.set(0)
         return False
     exists = getattr(client, "exists", None)
     active = exists(SCRAPING_SUSPENDED_KEY) == 1 if exists else False
-    metrics.SCRAPING_SUSPENDED_FLAG.set(1 if active else 0)
     return active
 
 def suspend_scraping(duration_seconds: int) -> None:
@@ -362,7 +358,6 @@ def suspend_scraping(duration_seconds: int) -> None:
     setter = getattr(client, "set", None)
     if setter:
         setter(SCRAPING_SUSPENDED_KEY, "1", ex=duration_seconds)
-        metrics.SCRAPING_SUSPENDED_FLAG.set(1)
 
 def resume_scraping() -> None:
     """ Remove imediatamente a flag de suspensão, permitindo o scraping """
@@ -372,4 +367,3 @@ def resume_scraping() -> None:
     deleter = getattr(client, "delete", None)
     if deleter:
         deleter(SCRAPING_SUSPENDED_KEY)
-        metrics.SCRAPING_SUSPENDED_FLAG.set(0)

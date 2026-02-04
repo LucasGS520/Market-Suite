@@ -32,11 +32,6 @@ from market_alert.utils.interval_calculator_products import calculate_next_check
 from market_alert.core.config_alert import settings
 
 from shared.utils.url_validation import normalize_and_validate_product_url
-from shared import metrics
-from shared.metrics.metrics_products import (
-    COMPETITOR_DELETED_TOTAL,
-    COMPETITOR_DELETE_FAILURES_TOTAL,
-)
 from market_alert.core.celery_app import celery_app
 
 
@@ -200,7 +195,6 @@ def create_competitor_scrape_request(
         is_paused=monitored_is_paused,
     )
 
-    metrics.PENDING_COMPETITOR_CREATED_TOTAL.inc()
     logger.info(
         "pending_competitor_created",
         competitor_id=str(pending.id),
@@ -386,7 +380,6 @@ def delete_competitor_entry(
             monitored_id=str(monitored_id),
         )
 
-        COMPETITOR_DELETED_TOTAL.inc()
         #Enfileira recálculo via Celery sem importar a task diretamente para evitar ciclo
         celery_app.send_task(
             "market_alert.tasks.compare_prices_task.compare_prices_task",
@@ -401,11 +394,9 @@ def delete_competitor_entry(
         return monitored_id
     except HTTPException:
         db.rollback()
-        COMPETITOR_DELETE_FAILURES_TOTAL.inc()
         raise
     except Exception as exc:
         db.rollback()
-        COMPETITOR_DELETE_FAILURES_TOTAL.inc()
         logger.exception("competitor_delete_failed", **log_context)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

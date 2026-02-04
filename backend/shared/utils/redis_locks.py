@@ -17,7 +17,6 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from shared.metrics import metrics_redis
 from shared.utils.redis_client import get_redis_client
 
 
@@ -86,11 +85,9 @@ def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = No
             nx=True,
         )
         if acquired:
-            metrics_redis.REDIS_LOCK_ACQUIRED_TOTAL.labels(resource="product").inc()
             return True, owner_id
         
         existing_owner = client.get(_lock_key_product(product_id))
-        metrics_redis.REDIS_LOCK_SKIPPED_TOTAL.labels(resource="product").inc()
         if existing_owner is None:
             return False, None
 
@@ -124,12 +121,10 @@ def release_product_lock(product_id: UUID | str, owner_id: str | None) -> bool:
         if released:
             return True
 
-        metrics_redis.REDIS_LOCK_RELEASE_FAILED_TOTAL.labels(resource="product").inc()
         logger.warning("product_lock_release_failed", product_id=str(product_id), reason="mismatch_or_expired")
         return False
     
     except Exception:
-        metrics_redis.REDIS_LOCK_RELEASE_FAILED_TOTAL.labels(resource="product").inc()
         logger.warning("product_lock_release_failed", product_id=str(product_id), reason="exception")
         return False
     
@@ -154,11 +149,9 @@ def acquire_continuous_collector_lock(*, ttl_seconds: int) -> tuple[bool, str | 
             nx=True,
         )
         if acquired:
-            metrics_redis.REDIS_LOCK_ACQUIRED_TOTAL.labels(resource="continuous_collector").inc()
             return True, owner_id
         
         existing_owner = client.get(_lock_key_continuous_collector())
-        metrics_redis.REDIS_LOCK_SKIPPED_TOTAL.labels(resource="continuous_collector").inc()
         if existing_owner is None:
             return False, None
         
@@ -223,18 +216,12 @@ def release_continuous_collector_lock(*, owner_id: str | None) -> bool:
         if released:
             return True
         
-        metrics_redis.REDIS_LOCK_RELEASE_FAILED_TOTAL.labels(
-            resource="continuous_collector"
-        ).inc()
         logger.warning(
             "continuous_collector_lock_release_failed",
             reason="mismatch_or_expired",
         )
         return False
     except Exception:
-        metrics_redis.REDIS_LOCK_RELEASE_FAILED_TOTAL.labels(
-            resource="continuous_collector"
-        ).inc()
         logger.warning(
             "continuous_collector_lock_release_failed",
             reason="exception",
@@ -259,11 +246,9 @@ def acquire_notification_lock(dedup_key: str, *, ttl_seconds: int | None = None)
             nx=True,
         )
         if acquired:
-            metrics_redis.REDIS_LOCK_ACQUIRED_TOTAL.labels(resource="notification").inc()
             return True, owner_id
         
         existing_owner = client.get(_lock_key_notification(dedup_key))
-        metrics_redis.REDIS_LOCK_SKIPPED_TOTAL.labels(resource="notification").inc()
         if existing_owner is None:
             return False, None
         
@@ -291,11 +276,9 @@ def release_notification_lock(dedup_key: str, owner_id: str | None) -> bool:
         if released:
             return True
         
-        metrics_redis.REDIS_LOCK_RELEASE_FAILED_TOTAL.labels(resource="notification").inc()
         logger.warning("notification_lock_release_failed", dedup_key=dedup_key, reason="mismatch_or_expired")
         return False
     
     except Exception:
-        metrics_redis.REDIS_LOCK_RELEASE_FAILED_TOTAL.labels(resource="notification").inc()
         logger.warning("notification_lock_release_failed", dedup_key=dedup_key, reason="exception")
         return False

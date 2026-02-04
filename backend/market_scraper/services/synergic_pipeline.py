@@ -1,9 +1,8 @@
-""" Pipeline sequencial e observável para o MarketScraper
+""" Pipeline sequencial para o MarketScraper
 
 O módulo implementa uma versão enxuta do pipeline que processa etapas em
-sequência, respeitando limites de tempo configuráveis e registrando
-métricas por etapa. A execução linear com métricas garante previsibilidade
-e observabilidade para o serviço de scraping.
+sequência, respeitando limites de tempo configuráveis. A execução linear
+garante previsibilidade para o serviço de scraping.
 """
 
 from __future__ import annotations
@@ -15,12 +14,6 @@ from typing import Any, Literal, Sequence
 
 import structlog
 
-from shared.metrics.metrics_scraper import (
-    SCRAPER_NO_RESULT_TOTAL,
-    SCRAPER_STEP_FALLBACK_TOTAL,
-    SCRAPER_STEP_LATENCY_SECONDS,
-    SCRAPER_STEP_SUCCESS_TOTAL,
-)
 from shared.utils.logging_utils import sanitize_log_data
 
 
@@ -94,7 +87,7 @@ class StepResult:
     
 @dataclass
 class StepExecution:
-    """ Registro de execução de uma etapa para depuração e métricas """
+    """ Registro de execução de uma etapa para depuração """
     name: str
     status: str
     duration_seconds: float
@@ -135,7 +128,7 @@ class PipelineStep:
         raise NotImplementedError
 
 class SynergicPipeline:
-    """ Executa etapas em sequência, monitorando métricas e timeouts """
+    """ Executa etapas em sequência, monitorando timeouts """
     def __init__(
         self,
         steps: Sequence[PipelineStep],
@@ -152,7 +145,7 @@ class SynergicPipeline:
         executions: list[StepExecution] = []
         payload: dict[str, Any] | None = None
         status: Literal["success", "no_result", "timeout", "error"] = "no_result"
-        #Controle de rótulos garante consistência entre métricas de etapa e do pipeline
+        #Controle de rótulos garante consistência entre etapas e resultado final
         last_result_label: str = "no_result"
         final_result_label: str = "no_result"
         context.data.setdefault("pipeline_timeout", self._pipeline_timeout)
@@ -176,8 +169,6 @@ class SynergicPipeline:
                             message="Tempo limite da etapa excedido",
                         )
                     )
-                    SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
-                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
                     last_result_label = result_label
                     logger.warning(
                         "step_timeout",
@@ -200,8 +191,6 @@ class SynergicPipeline:
                             message="Falha interna na etapa",
                         )
                     )
-                    SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
-                    SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
                     last_result_label = result_label
                     logger.exception(
                         "step_error",
@@ -216,11 +205,9 @@ class SynergicPipeline:
 
                 duration = perf_counter() - start
                 result_label = result.status
-                SCRAPER_STEP_LATENCY_SECONDS.labels(step.name, context.source, result_label).observe(duration)
                 last_result_label = result_label
 
                 if result.status == "success":
-                    SCRAPER_STEP_SUCCESS_TOTAL.labels(step.name, context.source, result_label).inc()
                     executions.append(
                         StepExecution(
                             name=step.name,
@@ -235,7 +222,6 @@ class SynergicPipeline:
                         return
                     continue
                 
-                SCRAPER_STEP_FALLBACK_TOTAL.labels(step.name, context.source, result_label).inc()
                 executions.append(
                     StepExecution(
                         name=step.name,
@@ -259,7 +245,6 @@ class SynergicPipeline:
                 domain=context.source,
                 result=final_result_label,
             )
-            SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
             raise PipelineTimeoutError("Tempo limite do pipeline excedido") from exc
         
         if status == "success":
@@ -279,7 +264,6 @@ class SynergicPipeline:
                     url=sanitize_log_data(context.url),
                     result=final_result_label,
                 )
-            SCRAPER_NO_RESULT_TOTAL.labels(context.source, final_result_label).inc()
             
             status = final_result_label
 
