@@ -99,7 +99,7 @@ async def _download_robots(robots_url: str, *, timeout: float) -> str | None:
         original = exc.__cause__
         if original is not None:
             logger.warning(
-                "robots_fetch_error", #Mantém label clássico para observabilidade
+                "robots_fetch_error", #Mantém label clássico para análise interna
                 robots_url=sanitize_log_data(robots_url),
                 error=str(original),
             )

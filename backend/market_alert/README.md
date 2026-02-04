@@ -10,7 +10,7 @@ API FastAPI responsável por autenticação, gestão e monitoramento, além de c
 - **Expor rotas REST** para gerenciamento de usuários, autenticação, produtos monitorados e concorrentes, comparações.
 - **Agendar tarefas Celery** (`scraping`, `monitor`, `compare`, `notifications`) para coleta de dados contínua e comparação.
 - **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
-- **Registrar logs estruturados** para observabilidade.
+- **Registrar logs estruturados** para auditoria operacional.
 - **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
 - **Regras de comparação**: comparações permanecem automáticas após coletas, priorizando mudanças de preço e disponibilidade sem thresholds dinâmicos ou idempotência distribuída. Fluxos manuais apenas disparam tasks já idempotentes (ex.: `compare_prices_task`).
 - **Notificações e alertas**: eventos de domínio alimentam regras configuráveis e geram notificações persistidas com idempotência e auditoria.
@@ -59,7 +59,7 @@ market_alert/
 ### Integração com os Serviços
 - **`market_scraper`**: consumido por `scraper/scraper_client.ScraperClient`, que envia `ParserRequest` valida `ParserResponse` do pacote e trata `304 Not Modified` retornando `None` quando nada mudou. O `ParserResponse` retorna sempre `price|currency` (pode ser `null`), `availability`, `last_status`, `etag` e `not_modified`, permitindo marcar anúncios inativos sem gravar preços `0.00`.
 - **`shared/`**: reutiliza abstrações de configuração, segurança e utilidades comuns.
-- **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs e tracing.
+- **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs.
 - **Codificação numérica**: valores monetários são serializados como string (`Decimal` → `"1099.90"`) em quase todos os contratos, exceto no resumo de comparação que mantém encoder numérico para compatibilidade.
 - **Execução das comparações**: as comparações são executadas automaticamente pelas tasks de monitoramento e comparação; não há endpoint para disparo manual.
 

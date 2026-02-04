@@ -1,5 +1,5 @@
 # Market Suite
-Market Suite é uma suíte de monitoramento de preços composta por dois grandes módulos — `backend/` e `frontend/` — apoiados por infraestrutura compartilhada de dados, mensageria e observabilidade. 
+Market Suite é uma suíte de monitoramento de preços composta por dois grandes módulos — `backend/` e `frontend/` — apoiados por infraestrutura compartilhada de dados e mensageria. 
 A plataforma combina API pública, processamento assíncrono e microserviço de scraping especializado, permitindo acompanhar produtos e comparar ofertas.
 
 ## Serviços e responsabilidades
@@ -45,7 +45,7 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
    - O contrato do `ParserResponse` expõe sempre `price|currency` (admite `null`), `availability`/`last_status` e cabeçalhos (`etag`, `not_modified`) para sinalizar indisponibilidade sem gravar preços `0.00`.
 5. **Persistência e regras de negócio**: workers Celery consolidam dados no PostgreSQL (`backend/market_alert/repositories`), recalculam comparações e armazenam histórico de coletas.
 6. **Eventos e notificações**: eventos de domínio são persistidos em `event_log`, avaliados por regras configuráveis e geram notificações com idempotência, retries e auditoria.
-7. **Observabilidade e resiliência**: cada serviço publica logs estruturados e permite integração com tracing. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
+7. **Resiliência operacional**: cada serviço publica logs estruturados. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 
 ### Tarefas Celery do `market_alert`
 - **Collector (`tasks.collector_product_task.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir. Enfileirado na fila `scraping`.
@@ -57,10 +57,10 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 - **Exposição de APIs**: o FastAPI em `market_alert` oferece rotas públicas, autenticação JWT e endpoints para monitoramentos, concorrentes e comparações.
 - **Contrato único**: esquemas em `backend/shared/schemas/schemas_scraper.py` padronizam comunicação API ↔ scraper.
 - **Separação de responsabilidades**: apenas o `market_scraper` processa HTML, enquanto o `market_alert` persiste dados e aplica lógica de negócios.
-- **Processamento assíncrono**: workers Celery ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização e observabilidade.
+- **Processamento assíncrono**: workers Celery ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização e logs estruturados.
 - **Simplicidade operacional**: priorizamos contratos previsíveis, removendo idempotência distribuída nos disparos manuais.
 - **Extensibilidade controlada**: novos marketplaces exigem evoluções no `market_scraper` e nos contratos compartilhados antes de tocar fluxos críticos.
-- **Biblioteca compartilhada**: `backend/shared` concentra schemas Pydantic, utilidades, observabilidade e integrações externas consumidas pelos demais serviços.
+- **Biblioteca compartilhada**: `backend/shared` concentra schemas Pydantic, utilidades e integrações externas consumidas pelos demais serviços.
 
 ## Frontend
 ### Arquitetura do frontend
@@ -78,7 +78,6 @@ O módulo `frontend/` entrega a interface web que interage com o backend.
 3. **Consumo de dados**: hooks do `react-query` buscam produtos monitorados, concorrentes e comparações via endpoints do backend, mantendo cache e estados de carregamento.
 4. **Ações do usuário**: interações como cadastro de monitoramentos, disparo de coletas e atualização de perfil chamam serviços da API e exibem feedback em toasts/modal.
 5. **Dashboard de indicadores**: com indicadores consolidados, utilizando componentes responsivos baseados em Radix UI.
-6. **Observabilidade do cliente**: eventos relevantes (ex.: erros de rede, ações críticas) são enviados a provedores de logging/browser analytics quando configurados.
 
 #### Princípios do frontend
 - **UX responsiva**: componentes baseados em Radix UI e Tailwind garantem adaptação a diferentes dispositivos.
@@ -144,16 +143,6 @@ docker compose up -d db redis redis-init api market_scraper celery-worker-scrapi
 3. `pnpm dev` para modo desenvolvimento em `http://localhost:5173`
 4. `pnpm build` gera artefatos estáticos e o bundle do servidor Express
 5. `pnpm start` executa o servidor Express com build de produção
-
-## Observabilidade e operação contínua
-### Backend
-- **Logs estruturados**: todos os serviços usam `structlog` com saída JSON.
-- **Tracing opcional**: pontos de integração podem enviar spans para provedores OTLP quando configurado nas variáveis de ambiente.
-
-### Frontend
-- **Build health**: logs do Vite/Express ajudam a identificar falhas de build ou inicialização.
-- **Métricas de uso**: integração com ferramentas de analytics pode ser habilitada via variáveis de ambiente (não obrigatória por padrão).
-- **Monitoramento de erros**: configure provedores como Sentry ou LogRocket conectando hooks do React às APIs correspondentes.
 
 ## Troubleshooting do coletor contínuo
 - **Worker monitor parado**: verifique se o container/processo `celery-worker-monitor` está ativo e se `CONTINUOUS_COLLECTOR_AUTOSTART=1` está definido.

@@ -9,10 +9,8 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - Descrever como agentes de IA devem navegar no repositório e usar os serviços disponíveis.
 - - Mapear os módulos ativos (`backend/` e `frontend/`) e apontar onde estão as responsabilidades de API, tarefas assíncronas, scraping e interface web.
 - Fornecer atalhos para localizar documentação e código relevantes de cada serviço.
-- Explicar rotinas essenciais (execução local, docker-compose, testes, migrações e observabilidade).
-- Consolidar diretrizes de código, observabilidade, segurança e qualidade para que automações mantenham integridade entre serviços.
-
----
+- Explicar rotinas essenciais (execução local, docker-compose, testes e migrações).
+- Consolidar diretrizes de código, segurança e qualidade para que automações mantenham integridade entre serviços.
 
 ## Referências
 ## Referências imediatas
@@ -21,15 +19,35 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - `backend/market_scraper/README.md`: responsabilidades do microserviço de scraping, pipeline de parsing e boas práticas.
 - `frontend/README.md` (quando presente): convenções da aplicação React + Vite e instruções de build/deploy.
 
+---
+
 ## Como Usar Este Documento
 - Utilize este arquivo como manual operacional para automações, integrações entre serviços.
 - Para visão conceitual, requisitos funcionais e setup humano consulte o `README.md` e, quando precisar de detalhes específicos, abra a documentação dos serviços correspondentes.
+
+## Diretrizes de Desenvolvimento para Agentes
+- **Linguagem, Docstrings e comentários**: mantenha docstrings e comentários em português, descrevendo propósito, parâmetros, retornos e exceções. Evite comentários redundantes; foque em contexto e decisões. Siga esse padrão para comentários e Docstrings: (Ex: #Comentário Padrão vem seguido da Hastag, """ Docstrings possui espaço após incio e fim """).
+- **Tipagem**: mantenha type hints em funções públicas e preserve compatibilidade adicionando parâmetros opcionais quando necessário.
+- **Estrutura e estilo**: siga o padrão existente do repositório; não introduza linters/formatadores novos sem alinhamento. Evite `print`; utilize `structlog`.
+- **Testes**: crie ou ajuste testes com `pytest`. Execute `pytest -q` nos módulos afetados antes de concluir alterações.
+- **Pesquisa no código**: prefira `rg` (ripgrep) para buscas rápidas; se indisponível, use `grep -Rni` com exclusões de diretórios (`.venv`, `.git`, caches). Exemplos: `rg -n "collect_.*_task" market_alert`.
+- **Commits**: mantenha mensagens claras no formato `<tipo>: <resumo>` do tipo de mudança (ex.: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`), sempre traga a frase utilizada para o commit ao final da resposta (Ex: feat: Add nova instrução ao AGENTS.md). Faça mudanças pequenas e coesas; referência arquivos/rotas afetadas. Evite criar branches sem necessidade ou renomear arquivos amplamente.
+- **Orquestração de scraping**: use sempre a task central `market_alert.tasks.collector_product_task.collect_product_task` que será enfileirada na fila `scraping`. O worker `celery-worker-monitor` consome a fila de prioridade Redis e dispara coletas via `collect_product_task` automaticamente. Evite chamadas diretas ao scraper; o padrão orquestrador centraliza tudo.
+- **Alterações de interface**: evite quebras em contratos de API, schemas Pydantic ou assinaturas de tasks Celery. Preserve retrocompatibilidade e documente qualquer deprecação. e atualize `AGENTS.md`, `README.md` e testes.
+- **Banco e migrações**: alterações de schema devem passar por Alembic; nunca execute deleções em massa sem salvaguardas.
+- **Logs Estruturados**: registre logs estruturados e revise integrações de tracing quando necessário.
+- **Segurança**: não exponha segredos. Utilize arquivos `.env` e helpers para acessar configurações.
+- **Compatibilidade local/Docker**: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos.
+- **Manutenção documental**: ao final de cada mudança extensa nos códigos, sprint ou mudança estrutural, sinalize ou execute atualizações necessárias nos determinados `README.md` e `AGENTS.md`.
+- **Scraper**: a inferência de disponibilidade ocorre antes do validador e deve propagar `last_status` em ordem de precedência (payload > inferência > validador). A rota `GET /monitored/` lista itens sem preço para indicar indisponibilidade.
+
+---
 
 ## Visão arquitetural rápida
 - **Frontend (`frontend/`)**: aplicação React 18 servida por Vite, com servidor Express para produção. Consome a API pública e oferece dashboards responsivos.
 - **Backend (`backend/`)**: agrega `market_alert` (API FastAPI + 4 Workers Celery dedicados) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, contratos Pydantic, clientes externos).
 - **Infraestrutura de apoio**: PostgreSQL e Redis são orquestrados via `docker-compose.yml`.
-- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery em filas específicas → workers dedicados consomem e processam → scraper coleta dados → eventos de domínio geram notificações → observabilidade registra logs e eventos.
+- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery em filas específicas → workers dedicados consomem e processam → scraper coleta dados → eventos de domínio geram notificações.
 - **Agendamento contínuo**: o worker `celery-worker-monitor` executa indefinidamente `run_continuous_collector`, que consome a fila de prioridade Redis (sorted sets), dispara coletas assíncronas de monitorados + concorrentes na fila `scraping` e mantém o reenqueue pendente até a coleta finalizar.
 
 ### Responsabilidades das tarefas Celery (`market_alert`) e Organização de Workers
@@ -51,24 +69,6 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 **Pausa de monitoramento**: monitorados com `paused=true` são ignorados por collector e loop contínuo, mantendo histórico íntegro até retomada explícita.
 
 **Contratos de desfecho**: quando lock não é adquirido, collector retorna `no_result`; respostas `not_modified` não geram novo `PriceHistory` e atualizam apenas `last_checked`.
-
-## Diretrizes de Desenvolvimento para Agentes
-- **Linguagem, Docstrings e comentários**: mantenha docstrings e comentários em português, descrevendo propósito, parâmetros, retornos e exceções. Evite comentários redundantes; foque em contexto e decisões. Siga esse padrão para comentários e Docstrings: (Ex: #Comentário Padrão vem seguido da Hastag, """ Docstrings possui espaço após incio e fim """).
-- **Tipagem**: mantenha type hints em funções públicas e preserve compatibilidade adicionando parâmetros opcionais quando necessário.
-- **Estrutura e estilo**: siga o padrão existente do repositório; não introduza linters/formatadores novos sem alinhamento. Evite `print`; utilize `structlog`.
-- **Testes**: crie ou ajuste testes com `pytest`. Execute `pytest -q` nos módulos afetados antes de concluir alterações.
-- **Métricas**: ao criar fluxos relevantes, exponha contadores/histogramas e reutilize nomes/padrões já existentes.
-- **Workers Celery**: utilize pool `prefork` ao subir workers (`celery -A market_alert.core.celery_app worker -P prefork ...`) para que `time.sleep` em backoffs não bloqueie pools cooperativos. Para notificações, mantenha um worker dedicado consumindo a fila `notifications`. Caso migre de pool, substitua esperas bloqueantes por `countdown` ou sleeps compatíveis.
-- **Pesquisa no código**: prefira `rg` (ripgrep) para buscas rápidas; se indisponível, use `grep -Rni` com exclusões de diretórios (`.venv`, `.git`, caches). Exemplos: `rg -n "collect_.*_task" market_alert`.
-- **Commits**: mantenha mensagens claras no formato `<tipo>: <resumo>` do tipo de mudança (ex.: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`), sempre traga a frase utilizada para o commit ao final da resposta (Ex: feat: Add nova instrução ao AGENTS.md). Faça mudanças pequenas e coesas; referência arquivos/rotas afetadas. Evite criar branches sem necessidade ou renomear arquivos amplamente.
-- **Orquestração de scraping**: use sempre a task central `market_alert.tasks.collector_product_task.collect_product_task` que será enfileirada na fila `scraping`. O worker `celery-worker-monitor` consome a fila de prioridade Redis e dispara coletas via `collect_product_task` automaticamente. Evite chamadas diretas ao scraper; o padrão orquestrador centraliza tudo.
-- **Alterações de interface**: evite quebras em contratos de API, schemas Pydantic ou assinaturas de tasks Celery. Preserve retrocompatibilidade e documente qualquer deprecação. e atualize `AGENTS.md`, `README.md` e testes.
-- **Banco e migrações**: alterações de schema devem passar por Alembic; nunca execute deleções em massa sem salvaguardas.
-- **Observabilidade**: registre logs estruturados e revise integrações de tracing quando necessário.
-- **Segurança**: não exponha segredos. Utilize arquivos `.env` e helpers para acessar configurações.
-- **Compatibilidade local/Docker**: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos.
-- **Manutenção documental**: ao final de cada sprint ou mudança estrutural, sinalize ou execute atualizações necessárias em `README.md` e `AGENTS.md`.
-- **Scraper**: a inferência de disponibilidade ocorre antes do validador e deve propagar `last_status` em ordem de precedência (payload > inferência > validador). A rota `GET /monitored/` lista itens sem preço para indicar indisponibilidade.
 
 ## Interação entre serviços
 - Comunicação frontend ⇄ backend via HTTP/JSON. O cliente padrão (`frontend/src/lib/api.ts`) injeta JWT no header `Authorization` e tenta renovar a sessão via `/auth/refresh` quando recebe `401`.
@@ -110,6 +110,8 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 - **Itens presos em processamento**: o loop reaproveita o conjunto de processamento após o TTL configurado em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs de `continuous_processing_reclaimed`.
 - **Monitorados pausados**: itens com `paused=true` são ignorados e não retornam para a fila; retome manualmente para reativar a coleta.
 
+---
+
 ## Checklist antes de concluir uma mudança
 1. Atualize ou confirme a existência de docstrings/comentários relevantes em português.
 2. Ajuste contratos ou schemas conforme necessário e estejam bem sincronizados com o projeto geral.
@@ -120,16 +122,7 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 
 ## Manutenção contínua - AGENTS.md Atualizado
 - Revisar este documento a cada sprint ou nova versão, e sempre que for realizado novas tarefas e mudanças no projeto.
-- Documentar mudanças relevantes sempre que atualizar fluxos de autenticação, scraping, comparação, observabilidade ou arquitetura.
-- Adicionar instruções sobre novos serviços, filas, variáveis de ambiente, pipelines ou convenções.
-- Remover comandos desatualizados e alinhar com os READMEs específicos.
-- Comparar o conteúdo com o `README.md` para evitar redundâncias: mantenha aqui instruções operacionais para agentes; no `README.md`, mantenha setup humano e visão geral.
-
-> Nota: Um guia desatualizado prejudica a confiabilidade do agente e pode levar a ações incorretas.
-
-## Manutenção contínua - AGENTS.md Atualizado
-- Revisar este documento a cada sprint ou nova versão, e sempre que for realizado novas tarefas e mudanças no projeto.
-- Documentar mudanças relevantes sempre que atualizar fluxos de autenticação, scraping, comparação, observabilidade ou arquitetura.
+- Documentar mudanças relevantes sempre que atualizar fluxos de autenticação, scraping, comparação ou arquitetura.
 - Adicionar instruções sobre novos serviços, filas, variáveis de ambiente, pipelines ou convenções.
 - Remover comandos desatualizados e alinhar com os READMEs específicos.
 - Comparar o conteúdo com o `README.md` para evitar redundâncias: mantenha aqui instruções operacionais para agentes; no `README.md`, mantenha setup humano e visão geral.

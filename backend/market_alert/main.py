@@ -1,12 +1,5 @@
 """ Aplicação principal FastAPI com configuração de rotas """
 
-try:
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry.instrumentation.logging import LoggingInstrumentor
-except Exception:
-    FastAPIInstrumentor = None
-    LoggingInstrumentor = None
-
 import structlog
 import logging
 
@@ -98,11 +91,6 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
-    if FastAPIInstrumentor:
-        FastAPIInstrumentor().instrument_app(app)
-        if LoggingInstrumentor:
-            LoggingInstrumentor().instrument(set_logging_format=True)
 
     #Adiciona middleware de limiter
     app.state.limiter = limiter

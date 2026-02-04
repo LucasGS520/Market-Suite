@@ -13,11 +13,6 @@ from celery import Celery
 from celery.signals import worker_ready
 from shared.utils.redis_client import get_redis_client, set_key_with_ttl
 
-try:
-    from opentelemetry.instrumentation.celery import CeleryInstrumentor
-except Exception:
-    CeleryInstrumentor = None
-
 from market_alert.core.config_alert import settings
 from market_alert.core.celery_schedule import (
     BEAT_SCHEDULE,
@@ -38,7 +33,7 @@ PROCESS_START_MONOTONIC = time.monotonic()
 
 
 def _get_process_uptime_seconds() -> float:
-    """ Retorna o uptime do processo em segundos para logs de observabilidade """
+    """ Retorna o uptime do processo em segundos para logs operacionais """
     return round(time.monotonic() - PROCESS_START_MONOTONIC, 2)
 
 def drop_repeated_events(
@@ -108,10 +103,6 @@ celery_app = Celery(
     backend=settings.redis_url,
     include=TASK_MODULES,
 )
-
-if CeleryInstrumentor:
-    #Instrumenta o Celery para observabilidade distribuída
-    CeleryInstrumentor().instrument()
 
 def _continuous_collector_autostart_enabled() -> bool:
     """ Determina se o coletor contínuo deve iniciar automaticamente no worker """
