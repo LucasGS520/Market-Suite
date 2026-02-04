@@ -1,4 +1,4 @@
-""" Tarefas de manutenção e limpeza perióidica para o serviço """
+""" Tarefas de manutenção periódica do cache de scraping no Redis """
 
 import structlog
 from celery import shared_task
@@ -11,7 +11,11 @@ logger = structlog.get_logger("maintenance_tasks")
 
 @shared_task(name="market_alert.tasks.maintenance_tasks.cleanup_cache")
 def cleanup_cache() -> None:
-    """ Remove entradas expiradas ou sem TTL do cache de Scraping """
+    """ Remove entradas do cache de scraping sem expiração (TTL == -1) ou expiradas (TTL <= 0).
+
+    A política remove chaves sem TTL para evitar crescimento indefinido do cache e
+    elimina chaves expiradas para manter apenas dados válidos para o scraping.
+    """
     removed = 0
     redis_client = get_redis_client()
     if redis_client is None:
