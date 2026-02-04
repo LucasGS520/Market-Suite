@@ -17,6 +17,8 @@ def cleanup_cache() -> None:
     elimina chaves expiradas para manter apenas dados válidos para o scraping.
     """
     removed = 0
+    no_expiration = 0
+    expired = 0
     redis_client = get_redis_client()
     if redis_client is None:
         logger.warning("cleanup_cache_skipped", reason="redis_unavailable")
@@ -32,13 +34,25 @@ def cleanup_cache() -> None:
                 # -2 significa que a chave não existe mais; -1 indica ausência de expiração
                 if ttl == -2:
                     continue
-                if ttl <= 0:
+                #Registra contadores separados para diagnosticar chaves sem expiração versus expirados
+                if ttl == -1:
                     redis_client.delete(key)
                     removed += 1
+                    no_expiration += 1
+                    continue
+                if ttl == 0 or ttl < 0:
+                    redis_client.delete(key)
+                    removed += 1
+                    expired += 1
             if cursor == 0:
                 break
             
-        logger.info("cleanup_cache_success", removed=removed)
+        logger.info(
+            "cleanup_cache_success",
+            removed=removed,
+            no_expiration=no_expiration,
+            expired=expired,
+        )
     except Exception:
         logger.exception("cleanup_cache_failure")
         
