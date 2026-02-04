@@ -13,16 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from typing import Dict, Any, Optional, List
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import structlog
-import time
 import json
-
-from shared.metrics.metrics_price_comparison import (
-    MALFORMED_COMPARISON_PAYLOADS_TOTAL,
-    PRICE_COMPARISON_DURATION_SECONDS,
-    PRICE_COMPARISON_FAILURES_TOTAL,
-    PRICE_COMPARISONS_TOTAL,
-    COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL,
-)
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, count_competitors_by_monitored
@@ -156,8 +147,6 @@ def run_price_comparison(
     O fluxo evita cálculos derivados quando já trabalhamos com resumos pré-existentes
     e persiste o payload completo somente quando configurado para depuração.
     """
-    start = time.time()
-    status = "success"
     result: Dict[str, Any] | None = None
 
     try:
@@ -258,9 +247,6 @@ def run_price_comparison(
             result = encoded_result
             return result
 
-        if not available_competitors:
-            COMPARISONS_NO_AVAILABLE_COMPETITORS_TOTAL.inc()
-
         logger.info(
             "comparison_started",
             monitored_id=str(monitored_id),
@@ -310,14 +296,7 @@ def run_price_comparison(
         logger.info("comparison_finished", monitored_id=str(monitored_id))
 
     except Exception:
-        status = "failure"
         raise
-
-    finally:
-        duration = time.time() - start
-        #Registra métricas de duração e status
-        PRICE_COMPARISON_DURATION_SECONDS.observe(duration)
-        PRICE_COMPARISONS_TOTAL.labels(status=status).inc()
 
     return result
 
@@ -525,7 +504,6 @@ def _build_summary_from_result(
             received_type=type(payload).__name__,
             comparison_id=str(comparison_id) if comparison_id else None,
         )
-        MALFORMED_COMPARISON_PAYLOADS_TOTAL.labels(stage="build_summary").inc()
         payload_dict: dict[str, Any] = {}
     else:
         payload_dict = payload
@@ -569,7 +547,6 @@ def _compute_summary_from_payload(
         summary["comparison_id"] = str(comparison_id)
 
     if not isinstance(payload, dict):
-        MALFORMED_COMPARISON_PAYLOADS_TOTAL.labels(stage="compute_summary").inc()
         logger.warning(
             "comparison_payload_invalid",
             comparison_id=str(comparison_id) if comparison_id else None,
@@ -661,8 +638,6 @@ def _compute_summary_from_payload(
             price_preview = json.dumps(payload)[:300]
         except Exception:
             price_preview = str(payload)[:300]
-        PRICE_COMPARISON_FAILURES_TOTAL.labels(stage="compute_summary").inc()
-        MALFORMED_COMPARISON_PAYLOADS_TOTAL.labels(stage="compute_summary").inc()
         logger.warning(
             "comparison_summary_failed",
             error=str(exc),

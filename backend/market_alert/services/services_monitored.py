@@ -13,7 +13,6 @@ from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
 )
 from shared.utils.url_validation import normalize_and_validate_product_url
-from shared.metrics.metrics_products import MONITORED_LISTED_WITHOUT_PRICE_TOTAL
 
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import (
@@ -122,8 +121,6 @@ def list_monitored_products(
 
     response_payload: list[MonitoredProductResponse] = []
     for product, _ in products_with_count:
-        if product.current_price is None:
-            MONITORED_LISTED_WITHOUT_PRICE_TOTAL.inc()
         response_payload.append(
             build_monitored_response(
                 product,

@@ -32,7 +32,7 @@ def build_referer(
     retornamos ``None`` para que os chamadores mantenham o comportamento
     tolerante esperado. Quando um ``logger`` é fornecido, registramos o
     incidente utilizando o ``event_name`` informado para facilitar a
-    correlação com métricas de rede.
+    correlação com logs de rede.
     """
     template = settings.SCRAPER_HEADERS_REFERER_TEMPLATE
     if not template:

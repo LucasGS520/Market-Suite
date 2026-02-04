@@ -8,10 +8,6 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from shared.metrics.metrics_settings import (
-    SETTINGS_PROFILE_UPDATES_TOTAL,
-    SETTINGS_NOTIFICATION_UPDATES_TOTAL,
-)
 from market_alert.core.config_alert import settings
 from market_alert.core.tokens import generate_phone_otp, generate_verification_token, token_expiry
 from market_alert.crud import crud_notifications, crud_user, crud_verification
@@ -172,7 +168,6 @@ def update_profile_settings(
             send_phone_otp.delay(str(user.id), otp)
             phone_verification_required = True
 
-        SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="success").inc()
         logger.info(
             "settings_profile_updated",
             user_id=str(user.id),
@@ -187,10 +182,8 @@ def update_profile_settings(
             phone_verification_required=phone_verification_required,
         )
     except HTTPException:
-        SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="failure").inc()
         raise
     except Exception:
-        SETTINGS_PROFILE_UPDATES_TOTAL.labels(result="failure").inc()
         logger.exception("settings_profile_update_failed", user_id=str(user.id))
         raise
 
@@ -217,7 +210,6 @@ def update_notification_settings(
             user_id=user.id,
             settings=settings_payload,
         )
-        SETTINGS_NOTIFICATION_UPDATES_TOTAL.labels(result="success").inc()
         logger.info(
             "settings_notification_updated",
             user_id=str(user.id),
@@ -230,9 +222,7 @@ def update_notification_settings(
             whatsapp=payload.whatsapp,
         )
     except HTTPException:
-        SETTINGS_NOTIFICATION_UPDATES_TOTAL.labels(result="failure").inc()
         raise
     except Exception:
-        SETTINGS_NOTIFICATION_UPDATES_TOTAL.labels(result="failure").inc()
         logger.exception("settings_notification_update_failed", user_id=str(user.id))
         raise

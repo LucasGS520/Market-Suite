@@ -57,7 +57,7 @@ def reconcile_priority_queue() -> dict[str, int]:
         for monitored_id, next_check_at in _iter_active_monitored(db):
             total += 1
             scheduled_at = _normalize_next_check(next_check_at, now)
-            #Usamos enfileiramento individual para registrar ``enqueued_at`` e métricas
+            #Usamos enfileiramento individual para registrar ``enqueued_at`` de cada item
             if enqueue_monitored_at(monitored_id, scheduled_at, source="reconciliation"):
                 enqueued += 1
             else:

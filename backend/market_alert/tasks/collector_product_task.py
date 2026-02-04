@@ -24,25 +24,6 @@ from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.exceptions import ScraperError
 from shared.infra.db import SessionLocal
-from shared.metrics.metrics_scraper import (
-    COLLECTOR_ERROR_TOTAL,
-    COLLECTOR_LOCK_ACQUIRED_TOTAL,
-    COLLECTOR_LOCK_SKIPPED_TOTAL,
-    COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL,
-    COLLECTOR_LOCK_RETRY_DELAY_SECONDS,
-    COLLECTOR_LOCK_RETRY_TOTAL,
-    COLLECTOR_NO_DATA_TOTAL,
-    COLLECTOR_NO_DATA_REASON_TOTAL,
-    COLLECTOR_SUCCESS_NEW_DATA_TOTAL,
-    COLLECTOR_SUCCESS_NO_CHANGE_TOTAL,
-    COLLECTOR_DURATION_MS,
-    COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL,
-    COLLECT_LOCK_SKIPPED_TOTAL,
-    COLLECT_SUCCESS_TOTAL,
-    COMPARE_DISPATCH_DEBOUNCED_TOTAL,
-    MONITORED_SKIPPED_PAUSED_TOTAL,
-    SCRAPER_IN_FLIGHT,
-)
 from shared.utils.redis_client import is_scraping_suspended, set_key_with_ttl
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
@@ -111,68 +92,41 @@ def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UU
 
     return kind, monitored_id, competitor_id, url
 
-def _record_metrics(
+def _resolve_outcome(
     kind: str,
     result: ScrapeResult | None,
     *,
     lock_status: str,
     reason: str | None,
-    lock_owner: str | None,
 ) -> str:
-    """ Atualiza métricas por desfecho e retorna rótulo normalizado.
-
-    O parâmetro ``lock_status`` admite ``acquired`` (lock aplicado) ou
-    ``skipped`` (não adquirido). A normalização garante que mesmo cenários
-    sem lock reportem ``no_result`` para manter o contrato esperado pelo
-    orquestrador. O campo ``reason`` preserva o motivo interno para logs,
-    mas sempre retorna um status contratual.
-    """
+    """ Normaliza o desfecho do coletor para o contrato esperado pelo pipeline """
     if lock_status == "skipped":
-        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason or "lock_skipped").inc()
-        COLLECTOR_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
-        COLLECT_LOCK_SKIPPED_TOTAL.labels(kind=kind).inc()
-        COLLECTOR_LOCK_SKIPPED_OWNER_TOTAL.labels(kind=kind, owner=lock_owner or "unknown").inc()
-        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
     
     if reason == "scraping_suspended":
-        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason).inc()
-        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
 
     if reason == "invalid_payload":
-        COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
         return "error"
     
     if reason == "missing_target":
-        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason).inc()
-        COLLECTOR_SKIPPED_MISSING_TARGET_TOTAL.labels(kind=kind).inc()
-        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
 
     if reason in {"scraper_error", "unexpected_error"}:
-        COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
         return "error"
 
     if result is None:
-        COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
         return "error"
     
     if result.status == "no_result":
-        COLLECTOR_NO_DATA_REASON_TOTAL.labels(kind=kind, reason=reason or "validation").inc()
-        COLLECTOR_NO_DATA_TOTAL.labels(kind=kind).inc()
         return "no_result"
 
     if result.status == "not_modified":
-        COLLECTOR_SUCCESS_NO_CHANGE_TOTAL.labels(kind=kind).inc()
         return "not_modified"
 
     if result.status == "success":
-        COLLECTOR_SUCCESS_NEW_DATA_TOTAL.labels(kind=kind).inc()
-        COLLECT_SUCCESS_TOTAL.labels(kind=kind).inc()
         return "success"
 
-    COLLECTOR_ERROR_TOTAL.labels(kind=kind).inc()
     return "error"
 
 def _resolve_no_result_reason(result: ScrapeResult | None) -> str:
@@ -230,7 +184,6 @@ def _dispatch_comparison(
     )
     if debounce_registered is False:
         #Evita duplicidade de comparação em janela curta para o mesmo monitorado
-        COMPARE_DISPATCH_DEBOUNCED_TOTAL.labels(reason="debounce_active").inc()
         logger.info(
             "compare_prices_debounced",
             monitored_id=str(monitored_id),
@@ -349,14 +302,12 @@ def collect_product(
 ) -> tuple[str, ScrapeResult | None]:
     """ Executa coleta de produto de forma reutilizável para tasks e orquestradores.
 
-    A função aplica validação de payload, coordena lock distribuído quando
-    ``use_lock`` estiver habilitado e registra métricas consistentes. O TTL
-    do lock segue ``PRODUCT_LOCK_TTL_SECONDS`` ou o valor informado em
-    ``lock_ttl_seconds``. Quando ``db`` é fornecida, reutilizamos a sessão
-    compartilhada para garantir consistência transacional e reduzir overhead
-    de conexões, mantendo commits e refresh no mesmo contexto.
+    A função aplica validação de payload e coordena lock distribuído quando
+    ``use_lock`` estiver habilitado. O TTL do lock segue ``PRODUCT_LOCK_TTL_SECONDS``
+    ou valor informado em  ``lock_ttl_seconds``. Quando ``db`` é fornecida, 
+    reutilizamos a sessão compartilhada para garantir consistência transacional e reduzir 
+    overhead de conexões, mantendo commits e refresh no mesmo contexto.
     """
-    SCRAPER_IN_FLIGHT.inc()
     #Mede latência com relógio monotônico para evitar valores negativos
     started_perf = time.perf_counter()
     task_logger = logger_bound or logger
@@ -386,9 +337,7 @@ def collect_product(
                 lock_acquired, resolved_owner = acquire_product_lock(lock_target, ttl_seconds=lock_ttl_seconds)
                 lock_owner = resolved_owner
                 lock_status = "acquired" if lock_acquired else "skipped"
-                if lock_acquired:
-                    COLLECTOR_LOCK_ACQUIRED_TOTAL.labels(kind=kind).inc()
-                else:
+                if not lock_acquired:
                     reason = "lock_skipped"
                     #Garante retorno explícito para rastrear locks no worker contínuo
                     result = ScrapeResult(
@@ -447,7 +396,6 @@ def collect_product(
                         if competitor_row.is_paused or monitored_paused:
                             reason = "paused"
                             #Evita scraping quando o concorrente ou o monitorado está pausado
-                            MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="collector").inc()
                             task_logger.info(
                                 "collector_skipped_paused",
                                 competitor_id=str(competitor_id),
@@ -485,7 +433,6 @@ def collect_product(
 
                         if monitored_row is not None and monitored_row.paused:
                             reason = "paused"
-                            MONITORED_SKIPPED_PAUSED_TOTAL.labels(source="collector").inc()
                             task_logger.info(
                                 "collect_skipped_paused",
                                 monitored_id=str(monitored_id),
@@ -552,12 +499,11 @@ def collect_product(
         if result is not None and result.status == "no_result" and reason is None:
             #Garante que ``no_result`` sempre carregue motivo descritivo para diagnóstico
             reason = _resolve_no_result_reason(result)
-        outcome = _record_metrics(
+        outcome = _resolve_outcome(
             kind,
             result,
             lock_status=lock_status,
             reason=reason,
-            lock_owner=lock_owner,
         )
         if use_lock and lock_status == "acquired":
             #Tentativa explícita de liberar o lock para evitar contenção após falhas
@@ -568,8 +514,6 @@ def collect_product(
                     product_id=str(lock_target) if lock_target else None,
                     trace_id=trace_id,
                 )
-        SCRAPER_IN_FLIGHT.dec()
-        COLLECTOR_DURATION_MS.labels(kind=kind, outcome=outcome).observe(duration_ms)
         task_logger.info(
             "collect_product_finished",
             kind=kind,
@@ -623,8 +567,6 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
         if error_code == "lock_skipped":
             attempt = int(getattr(self.request, "retries", 0)) + 1
             delay = _compute_lock_retry_delay(attempt)
-            COLLECTOR_LOCK_RETRY_TOTAL.labels(kind=kind).inc()
-            COLLECTOR_LOCK_RETRY_DELAY_SECONDS.labels(kind=kind).observe(delay)
             logger.warning(
                 "collect_lock_retry_scheduled",
                 kind=kind,

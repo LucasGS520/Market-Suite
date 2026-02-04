@@ -36,7 +36,7 @@ def calculate_stability_score(
     """ Calcula a pontuação de estabilidade baseada na última mudança registrada """
     now = _normalize_datetime(reference_time) or datetime.now(timezone.utc)
 
-    #Prioriza mudanças explícitas, mas considera métricas de grupo e criaão como fallback
+    #Prioriza mudanças explícitas, mas considera indicadores de grupo e criaão como fallback
     last_change = (
         product.last_price_change_at
         or product.group_collected_at

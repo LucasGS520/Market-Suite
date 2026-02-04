@@ -23,10 +23,6 @@ import httpx
 import structlog
 
 from market_scraper.core.config_scraper import settings
-from shared.metrics.metrics_scraper import (
-    SCRAPER_DNS_BLOCKED_TOTAL,
-    SCRAPER_DNS_RESOLVE_DURATION_SECONDS,
-)
 
 
 logger = structlog.get_logger(__name__)
@@ -48,7 +44,7 @@ except ModuleNotFoundError:
 class ContentDecodeError(Exception):
     """ Sinaliza falhas ao transformar o corpo HTTP em texto legível """
     def __init__(self, *, encoding: str, reason: str) -> None:
-        #Armazenamos o encoding e o motivo para facilitar logs e métricas
+        #Armazenamos o encoding e o motivo para facilitar logs
         super().__init__(f"{reason} (encoding={encoding})")
         self.encoding = encoding
         self.reason = reason
@@ -126,19 +122,12 @@ def resolve_public_address(host: str) -> list[str]:
         with _DNS_CACHE_LOCK:
             cached = _DNS_CACHE.get(normalized_host)
             if cached and cached[0] > now:
-                SCRAPER_DNS_RESOLVE_DURATION_SECONDS.labels(outcome="cache").observe(0.0)
                 return list(cached[1])
             
-    start_time = time.perf_counter()
     try:
         addresses = _resolve_host_records(normalized_host)
     except HostResolutionError:
-        duration = time.perf_counter() - start_time
-        SCRAPER_DNS_RESOLVE_DURATION_SECONDS.labels(outcome="error").observe(duration)
         raise
-    else:
-        duration = time.perf_counter() - start_time
-        SCRAPER_DNS_RESOLVE_DURATION_SECONDS.labels(outcome="resolved").observe(duration)
 
     if not addresses:
         raise HostResolutionError(f"Host sem endereços públicos: {normalized_host}")
@@ -272,7 +261,6 @@ def _validate_public_addresses(host: str, addresses: list[str]) -> list[str]:
         
         if not ip_obj.is_global:
             reason = _classify_non_public(ip_obj)
-            SCRAPER_DNS_BLOCKED_TOTAL.labels(reason=reason).inc()
             logger.warning(
                 "dns_resolution_blocked",
                 host=host,

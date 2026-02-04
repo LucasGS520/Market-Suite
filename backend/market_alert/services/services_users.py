@@ -7,13 +7,6 @@ import structlog
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from shared.metrics.metrics_auth import (
-    VERIFICATION_FAILURE_TOTAL,
-    VERIFICATION_RESEND_ATTEMPTS_TOTAL,
-    VERIFICATION_SENT_TOTAL,
-    VERIFICATION_SUCCESS_TOTAL,
-)
-
 from market_alert.core.config_alert import settings
 from market_alert.core.tokens import generate_verification_token, generate_phone_otp, token_expiry
 from market_alert.core.bruteforce import enforce_rate_limit
@@ -68,7 +61,6 @@ def register_user(db: Session, user_data: UserCreate, request: Request) -> UserR
         metadata={"ip": ip_address, "agent": request.headers.get("user-agent")},
     )
     send_email_verification.delay(str(user.id), token)
-    VERIFICATION_SENT_TOTAL.labels(channel="email").inc()
     if payload.phone_number:
         otp = generate_phone_otp()
         phone_expires = token_expiry(settings.PHONE_VERIFICATION_EXPIRE_MINUTES)
@@ -82,7 +74,6 @@ def register_user(db: Session, user_data: UserCreate, request: Request) -> UserR
             metadata={"ip": ip_address, "agent": request.headers.get("user-agent")},
         )
         send_phone_otp.delay(str(user.id), otp)
-        VERIFICATION_SENT_TOTAL.labels(channel="phone_number").inc()
     return user
 
 def verify_email(db: Session, token: str) -> UserResponse:
@@ -93,24 +84,20 @@ def verify_email(db: Session, token: str) -> UserResponse:
         raw_token=token,
     )
     if not verification:
-        VERIFICATION_FAILURE_TOTAL.labels(channel="email", reason="invalid_token").inc()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token inválido ou expirado")
     user = crud_user.get_user_by_id(db, verification.user_id)
     crud_user.set_email_verified(db, user)
     if user.status == UserStatus.pending and (not user.phone_number or user.phone_number_verified):
         crud_user.set_status(db, user, UserStatus.active)
-    VERIFICATION_SUCCESS_TOTAL.labels(channel="email").inc()
     return user
 
 def verify_phone_otp(db: Session, user_id: UUID, otp: str) -> UserResponse:
     """ Valida o OTP de telefone e ativa a conta quando possível """
     user = crud_user.get_user_by_id(db, user_id)
     if not user.phone_number:
-        VERIFICATION_FAILURE_TOTAL.labels(channel="phone_number", reason="missing_phone").inc()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Telefone não cadastrado")
     verification = crud_verification.get_active_by_user(db, user_id, VerificationKind.phone_number)
     if not verification:
-        VERIFICATION_FAILURE_TOTAL.labels(channel="phone_number", reason="expired_otp").inc()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP inválido ou expirado")
     enforce_rate_limit(
         key=f"otp:{user_id}",
@@ -119,7 +106,6 @@ def verify_phone_otp(db: Session, user_id: UUID, otp: str) -> UserResponse:
         error_message="Muitas tentativas inválidas, tente novamente mais tarde.",
     )
     if verification.attempts_remaining is not None and verification.attempts_remaining <= 0:
-        VERIFICATION_FAILURE_TOTAL.labels(channel="phone_number", reason="attempts_exceeded").inc()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Limite de tentativas atingido")
     consumed = crud_verification.consume_verification(
         db,
@@ -129,18 +115,15 @@ def verify_phone_otp(db: Session, user_id: UUID, otp: str) -> UserResponse:
     )
     if not consumed:
         crud_verification.increment_attempts(db, verification)
-        VERIFICATION_FAILURE_TOTAL.labels(channel="phone_number", reason="invalid_otp").inc()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "OTP inválido")
     crud_user.set_phone_verified(db, user)
     if user.status == UserStatus.pending and user.email_verified:
         crud_user.set_status(db, user, UserStatus.active)
-    VERIFICATION_SUCCESS_TOTAL.labels(channel="phone_number").inc()
     return user
 
 def resend_verification(db: Session, user: User, payload: VerificationResendRequest, request: Request) -> None:
     """ Reenvia token de verificação respeitando limites de tentativa """
     ip_address = request.client.host if request.client else "unknown"
-    VERIFICATION_RESEND_ATTEMPTS_TOTAL.labels(channel=payload.channel).inc()
     enforce_rate_limit(
         key=f"verify:resend:{user.id}:{payload.channel}",
         max_attempts=settings.VERIFICATION_RESEND_MAX_PER_HOUR,
@@ -165,7 +148,6 @@ def resend_verification(db: Session, user: User, payload: VerificationResendRequ
             metadata={"ip": ip_address, "agent": request.headers.get("user-agent")},
         )
         send_email_verification.delay(str(user.id), token)
-        VERIFICATION_SENT_TOTAL.labels(channel="email").inc()
         return
     if payload.channel == "phone_number":
         if not user.phone_number:
@@ -182,7 +164,6 @@ def resend_verification(db: Session, user: User, payload: VerificationResendRequ
             metadata={"ip": ip_address, "agent": request.headers.get("user-agent")},
         )
         send_phone_otp.delay(str(user.id), otp)
-        VERIFICATION_SENT_TOTAL.labels(channel="phone_number").inc()
         return
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "Canal inválido")
 

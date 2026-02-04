@@ -7,7 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
-from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpdate, VerificationResendRequest
+from market_alert.schemas.schemas_users import (
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+    VerificationResendRequest,
+)
 from market_alert.models.models_users import User
 from market_alert.core.security import get_current_user
 from market_alert.services.services_users import (

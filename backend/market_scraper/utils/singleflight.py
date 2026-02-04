@@ -16,10 +16,6 @@ from typing import Any, TypeVar
 
 import structlog
 
-from shared.metrics.metrics_scraper import (
-    SCRAPER_SINGLEFLIGHT_CALLS_TOTAL,
-    SCRAPER_SINGLEFLIGHT_WAIT_SECONDS,
-)
 from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.core.config_scraper import settings
@@ -75,9 +71,6 @@ class AsyncSingleFlight:
             except Exception as exc:
                 if not entry.future.done():
                     entry.future.set_exception(exc)
-                SCRAPER_SINGLEFLIGHT_CALLS_TOTAL.labels(
-                    role="leader", outcome="error"
-                ).inc()
                 logger.warning(
                     "singleflight_leader_error",
                     key=sanitize_log_data(key),
@@ -87,9 +80,6 @@ class AsyncSingleFlight:
             else:
                 if not entry.future.done():
                     entry.future.set_result(result)
-                SCRAPER_SINGLEFLIGHT_CALLS_TOTAL.labels(
-                    role="leader", outcome="success"
-                ).inc()
                 return result
             finally:
                 await self._release_entry(key, entry)
@@ -98,16 +88,11 @@ class AsyncSingleFlight:
         try:
             result = await entry.future
         except Exception:
-            SCRAPER_SINGLEFLIGHT_CALLS_TOTAL.labels(role="follower", outcome="error").inc()
             raise
         else:
-            SCRAPER_SINGLEFLIGHT_CALLS_TOTAL.labels(
-                role="follower", outcome="success"
-            ).inc()
             return result
         finally:
             wait_duration = max(time.monotonic() - wait_started, 0.0)
-            SCRAPER_SINGLEFLIGHT_WAIT_SECONDS.labels(role="follower").observe(wait_duration)
             await self._release_entry(key, entry)
 
     async def reset(self) -> None:

@@ -22,11 +22,6 @@ from market_alert.schemas.schemas_auth import (
 from market_alert.schemas.schemas_auth import TokenPairResponse, RefreshRequest
 from market_alert.models.models_users import User
 from market_alert.enums.enums_users import UserStatus
-from shared.metrics.metrics_auth import (
-    REFRESH_FAILURE_TOTAL,
-    REFRESH_MISSING_TOTAL,
-    REFRESH_SUCCESS_TOTAL,
-)
 
 
 logger = structlog.get_logger("service.auth")
@@ -179,13 +174,10 @@ def refresh_token_service(db: Session, payload: RefreshRequest | None, request: 
     raw_token = _resolve_refresh_token(payload, request)
     if not raw_token:
         logger.warning("refresh_failed_missing", ip=request.client.host, request_id=request_id)
-        REFRESH_MISSING_TOTAL.inc()
-        REFRESH_FAILURE_TOTAL.labels(reason="missing").inc()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autorizado")
     refresh = get_refresh_token(db, raw_token)
     if not refresh:
         logger.warning("refresh_failed_invalid", ip=request.client.host, request_id=request_id)
-        REFRESH_FAILURE_TOTAL.labels(reason="invalid").inc()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autorizado")
 
     #Revoga o token antigo
@@ -214,7 +206,6 @@ def refresh_token_service(db: Session, payload: RefreshRequest | None, request: 
         ip=request.client.host,
         request_id=request_id,
     )
-    REFRESH_SUCCESS_TOTAL.inc()
     return TokenPairResponse(access_token=access_token, refresh_token=new_raw, token_type="bearer")
 
 def logout_service(db: Session, payload: RefreshRequest | None, request: Request) -> None:

@@ -17,11 +17,6 @@ import structlog
 
 from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.url_validation import normalize_product_url
-from shared.metrics.metrics_scraper import (
-    SCRAPER_AVAILABILITY_HEURISTICS_TOTAL,
-    SCRAPER_STEP_INVALID_TOTAL,
-    SCRAPER_VALIDATION_REJECT_TOTAL,
-)
 
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils.price import format_decimal_to_str, parse_price_str
@@ -83,7 +78,7 @@ def _normalize_source(raw_source: Any, fallback: str) -> str:
     return fallback
 
 def _extract_domain(candidate: str, fallback: str) -> str:
-    """ Reduz URLs completas a hostname para uso em métricas de baixa cardinalidade """
+    """ Reduz URLs completas a hostname para uso em logs de baixa cardinalidade """
     parsed = urlparse(candidate)
     hostname = parsed.hostname or parsed.netloc
     if hostname:
@@ -176,10 +171,9 @@ class DataQualityValidator:
         price_raw = payload.get("current_price")
         price_decimal = None
         if normalized_availability is False:
-            SCRAPER_AVAILABILITY_HEURISTICS_TOTAL.labels(reason="unavailable_payload").inc()
+            validator_last_status = validator_last_status or "unavailable_payload"
         else:
             if price_raw is None or (isinstance(price_raw, str) and not price_raw.strip()):
-                SCRAPER_AVAILABILITY_HEURISTICS_TOTAL.labels(reason="price_inferred_null").inc()
                 validator_last_status = validator_last_status or "price_inferred_null"
             else:
                 try:
@@ -187,12 +181,10 @@ class DataQualityValidator:
                 except ValueError:
                     tolerant_price = self._try_tolerant_price(price_raw)
                     if tolerant_price is None:
-                        SCRAPER_AVAILABILITY_HEURISTICS_TOTAL.labels(reason="price_inferred_null").inc()
                         validator_last_status = validator_last_status or "price_inferred_null"
                     else:
                         price_decimal = tolerant_price
                 if price_decimal is not None and price_decimal == 0:
-                    SCRAPER_AVAILABILITY_HEURISTICS_TOTAL.labels(reason="zero_price_filtered").inc()
                     price_decimal = None
                     validator_last_status = validator_last_status or "price_zero_filtered"
         
@@ -223,18 +215,7 @@ class DataQualityValidator:
         parser_name: str | None = None,
         dump_path: str | None = None,
     ) -> None:
-        """ Registra métrica e log estruturado para depuração """
-        #Utilizamos labels nomeados para evitar erros em futuras mudanças de ordem
-        SCRAPER_STEP_INVALID_TOTAL.labels(
-            step=step_name,
-            domain=domain,
-            result=reason_code,
-        ).inc()
-        SCRAPER_VALIDATION_REJECT_TOTAL.labels(
-            domain=domain,
-            step=step_name,
-            reason=reason_code,
-        ).inc()
+        """ Registra log estruturado para depuração """
         logger.warning(
             "validation_rejected_payload",
             step=step_name,

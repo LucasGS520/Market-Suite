@@ -13,9 +13,6 @@ import structlog
 from email_validator import EmailNotValidError, validate_email
 from sqlalchemy.orm import Session
 
-from shared.metrics.metrics_notifications import (
-    NOTIFICATION_ALERTS_SKIPPED_TOTAL,
-)
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_notifications import AlertType, EventType, NotificationChannel
 from market_alert.models import AlertRule, MonitoredProduct, User, UserNotificationPreference
@@ -200,7 +197,6 @@ def evaluate(
 ) -> list[NotificationCandidate]:
     """ Avalia snapshots e retorna notificações candidatas por canal """
     if monitored.paused:
-        NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type="paused", reason="monitored_paused").inc()
         return []
     
     event_types = _resolve_event_types(previous_snapshot, current_snapshot)
@@ -218,7 +214,6 @@ def evaluate(
         previous_price = (previous_snapshot or {}).get("price")
         current_price = current_snapshot.get("price")
         if event_type == EventType.price_change and _price_delta_below_min(previous_price, current_price):
-            NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="delta_below_min").inc()
             continue
         
         preferences_by_channel = {
@@ -241,7 +236,6 @@ def evaluate(
             preference = preferences_by_channel.get(channel)
             alert_rule_for_channel = rules_by_channel.get(channel)
             if preference and not preference.enabled:
-                NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="preference_disabled").inc()
                 continue
             
             recipient = _resolve_channel_destination(
@@ -250,24 +244,20 @@ def evaluate(
                 channel=channel,
             )
             if not recipient:
-                NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="missing_destination").inc()
                 continue
             
             if channel == NotificationChannel.email:
                 if not user.email_verified:
-                    NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="email_unverified").inc()
                     continue
+
                 if not _is_valid_email(recipient):
-                    NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="email_invalid").inc()
                     continue
                 
             if channel in {NotificationChannel.sms, NotificationChannel.whatsapp}:
                 if not _is_valid_phone_number(recipient):
-                    NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="phone_invalid").inc()
                     continue
                 
                 if not _is_channel_confirmed(channel=channel, user=user, preference=preference):
-                    NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="phone_unverified").inc()
                     continue
             
             cooldown_seconds = _cooldown_seconds(
@@ -280,7 +270,6 @@ def evaluate(
                 channel=channel,
             )
             if _within_cooldown(last_sent_at, cooldown_seconds, now=now):
-                NOTIFICATION_ALERTS_SKIPPED_TOTAL.labels(alert_type=alert_type.value, reason="cooldown_active").inc()
                 continue
             
             context = {

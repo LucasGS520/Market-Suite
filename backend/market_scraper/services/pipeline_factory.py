@@ -1,7 +1,7 @@
 """ Funções auxiliares para montar e executar o pipeline enxuto
 
 O módulo expõe um único ponto de criação do pipeline, encapsulando
-as etapas padrão, timeouts e registro de métricas. Assim, a rota
+as etapas padrão, timeouts. Assim, a rota
 ``/scraper/parse`` pode focar apenas na validação da requisição.
 """
 

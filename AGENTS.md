@@ -3,7 +3,7 @@
 Este arquivo é um guia específico com instruções operacionais para agentes de IA que interagem com o código do projeto MarketSuite.
  Ele complementa os `README.md` voltado a pessoas desenvolvedoras, oferecendo contexto operacional do repositório, listagem de serviços e tarefas, utilidades internas e boas práticas destacando convenções internas, fluxos críticos, comandos frequentes e gatilhos de manutenção contínua.
 
-> Nota: Sempre sincronize o conteúdo deste arquivo com o `README.md` e com os READMEs específicos dos serviços. Registre mudanças de arquitetura, novas filas, métricas ou variáveis assim que forem introduzidas.
+> Nota: Sempre sincronize o conteúdo deste arquivo com o `README.md` e com os READMEs específicos dos serviços. Registre mudanças de arquitetura, novas filas ou variáveis assim que forem introduzidas.
 
 ## Objetivo
 - Descrever como agentes de IA devem navegar no repositório e usar os serviços disponíveis.
@@ -27,9 +27,9 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 
 ## Visão arquitetural rápida
 - **Frontend (`frontend/`)**: aplicação React 18 servida por Vite, com servidor Express para produção. Consome a API pública e oferece dashboards responsivos.
-- **Backend (`backend/`)**: agrega `market_alert` (API FastAPI + 4 Workers Celery dedicados) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, métricas, contratos Pydantic, clientes externos).
-- **Infraestrutura de apoio**: PostgreSQL, Redis, Prometheus, Grafana, Loki e Alertmanager são orquestrados via `docker-compose.yml`.
-- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery em filas específicas → workers dedicados consomem e processam → scraper coleta dados → eventos de domínio geram notificações → observabilidade coleta métricas/logs → dashboards são atualizados.
+- **Backend (`backend/`)**: agrega `market_alert` (API FastAPI + 4 Workers Celery dedicados) e `market_scraper` (FastAPI dedicada a scraping). Recursos compartilhados ficam em `backend/shared/` (config, contratos Pydantic, clientes externos).
+- **Infraestrutura de apoio**: PostgreSQL e Redis são orquestrados via `docker-compose.yml`.
+- **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery em filas específicas → workers dedicados consomem e processam → scraper coleta dados → eventos de domínio geram notificações → observabilidade registra logs e eventos.
 - **Agendamento contínuo**: o worker `celery-worker-monitor` executa indefinidamente `run_continuous_collector`, que consome a fila de prioridade Redis (sorted sets), dispara coletas assíncronas de monitorados + concorrentes na fila `scraping` e mantém o reenqueue pendente até a coleta finalizar.
 
 ### Responsabilidades das tarefas Celery (`market_alert`) e Organização de Workers
@@ -48,23 +48,23 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 
 **Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando race conditions e usando Redis como único mecanismo de exclusão mútua (sem flags em banco).
 
-**Pausa de monitoramento**: monitorados com `paused=true` são ignorados por collector e loop contínuo, incrementando `monitored_skipped_paused` e mantendo histórico íntegro até retomada explícita.
+**Pausa de monitoramento**: monitorados com `paused=true` são ignorados por collector e loop contínuo, mantendo histórico íntegro até retomada explícita.
 
-**Contratos de desfecho**: quando lock não é adquirido, collector retorna `no_result` com métrica `lock_skipped`; respostas `not_modified` não geram novo `PriceHistory` e atualizam apenas `last_checked`.
+**Contratos de desfecho**: quando lock não é adquirido, collector retorna `no_result`; respostas `not_modified` não geram novo `PriceHistory` e atualizam apenas `last_checked`.
 
 ## Diretrizes de Desenvolvimento para Agentes
 - **Linguagem, Docstrings e comentários**: mantenha docstrings e comentários em português, descrevendo propósito, parâmetros, retornos e exceções. Evite comentários redundantes; foque em contexto e decisões. Siga esse padrão para comentários e Docstrings: (Ex: #Comentário Padrão vem seguido da Hastag, """ Docstrings possui espaço após incio e fim """).
 - **Tipagem**: mantenha type hints em funções públicas e preserve compatibilidade adicionando parâmetros opcionais quando necessário.
-- **Estrutura e estilo**: siga o padrão existente do repositório; não introduza linters/formatadores novos sem alinhamento. Evite `print`; utilize `structlog` e incremente métricas quando essencial e possível.
+- **Estrutura e estilo**: siga o padrão existente do repositório; não introduza linters/formatadores novos sem alinhamento. Evite `print`; utilize `structlog`.
 - **Testes**: crie ou ajuste testes com `pytest`. Execute `pytest -q` nos módulos afetados antes de concluir alterações.
 - **Métricas**: ao criar fluxos relevantes, exponha contadores/histogramas e reutilize nomes/padrões já existentes.
 - **Workers Celery**: utilize pool `prefork` ao subir workers (`celery -A market_alert.core.celery_app worker -P prefork ...`) para que `time.sleep` em backoffs não bloqueie pools cooperativos. Para notificações, mantenha um worker dedicado consumindo a fila `notifications`. Caso migre de pool, substitua esperas bloqueantes por `countdown` ou sleeps compatíveis.
-- **Pesquisa no código**: prefira `rg` (ripgrep) para buscas rápidas; se indisponível, use `grep -Rni` com exclusões de diretórios (`.venv`, `.git`, caches). Exemplos: `rg -n "metrics|/metrics"`, `rg -n "collect_.*_task" market_alert`.
+- **Pesquisa no código**: prefira `rg` (ripgrep) para buscas rápidas; se indisponível, use `grep -Rni` com exclusões de diretórios (`.venv`, `.git`, caches). Exemplos: `rg -n "collect_.*_task" market_alert`.
 - **Commits**: mantenha mensagens claras no formato `<tipo>: <resumo>` do tipo de mudança (ex.: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`), sempre traga a frase utilizada para o commit ao final da resposta (Ex: feat: Add nova instrução ao AGENTS.md). Faça mudanças pequenas e coesas; referência arquivos/rotas afetadas. Evite criar branches sem necessidade ou renomear arquivos amplamente.
 - **Orquestração de scraping**: use sempre a task central `market_alert.tasks.collector_product_task.collect_product_task` que será enfileirada na fila `scraping`. O worker `celery-worker-monitor` consome a fila de prioridade Redis e dispara coletas via `collect_product_task` automaticamente. Evite chamadas diretas ao scraper; o padrão orquestrador centraliza tudo.
 - **Alterações de interface**: evite quebras em contratos de API, schemas Pydantic ou assinaturas de tasks Celery. Preserve retrocompatibilidade e documente qualquer deprecação. e atualize `AGENTS.md`, `README.md` e testes.
 - **Banco e migrações**: alterações de schema devem passar por Alembic; nunca execute deleções em massa sem salvaguardas.
-- **Observabilidade**: registre logs estruturados, atualize métricas e revise Prometheus quando necessário.
+- **Observabilidade**: registre logs estruturados e revise integrações de tracing quando necessário.
 - **Segurança**: não exponha segredos. Utilize arquivos `.env` e helpers para acessar configurações.
 - **Compatibilidade local/Docker**: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos.
 - **Manutenção documental**: ao final de cada sprint ou mudança estrutural, sinalize ou execute atualizações necessárias em `README.md` e `AGENTS.md`.
@@ -83,7 +83,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - O logout (`POST /auth/logout`) revoga o refresh token e remove o cookie HttpOnly quando presente.
 - Verificações: `POST /auth/verify-email?token=...` e `POST /auth/verify-phone` com `{ user_id, otp }`.
 - Reenvio: `POST /users/resend-verification` com `{ channel: "email" | "phone_number" }`, respeitando cooldown do backend.
-- Métricas de verificação ficam em `backend/shared/metrics/metrics_auth.py` (`verification_sent_total`, `verification_resend_attempts_total`, `verification_success_total`, `verification_failure_total`).
+- Acompanhe verificações de autenticação via logs estruturados e eventos persistidos.
 
 ### Arquivos de ambiente (.env)
 - O projeto utiliza três arquivos de configuração no `backend`:
@@ -104,15 +104,15 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 - Valide comandos em ambientes isolados e registre no relatório final as execuções realizadas.
 
 ## Troubleshooting do coletor contínuo
-- **Fila vazia ou sem itens prontos**: verifique `PRIORITY_QUEUE_SIZE`, `PRIORITY_QUEUE_READY_TOTAL` e o conjunto ordenado configurado em `PRIORITY_QUEUE_KEY`. Garanta que o monitorado foi enfileirado com `next_check_at` válido e que não está preso em processamento aguardando requeue pós-coleta.
+- **Fila vazia ou sem itens prontos**: verifique o conjunto ordenado configurado em `PRIORITY_QUEUE_KEY`. Garanta que o monitorado foi enfileirado com `next_check_at` válido e que não está preso em processamento aguardando requeue pós-coleta.
 - **Worker monitor inativo**: confirme o processo `celery-worker-monitor` ativo e a env `CONTINUOUS_COLLECTOR_AUTOSTART=1`. Sem ela, o loop não inicia automaticamente.
 - **Redis indisponível**: valide conectividade e credenciais; o coletor registra `continuous_queue_unavailable` quando o Redis não responde.
-- **Itens presos em processamento**: o loop reaproveita o conjunto de processamento após o TTL configurado em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs de `continuous_processing_reclaimed` e a métrica `priority_queue_pending_requeue_total`.
+- **Itens presos em processamento**: o loop reaproveita o conjunto de processamento após o TTL configurado em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs de `continuous_processing_reclaimed`.
 - **Monitorados pausados**: itens com `paused=true` são ignorados e não retornam para a fila; retome manualmente para reativar a coleta.
 
 ## Checklist antes de concluir uma mudança
 1. Atualize ou confirme a existência de docstrings/comentários relevantes em português.
-2. Ajuste contratos, schemas ou métricas conforme necessário e estejam bem sincronizados com o projeto geral.
+2. Ajuste contratos ou schemas conforme necessário e estejam bem sincronizados com o projeto geral.
 3. Execute testes pertinentes e registre resultados.
 4. Valide se novas portas/variáveis foram documentadas.
 5. Revise o `README.md` e demais READMEs específicos para garantir consistência.
@@ -121,7 +121,7 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 ## Manutenção contínua - AGENTS.md Atualizado
 - Revisar este documento a cada sprint ou nova versão, e sempre que for realizado novas tarefas e mudanças no projeto.
 - Documentar mudanças relevantes sempre que atualizar fluxos de autenticação, scraping, comparação, observabilidade ou arquitetura.
-- Adicionar instruções sobre novos serviços, filas, métricas, variáveis de ambiente, pipelines ou convenções.
+- Adicionar instruções sobre novos serviços, filas, variáveis de ambiente, pipelines ou convenções.
 - Remover comandos desatualizados e alinhar com os READMEs específicos.
 - Comparar o conteúdo com o `README.md` para evitar redundâncias: mantenha aqui instruções operacionais para agentes; no `README.md`, mantenha setup humano e visão geral.
 
@@ -130,7 +130,7 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 ## Manutenção contínua - AGENTS.md Atualizado
 - Revisar este documento a cada sprint ou nova versão, e sempre que for realizado novas tarefas e mudanças no projeto.
 - Documentar mudanças relevantes sempre que atualizar fluxos de autenticação, scraping, comparação, observabilidade ou arquitetura.
-- Adicionar instruções sobre novos serviços, filas, métricas, variáveis de ambiente, pipelines ou convenções.
+- Adicionar instruções sobre novos serviços, filas, variáveis de ambiente, pipelines ou convenções.
 - Remover comandos desatualizados e alinhar com os READMEs específicos.
 - Comparar o conteúdo com o `README.md` para evitar redundâncias: mantenha aqui instruções operacionais para agentes; no `README.md`, mantenha setup humano e visão geral.
 

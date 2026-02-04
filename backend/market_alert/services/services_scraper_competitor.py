@@ -13,6 +13,7 @@ from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
 from shared.utils.url_validation import normalize_competitor_url
+
 from market_alert.crud.crud_competitor import (
     create_or_update_competitor_product_scraped,
     get_competitor_by_monitored_and_url,

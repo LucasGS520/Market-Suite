@@ -1,8 +1,7 @@
 """ Utilitários compartilhados para aplicar retries HTTP com tenacity
 
 O módulo padroniza tentativas extras em downloads do scraper, respeitando
-``Retry-After``, expondo métricas e mantendo a API pública estável para os
-consumidores atuais.
+``Retry-After`` e mantendo a API pública estável para os consumidores atuais.
 """
 
 from __future__ import annotations
@@ -16,10 +15,6 @@ from tenacity import RetryCallState, retry, retry_if_exception_type, stop_after_
 from tenacity.wait import wait_base
 
 from market_scraper.core.config_scraper import settings
-from shared.metrics.metrics_scraper import (
-    SCRAPER_HTTP_RETRIES_TOTAL,
-    SCRAPER_HTTP_RETRY_BACKOFF_SECONDS,
-)
 from market_scraper.utils.http_utils import parse_retry_after
 
 
@@ -72,7 +67,7 @@ def _before_sleep_factory(
     target: str,
     multiplier: float,
 ) -> Callable[[RetryCallState], None]:
-    """ Registra métricas e logs antes de aguardar uma nova tentativa """
+    """ Registra logs antes de aguardar uma nova tentativa """
     def _before_sleep(retry_state: RetryCallState) -> None:
         exc = retry_state.outcome.exception() if retry_state.outcome else None
         if not isinstance(exc, RetryableHTTPError):
@@ -82,15 +77,6 @@ def _before_sleep_factory(
             retry_state=retry_state,
             multiplier=multiplier,
         )
-
-        SCRAPER_HTTP_RETRIES_TOTAL.labels(
-            target=target,
-            reason=exc.reason,
-        ).inc()
-        SCRAPER_HTTP_RETRY_BACKOFF_SECONDS.labels(
-            target=target,
-            reason=exc.reason,
-        ).observe(wait_seconds)
 
         logger.warning(
             "http_retry_scheduled",

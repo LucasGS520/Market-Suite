@@ -5,7 +5,7 @@ A plataforma combina API pública, processamento assíncrono e microserviço de 
 ## Serviços e responsabilidades
 A suíte é organizada em duas camadas principais:
 
-- **Backend**: engloba API, workers Celery, microserviço de scraping e utilidades compartilhadas em Python. Cada serviço roda em contêiner próprio, mas compartilha contratos, métricas e convenções em `backend/shared/`.
+- **Backend**: engloba API, workers Celery, microserviço de scraping e utilidades compartilhadas em Python. Cada serviço roda em contêiner próprio, mas compartilha contratos e convenções em `backend/shared/`.
 - **Frontend**: aplicação React + Vite que consome a API pública, oferece interface responsiva para configurar monitoramentos e consolida indicadores operacionais.
 
 ## Visão Arquitetural
@@ -22,14 +22,6 @@ graph TD
     API --> Cache[(Redis)]
     Worker --> Cache
     MonitorWorker --> Cache
-    API --> Prometheus
-    Worker --> Prometheus
-    MonitorWorker --> Prometheus
-    Scraper --> Prometheus
-    Prometheus --> Grafana[(Dashboards)]
-    API --> Loki[(Logs estruturados)]
-    Worker --> Loki
-    Scraper --> Loki
     FE --> |Build estático| CDN[(Servidor Express/Vite)]
 ```
 
@@ -41,7 +33,7 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 |---------|------------------|-----------------------|
 | **backend/market_alert** | expõe a API pública FastAPI, agenda tarefas Celery, persiste dados em PostgreSQL e consome o scraper via cliente dedicado | [`backend/market_alert/README.md`](backend/market_alert/README.md) |
 | **backend/market_scraper** | valida URLs, realiza download das páginas, executa pipeline de parsing multiestágio e devolve `ParserResponse` | [`backend/market_scraper/README.md`](backend/market_scraper/README.md) |
-| **backend/shared** | reúne contratos Pydantic, métricas, configuração, clientes externos e utilidades comuns | [`backend/shared/`](backend/shared/) |
+| **backend/shared** | reúne contratos Pydantic, configuração, clientes externos e utilidades comuns | [`backend/shared/`](backend/shared/) |
 
 > Nota operacional: a inferência de disponibilidade agora antecede a validação do parser e preserva `last_status` informado pelo scraper. A listagem `GET /monitored/` também exibe itens sem preço coletado para sinalizar anúncios pausados ou indisponíveis.
 
@@ -53,7 +45,7 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
    - O contrato do `ParserResponse` expõe sempre `price|currency` (admite `null`), `availability`/`last_status` e cabeçalhos (`etag`, `not_modified`) para sinalizar indisponibilidade sem gravar preços `0.00`.
 5. **Persistência e regras de negócio**: workers Celery consolidam dados no PostgreSQL (`backend/market_alert/repositories`), recalculam comparações e armazenam histórico de coletas.
 6. **Eventos e notificações**: eventos de domínio são persistidos em `event_log`, avaliados por regras configuráveis e geram notificações com idempotência, retries e auditoria.
-7. **Observabilidade e resiliência**: cada serviço publica métricas Prometheus, logs estruturados e incrementa contadores de erro. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
+7. **Observabilidade e resiliência**: cada serviço publica logs estruturados e permite integração com tracing. O fluxo atual privilegia simplicidade: as regras de retry permanecem, mas a idempotência distribuída foi desativada nas rotas manuais para facilitar depuração.
 
 ### Tarefas Celery do `market_alert`
 - **Collector (`tasks.collector_product_task.collect_product_task`)**: executa scraping de um monitorado ou concorrente por vez, respeitando lock Redis (`acquire_product_lock`) antes de chamar o scraper. Retorna `ScrapeResult` padronizado com status (`success`, `not_modified`, `no_result`, `error`), `http_status`, sinalização de mudança de preço/disponibilidade e `error_code` quando existir. Enfileirado na fila `scraping`.
@@ -65,10 +57,10 @@ O módulo `backend/` concentra serviços Python que antes viviam na raiz do repo
 - **Exposição de APIs**: o FastAPI em `market_alert` oferece rotas públicas, autenticação JWT e endpoints para monitoramentos, concorrentes e comparações.
 - **Contrato único**: esquemas em `backend/shared/schemas/schemas_scraper.py` padronizam comunicação API ↔ scraper.
 - **Separação de responsabilidades**: apenas o `market_scraper` processa HTML, enquanto o `market_alert` persiste dados e aplica lógica de negócios.
-- **Processamento assíncrono**: workers Celery ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização, métricas e observabilidade.
+- **Processamento assíncrono**: workers Celery ficam no mesmo pacote, reutilizando `backend/shared/core` para inicialização e observabilidade.
 - **Simplicidade operacional**: priorizamos contratos previsíveis, removendo idempotência distribuída nos disparos manuais.
 - **Extensibilidade controlada**: novos marketplaces exigem evoluções no `market_scraper` e nos contratos compartilhados antes de tocar fluxos críticos.
-- **Biblioteca compartilhada**: `backend/shared` concentra schemas Pydantic, utilidades, métricas, observabilidade e integrações externas consumidas pelos demais serviços.
+- **Biblioteca compartilhada**: `backend/shared` concentra schemas Pydantic, utilidades, observabilidade e integrações externas consumidas pelos demais serviços.
 
 ## Frontend
 ### Arquitetura do frontend
@@ -155,8 +147,7 @@ docker compose up -d db redis redis-init api market_scraper celery-worker-scrapi
 
 ## Observabilidade e operação contínua
 ### Backend
-- **Métricas Prometheus**: endpoints `/metrics` expostos pela API (`:8000`), worker principal (`:8002`), worker do coletor contínuo (`:8004`), worker de comparação (`:8005`) e Scraper (`:8010`). Métricas definidas em [`backend/shared/metrics`](backend/shared/metrics).
-- **Logs estruturados**: todos os serviços usam `structlog` com saída JSON. Em Compose, Loki + Promtail coletam e disponibilizam via Grafana (`http://localhost:3000`).
+- **Logs estruturados**: todos os serviços usam `structlog` com saída JSON.
 - **Tracing opcional**: pontos de integração podem enviar spans para provedores OTLP quando configurado nas variáveis de ambiente.
 
 ### Frontend
@@ -166,10 +157,10 @@ docker compose up -d db redis redis-init api market_scraper celery-worker-scrapi
 
 ## Troubleshooting do coletor contínuo
 - **Worker monitor parado**: verifique se o container/processo `celery-worker-monitor` está ativo e se `CONTINUOUS_COLLECTOR_AUTOSTART=1` está definido.
-- **Fila sem itens prontos**: valide o `PRIORITY_QUEUE_KEY`, as métricas `PRIORITY_QUEUE_SIZE` e `PRIORITY_QUEUE_READY_TOTAL`, além dos timestamps `next_check_at`.
+- **Fila sem itens prontos**: valide o `PRIORITY_QUEUE_KEY` e os timestamps `next_check_at`.
 - **Redis indisponível**: confirme conectividade e credenciais; a aplicação registra `continuous_queue_unavailable` quando o Redis falha.
 - **Itens presos em processamento**: o loop reaproveita entradas expiradas com base em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs `continuous_processing_reclaimed`.
-- **Reenqueue pendente pós-coleta**: aumentos em `priority_queue_pending_requeue_total` indicam itens mantidos em processamento aguardando o retorno das coletas assíncronas.
+- **Reenqueue pendente pós-coleta**: logs `continuous_processing_reclaimed` indicam itens mantidos em processamento aguardando o retorno das coletas assíncronas.
 - **Monitorados pausados**: itens com `paused=true` são ignorados pelo coletor; retome manualmente para reativar.
 
 ## Estrutura do respositório
@@ -177,7 +168,7 @@ docker compose up -d db redis redis-init api market_scraper celery-worker-scrapi
 backend/
   market_alert/    # API FastAPI, tasks Celery e rotinas de comparação
   market_scraper/  # Microserviço FastAPI de scraping com pipeline sequencial
-  shared/          # Configuração, contratos, métricas, utilidades e recursos de infraestrutura
+  shared/          # Configuração, contratos, utilidades e recursos de infraestrutura
 frontend/          # Aplicação React + Vite com servidor Express para distribuição
 docker-compose.yml # Orquestração completa em desenvolvimento
 requirements.txt   # Dependências comuns aos serviços Python

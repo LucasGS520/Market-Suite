@@ -7,17 +7,13 @@ from uuid import UUID
 
 import structlog
 
-from shared.metrics.metrics_priority_queue import (
-    PRIORITY_QUEUE_ENQUEUED_TOTAL,
-    PRIORITY_QUEUE_FALLBACK_TOTAL,
-)
 from market_alert.services.services_priority_queue import PriorityQueueService
 
 
 logger = structlog.get_logger("priority_queue_manager")
 
 def _utc_now() -> datetime:
-    """ Retorna timestamp UTC sem microssegundos para consistência de métricas """
+    """ Retorna timestamp UTC sem microssegundos para consistência de logs """
     return datetime.now(timezone.utc).replace(microsecond=0)
 
 def enqueue_monitored_now(
@@ -30,7 +26,6 @@ def enqueue_monitored_now(
     service = queue_service or PriorityQueueService()
     enqueued_at = _utc_now()
     if not service.enqueue_now(str(monitored_id)):
-        PRIORITY_QUEUE_FALLBACK_TOTAL.labels(source=source).inc()
         logger.warning(
             "priority_queue_enqueue_failed",
             monitored_id=str(monitored_id),
@@ -39,7 +34,6 @@ def enqueue_monitored_now(
         return False
     
     service.set_enqueued_at(str(monitored_id), enqueued_at)
-    PRIORITY_QUEUE_ENQUEUED_TOTAL.labels(source=source).inc()
     logger.info(
         "priority_queue_enqueued",
         monitored_id=str(monitored_id),
@@ -63,7 +57,6 @@ def enqueue_monitored_at(
 
     enqueued_at = _utc_now()
     if not service.enqueue(str(monitored_id), normalized_time):
-        PRIORITY_QUEUE_FALLBACK_TOTAL.labels(source=source).inc()
         logger.warning(
             "priority_queue_schedule_failed",
             monitored_id=str(monitored_id),
@@ -73,7 +66,6 @@ def enqueue_monitored_at(
         return False
     
     service.set_enqueued_at(str(monitored_id), enqueued_at)
-    PRIORITY_QUEUE_ENQUEUED_TOTAL.labels(source=source).inc()
     logger.info(
         "priority_queue_scheduled",
         monitored_id=str(monitored_id),

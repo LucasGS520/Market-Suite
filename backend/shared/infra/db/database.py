@@ -2,13 +2,13 @@
 
 Este módulo cria o engine do SQLAlchemy e a fábrica de sessões que será
 utilizada por toda a aplicação. também define funções utilitárias e eventos
-para instrumentação do pool de conexões
+para reaproveitar a configuração do pool de conexões
 """
 
 import os
 from typing import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from shared.core.config_base import ConfigBase

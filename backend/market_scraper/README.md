@@ -9,15 +9,14 @@ Serviço FastAPI responsável por transformar URLs de marketplaces em um `ParseR
 ## Principais Responsabilidades
 - **Normalizar e validar URLs** aceitando apenas marketplaces suportados.
 - **Executar pipeline de scraping** com etapas específicas por domínio, metadados e fallback genérico.
-- **Expor API REST** para consumo síncrono (`/scraper/parse`) e endpoints de suporte (`/health/ping`, `/metrics`).
-- **Registrar métricas detalhadas** de latência, cache, DNS e resultados de parsing.
+- **Expor API REST** para consumo síncrono (`/scraper/parse`) e endpoint de suporte (`/health/ping`).
 
 ## Estrutura do Diretório
 ```text
 market_scraper/
 ├── core/                 #Configuração do serviço, carregamento de env e inicialização FastAPI
 ├── main.py               #Criação da aplicação FastAPI, middlewares e rotas
-├── routes/               #Rotas públicas (/scraper/parse, /health, /metrics)
+├── routes/               #Rotas públicas (/scraper/parse, /health)
 ├── services/             #Pipeline, etapas e orquestradores de parsing
 ├── parsers/              #Parsers específicos por domínio e fallback genérico
 ├── utils/                #Utilidades (HTTP, cache, DNS, robots, validação de URL)
@@ -30,7 +29,6 @@ market_scraper/
 |--------|--------------|-----------|
 | `POST` | `/scraper/parse` | Recebe `ParserRequest`, executa o pipeline e devolve `ParserResponse`. Pode retornar `304 Not Modified` ou `no_result` quando não há dados novos. |
 | `GET` | `/health/ping` | Retorna `{ "status": "ok" }` para monitoramento básico. |
-| `GET` | `/metrics` | Exibe métricas Prometheus do `REGISTRY` padrão. |
 | `Pipeline` | `services/synergic_pipeline.SynergicPipeline` | Coordena etapas sequenciais de parsing com timeouts individuais. |
 | `Pipeline` | `services/pipeline_steps.FetchHTMLStep` | Baixa HTML aplicando cache, singleflight e política de robots. |
 
@@ -38,8 +36,8 @@ O cliente oficial vive em [`market_alert/scraper/scraper_client.py`](../market_a
 
 ### Integração com os Serviços
 - **`market_alert`**: consome o endpoint `/scraper/parse` via `ScraperClient`, usando autenticação e timeouts definidos na API.
-- **`shared/`**: reaproveita métricas (`shared/metrics/metrics_scraper.py`), utilidades de configuração e padrões de logs.
-- **Infraestrutura compartilhada**: depende de Redis para cache opcional, utiliza `.env.common` para parâmetros globais e compartilha observabilidade via Prometheus/Loki definidos no `docker-compose.yml`.
+- **`shared/`**: reaproveita utilidades de configuração e padrões de logs.
+- **Infraestrutura compartilhada**: depende de Redis para cache opcional e utiliza `.env.common` para parâmetros globais.
 
 ## Pipeline de Parsing
 O pipeline sequencial é registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado pelo `SynergicPipeline` (`services/synergic_pipeline.py`). Ordem padrão:
@@ -50,7 +48,7 @@ O pipeline sequencial é registrado em [`services/pipeline_steps.py`](services/p
 4. **HtmlMetadataParserStep** – coleta metadados e marcações estruturais com BeautifulSoup.
 5. **GenericFallbackParserStep** – aplica heurísticas genéricas (`price-parser` + regras textuais) quando etapas anteriores falham.
 
-Tempo máximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline: `SCRAPER_PIPELINE_TIMEOUT_SECONDS`. Métricas obrigatórias são registradas via `shared/metrics/metrics_scraper.py` (`SCRAPER_STEP_*`, `SCRAPER_NO_RESULT_TOTAL`, `SCRAPING_LATENCY_SECONDS`).
+Tempo máximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline: `SCRAPER_PIPELINE_TIMEOUT_SECONDS`.
 
 ## Configuração
 As variáveis padrão estão em [`core/config_scraper.py`](core/config_scraper.py) e podem ser sobrescritas via `market_scraper/.env.market_scraper`.
@@ -61,15 +59,15 @@ As variáveis padrão estão em [`core/config_scraper.py`](core/config_scraper.p
 | HTTP | `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, `SCRAPER_DEFAULT_USER_AGENT`, `SCRAPER_USER_AGENT_POOL`, `SCRAPER_HEADERS_*` |
 | Cache | `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES`, `SCRAPER_SINGLEFLIGHT_LOCK_TTL` |
 | Parsing | `SCRAPER_PRICE_TOLERANCE`, `SCRAPER_ALLOWED_DOMAINS`, flags em `parsers/` |
-| Observabilidade | `SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `METRICS_PORT`, `LOG_LEVEL` |
+| Observabilidade | `SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `LOG_LEVEL` |
 
 ## Principais Componentes do Serviço
-- `services/synergic_pipeline.py` – organiza execução do pipeline, métricas e tratamento de exceções.
+- `services/synergic_pipeline.py` – organiza execução do pipeline e tratamento de exceções.
 - `services/pipeline_steps.py` – lista etapas (`FetchHTMLStep`, `DomainSpecificParserStep`, `JsonLdParserStep`, `HtmlMetadataParserStep`, `GenericFallbackParserStep`).
 - `services/parser_runner.py` – valida dados extraídos e gera `ParserResponse` final.
 - `utils/http_utils.py` – resolve DNS com cache e previne SSRF.
 - `utils/http_download.py` – realiza download com retries configuráveis.
-- `utils/cache.py` – implementa cache LRU/TTL e métricas associadas.
+- `utils/cache.py` – implementa cache LRU/TTL.
 - `utils/robots.py` – consulta `robots.txt` respeitando bloqueios explícitos.
 - `shared/utils/url_validation.py` – validação de domínio, esquema e normalização de URLs utilizada por ambos os serviços.
 
@@ -96,7 +94,6 @@ SERVICE_NAME=market-scraper
   - Cache defensivo itens são invalidados por TTL e capacidade. Métricas `SCRAPER_CACHE_LOOKUPS_TOTAL`, `SCRAPER_CACHE_HIT_RATE`, `SCRAPER_CACHE_EVICTIONS_TOTAL` auxiliam na calibração.
 
 - **Observabilidade:**
-  - Métricas detalhadas em `/metrics` (`SCRAPER_STEP_LATENCY_SECONDS`, `SCRAPER_HTTP_RETRIES_TOTAL`, `SCRAPER_DNS_RESOLVE_DURATION_SECONDS`, `SCRAPER_CACHE_*`)
   - Logs estruturados do pipeline (`logger` em `services/synergic_pipeline.py`) descrevem etapa, domínio, resultado e duração.
   - Health-check simples em `/health/ping` facilita probes do docker-compose ou orquestradores.
 
@@ -125,6 +122,6 @@ A suíte cobre pipeline, parsers específicos, validação de URLs, cache, DNS, 
 - **`unsupported_by_robots` frequente**: revise logs de `utils/robots.py` e confirme permissões do domínio. Ajuste configurações apenas após validação legal.
 - **`304 Not Modified` constante**: reduza `SCRAPER_CACHE_TTL_SECONDS` ou limpe cache via `utils/cache.clear()` em ambiente controlado.
 - **Falhas DNS recorrentes**: aumente `SCRAPER_DNS_TIMEOUT` temporariamente e monitore `SCRAPER_DNS_BLOCKED_TOTAL`.
-- **Latência elevada**: avalie métricas `SCRAPER_STEP_LATENCY_SECONDS` para identificar etapa crítica e ajuste timeouts ou heurísticas.
+- **Latência elevada**: revise logs do pipeline para identificar etapa crítica e ajuste timeouts ou heurísticas.
 
-Atualize este documento sempre que etapas do pipeline, domínios suportados ou métricas forem alterados.
+Atualize este documento sempre que etapas do pipeline, domínios suportados forem alterados.

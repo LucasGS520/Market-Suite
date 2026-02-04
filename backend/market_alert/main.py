@@ -1,6 +1,4 @@
-""" Aplicação principal FastAPI com configuração de métricas e rotas """
-
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
+""" Aplicação principal FastAPI com configuração de rotas """
 
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -11,9 +9,8 @@ except Exception:
 
 import structlog
 import logging
-import time
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
@@ -22,15 +19,6 @@ from slowapi import Limiter
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-
-from starlette.middleware.base import BaseHTTPMiddleware
-
-
-from shared.infra.db import get_engine
-from shared.metrics.metrics_logging import LOG_ENTRIES_TOTAL
-from shared.metrics.metrics_http import HTTP_REQUESTS_TOTAL, HTTP_REQUESTS_LATENCY_SECONDS
-from shared.metrics.metrics_api import API_ERRORS_TOTAL
-from shared.metrics.metrics_db import DB_POOL_CHECKOUTS, DB_POOL_SIZE
 
 from market_alert.core.config_alert import settings
 
@@ -73,22 +61,9 @@ def configure_logging():
         foreign_pre_chain=[structlog.processors.TimeStamper(fmt="iso")]
     ))
 
-    class MetricsLogHandler(logging.Handler):
-        """ Handler que incrementa métricas por volume de logs """
-
-        def emit(self, record: logging.LogRecord) -> None:
-            level = record.levelname.lower()
-            try:
-                LOG_ENTRIES_TOTAL.labels(level=level).inc()
-            except Exception:
-                pass
-
-    metrics_handler = MetricsLogHandler()
-
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
-    root.addHandler(metrics_handler)
     root.setLevel(logging.INFO)
 
 
@@ -105,44 +80,6 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
         status_code=429,
         content={"detail": "Muitas requisições. Tente novamente mais tarde."}
     )
-
-SERVICE_LABEL = "market_alert"
-
-class MetricsMiddleware(BaseHTTPMiddleware):
-    """ Coleta métricas de requisição e latência a cada chamada HTTP """
-
-    async def dispatch(self, request: Request, call_next):
-        """ Middleware que mede latência e conta requisições """
-        start = time.time()
-        response = await call_next(request)
-        latency = time.time() - start
-
-        #Incrementa contador de requisições
-        HTTP_REQUESTS_TOTAL.labels(
-            service=SERVICE_LABEL,
-            method=request.method,
-            endpoint=request.url.path,
-            status_code=response.status_code
-        ).inc()
-
-        if response.status_code >= 400:
-            try:
-                API_ERRORS_TOTAL.labels(
-                    service=SERVICE_LABEL,
-                    endpoint=request.url.path,
-                    status_code=response.status_code
-                ).inc()
-            except Exception:
-                pass
-
-        #Observa latência
-        HTTP_REQUESTS_LATENCY_SECONDS.labels(
-            service=SERVICE_LABEL,
-            method=request.method,
-            endpoint=request.url.path
-        ).observe(latency)
-
-        return response
 
 def create_app() -> FastAPI:
     """ Cria a instância principal da aplicação FastAPI"""
@@ -167,28 +104,10 @@ def create_app() -> FastAPI:
         if LoggingInstrumentor:
             LoggingInstrumentor().instrument(set_logging_format=True)
 
-    #Adiciona middleware de métricas e limiter
-    app.add_middleware(MetricsMiddleware)
+    #Adiciona middleware de limiter
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
     app.add_middleware(SlowAPIMiddleware)
-
-    # Endpoint que expõe todas as métricas para o Prometheus
-    @app.get("/metrics")
-    async def metrics_endpoint() -> Response:
-        """ Gera o payload com todas as métricas do DEFAULT_REGISTRY """
-        #Atualiza DB pool metrics
-        engine = get_engine()
-        #Atualiza gauges de pool
-        DB_POOL_SIZE.set(engine.pool.size())
-        DB_POOL_CHECKOUTS.set(engine.pool.checkedout())
-
-        data = generate_latest(REGISTRY)
-        return Response(content=data, media_type=CONTENT_TYPE_LATEST)
-
-    #Monta o Audit Exporter em /audit
-    from market_alert.utils.audit_exporter import app as audit_exporter_app
-    app.mount("/audit", audit_exporter_app)
 
 # ---------- REGISTRO DE ROTAS ----------
     #Usuários e administração

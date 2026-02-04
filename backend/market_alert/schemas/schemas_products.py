@@ -84,7 +84,7 @@ class MonitoredProductResponse(ProductResponse):
     paused_at: datetime | None = Field(None, description="Momento em que a pausa foi ativada, quando existir")
     comparison_summary: PriceComparisonSummaryResponse | None = Field(
         default=None,
-        description=("Último resumo consolidado de comparação de preços com métricas normalizadas para exibição imediata no frontend."),
+        description=("Último resumo consolidado de comparação de preços com indicadores normalizadas para exibição imediata no frontend."),
     )
 
 class MonitoredPausedUpdateRequest(BaseModel):
@@ -125,7 +125,7 @@ class CompetitorsListResponse(BaseModel):
         ..., description="Quantidade total de concorrentes vinculados ao monitorado"
     )
     competitors_with_price_count: int = Field(
-        ..., description="Concorrentes com preço utilizável em métricas e comparações"
+        ..., description="Concorrentes com preço utilizável em indicadores e comparações"
     )
     excluded_due_to_inactive_count: int = Field(
         ...,

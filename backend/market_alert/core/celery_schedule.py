@@ -15,12 +15,12 @@ from kombu import Exchange, Queue
 TASK_MODULES = [
     "market_alert.tasks.collector_product_task",
     "market_alert.tasks.continuous_collector_task",
-    "market_alert.tasks.metrics_tasks",
     "market_alert.tasks.compare_prices_task",
     "market_alert.tasks.notifications_enqueue_task",
     "market_alert.tasks.send_notification_task",
     "market_alert.tasks.verification_tasks",
     "market_alert.tasks.priority_queue_tasks",
+    "market_alert.tasks.maintenance_tasks",
 ]
 
 #Exchanges separados para scraping, monitoramento e comparação
@@ -77,24 +77,11 @@ def _schedule_entry(task: str, schedule, *, queue: str = "monitor", routing_key:
         "options": {"queue": queue, "routing_key": routing_key or queue},
     }
 
-
 #Agendamentos periódicos (Celery Beat)
 #Mantidos aqui para simplificar auditoria e evitar divergências
 BEAT_SCHEDULE = {
-    "collect-celery-metrics-every-1min": _schedule_entry(
-        "market_alert.tasks.metrics_tasks.collect_celery_metrics",
-        crontab(minute="*/1"),
-    ),
-    "collect-audit-metrics-every-1min": _schedule_entry(
-        "market_alert.tasks.metrics_tasks.collect_audit_metrics",
-        crontab(minute="*/1"),
-    ),
-    "collect-db-metrics-every-1min": _schedule_entry(
-        "market_alert.tasks.metrics_tasks.collect_db_metrics",
-        crontab(minute="*/1"),
-    ),
     "cleanup-cache-daily": _schedule_entry(
-        "market_alert.tasks.metrics_tasks.cleanup_cache",
+        "market_alert.tasks.maintenance_tasks.cleanup_cache",
         crontab(hour=3, minute=0),
     ),
 }

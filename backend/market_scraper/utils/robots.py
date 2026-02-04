@@ -2,9 +2,8 @@
 
 O módulo valida o acesso com ``robots.txt`` de forma assíncrona reaproveitando
 limites de rede definidos nas configurações globais. O cache interno reduz
-round-trips desnecessários enquanto preserva métricas de sucesso e erro. A
-política de fallback é restritiva para impedir acessos quando o arquivo não
-pode ser validado, privilegiando conformidade legal.
+round-trips desnecessários. A política de fallback é restritiva para impedir 
+acessos quando o arquivo não pode ser validado, privilegiando conformidade legal.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
-from shared.metrics.metrics_scraper import SCRAPER_ROBOTS_CHECK_TOTAL
 from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.utils.http_retry import (
@@ -182,7 +180,6 @@ async def is_allowed(
 
     if parser is None:
         #Sem parser confiável, evitamos scraping para cumprir políticas públicas do site
-        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
         logger.warning(
             "robots_fallback_block",
             host=host_key,
@@ -201,12 +198,10 @@ async def is_allowed(
             user_agent=user_agent,
             error=str(exc),
         )
-        SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome="error").inc()
         #Fallback permanece permissivo para garantir disponibilidade do pipeline
         return False
     
     outcome = "allowed" if allowed else "disallowed"
-    SCRAPER_ROBOTS_CHECK_TOTAL.labels(outcome=outcome).inc()
 
     if not allowed:
         #Registramos no log para facilitar diagnóstico em produção

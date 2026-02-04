@@ -3,7 +3,7 @@
 O módulo prioriza estratégias robustas para interpretar diferentes
 formatos de preços mantendo ``Decimal`` como tipo canônico. O
 ``price-parser`` é utilizado sempre como primeira tentativa para
-uniformizar o parsing e registrar métricas de adoção.
+uniformizar o parsing.
 """
 
 from __future__ import annotations
@@ -12,8 +12,6 @@ import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from price_parser import Price
-
-from shared.metrics.metrics_scraper import SCRAPER_PRICE_PARSER_USAGE_TOTAL
 
 
 #Constante garante arredondamento consistente com duas casas decimais
@@ -35,8 +33,8 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
     
     Aceita strings com símbolos brasileiros (``R$``), números simples ou
     objetos ``Decimal``. Sempre tenta primeiro interpretar o valor usando
-    ``price-parser`` para lidar com formatos mais complexos e registra o
-    resultado em métricas, mantendo o fallback manual para garantir
+    ``price-parser`` para lidar com formatos mais complexos, mantendo o
+    fallback manual para garantir
     robustez. Lança ``ValueError`` quando conteúdo não pode ser
     interpretado.
     """
@@ -57,19 +55,15 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
     try:
         parsed_price = Price.fromstring(raw_text)
     except Exception:
-        SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="error").inc()
+        parsed_price = None
     else:
         if parsed_price and parsed_price.amount is not None:
             try:
                 candidate = Decimal(str(parsed_price.amount))
             except InvalidOperation:
-                SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="invalid_amount").inc()
+                candiate = None
             else:
-                SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="parsed").inc()
                 return candidate.quantize(_TWO_DECIMAL_QUANTIZE, rounding=ROUND_HALF_UP)
-            
-        else:
-            SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="missing_amount").inc()
 
     normalized = _normalize_raw_price(raw_text)
     if not normalized:
@@ -79,8 +73,6 @@ def parse_price_str(raw: str | int | float | Decimal, url: str) -> Decimal:
         parsed = Decimal(normalized)
     except InvalidOperation as exc:
         raise ValueError(f"Preço inválido em {url}: {raw_text}") from exc
-    #Registramos explicitamente quando o fallback manual foi necessário
-    SCRAPER_PRICE_PARSER_USAGE_TOTAL.labels(outcome="fallback").inc()
     return parsed.quantize(_TWO_DECIMAL_QUANTIZE, rounding=ROUND_HALF_UP)
     
 def format_decimal_to_str(value: Decimal) -> str:

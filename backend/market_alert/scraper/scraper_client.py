@@ -24,10 +24,6 @@ from pydantic import ValidationError
 
 from backend.shared.schemas.shared_schemas_scraper import ParserRequest, ParserResponse
 from shared.utils.redis_client import get_redis_client
-from shared.metrics.metrics_scraper import (
-    SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL,
-    SCRAPER_RESPONSE_SANITIZED_TOTAL,
-)
 
 from market_alert.core.config_alert import settings
 from market_alert.utils.circuit_breaker import CircuitBreaker
@@ -125,7 +121,6 @@ def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
     price_filtered = response.current_price is not None and sanitized.current_price is None
     if removed_fields or price_filtered:
         reason = "price_filtered" if price_filtered else "payload_filtered"
-        SCRAPER_RESPONSE_SANITIZED_TOTAL.labels(reason=reason).inc()
         logger.info(
             "scraper_response_sanitized",
             removed_fields=removed_fields,
@@ -178,7 +173,6 @@ class ScraperClient:
         host = parsed.netloc or "unknown"
 
         if circuit_breaker.is_open(host):
-            SCRAPER_CIRCUIT_OPEN_EVENTS_TOTAL.labels(host=host).inc()
             raise ScraperClientError(
                 "Circuito aberto para host solicitado",
                 status_code=503,

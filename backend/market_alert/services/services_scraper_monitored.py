@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
-from shared import metrics
+
 from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
 from shared.utils.url_validation import normalize_product_url
 
@@ -84,7 +84,7 @@ def _handle_response(
                         "enqueue_competitors_failed",
                         monitored_id=str(product.id),
                     )
-                    metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
+
                 logger.info(
                     "monitored_not_modified",
                     product_id=str(product.id),
@@ -169,7 +169,6 @@ def _handle_response(
         enqueue_competitors_for_monitored(db, monitored_id=product.id)
     except Exception:
         logger.exception("enqueue_competitors_failed", monitored_id=str(product.id))
-        metrics.RECHECK_ENQUEUE_FAILURES_TOTAL.inc()
     
     persisted_at = datetime.now(timezone.utc)
     logger.info(

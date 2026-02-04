@@ -11,7 +11,6 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from market_alert.models.models_price_history import PriceHistory
-from shared.metrics.metrics_products import PRICE_HISTORY_CREATED_TOTAL
 import structlog
 
 
@@ -81,7 +80,6 @@ def create_for_monitored(
     else:
         db.flush()
 
-    PRICE_HISTORY_CREATED_TOTAL.labels(owner="monitored").inc()
     logger.info(
         "price_history_created",
         owner_type="monitored",
@@ -126,7 +124,6 @@ def create_for_competitor(
     else:
         db.flush()
 
-    PRICE_HISTORY_CREATED_TOTAL.labels(owner="competitor").inc()
     logger.info(
         "price_history_created",
         owner_type="competitor",
