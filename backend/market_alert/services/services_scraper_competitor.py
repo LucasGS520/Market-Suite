@@ -119,7 +119,7 @@ def scrape_competitor_product(
             persisted_at=persisted_at,
         )
 
-    if status_code == 422:
+    if status_code in {400, 403, 422}:
         error_code = response.error_code or "validation_error"
         if error_code == "no_result":
             return ScrapeResult(
@@ -131,7 +131,7 @@ def scrape_competitor_product(
         return ScrapeResult(
             status="error",
             product_id=str(existing.id) if existing else None,
-            http_status=422,
+            http_status=status_code,
             error_code=error_code,
         )
 

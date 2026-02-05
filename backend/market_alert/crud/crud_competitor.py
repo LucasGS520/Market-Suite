@@ -129,6 +129,22 @@ def update_competitors_pause_state(
     )
     return int(updated or 0)
 
+def update_competitor_pause_state(
+    db: Session,
+    competitor_id: UUID,
+    *,
+    is_paused: bool,
+) -> bool:
+    """ Atualiza o estado de pausa de um concorrente específico """
+    updated = (
+        db.query(CompetitorProduct)
+        .filter(CompetitorProduct.id == competitor_id)
+        .update({CompetitorProduct.is_paused: is_paused}, synchronize_session=False)
+    )
+    if updated:
+        db.commit()
+    return bool(updated)
+
 def _derive_competitor_name_from_url(product_url: str) -> str:
     """Gera um nome provisório a partir da URL para preencher o cadastro pendente."""
     parsed = urlparse(product_url)

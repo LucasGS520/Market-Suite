@@ -101,7 +101,7 @@ def _handle_response(
             persisted_at=persisted_at,
         )
     
-    if status_code == 422:
+    if status_code in {400, 403, 422}:
         error_code = fetch_result.error_code or "validation_error"
         if error_code == "no_result":
             return ScrapeResult(
@@ -113,7 +113,7 @@ def _handle_response(
         return ScrapeResult(
             status="error",
             product_id=str(existing_id) if existing_id else None,
-            http_status=422,
+            http_status=status_code,
             error_code=error_code,
         )
 

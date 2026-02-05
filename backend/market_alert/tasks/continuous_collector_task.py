@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Iterable, Mapping, Any
 from uuid import UUID, uuid4
 
@@ -20,7 +20,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from celery.canvas import Signature
 
 from shared.infra.db import SessionLocal
-from shared.utils.redis_client import is_scraping_suspended
+from shared.utils.redis_client import get_redis_client, is_scraping_suspended
 from shared.utils.redis_locks import (
     acquire_continuous_collector_lock,
     refresh_continuous_collector_lock,
@@ -96,6 +96,30 @@ def _should_abort(task_request) -> bool:
     if abort_fn is None:
         return False
     return bool(abort_fn())
+
+def _cooldown_key(product_id: str) -> str:
+    """ Monta a chave Redis usada para cooldown de scraping """
+    return f"market_alert:scrape_cooldown:{product_id}"
+
+def _resolve_cooldown_seconds(product_id: str) -> int | None:
+    """ Verifica se há cooldown ativo para evitar coletas consecutivas """
+    client = get_redis_client()
+    if client is None:
+        return None
+    try:
+        ttl = client.ttl(_cooldown_key(product_id))
+    except Exception:
+        return None
+    if ttl is None or ttl < 0:
+        return None
+    return int(ttl)
+
+def _should_skip_requeue(monitored: MonitoredProduct, reason: str | None) -> bool:
+    """ Decide se o monitorado deve ficar fora da fila após falha crítica """
+    if monitored.paused or monitored.status in {MonitoredStatus.failed}:
+        return True
+    normalized_reason = (reason or "").strip().lower()
+    return normalized_reason in {"blocked", "invalid_url_blocked"}
 
 def _dispatch_collect_task(
     *,
@@ -226,6 +250,16 @@ def _collect_group(
 
     competitor_failures = 0
     for competitor in competitors:
+        cooldown_seconds = _resolve_cooldown_seconds(str(competitor.id))
+        if cooldown_seconds is not None:
+            logger.info(
+                "continuous_competitor_cooldown_active",
+                monitored_id=str(monitored.id),
+                competitor_id=str(competitor.id),
+                cooldown_seconds=cooldown_seconds,
+                trace_id=trace_id,
+            )
+            continue
         competitor_payload = build_competitor_payload(
             competitor,
             user_id=monitored.user_id,
@@ -339,7 +373,23 @@ def _handle_processing_requeue(
             queue_service.drain_processing([monitored_id])
             return
         
-        resolved_next_check_at, _ = _resolve_next_check_at(monitored, next_retry_at)
+        if _should_skip_requeue(monitored, normalized_reason):
+            queue_service.remove(monitored_id)
+            logger.warning(
+                "continuous_processing_blocked",
+                monitored_id=monitored_id,
+                reason=normalized_reason,
+                status=monitored.status,
+                trace_id=trace_id,
+            )
+            return
+        
+        resolved_next_check_at, now = _resolve_next_check_at(monitored, next_retry_at)
+        if normalized_reason in {"rate_limit", "too_many_requests", "429", "temporary_failure"}:
+            cooldown_at = now + timedelta(seconds=settings.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS)
+            if resolved_next_check_at < cooldown_at:
+                resolved_next_check_at = cooldown_at
+                
         requeued, effective_next_check_at = _requeue_monitored(
             monitored=monitored,
             next_check_at=resolved_next_check_at,

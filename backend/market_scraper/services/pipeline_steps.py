@@ -67,6 +67,26 @@ class FetchHTMLStep(PipelineStep):
         try:
             html = await singleflight.coalesce(context.url, _download)
             context.data["http_status"] = context.data.get("http_status") or 200
+        except httpx.TooManyRedirects as exc:
+            #Marcamos explicitamente a falha para evitar loops em URLs com redirecionamento infinito
+            context.data["http_status"] = context.data.get("http_status") or 422
+            logger.warning(
+                "html_fetch_redirect_loop",
+                url=context.url,
+                domain=context.source,
+                error=str(exc),
+            )
+            return StepResult.failure(message="too_many_redirects")
+        except (httpx.InvalidURL, httpx.UnsupportedProtocol) as exc:
+            #Tratamos falhas de URL malformada ou protocolo inválido para sinalizar revisão manual
+            context.data["http_status"] = context.data.get("http_status") or 422
+            logger.warning(
+                "html_fetch_redirect_loop",
+                url=context.url,
+                domain=context.source,
+                error=str(exc),
+            )
+            return StepResult.failure(message="invalid_url")
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code if exc.response is not None else None
             context.data["http_status"] = status_code

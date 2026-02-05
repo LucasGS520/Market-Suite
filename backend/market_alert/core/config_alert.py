@@ -192,6 +192,12 @@ class Settings(ConfigBase):
     SCRAPER_HOST_RATE_WINDOW_SECONDS: int = int(
         os.getenv("SCRAPER_HOST_RATE_WINDOW_SECONDS", "60")
     ) #Janela de rate limit por host
+    SCRAPER_HOST_RETRY_MAX_ATTEMPTS: int = int(
+        os.getenv("SCRAPER_HOST_RETRY_MAX_ATTEMPTS", "4")
+    ) #Tentativas máximas por host em janela curta
+    SCRAPER_HOST_RETRY_WINDOW_SECONDS: int = int(
+        os.getenv("SCRAPER_HOST_RETRY_WINDOW_SECONDS", "60")
+    ) #Janela para contabilizar tentativas por host
     SCRAPER_CIRCUIT_FAILURE_THRESHOLD: int = int(
         os.getenv("SCRAPER_CIRCUIT_FAILURE_THRESHOLD", "5")
     ) #Falhas para acionar o circuito
@@ -210,6 +216,15 @@ class Settings(ConfigBase):
     SCRAPER_MAX_RETRY_DELAY_SECONDS: int = int(
         os.getenv("SCRAPER_MAX_RETRY_DELAY_SECONDS", str(5 * 60))
     ) #Limite superior para backoff de Celery
+    SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS: int = int(
+        os.getenv("SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS", str(10 * 60))
+    ) #Cooldown adicional após falhas de rate limit
+    SCRAPER_INVALID_URL_MAX_ATTEMPTS: int = int(
+        os.getenv("SCRAPER_INVALID_URL_MAX_ATTEMPTS", "3")
+    ) #Tentativas antes de marcar URL como inválida
+    SCRAPER_INVALID_URL_TTL_SECONDS: int = int(
+        os.getenv("SCRAPER_INVALID_URL_TTL_SECONDS", str(24 * 60 * 60))
+    ) #Janela para contagem de falhas de URL
     MAX_COMPETITORS_PER_MONITORED: int = int(
         os.getenv("MAX_COMPETITORS_PER_MONITORED", "10")
     ) #Limite padrão de concorrentes por produto monitorado

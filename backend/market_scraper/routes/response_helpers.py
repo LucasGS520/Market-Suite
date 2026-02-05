@@ -35,6 +35,18 @@ def _map_http_download_issue(outcome: PipelineOutcome) -> tuple[UrlIssue, int] |
             message="O acesso à URL foi bloqueado pelas regras de robots.txt",
         )
         return issue, status.HTTP_403_FORBIDDEN
+    if any(step.message == "too_many_redirects" for step in outcome.steps):
+        issue = UrlIssue(
+            code="too_many_redirects",
+            message="A URL entrou em loop de redirecionamento",
+        )
+        return issue, status.HTTP_422_UNPROCESSABLE_ENTITY
+    if any(step.message == "invalid_url" for step in outcome.steps):
+        issue = UrlIssue(
+            code="invalid_url",
+            message="A URL informada é inválida ou usa protocolo não suportado",
+        )
+        return issue, status.HTTP_422_UNPROCESSABLE_ENTITY
     return None
 
 def _http_error(

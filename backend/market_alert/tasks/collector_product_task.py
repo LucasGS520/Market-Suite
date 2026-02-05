@@ -54,12 +54,20 @@ SCRAPE_RETRY_TTL_SECONDS = 60 * 60
 TEMPORARY_FAILURE_ERROR_CODES = {
     "rate_limit",
     "too_many_requests",
-    "too_many_redirects",
     "timeout",
     "service_unavailable",
     "gateway_timeout",
 }
 TEMPORARY_FAILURE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
+INVALID_URL_ERRORS_CODES = {
+    "too_many_redirects",
+    "redirect_loop",
+    "invalid_url",
+    "unsupported_by_robots",
+    "blocked_host",
+    "unsupported_protocol",
+}
+RATE_LIMIT_ERROR_CODES = {"rate_limit", "too_many_requests", "429", "rate_limit_window_exhausted"}
 
 def _compute_lock_retry_delay(
     attempt: int,
@@ -184,11 +192,11 @@ def _resolve_no_result_reason(result: ScrapeResult | None) -> str:
     if "robot" in error_code:
         return "robots"
     
-    if error_code in {"rate_limit", "too_many_requests", "429"} or result.http_status == 429:
+    if error_code in RATE_LIMIT_ERROR_CODES or result.http_status == 429:
         return "rate_limit"
     
-    if error_code in {"too_many_redirects", "redirect_loop"}:
-        return "too_many_redirects"
+    if error_code in INVALID_URL_ERRORS_CODES:
+        return "invalid_url"
 
     if "timeout" in error_code or result.http_status in {408, 504}:
         return "timeout"
@@ -351,8 +359,11 @@ def _should_schedule_temporary_retry(
     error_code = (result.error_code or "").strip().lower()
     http_status = result.http_status
 
-    if reason in {"rate_limit", "timeout", "too_many_redirects"}:
+    if reason in {"rate_limit", "timeout"}:
         return True
+    
+    if error_code in INVALID_URL_ERRORS_CODES:
+        return False
     
     if error_code in TEMPORARY_FAILURE_ERROR_CODES:
         return True
@@ -361,6 +372,108 @@ def _should_schedule_temporary_retry(
         return True
     
     return False
+
+def _should_block_invalid_url(result: ScrapeResult | None) -> bool:
+    """ Indica se o erro deve contar como URL inválida """
+    if result is None:
+        return False
+    error_code = (result.error_code or "").strip().lower()
+    return error_code in INVALID_URL_ERRORS_CODES
+
+def _is_rate_limit_error(result: ScrapeResult | None, reason: str | None) -> bool:
+    """ Detecta falhas relacionadas a rate limit para aplciar cooldown """
+    if reason == "rate_limit":
+        return True
+    if result is None:
+        return False
+    error_code = (result.error_code or "").strip().lower()
+    return error_code in RATE_LIMIT_ERROR_CODES or result.http_status == 429
+
+def _increment_invalid_url_attempt(
+    product_id: UUID | None,
+    *,
+    ttl_seconds: int = SCRAPE_RETRY_TTL_SECONDS,
+) -> int | None:
+    """ Incrementa contador de URLs inválidas para limitar reprocessamentos """
+    if product_id is None:
+        return None
+    client = get_redis_client()
+    if client is None:
+        return None
+    
+    key = f"market_alert:scrape_invalid:{product_id}"
+    try:
+        pipeline = client.pipeline(True)
+        pipeline.incr(key)
+        pipeline.expire(key, ttl_seconds)
+        current, _ = pipeline.execute()
+        return int(current)
+    except Exception:
+        return None
+    
+def _reset_invalid_url_attempt(product_id: UUID | None) -> None:
+    """ Reseta contador de URLs inválidas após bloqueio """
+    if product_id is None:
+        return
+    client = get_redis_client()
+    if client is None:
+        return
+    try:
+        client.delete(f"market_alert:scrape_invalid:{product_id}")
+    except Exception:
+        pass
+    
+def _register_scrape_cooldown(
+    product_id: UUID | None,
+    *,
+    ttl_seconds: int,
+) -> bool | None:
+    """ Registra cooldown para reduzir coletas consecutivas """
+    if product_id is None:
+        return None
+    return set_key_with_ttl(
+        f"market_alert:scrape_cooldown:{product_id}",
+        "1",
+        ttl_seconds,
+        only_if_absent=True,
+    )
+
+def _mark_invalid_product(
+    *,
+    monitored_id: UUID | None,
+    competitor_id: UUID | None,
+    kind: str,
+    url: str | None,
+    attempts: int,
+    trace_id: str | None,
+) -> None:
+    """ Marca produto como inválido após falhas repetidas de URL """
+    if monitored_id is None and competitor_id is None:
+        return
+    with SessionLocal() as db:
+        if monitored_id is not None:
+            from market_alert.crud.crud_monitored import mark_monitored_product_failed
+            mark_monitored_product_failed(db, monitored_id)
+            logger.warning(
+                "scrape_invalid_url_blocked",
+                kind=kind,
+                monitored_id=str(monitored_id),
+                url=url,
+                attempts=attempts,
+                trace_id=trace_id,
+            )
+            return
+        if competitor_id is not None:
+            from market_alert.crud.crud_competitor import update_competitor_pause_state
+            update_competitor_pause_state(db, competitor_id, is_paused=True)
+            logger.warning(
+                "scrape_invalid_url_blocked",
+                kind=kind,
+                competitor_id=str(competitor_id),
+                url=url,
+                attempts=attempts,
+                trace_id=trace_id,
+            )
 
 def _increment_temporary_failure_attempt(
     product_id: UUID | None,
@@ -633,6 +746,10 @@ def collect_product(
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        if result is not None and reason is None:
+            error_code = (result.error_code or "").strip().lower()
+            if error_code in INVALID_URL_ERRORS_CODES:
+                reason = "invalid_url"
         if result is not None and result.status == "no_result" and reason is None:
             #Garante que ``no_result`` sempre carregue motivo descritivo para diagnóstico
             reason = _resolve_no_result_reason(result)
@@ -728,9 +845,47 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     attempt=attempt,
                 )
     temporary_failure = False
+    blocked_invalid = False
     next_retry_at = None
     retry_attempt = None
-    if payload and lock_target and _should_schedule_temporary_retry(result, reason):
+    if payload and lock_target and _should_block_invalid_url(result):
+        invalid_attempt = _increment_invalid_url_attempt(
+            lock_target,
+            ttl_seconds=settings.SCRAPER_INVALID_URL_TTL_SECONDS,
+        )
+        if invalid_attempt is None:
+            invalid_attempt = 1
+        if invalid_attempt >= settings.SCRAPER_INVALID_URL_MAX_ATTEMPTS:
+            _reset_invalid_url_attempt(lock_target)
+            blocked_invalid = True
+            reason = "invalid_url_blocked"
+            _mark_invalid_product(
+                monitored_id=monitored_id,
+                competitor_id=competitor_id,
+                kind=kind,
+                url=payload.get("url") if payload else None,
+                attempts=invalid_attempt,
+                trace_id=trace_id,
+            )
+        else:
+            now = datetime.now(timezone.utc)
+            delay = _compute_scrape_retry_delay(
+                invalid_attempt,
+                max_seconds=min(SCRAPE_RETRY_MAX_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+            )
+            next_retry_at = now + timedelta(seconds=delay)
+            temporary_failure = True
+            logger.warning(
+                "scrape_invalid_url_retry_scheduled",
+                kind=kind,
+                product_id=str(lock_target),
+                trace_id=trace_id,
+                attempts=invalid_attempt,
+                delay_seconds=delay,
+                next_retry_at=next_retry_at.isoformat(),
+            )
+    
+    if payload and lock_target and _should_schedule_temporary_retry(result, reason) and not blocked_invalid:
         retry_attempt = _increment_temporary_failure_attempt(lock_target)
         if retry_attempt is None:
             retry_attempt = 1
@@ -758,6 +913,11 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             )
             next_retry_at = now + timedelta(seconds=delay)
             temporary_failure = True
+            if _is_rate_limit_error(result, reason):
+                _register_scrape_cooldown(
+                    lock_target,
+                    ttl_seconds=settings.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS,
+                )
             logger.warning(
                 "scrape_temporary_failure_scheduled",
                 kind=kind,
@@ -769,7 +929,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                 next_retry_at=next_retry_at.isoformat(),
             )
 
-    status = "temporary_failure" if temporary_failure else outcome
+    status = "blocked" if blocked_invalid else ("temporary_failure" if temporary_failure else outcome)
     return {
         "outcome": outcome,
         "status": status,
