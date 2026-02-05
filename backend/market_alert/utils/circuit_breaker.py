@@ -60,7 +60,12 @@ class CircuitBreaker:
         if client is None:
             return
         try:
+            open_key = self._open_key(host)
+            was_open = bool(client.exists(open_key))
             client.delete(self._failures_key(host))
+            if was_open:
+                client.delete(open_key)
+                logger.info("host_unblocked", extra={"host": host})
         except Exception as exc:
             logger.warning("circuit_breaker_reset_error: %s", exc)
 
@@ -89,9 +94,8 @@ class CircuitBreaker:
                 pipeline.delete(failures_key)
                 pipeline.execute()
                 logger.warning(
-                    "circuit_opened",
-                    host=host,
-                    cooldown_seconds=self._cooldown_seconds,
+                    "host_blocked",
+                    extra={"host": host, "cooldown_seconds": self._cooldown_seconds}
                 )
             except Exception as exc:  # pragma: no cover
                 logger.warning("circuit_breaker_open_error: %s", exc)

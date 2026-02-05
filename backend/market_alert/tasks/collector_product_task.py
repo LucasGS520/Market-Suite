@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import time
 import random
-from datetime import datetime, timezone
-from typing import Mapping
+from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping
+from urllib.parse import urlparse
 from uuid import UUID
 
 import structlog
@@ -24,14 +25,16 @@ from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.exceptions import ScraperError
 from shared.infra.db import SessionLocal
-from shared.utils.redis_client import is_scraping_suspended, set_key_with_ttl
+from shared.utils.redis_client import get_redis_client, is_scraping_suspended, set_key_with_ttl
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.celery_app import celery_app
+from market_alert.core.config_alert import settings
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import MonitoredStatus
+from market_alert.scraper.scraper_client import ScraperClientError
 
 
 logger = structlog.get_logger("collector_product_task")
@@ -42,6 +45,21 @@ LOCK_RETRY_MAX_RETRIES = 3
 LOCK_RETRY_JITTER_RATIO = 0.2
 COMPARE_DEBOUNCE_TTL_SECONDS = 600
 COMPARE_DISPATCH_COUNTDOWN_SECONDS = 3
+SCRAPE_RETRY_BASE_SECONDS = 30
+SCRAPE_RETRY_MAX_SECONDS = 15 * 60
+SCRAPE_RETRY_MAX_ATTEMPTS = 5
+SCRAPE_RETRY_JITTER_RATIO = 0.3
+SCRAPE_RETRY_TTL_SECONDS = 60 * 60
+
+TEMPORARY_FAILURE_ERROR_CODES = {
+    "rate_limit",
+    "too_many_requests",
+    "too_many_redirects",
+    "timeout",
+    "service_unavailable",
+    "gateway_timeout",
+}
+TEMPORARY_FAILURE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
 
 def _compute_lock_retry_delay(
     attempt: int,
@@ -58,6 +76,34 @@ def _compute_lock_retry_delay(
     jitter_multiplier = 1 + ((random.random() * 2) - 1) * jitter_ratio
     delay = int(max(1, capped_delay * jitter_multiplier))
     return delay
+
+def _compute_scrape_retry_delay(
+    attempt: int,
+    *,
+    base_seconds: int = SCRAPE_RETRY_BASE_SECONDS,
+    max_seconds: int = SCRAPE_RETRY_MAX_SECONDS,
+    jitter_ratio: float = SCRAPE_RETRY_JITTER_RATIO,
+    retry_after: int | None = None,
+) -> int:
+    """ Calcula atraso para falhas temporárias usando backoff e ``Retry-After`` """
+    if retry_after is not None and retry_after > 0:
+        return int(min(retry_after, max_seconds))
+    return _compute_lock_retry_delay(
+        attempt,
+        base_seconds=base_seconds,
+        max_seconds=max_seconds,
+        jitter_ratio=jitter_ratio,
+    )
+
+def _extract_host(url: str | None) -> str:
+    """ Extrai o host de uma URL para uso em logs """
+    if not url:
+        return "unknown"
+    try:
+        parsed = urlparse(url)
+        return parsed.netloc or "unknown"
+    except Exception:
+        return "unknown"
 
 def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
     """ Valida campos mínimos, retornando tipo, IDs e URL.
@@ -141,6 +187,9 @@ def _resolve_no_result_reason(result: ScrapeResult | None) -> str:
     if error_code in {"rate_limit", "too_many_requests", "429"} or result.http_status == 429:
         return "rate_limit"
     
+    if error_code in {"too_many_redirects", "redirect_loop"}:
+        return "too_many_redirects"
+
     if "timeout" in error_code or result.http_status in {408, 504}:
         return "timeout"
     
@@ -291,6 +340,62 @@ def _activate_pending_monitored(
         trace_id=trace_id,
     )
 
+def _should_schedule_temporary_retry(
+    result: ScrapeResult | None,
+    reason: str | None,
+) -> bool:
+    """ Indica se a falha deve gerar backoff e reprocessamento tardio """
+    if result is None:
+        return False
+    
+    error_code = (result.error_code or "").strip().lower()
+    http_status = result.http_status
+
+    if reason in {"rate_limit", "timeout", "too_many_redirects"}:
+        return True
+    
+    if error_code in TEMPORARY_FAILURE_ERROR_CODES:
+        return True
+    
+    if http_status in TEMPORARY_FAILURE_HTTP_STATUSES:
+        return True
+    
+    return False
+
+def _increment_temporary_failure_attempt(
+    product_id: UUID | None,
+    *,
+    ttl_seconds: int = SCRAPE_RETRY_TTL_SECONDS,
+) -> int | None:
+    """ Incrementa contador de falhas temporárias para limitar reprocessamentos """
+    if product_id is None:
+        return None
+    client = get_redis_client()
+    if client is None:
+        return None
+    
+    key = f"market_alert:scrape_retry:{product_id}"
+    try:
+        pipeline = client.pipeline(True)
+        pipeline.incr(key)
+        pipeline.expire(key, ttl_seconds)
+        current, _ = pipeline.execute()
+        return int(current)
+    except Exception:
+        return None
+    
+def _reset_temporary_failure_attempt(product_id: UUID | None) -> None:
+    """ Reseta contador de falhas temporárias quando o limite é atingido """
+    if product_id is None:
+        return
+    client = get_redis_client()
+    if client is None:
+        return
+    try:
+        client.delete(f"market_alert:scrape_retry:{product_id}")
+    except Exception:
+        pass
+
 def collect_product(
     payload: Mapping[str, str | None] | None,
     *,
@@ -299,7 +404,7 @@ def collect_product(
     lock_ttl_seconds: int | None = None,
     logger_bound=None,
     db: Session | None = None,
-) -> tuple[str, ScrapeResult | None]:
+) -> tuple[str, ScrapeResult | None, str | None]:
     """ Executa coleta de produto de forma reutilizável para tasks e orquestradores.
 
     A função aplica validação de payload e coordena lock distribuído quando
@@ -487,12 +592,44 @@ def collect_product(
                             trace_id,
                             force=force_compare,
                         )
+
+    except ScraperClientError as exc:
+        reason = "scraper_client_error"
+        error_code = "scraper_client_error"
+        if exc.status_code == 429:
+            error_code = "rate_limit"
+        elif exc.status_code in {503, 504}:
+            error_code = "service_unavailable"
+        result = ScrapeResult(
+            status="error",
+            product_id=str(lock_target) if lock_target else None,
+            http_status=exc.status_code,
+            error_code=error_code,
+            retry_after=exc.retry_after,
+        )
+        task_logger.warning(
+            "scraper_client_error",
+            kind=kind,
+            error=str(exc),
+            http_status=exc.status_code,
+        )
                             
     except ScraperError as exc:
         reason = "scraper_error"
+        result = ScrapeResult(
+            status="error",
+            product_id=str(lock_target) if lock_target else None,
+            http_status=exc.status_code,
+            error_code="scraper_error",
+        )
         task_logger.warning("scraper_error", kind=kind, error=str(exc))
     except Exception:
         reason = "unexpected_error"
+        result = ScrapeResult(
+            status="error",
+            product_id=str(lock_target) if lock_target else None,
+            error_code="unexpected_error",
+        )
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -527,7 +664,7 @@ def collect_product(
             enqueued_at=enqueued_at,
         )
 
-    return outcome, result
+    return outcome, result, reason
 
 @celery_app.task(
     bind=True,
@@ -538,7 +675,7 @@ def collect_product(
     soft_time_limit=90,
     time_limit=120,
 )
-def collect_product_task(self, payload: Mapping[str, str | None] | None = None) -> str:
+def collect_product_task(self, payload: Mapping[str, str | None] | None = None) -> dict[str, Any]:
     """Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
 
     A task valida o payload mínimo, aplica o lock Redis para o produto alvo e
@@ -547,7 +684,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     lock não pode ser adquirido, retorna ``no_result`` para manter o contrato
     de status enxuto previsto pelo pipeline e agenda retry com backoff leve.
     """
-    outcome, result = collect_product(
+    outcome, result, reason = collect_product(
         payload,
         use_lock=True,
         dispatch_comparison=True,
@@ -590,4 +727,53 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     trace_id=trace_id,
                     attempt=attempt,
                 )
-    return outcome
+    temporary_failure = False
+    next_retry_at = None
+    retry_attempt = None
+    if payload and lock_target and _should_schedule_temporary_retry(result, reason):
+        retry_attempt = _increment_temporary_failure_attempt(lock_target)
+        if retry_attempt is None:
+            retry_attempt = 1
+        now = datetime.now(timezone.utc)
+        if retry_attempt > SCRAPE_RETRY_MAX_ATTEMPTS:
+            #Reinicia contador para evitar loops infinitos após atingir o limite
+            _reset_temporary_failure_attempt(lock_target)
+            delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
+            next_retry_at = now + timedelta(seconds=delay)
+            temporary_failure = True
+            logger.warning(
+                "scrape_retry_exhausted",
+                kind=kind,
+                product_id=str(lock_target),
+                trace_id=trace_id,
+                attempts=retry_attempt,
+                delay_seconds=delay,
+                next_retry_at=next_retry_at.isoformat(),
+            )
+        else:
+            delay = _compute_scrape_retry_delay(
+                retry_attempt,
+                max_seconds=min(SCRAPE_RETRY_MAX_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                retry_after=getattr(result, "retry_after", None),
+            )
+            next_retry_at = now + timedelta(seconds=delay)
+            temporary_failure = True
+            logger.warning(
+                "scrape_temporary_failure_scheduled",
+                kind=kind,
+                product_id=str(lock_target),
+                trace_id=trace_id,
+                host=_extract_host(payload.get("url") if payload else None),
+                attempts=retry_attempt,
+                delay_seconds=delay,
+                next_retry_at=next_retry_at.isoformat(),
+            )
+
+    status = "temporary_failure" if temporary_failure else outcome
+    return {
+        "outcome": outcome,
+        "status": status,
+        "reason": reason,
+        "next_retry_at": next_retry_at.isoformat() if next_retry_at else None,
+        "product_id": str(lock_target) if lock_target else None,
+    }

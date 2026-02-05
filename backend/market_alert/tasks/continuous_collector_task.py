@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Iterable, Mapping, Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -67,6 +67,26 @@ def _resolve_next_check_at(
         #Evita reenqueue com horário no passado para impedir loops ociosos
         resolved_next_check_at = now
     return resolved_next_check_at, now
+
+def _parse_next_retry_at(value: str | None) -> datetime | None:
+    """ Converte string ISO de retry para datetime com timezone """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+def _parse_collect_result(collect_result: Any) -> dict[str, Any]:
+    """ Normaliza o retorno da task de coleta preservando compatibilidade """
+    if isinstance(collect_result, Mapping):
+        return dict(collect_result)
+    if isinstance(collect_result, str):
+        return {"outcome": collect_result, "status": collect_result, "reason": collect_result}
+    return {"outcome": "unknown", "status": "unknown", "reason": "unknown"}
 
 def _should_abort(task_request) -> bool:
     """ Verifica se a task foi sinalizada para abortar """
@@ -301,6 +321,7 @@ def _handle_processing_requeue(
     collect_outcome: str | None,
     reason: str,
     trace_id: str | None = None,
+    next_retry_at: datetime | None = None,
 ) -> None:
     """ Conclui o fluxo de processamento movendo o item de volta para o ready """
     queue_service = PriorityQueueService()
@@ -318,7 +339,7 @@ def _handle_processing_requeue(
             queue_service.drain_processing([monitored_id])
             return
         
-        resolved_next_check_at, _ = _resolve_next_check_at(monitored, None)
+        resolved_next_check_at, _ = _resolve_next_check_at(monitored, next_retry_at)
         requeued, effective_next_check_at = _requeue_monitored(
             monitored=monitored,
             next_check_at=resolved_next_check_at,
@@ -351,16 +372,19 @@ def _handle_processing_requeue(
     queue="monitor",
 )
 def finalize_processing_requeue(
-    collect_outcome: str,
+    collect_result: Any,
     monitored_id: str,
     trace_id: str | None = None,
 ) -> None:
     """ Reenfileira monitorado após a coleta finalizar e remove do processamento """
+    normalized = _parse_collect_result(collect_result)
+    next_retry_at = _parse_next_retry_at(normalized.get("next_retry_at"))
     _handle_processing_requeue(
         monitored_id=monitored_id,
-        collect_outcome=collect_outcome,
-        reason=collect_outcome,
+        collect_outcome=normalized.get("outcome"),
+        reason=normalized.get("status") or normalized.get("reason") or normalized.get("outcome") or "unknown",
         trace_id=trace_id,
+        next_retry_at=next_retry_at,
     )
 
 @celery_app.task(
