@@ -67,6 +67,7 @@ def _activate_pending_monitored(
     *,
     task_logger,
     trace_id: str | None,
+    commit: bool = True,
 ) -> None:
     """ Atualiza monitorado pendente para ativo após coleta bem-sucedida """
     if monitored_id is None:
@@ -84,8 +85,12 @@ def _activate_pending_monitored(
         return
     
     monitored.status = MonitoredStatus.active
-    db.commit()
-    db.refresh(monitored)
+    if commit:
+        db.commit()
+        db.refresh(monitored)
+    else:
+        #Mantém a alteração persistida na transação sem finalizar o commit externo.
+        db.flush()
     task_logger.info(
         "monitored_status_activated",
         monitored_id=str(monitored_id),
@@ -144,7 +149,8 @@ def collect_product(
     ``use_lock`` estiver habilitado. O TTL do lock segue ``PRODUCT_LOCK_TTL_SECONDS``
     ou valor informado em  ``lock_ttl_seconds``. Quando ``db`` é fornecida, 
     reutilizamos a sessão compartilhada para garantir consistência transacional e reduzir 
-    overhead de conexões, mantendo commits e refresh no mesmo contexto.
+    overhead de conexões, evitando commits internos e usando ``flush`` na ativação do monitorado
+    para permitir que o chamador controle o commit final.
     """
     #Mede latência com relógio monotônico para evitar valores negativos
     started_perf = time.perf_counter()
@@ -201,7 +207,7 @@ def collect_product(
                 except Exception:
                     user_uuid = None
 
-                def _collect_with_db(session_manager: Session) -> None:
+                def _collect_with_db(session_manager: Session, *, commit_activation: bool) -> None:
                     nonlocal monitored_id, reason, result
 
                     competitor_row: CompetitorProduct | None = None
@@ -301,12 +307,13 @@ def collect_product(
                                     monitored_id,
                                     task_logger=task_logger,
                                     trace_id=trace_id,
+                                    commit=commit_activation,
                                 )
 
                 #Mantém a sessão compartilhada quando fornecida para preservar consistência transacional.
                 if db is None:
                     with SessionLocal() as session_manager:
-                        _collect_with_db(session_manager)
+                        _collect_with_db(session_manager, commit_activation=True)
                         if dispatch_comparison:
                             _schedule_comparison_after_commit(
                                 session_manager,
@@ -316,7 +323,7 @@ def collect_product(
                                 force=force_compare,
                             )
                 else:
-                    _collect_with_db(db)
+                    _collect_with_db(db, commit_activation=False)
                     if dispatch_comparison:
                         _schedule_comparison_after_commit(
                             db,
