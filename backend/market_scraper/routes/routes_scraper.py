@@ -121,7 +121,7 @@ async def parse_endpoint(
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
 
     try:
-        outcome = await run_pipeline(normalized_url)
+        outcome = await run_pipeline(normalized_url, force_refresh=force_refresh)
     except PipelineTimeoutError as exc:
         issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline excedido")
         return _http_error(

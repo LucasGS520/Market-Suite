@@ -53,11 +53,12 @@ class FetchHTMLStep(PipelineStep):
         if not await robots.is_allowed(context.url, timeout=timeout_value):
             return StepResult.failure(message="unsupported_by_robots")
         
-        #A URL validada do usuário é utilizada diretamente como chave de cache para manter previsibilidade
-        cached_html: str | None = cache.get(context.url)
-        if cached_html is not None:
-            context.set_html(cached_html)
-            return StepResult.success(message="html_from_cache")
+        #Quando o orquestrador força refresh, ignoramos o cache para garantir HTML atualizado
+        if not context.force_refresh:
+            cached_html: str | None = cache.get(context.url)
+            if cached_html is not None:
+                context.set_html(cached_html)
+                return StepResult.success(message="html_from_cache")
 
         async def _download() -> str:
             """ Encapsula o download respeitando timeout da etapa para coalescing """

@@ -27,6 +27,7 @@ class PipelineContext:
     url: str
     source: str
     default_step_timeout: float
+    force_refresh: bool = False
     html: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
 
@@ -40,6 +41,8 @@ class PipelineContext:
         self.data.setdefault("source", self.source)
         self.data.setdefault("domain", self.source)
         self.data.setdefault("step_timeout", self.default_step_timeout)
+        #Registramos o sinal de refresh para evitar decisões inconsistentes em etapas posteriores
+        self.data.setdefault("force_refresh", self.force_refresh)
 
     def set_html(self, html: str) -> None:
         """ Guarda o HTML obtido para que etapas posteriores possam reutilizá-lo """
