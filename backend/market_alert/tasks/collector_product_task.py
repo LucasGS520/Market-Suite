@@ -8,7 +8,6 @@ apenas o lock Redis aplicado aqui é utilizado para exclusão mútua.
 from __future__ import annotations
 
 import time
-import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 from uuid import UUID
@@ -42,8 +41,11 @@ from market_alert.utils.collector_result import (
     _resolve_outcome,
     _should_block_invalid_url,
     _should_schedule_temporary_retry,
+    _validate_payload,
 )
 from market_alert.utils.rate_limiter import (
+    _compute_lock_retry_delay,
+    _compute_scrape_retry_delay,
     _increment_invalid_url_attempt,
     _increment_temporary_failure_attempt,
     _register_scrape_cooldown,
@@ -54,82 +56,10 @@ from market_alert.utils.rate_limiter import (
 
 logger = structlog.get_logger("collector_product_task")
 
-LOCK_RETRY_BASE_SECONDS = 5
-LOCK_RETRY_MAX_SECONDS = 60
 LOCK_RETRY_MAX_RETRIES = 3
-LOCK_RETRY_JITTER_RATIO = 0.2
-SCRAPE_RETRY_BASE_SECONDS = 30
 SCRAPE_RETRY_MAX_SECONDS = 15 * 60
 SCRAPE_RETRY_MAX_ATTEMPTS = 5
-SCRAPE_RETRY_JITTER_RATIO = 0.3
 SCRAPE_RETRY_TTL_SECONDS = 60 * 60
-
-def _compute_lock_retry_delay(
-    attempt: int,
-    *,
-    base_seconds: int = LOCK_RETRY_BASE_SECONDS,
-    max_seconds: int = LOCK_RETRY_MAX_SECONDS,
-    jitter_ratio: float = LOCK_RETRY_JITTER_RATIO,
-) -> int:
-    """ Calcula atraso para retry com backoff exponencial e jitter leve """
-    sanitized_attempt = max(1, attempt)
-    exponential_delay = base_seconds * (2 ** (sanitized_attempt - 1))
-    capped_delay = min(exponential_delay, max_seconds)
-    #Aplica jitter leve para evitar colisão de reexecuções simultâneas
-    jitter_multiplier = 1 + ((random.random() * 2) - 1) * jitter_ratio
-    delay = int(max(1, capped_delay * jitter_multiplier))
-    return delay
-
-def _compute_scrape_retry_delay(
-    attempt: int,
-    *,
-    base_seconds: int = SCRAPE_RETRY_BASE_SECONDS,
-    max_seconds: int = SCRAPE_RETRY_MAX_SECONDS,
-    jitter_ratio: float = SCRAPE_RETRY_JITTER_RATIO,
-    retry_after: int | None = None,
-) -> int:
-    """ Calcula atraso para falhas temporárias usando backoff e ``Retry-After`` """
-    if retry_after is not None and retry_after > 0:
-        return int(min(retry_after, max_seconds))
-    return _compute_lock_retry_delay(
-        attempt,
-        base_seconds=base_seconds,
-        max_seconds=max_seconds,
-        jitter_ratio=jitter_ratio,
-    )
-
-def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
-    """ Valida campos mínimos, retornando tipo, IDs e URL.
-
-    A validação impede que a tarefa tente acessar campos ausentes e garante
-    que tenhamos um identificador claro para aplicar o lock. Em caso de
-    inconsistências retornamos identificadores nulos para facilitar logs.
-    """
-    if payload is None:
-        return "unknown", None, None, None
-
-    competitor_id_value = payload.get("competitor_id")
-    monitored_id_value = payload.get("monitored_id")
-    url = payload.get("url")
-
-    competitor_id = None
-    monitored_id = None
-
-    try:
-        competitor_id = UUID(str(competitor_id_value)) if competitor_id_value else None
-    except Exception:
-        competitor_id = None
-
-    try:
-        monitored_id = UUID(str(monitored_id_value)) if monitored_id_value else None
-    except Exception:
-        monitored_id = None
-
-    kind = "competitor" if competitor_id is not None else "monitored"
-    if monitored_id is None and competitor_id is None:
-        kind = payload.get("kind", "unknown") or "unknown"
-
-    return kind, monitored_id, competitor_id, url
 
 def _activate_pending_monitored(
     db: Session,

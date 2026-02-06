@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 from urllib.parse import urlparse
+from uuid import UUID
 
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
@@ -150,6 +151,41 @@ def _parse_collect_result(collect_result: Any) -> dict[str, Any]:
         return {"outcome": collect_result, "status": collect_result, "reason": collect_result}
     return {"outcome": "unknown", "status": "unknown", "reason": "unknown"}
 
+def _validate_payload(
+    payload: Mapping[str, str | None] | None,
+) -> tuple[str, UUID | None, UUID | None, str | None]:
+    """ Valida campos mínimos, retornando tipo, IDs e URL 
+    
+    A validação impede que a tarefa tenta acessar campos ausentes e garante
+    que tenhamos um identificador claro para aplicar o lock. Em caso de 
+    inconsistências retornamos identificadores nulos para facilitar logs.
+    """
+    if payload is None:
+        return "unknown", None, None, None
+    
+    competitor_id_value = payload.get("competitor_id")
+    monitored_id_value = payload.get("monitored_id")
+    url = payload.get("url")
+
+    competitor_id = None
+    monitored_id = None
+
+    try:
+        competitor_id = UUID(str(competitor_id_value)) if competitor_id_value else None
+    except Exception:
+        competitor_id = None
+
+    try:
+        monitored_id = UUID(str(monitored_id_value)) if monitored_id_value else None
+    except Exception:
+        monitored_id = None
+
+    kind = "competitor" if competitor_id is not None else "monitored"
+    if monitored_id is None and competitor_id is None:
+        kind = payload.get("kind", "unknown") or "unknown"
+
+    return kind, monitored_id, competitor_id, url
+
 
 __all__ = [
     "INVALID_URL_ERRORS_CODES",
@@ -160,4 +196,5 @@ __all__ = [
     "_is_rate_limit_error",
     "_extract_host",
     "_parse_collect_result",
+    "_validate_payload",
 ]
