@@ -81,7 +81,7 @@ class FetchHTMLStep(PipelineStep):
             #Tratamos falhas de URL malformada ou protocolo inválido para sinalizar revisão manual
             context.data["http_status"] = context.data.get("http_status") or 422
             logger.warning(
-                "html_fetch_redirect_loop",
+                "html_fetch_invalid_url",
                 url=context.url,
                 domain=context.source,
                 error=str(exc),
