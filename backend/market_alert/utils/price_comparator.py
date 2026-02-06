@@ -7,10 +7,15 @@ maior preço, média dos concorrentes e ranking básico.
 
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any, Optional
+from uuid import UUID
 
 import structlog
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.enums.enums_products import ProductStatus
+from shared.utils.redis_client import set_key_with_ttl
 
 
 logger = structlog.get_logger("price_comparator")
@@ -143,3 +148,130 @@ def compare_prices(
 
     logger.debug("comparison_result", lowest=str(lowest.id), highest=str(highest.id))
     return result
+
+def _dispatch_comparison(
+    monitored_id: UUID | None,
+    result: ScrapeResult | None,
+    trace_id: str | None,
+    *,
+    force: bool = False,
+    debounce_ttl_seconds: int = 600,
+    countdown_seconds: int = 3,
+) -> None:
+    """ Agenda comparação apenas quando scraping trouxe alteração relevante """
+    if monitored_id is None or result is None:
+        return
+    
+    if result.persisted_at is None:
+        #Evita enfileirar comparação antes do commit terminar de persistir dados
+        logger.warning(
+            "compare_dispatch_skipped_missing_persisted_at",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+            status=result.status,
+        )
+        return
+    
+    changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
+    if not (force or changed):
+        return
+
+    debounce_key = f"compare:debounce:{monitored_id}"
+    debounce_registered = set_key_with_ttl(
+        debounce_key,
+        "1",
+        debounce_ttl_seconds,
+        only_if_absent=True,
+    )
+    if debounce_registered is False:
+        #Evita duplicidade de comparação em janela curta para o mesmo monitorado
+        logger.info(
+            "compare_prices_debounced",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+            ttl_seconds=debounce_ttl_seconds,
+        )
+        return
+    if debounce_registered is None:
+        #Mantém o fluxo mesmo sem Redis para não perder comparações relevantes
+        logger.warning(
+            "compare_debounce_unavailable",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+        )
+
+    #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
+    from market_alert.core.celery_app import celery_app
+
+    celery_app.send_task(
+        "market_alert.tasks.compare_prices_task.compare_prices_task",
+        args=[
+            str(monitored_id),
+            bool(getattr(result, "price_changed", False)),
+            bool(getattr(result, "availability_changed", False)),
+            trace_id,
+        ],
+        #Mantém comparação a fila dedicada para não saturar o worker do coletor contínuo
+        queue="compare",
+        #Pequeno atraso para reduzir janelas de leitura suja após commit
+        countdown=countdown_seconds,
+    )
+    logger.info(
+        "compare_prices_enqueued",
+        monitored_id=str(monitored_id),
+        trace_id=trace_id,
+        forced=force,
+        changed=changed,
+        countdown_seconds=countdown_seconds,
+    )
+
+def _schedule_comparison_after_commit(
+    session_manager: Session,
+    monitored_id: UUID | None,
+    result: ScrapeResult | None,
+    trace_id: str | None,
+    *,
+    force: bool,
+    debounce_ttl_seconds: int = 600,
+    countdown_seconds: int = 3,
+) -> None:
+    """ Registra callback para disparar comparação após commit da sessão """
+    transaction = session_manager.get_transaction()
+
+    def _dispatch_callback() -> None:
+        _dispatch_comparison(
+            monitored_id,
+            result,
+            trace_id,
+            force=force,
+            debounce_ttl_seconds=debounce_ttl_seconds,
+            countdown_seconds=countdown_seconds,
+        )
+
+    if transaction is not None and hasattr(transaction, "on_commit"):
+        #Usa hook nativo do SQLAlchemy 2 para garantir execução pós commit
+        transaction.on_commit(_dispatch_callback)
+        return
+    
+    if transaction is not None:
+        #Fallback registra evento quando o hook on_commit não está disponível
+        event.listen(session_manager, "after_commit", lambda _session: _dispatch_callback(), once=True)
+        return
+    
+    #Sem transação ativa, a persistência já ocorreu
+    _dispatch_callback()
+
+def _parse_force_compare_(value: str | None) -> bool:
+    """ Normaliza a flag de disparo forçado para comparação """
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+__all__ = [
+    "calculate_discrepancies",
+    "compare_prices",
+    "_dispatch_comparison",
+    "_schedule_comparison_after_commit",
+    "_parse_force_compare_",
+]

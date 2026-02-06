@@ -11,11 +11,9 @@ import time
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
-from urllib.parse import urlparse
 from uuid import UUID
 
 import structlog
-from sqlalchemy import event
 from sqlalchemy.orm import Session
 from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
@@ -25,7 +23,7 @@ from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.exceptions import ScraperError
 from shared.infra.db import SessionLocal
-from shared.utils.redis_client import get_redis_client, is_scraping_suspended, set_key_with_ttl
+from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.celery_app import celery_app
@@ -35,6 +33,23 @@ from market_alert.services.services_scraper_monitored import scrape_monitored_pr
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperClientError
+from market_alert.utils.price_comparator import _parse_force_compare_, _schedule_comparison_after_commit
+from market_alert.utils.collector_result import (
+    INVALID_URL_ERRORS_CODES,
+    _extract_host,
+    _is_rate_limit_error,
+    _resolve_no_result_reason,
+    _resolve_outcome,
+    _should_block_invalid_url,
+    _should_schedule_temporary_retry,
+)
+from market_alert.utils.rate_limiter import (
+    _increment_invalid_url_attempt,
+    _increment_temporary_failure_attempt,
+    _register_scrape_cooldown,
+    _reset_invalid_url_attempt,
+    _reset_temporary_failure_attempt,
+)
 
 
 logger = structlog.get_logger("collector_product_task")
@@ -43,31 +58,11 @@ LOCK_RETRY_BASE_SECONDS = 5
 LOCK_RETRY_MAX_SECONDS = 60
 LOCK_RETRY_MAX_RETRIES = 3
 LOCK_RETRY_JITTER_RATIO = 0.2
-COMPARE_DEBOUNCE_TTL_SECONDS = 600
-COMPARE_DISPATCH_COUNTDOWN_SECONDS = 3
 SCRAPE_RETRY_BASE_SECONDS = 30
 SCRAPE_RETRY_MAX_SECONDS = 15 * 60
 SCRAPE_RETRY_MAX_ATTEMPTS = 5
 SCRAPE_RETRY_JITTER_RATIO = 0.3
 SCRAPE_RETRY_TTL_SECONDS = 60 * 60
-
-TEMPORARY_FAILURE_ERROR_CODES = {
-    "rate_limit",
-    "too_many_requests",
-    "timeout",
-    "service_unavailable",
-    "gateway_timeout",
-}
-TEMPORARY_FAILURE_HTTP_STATUSES = {408, 429, 500, 502, 503, 504}
-INVALID_URL_ERRORS_CODES = {
-    "too_many_redirects",
-    "redirect_loop",
-    "invalid_url",
-    "unsupported_by_robots",
-    "blocked_host",
-    "unsupported_protocol",
-}
-RATE_LIMIT_ERROR_CODES = {"rate_limit", "too_many_requests", "429", "rate_limit_window_exhausted"}
 
 def _compute_lock_retry_delay(
     attempt: int,
@@ -103,16 +98,6 @@ def _compute_scrape_retry_delay(
         jitter_ratio=jitter_ratio,
     )
 
-def _extract_host(url: str | None) -> str:
-    """ Extrai o host de uma URL para uso em logs """
-    if not url:
-        return "unknown"
-    try:
-        parsed = urlparse(url)
-        return parsed.netloc or "unknown"
-    except Exception:
-        return "unknown"
-
 def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
     """ Valida campos mínimos, retornando tipo, IDs e URL.
 
@@ -146,177 +131,6 @@ def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UU
 
     return kind, monitored_id, competitor_id, url
 
-def _resolve_outcome(
-    kind: str,
-    result: ScrapeResult | None,
-    *,
-    lock_status: str,
-    reason: str | None,
-) -> str:
-    """ Normaliza o desfecho do coletor para o contrato esperado pelo pipeline """
-    if lock_status == "skipped":
-        return "no_result"
-    
-    if reason == "scraping_suspended":
-        return "no_result"
-
-    if reason == "invalid_payload":
-        return "error"
-    
-    if reason == "missing_target":
-        return "no_result"
-
-    if reason in {"scraper_error", "unexpected_error"}:
-        return "error"
-
-    if result is None:
-        return "error"
-    
-    if result.status == "no_result":
-        return "no_result"
-
-    if result.status == "not_modified":
-        return "not_modified"
-
-    if result.status == "success":
-        return "success"
-
-    return "error"
-
-def _resolve_no_result_reason(result: ScrapeResult | None) -> str:
-    """ Determina uma razão decritiva para status ``no_result`` """
-    if result is None:
-        return "validation"
-    
-    error_code = (result.error_code or "").strip().lower()
-    if "robot" in error_code:
-        return "robots"
-    
-    if error_code in RATE_LIMIT_ERROR_CODES or result.http_status == 429:
-        return "rate_limit"
-    
-    if error_code in INVALID_URL_ERRORS_CODES:
-        return "invalid_url"
-
-    if "timeout" in error_code or result.http_status in {408, 504}:
-        return "timeout"
-    
-    if error_code == "no_result":
-        return "validation"
-    
-    return "validation"
-
-def _dispatch_comparison(
-    monitored_id: UUID | None,
-    result: ScrapeResult | None,
-    trace_id: str | None,
-    *,
-    force: bool = False,
-    countdown_seconds: int = COMPARE_DISPATCH_COUNTDOWN_SECONDS,
-) -> None:
-    """ Agenda comparação apenas quando scraping trouxe alteração relevante """
-    if monitored_id is None or result is None:
-        return
-    
-    if result.persisted_at is None:
-        #Evita enfileirar comparação antes do commit terminar de persistir dados
-        logger.warning(
-            "compare_dispatch_skipped_missing_persisted_at",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-            status=result.status,
-        )
-        return
-    
-    changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
-    if not (force or changed):
-        return
-    
-    debounce_key = f"compare:debounce:{monitored_id}"
-    debounce_registered = set_key_with_ttl(
-        debounce_key,
-        "1",
-        COMPARE_DEBOUNCE_TTL_SECONDS,
-        only_if_absent=True,
-    )
-    if debounce_registered is False:
-        #Evita duplicidade de comparação em janela curta para o mesmo monitorado
-        logger.info(
-            "compare_prices_debounced",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-            ttl_seconds=COMPARE_DEBOUNCE_TTL_SECONDS,
-        )
-        return
-    if debounce_registered is None:
-        #Mantém o fluxo mesmo sem Redis para não perder comparações relevantes
-        logger.warning(
-            "compare_debounce_unavailable",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-        )
-
-    #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
-    celery_app.send_task(
-        "market_alert.tasks.compare_prices_task.compare_prices_task",
-        args=[
-            str(monitored_id),
-            bool(getattr(result, "price_changed", False)),
-            bool(getattr(result, "availability_changed", False)),
-            trace_id,
-        ],
-        #Mantém comparação na fila dedicada para não saturar o worker do coletor contínuo
-        queue="compare",
-        #Pequeno atraso para reduzir janelas de leitura suja após commit
-        countdown=countdown_seconds,
-    )
-    logger.info(
-        "compare_prices_enqueued",
-        monitored_id=str(monitored_id),
-        trace_id=trace_id,
-        forced=force,
-        changed=changed,
-        countdown_seconds=countdown_seconds,
-    )
-
-def _schedule_comparison_after_commit(
-    session_manager: Session,
-    monitored_id: UUID | None,
-    result: ScrapeResult | None,
-    trace_id: str | None,
-    *,
-    force: bool,
-) -> None:
-    """ Registra callback para disparar comparação após commit da sessão """
-    transaction = session_manager.get_transaction()
-
-    def _dispatch_callback() -> None:
-        _dispatch_comparison(
-            monitored_id,
-            result,
-            trace_id,
-            force=force,
-        )
-
-    if transaction is not None and hasattr(transaction, "on_commit"):
-        #Usa hook nativo do SQLAlchemy 2 para garantir execução pós-commit
-        transaction.on_commit(_dispatch_callback)
-        return
-    
-    if transaction is not None:
-        #Fallback registra evento quando o hook on_commit não está disponível
-        event.listen(session_manager, "after_commit", lambda _session: _dispatch_callback(), once=True)
-        return
-    
-    #Sem transação ativa, a persistência já ocorreu
-    _dispatch_callback()
-
-def _parse_force_compare_(value: str | None) -> bool:
-    """ Normaliza o flag de disparo forçado para comparação """
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
 def _activate_pending_monitored(
     db: Session,
     monitored_id: UUID | None,
@@ -346,96 +160,6 @@ def _activate_pending_monitored(
         "monitored_status_activated",
         monitored_id=str(monitored_id),
         trace_id=trace_id,
-    )
-
-def _should_schedule_temporary_retry(
-    result: ScrapeResult | None,
-    reason: str | None,
-) -> bool:
-    """ Indica se a falha deve gerar backoff e reprocessamento tardio """
-    if result is None:
-        return False
-    
-    error_code = (result.error_code or "").strip().lower()
-    http_status = result.http_status
-
-    if reason in {"rate_limit", "timeout"}:
-        return True
-    
-    if error_code in INVALID_URL_ERRORS_CODES:
-        return False
-    
-    if error_code in TEMPORARY_FAILURE_ERROR_CODES:
-        return True
-    
-    if http_status in TEMPORARY_FAILURE_HTTP_STATUSES:
-        return True
-    
-    return False
-
-def _should_block_invalid_url(result: ScrapeResult | None) -> bool:
-    """ Indica se o erro deve contar como URL inválida """
-    if result is None:
-        return False
-    error_code = (result.error_code or "").strip().lower()
-    return error_code in INVALID_URL_ERRORS_CODES
-
-def _is_rate_limit_error(result: ScrapeResult | None, reason: str | None) -> bool:
-    """ Detecta falhas relacionadas a rate limit para aplciar cooldown """
-    if reason == "rate_limit":
-        return True
-    if result is None:
-        return False
-    error_code = (result.error_code or "").strip().lower()
-    return error_code in RATE_LIMIT_ERROR_CODES or result.http_status == 429
-
-def _increment_invalid_url_attempt(
-    product_id: UUID | None,
-    *,
-    ttl_seconds: int = SCRAPE_RETRY_TTL_SECONDS,
-) -> int | None:
-    """ Incrementa contador de URLs inválidas para limitar reprocessamentos """
-    if product_id is None:
-        return None
-    client = get_redis_client()
-    if client is None:
-        return None
-    
-    key = f"market_alert:scrape_invalid:{product_id}"
-    try:
-        pipeline = client.pipeline(True)
-        pipeline.incr(key)
-        pipeline.expire(key, ttl_seconds)
-        current, _ = pipeline.execute()
-        return int(current)
-    except Exception:
-        return None
-    
-def _reset_invalid_url_attempt(product_id: UUID | None) -> None:
-    """ Reseta contador de URLs inválidas após bloqueio """
-    if product_id is None:
-        return
-    client = get_redis_client()
-    if client is None:
-        return
-    try:
-        client.delete(f"market_alert:scrape_invalid:{product_id}")
-    except Exception:
-        pass
-    
-def _register_scrape_cooldown(
-    product_id: UUID | None,
-    *,
-    ttl_seconds: int,
-) -> bool | None:
-    """ Registra cooldown para reduzir coletas consecutivas """
-    if product_id is None:
-        return None
-    return set_key_with_ttl(
-        f"market_alert:scrape_cooldown:{product_id}",
-        "1",
-        ttl_seconds,
-        only_if_absent=True,
     )
 
 def _mark_invalid_product(
@@ -474,40 +198,6 @@ def _mark_invalid_product(
                 attempts=attempts,
                 trace_id=trace_id,
             )
-
-def _increment_temporary_failure_attempt(
-    product_id: UUID | None,
-    *,
-    ttl_seconds: int = SCRAPE_RETRY_TTL_SECONDS,
-) -> int | None:
-    """ Incrementa contador de falhas temporárias para limitar reprocessamentos """
-    if product_id is None:
-        return None
-    client = get_redis_client()
-    if client is None:
-        return None
-    
-    key = f"market_alert:scrape_retry:{product_id}"
-    try:
-        pipeline = client.pipeline(True)
-        pipeline.incr(key)
-        pipeline.expire(key, ttl_seconds)
-        current, _ = pipeline.execute()
-        return int(current)
-    except Exception:
-        return None
-    
-def _reset_temporary_failure_attempt(product_id: UUID | None) -> None:
-    """ Reseta contador de falhas temporárias quando o limite é atingido """
-    if product_id is None:
-        return
-    client = get_redis_client()
-    if client is None:
-        return
-    try:
-        client.delete(f"market_alert:scrape_retry:{product_id}")
-    except Exception:
-        pass
 
 def collect_product(
     payload: Mapping[str, str | None] | None,
@@ -850,13 +540,13 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     retry_attempt = None
     if payload and lock_target and _should_block_invalid_url(result):
         invalid_attempt = _increment_invalid_url_attempt(
-            lock_target,
+            str(lock_target),
             ttl_seconds=settings.SCRAPER_INVALID_URL_TTL_SECONDS,
         )
         if invalid_attempt is None:
             invalid_attempt = 1
         if invalid_attempt >= settings.SCRAPER_INVALID_URL_MAX_ATTEMPTS:
-            _reset_invalid_url_attempt(lock_target)
+            _reset_invalid_url_attempt(str(lock_target))
             blocked_invalid = True
             reason = "invalid_url_blocked"
             _mark_invalid_product(
@@ -886,13 +576,16 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             )
     
     if payload and lock_target and _should_schedule_temporary_retry(result, reason) and not blocked_invalid:
-        retry_attempt = _increment_temporary_failure_attempt(lock_target)
+        retry_attempt = _increment_temporary_failure_attempt(
+            str(lock_target),
+            ttl_seconds=SCRAPE_RETRY_TTL_SECONDS,
+        )
         if retry_attempt is None:
             retry_attempt = 1
         now = datetime.now(timezone.utc)
         if retry_attempt > SCRAPE_RETRY_MAX_ATTEMPTS:
             #Reinicia contador para evitar loops infinitos após atingir o limite
-            _reset_temporary_failure_attempt(lock_target)
+            _reset_temporary_failure_attempt(str(lock_target))
             delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
             next_retry_at = now + timedelta(seconds=delay)
             temporary_failure = True
@@ -915,7 +608,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             temporary_failure = True
             if _is_rate_limit_error(result, reason):
                 _register_scrape_cooldown(
-                    lock_target,
+                    str(lock_target),
                     ttl_seconds=settings.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS,
                 )
             logger.warning(

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
-from typing import Iterable, Mapping, Any
+from datetime import datetime, timedelta
+from typing import Iterable, Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -20,7 +20,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from celery.canvas import Signature
 
 from shared.infra.db import SessionLocal
-from shared.utils.redis_client import get_redis_client, is_scraping_suspended
+from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import (
     acquire_continuous_collector_lock,
     refresh_continuous_collector_lock,
@@ -37,9 +37,12 @@ from market_alert.orchestrator.collector_service_orchestrator import build_monit
 from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.services.services_priority_queue_manager import enqueue_monitored_at
 from market_alert.utils.interval_calculator_products import (
-    STABILITY_UNSTABLE,
-    STABILITY_VERY_STABLE,
+    _parse_next_retry_at,
+    _resolve_next_check_at,
+    _utc_now,
 )
+from market_alert.utils.price_utils import _parse_collect_result
+from market_alert.utils.rate_limiter import _resolve_cooldown_seconds
 
 
 logger = structlog.get_logger("continuous_collector_task")
@@ -52,42 +55,6 @@ class CollectDispatchDecision:
     should_requeue: bool
     retain_processing: bool
 
-def _utc_now() -> datetime:
-    """ Retorna timestamp em UTC sem microssegundos para logs """
-    return datetime.now(timezone.utc).replace(microsecond=0)
-
-def _resolve_next_check_at(
-    monitored: MonitoredProduct,
-    next_check_at: datetime | None,
-) -> tuple[datetime, datetime]:
-    """ Resolve o próximo check garantindo data válida e retorna também o horário base """
-    now = _utc_now()
-    resolved_next_check_at = next_check_at or monitored.next_check_at or now
-    if resolved_next_check_at < now:
-        #Evita reenqueue com horário no passado para impedir loops ociosos
-        resolved_next_check_at = now
-    return resolved_next_check_at, now
-
-def _parse_next_retry_at(value: str | None) -> datetime | None:
-    """ Converte string ISO de retry para datetime com timezone """
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-def _parse_collect_result(collect_result: Any) -> dict[str, Any]:
-    """ Normaliza o retorno da task de coleta preservando compatibilidade """
-    if isinstance(collect_result, Mapping):
-        return dict(collect_result)
-    if isinstance(collect_result, str):
-        return {"outcome": collect_result, "status": collect_result, "reason": collect_result}
-    return {"outcome": "unknown", "status": "unknown", "reason": "unknown"}
-
 def _should_abort(task_request) -> bool:
     """ Verifica se a task foi sinalizada para abortar """
     if task_request is None:
@@ -96,23 +63,6 @@ def _should_abort(task_request) -> bool:
     if abort_fn is None:
         return False
     return bool(abort_fn())
-
-def _cooldown_key(product_id: str) -> str:
-    """ Monta a chave Redis usada para cooldown de scraping """
-    return f"market_alert:scrape_cooldown:{product_id}"
-
-def _resolve_cooldown_seconds(product_id: str) -> int | None:
-    """ Verifica se há cooldown ativo para evitar coletas consecutivas """
-    client = get_redis_client()
-    if client is None:
-        return None
-    try:
-        ttl = client.ttl(_cooldown_key(product_id))
-    except Exception:
-        return None
-    if ttl is None or ttl < 0:
-        return None
-    return int(ttl)
 
 def _should_skip_requeue(monitored: MonitoredProduct, reason: str | None) -> bool:
     """ Decide se o monitorado deve ficar fora da fila após falha crítica """
