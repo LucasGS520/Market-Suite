@@ -105,10 +105,11 @@ def _handle_response(
         error_code = fetch_result.error_code or "validation_error"
         if error_code == "no_result":
             return ScrapeResult(
-                status="no_result",
+                #Evita tratar resposta inválida como ausência legítima de resultado
+                status="error",
                 product_id=str(existing_id) if existing_id else None,
-                http_status=422,
-                error_code="no_result",
+                http_status=status_code,
+                error_code=error_code,
             )
         return ScrapeResult(
             status="error",

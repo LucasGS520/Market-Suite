@@ -109,6 +109,9 @@ def _should_schedule_temporary_retry(
     if error_code in INVALID_URL_ERRORS_CODES:
         return False
     
+    if error_code == "no_result":
+        return False
+
     if error_code in TEMPORARY_FAILURE_ERROR_CODES:
         return True
     
