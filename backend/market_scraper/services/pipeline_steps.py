@@ -27,7 +27,7 @@ from market_scraper.services.synergic_pipeline import (
     PipelineStep,
     StepResult,
 )
-from market_scraper.utils.availability import detect_availability
+from market_scraper.services.availability_inference import infer_availability_from_http_status
 from market_scraper.utils import cache, robots, singleflight
 from market_scraper.utils.http_download import download_html, extract_domain
 
@@ -53,8 +53,8 @@ class FetchHTMLStep(PipelineStep):
         if not await robots.is_allowed(context.url, timeout=timeout_value):
             return StepResult.failure(message="unsupported_by_robots")
         
-        #Quando o orquestrador força refresh, ignoramos o cache para garantir HTML atualizado
-        if not context.force_refresh:
+        #Decisão de cache é centralizada no contexto para manter coerência entre etapas
+        if context.should_use_cache("html"):
             cached_html: str | None = cache.get(context.url)
             if cached_html is not None:
                 context.set_html(cached_html)
@@ -64,9 +64,17 @@ class FetchHTMLStep(PipelineStep):
             """ Encapsula o download respeitando timeout da etapa para coalescing """
             return await download_html(context.url, timeout=timeout_value)
         
-        #O singleflight também usa a mesma URL para coalescer chamadas simultâneas
+        #O ``force_refresh`` entra na chave para evitar coalescer requisições com intenção divergente
+        singleflight_key = f"{context.url}|force_refresh={context.force_refresh}"
         try:
-            html = await singleflight.coalesce(context.url, _download)
+            html, is_leader = await singleflight.coalesce_with_leader(singleflight_key, _download)
+            if not is_leader:
+                logger.info(
+                    "html_fetch_coalesced",
+                    url=context.url,
+                    domain=context.source,
+                    cache_key=singleflight_key,
+                )
             context.data["http_status"] = context.data.get("http_status") or 200
         except httpx.TooManyRedirects as exc:
             #Marcamos explicitamente a falha para evitar loops em URLs com redirecionamento infinito
@@ -91,31 +99,37 @@ class FetchHTMLStep(PipelineStep):
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code if exc.response is not None else None
             context.data["http_status"] = status_code
-            availability, last_status = detect_availability(
-                None,
+            if status_code is None:
+                raise
+            inference = infer_availability_from_http_status(status_code, context.source)
+            logger.info(
+                "http_status_availability_inferred",
+                url=context.url,
                 status_code=status_code,
-                domain=context.source,
+                availability=inference.availability,
+                last_status=inference.last_status,
+                confidence=inference.confidence,
             )
-            if availability is False:
+            if inference.availability is False:
                 logger.info(
                     "html_fetch_unavailable",
                     url=context.url,
                     status_code=status_code,
-                    last_status=last_status,
+                    last_status=inference.last_status,
                 )
                 context.set_html("")
-                context.data["availability"] = availability
-                context.data["last_status"] = last_status
-                context.data["availability_inferred"] = availability
-                context.data["last_status_inferred"] = last_status
+                context.data["availability"] = inference.availability
+                context.data["last_status"] = inference.last_status
+                context.data["availability_inferred"] = inference.availability
+                context.data["last_status_inferred"] = inference.last_status
                 return StepResult.success(
                     payload={
                         "name": None,
                         "current_price": None,
                         "url": context.url,
                         "source": context.source,
-                        "availability": availability,
-                        "last_status": last_status,
+                        "availability": inference.availability,
+                        "last_status": inference.last_status,
                     },
                     message="Disponibilidade inferida por código HTTP",
                 )

@@ -24,6 +24,7 @@ from market_scraper.core.config_scraper import settings
 __all__ = [
     "AsyncSingleFlight",
     "coalesce",
+    "coalesce_with_leader",
     "reset",
 ]
 
@@ -95,6 +96,37 @@ class AsyncSingleFlight:
             wait_duration = max(time.monotonic() - wait_started, 0.0)
             await self._release_entry(key, entry)
 
+    async def coalesce_with_leader(self, key: str, producer: Callable[[], Awaitable[T]]) -> tuple[T, bool]:
+        """ Agrupa chamadas concorrentes e informa se a chamada foi líder """
+        entry, is_leader = await self._acquire_entry(key)
+        if is_leader:
+            try:
+                result = await producer()
+            except Exception as exc:
+                if not entry.future.done():
+                    entry.future.set_exception(exc)
+                logger.warning(
+                    "singleflight_leader_error",
+                    key=sanitize_log_data(key),
+                    error=sanitize_log_data(str(exc)),
+                )
+                raise
+            else:
+                if not entry.future.done():
+                    entry.future.set_result(result)
+                return result, True
+            finally:
+                await self._release_entry(key, entry)
+
+        try:
+            result = await entry.future
+        except Exception:
+            raise
+        else:
+            return result, False
+        finally:
+            await self._release_entry(key, entry)
+
     async def reset(self) -> None:
         """ Limpa entradas pendentes; usando apenas em testes para isolamento """
         async with self._entries_lock:
@@ -146,6 +178,10 @@ _singleflight = AsyncSingleFlight(lock_ttl=settings.SCRAPER_SINGLEFLIGHT_LOCK_TT
 async def coalesce(key: str, producer: Callable[[], Awaitable[T]]) -> T:
     """ Executa ``producer`` apenas uma vez por chave e compartilha o retorno """
     return await _singleflight.coalesce(key, producer)
+
+async def coalesce_with_leader(key: str, producer: Callable[[], Awaitable[T]]) -> tuple[T, bool]:
+    """ Executa ``producer`` apenas uma vez por chave e indica se foi líder """
+    return await _singleflight.coalesce_with_leader(key, producer)
 
 async def reset() -> None:
     """ Limpa o estado interno global; reservado para testes """

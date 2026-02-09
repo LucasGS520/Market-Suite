@@ -105,6 +105,7 @@ async def parse_endpoint(
     force_refresh = bool(payload.metadata.get("force_refresh")) if payload.metadata else False
     cached_metadata = None
     if not force_refresh:
+        #Cache HTTP aqui é independente do cache interno do pipeline
         cached_metadata = get_cached_response(normalized_url)
         if cached_metadata and should_return_not_modified(
             if_none_match=request.headers.get("if-none-match"),

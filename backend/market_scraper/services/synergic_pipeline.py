@@ -48,6 +48,14 @@ class PipelineContext:
         """ Guarda o HTML obtido para que etapas posteriores possam reutilizá-lo """
         self.html = html
 
+    def should_use_cache(self, cache_name: str) -> bool:
+        """ Centraliza a decisão de uso de cache para o pipeline """
+        if self.force_refresh:
+            #Registramos o cache ignorado para depuração de requisições forçadas
+            self.data.setdefault("cache_bypass", []).append(cache_name)
+            return False
+        return True
+
     def build_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """ Normaliza o payload principal adicionando origem e URL canônica
 

@@ -14,7 +14,7 @@ import structlog
 from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.services.synergic_pipeline import PipelineContext
-from market_scraper.utils.availability import detect_availability
+from market_scraper.services.availability_inference import detect_availability
 from market_scraper.utils.validator import DataQualityValidator
 
 

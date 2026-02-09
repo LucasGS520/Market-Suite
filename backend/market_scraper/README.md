@@ -42,7 +42,7 @@ O cliente oficial vive em [`market_alert/scraper/scraper_client.py`](../market_a
 ## Pipeline de Parsing
 O pipeline sequencial é registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado pelo `SynergicPipeline` (`services/synergic_pipeline.py`). Ordem padrão:
 
-1. **FetchHTMLStep** – normaliza URL, verifica `robots.txt`, consulta cache LRU/TTL e singleflight antes de baixar HTML via `httpx` com retries leves.
+1. **FetchHTMLStep** – normaliza URL, verifica `robots.txt`, consulta cache LRU/TTL usa singleflight e aplica inferência de disponibilidade por status HTTP quando necessário.
 2. **DomainSpecificParserStep** – ativa parsers dedicados (`parsers/domain_parsers.py`) quando o domínio possui regras especializadas.
 3. **JsonLdParserStep** – procura dados estruturados `application/ld+json`.
 4. **HtmlMetadataParserStep** – coleta metadados e marcações estruturais com BeautifulSoup.
@@ -65,6 +65,7 @@ As variáveis padrão estão em [`core/config_scraper.py`](core/config_scraper.p
 - `services/synergic_pipeline.py` – organiza execução do pipeline e tratamento de exceções.
 - `services/pipeline_steps.py` – lista etapas (`FetchHTMLStep`, `DomainSpecificParserStep`, `JsonLdParserStep`, `HtmlMetadataParserStep`, `GenericFallbackParserStep`).
 - `services/parser_runner.py` – valida dados extraídos e gera `ParserResponse` final.
+- `services/availability_inference.py` – inferência centralizada de disponibilidade por HTTP e heurísticas de HTML.
 - `utils/http_utils.py` – resolve DNS com cache e previne SSRF.
 - `utils/http_download.py` – realiza download com retries configuráveis.
 - `utils/cache.py` – implementa cache LRU/TTL.
