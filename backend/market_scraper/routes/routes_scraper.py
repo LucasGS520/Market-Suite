@@ -201,16 +201,26 @@ async def parse_endpoint(
         request_logger=request_logger,
         current_price=price,
     )
-    metadata = store_response(normalized_url, parse_response)
-    request_logger.info(
-        "http_cache_stored",
-        url=sanitize_log_data(normalized_url),
-        etag=metadata.etag,
-        source=metadata.payload.source,
-        cache_status=cache_status,
-    )
-    for key, value in build_cache_headers(metadata).items():
-        response.headers[key] = value
+    try:
+        metadata = store_response(normalized_url, parse_response)
+    except Exception as exc:
+        metadata = None
+        request_logger.warning(
+            "http_cache_store_failed",
+            url=sanitize_log_data(normalized_url),
+            cache_status=cache_status,
+            error=sanitize_log_data(str(exc)),
+        )
+    if metadata:
+        request_logger.info(
+            "http_cache_stored",
+            url=sanitize_log_data(normalized_url),
+            etag=metadata.etag,
+            source=metadata.payload.source,
+            cache_status=cache_status,
+        )
+        for key, value in build_cache_headers(metadata).items():
+            response.headers[key] = value
     #Cabeçalho customizado facilita inspeção de decisões do cache HTTP pelo cliente
     response.headers["X-MarketScraper-Cache-Status"] = cache_status
     return parse_response

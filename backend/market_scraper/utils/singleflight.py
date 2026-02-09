@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
@@ -58,10 +59,11 @@ class AsyncSingleFlight:
     Deve ser usada somente dentro de um contexto assíncrono já associado a um
     loop de eventos ativos para manter a coordenação das futures compartilhadas.
     """
-    def __init__(self, *, lock_ttl: float) -> None:
-        self._entries: dict[str, _SingleFlightEntry] = {}
+    def __init__(self, *, lock_ttl: float, max_entries: int) -> None:
+        self._entries: "OrderedDict[str, _SingleFlightEntry]" = OrderedDict()
         self._entries_lock = asyncio.Lock()
         self._lock_ttl = lock_ttl
+        self._max_entries = max_entries
 
     async def coalesce(self, key: str, producer: Callable[[], Awaitable[T]]) -> T:
         """ Agrupa chamadas concorrentes para ``key`` e compartilha o resultado """
@@ -159,10 +161,38 @@ class AsyncSingleFlight:
             if entry is None:
                 entry = _SingleFlightEntry()
                 self._entries[key] = entry
+                self._entries.move_to_end(key)
+                self._enforce_max_entries(now=now)
                 return entry, True
             
+            self._entries.move_to_end(key)
             return entry, False
         
+    def _enforce_max_entries(self, *, now: float) -> None:
+        """ Limita o número de entradas para evitar crescimento indefinido """
+        if self._max_entries <= 0:
+            return
+        while len(self._entries) > self._max_entries:
+            oldest_key, oldest_entry = next(iter(self._entries.items()))
+            if oldest_entry.future.done() or oldest_entry.is_stale(now=now, ttl=self._lock_ttl):
+                if not oldest_entry.future.done():
+                    oldest_entry.future.set_exception(asyncio.TimeoutError("singleflight_evicted"))
+                self._entries.pop(oldest_key, None)
+                logger.warning(
+                    "singleflight_entry_evicted",
+                    key=sanitize_log_data(oldest_key),
+                    max_entries=self._max_entries,
+                )
+                continue
+            #Se apenas entradas ativas permanecem, removemos a mais antiga para garantir limite
+            oldest_entry.future.set_exception(asyncio.TimeoutError("singleflight_evicted"))
+            self._entries.pop(oldest_key, None)
+            logger.warning(
+                "singleflight_entry_evicted",
+                key=sanitize_log_data(oldest_key),
+                max_entries=self._max_entries,
+            )
+ 
     async def _release_entry(self, key: str, entry: _SingleFlightEntry) -> None:
         """ Recicla a entrada associada após concluir a operação compartilhada """
         if not entry.future.done():
@@ -173,7 +203,10 @@ class AsyncSingleFlight:
             if current is entry:
                 self._entries.pop(key, None)
 
-_singleflight = AsyncSingleFlight(lock_ttl=settings.SCRAPER_SINGLEFLIGHT_LOCK_TTL)
+_singleflight = AsyncSingleFlight(
+    lock_ttl=settings.SCRAPER_SINGLEFLIGHT_LOCK_TTL,
+    max_entries=settings.SCRAPER_SINGLEFLIGHT_MAX_ENTRIES,
+)
 
 async def coalesce(key: str, producer: Callable[[], Awaitable[T]]) -> T:
     """ Executa ``producer`` apenas uma vez por chave e compartilha o retorno """

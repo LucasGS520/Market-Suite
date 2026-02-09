@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from time import perf_counter
+from uuid import uuid4
 from typing import Any, Literal, Sequence
 
 import structlog
@@ -38,6 +39,9 @@ class PipelineContext:
         Garante que as etapas sempre encontrem informações básicas
         sem depender de inicialização externa.
         """
+        if not self.trace_id:
+            #Geramos o trace_id para garantir rastreabilidade mesmo em chamadas internas.
+            self.trace_id = str(uuid4())
         self.data.setdefault("url", self.url)
         self.data.setdefault("source", self.source)
         self.data.setdefault("domain", self.source)

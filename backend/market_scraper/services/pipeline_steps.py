@@ -109,6 +109,8 @@ class FetchHTMLStep(PipelineStep):
             if status_code is None:
                 raise
             inference = infer_availability_from_http_status(status_code, context.source)
+            context.data["availability_inferred"] = inference.availability
+            context.data["last_status_inferred"] = inference.last_status
             logger.info(
                 "http_status_availability_inferred",
                 url=context.url,

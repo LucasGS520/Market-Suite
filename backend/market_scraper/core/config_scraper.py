@@ -38,6 +38,9 @@ class Settings(ConfigBase):
     SCRAPER_SINGLEFLIGHT_LOCK_TTL: float = float(
         os.getenv("SCRAPER_SINGLEFLIGHT_LOCK_TTL", "15.0")
     )  #TTL dos locks de singleflight
+    SCRAPER_SINGLEFLIGHT_MAX_ENTRIES: int = int(
+        os.getenv("SCRAPER_SINGLEFLIGHT_MAX_ENTRIES", "2000")
+    )  #Limite de entradas em memória do singleflight
     SCRAPER_PRICE_TOLERANCE: float = float(
         os.getenv("SCRAPER_PRICE_TOLERANCE", "0.0")
     )  #Tolerância percentual na comparação de preços

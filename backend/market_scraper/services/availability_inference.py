@@ -27,7 +27,7 @@ DetectorCallable = Callable[[str], DetectorResult | None]
 class InferenceResult:
     """ Representa a inferência de disponibilidade baseada em HTTP """
     availability: bool | None
-    last_status: str
+    last_status: str | None
     confidence: Literal["high", "medium", "low"]
 
 def _contains_any(haystack: str, needles: Iterable[str]) -> bool:
@@ -103,8 +103,6 @@ _DETECTORS: tuple[tuple[str, DetectorCallable], ...] = (
     ("amazon.com", _detect_amazon),
     ("magazineluiza.com.br", _detect_magalu),
     ("magazineluiza.com", _detect_magalu),
-    ("generic", _detect_generic),
-    ("metadata", _detect_metadata_flags),
 )
 
 def _register_heuristic(reason: str, *, domain: str | None) -> None:
