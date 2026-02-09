@@ -3,14 +3,27 @@
 from __future__ import annotations
 
 import logging
+import random
 from typing import Callable, Tuple
 
 from redis import Redis
 
-from shared.utils.redis_client import consume_leaky_bucket, consume_token_bucket
+from shared.utils.redis_client import (
+    consume_leaky_bucket,
+    consume_token_bucket,
+    get_redis_client,
+    set_key_with_ttl,
+)
 
 
 logger = logging.getLogger(__name__)
+
+LOCK_RETRY_BASE_SECONDS = 5
+LOCK_RETRY_MAX_SECONDS = 60
+LOCK_RETRY_JITTER_RATIO = 0.2
+SCRAPE_RETRY_BASE_SECONDS = 30
+SCRAPE_RETRY_MAX_SECONDS = 15 * 60
+SCRAPE_RETRY_JITTER_RATIO = 0.3
 
 class RateLimiter:
     """ Controla volume de chamadas para um host específico """
@@ -124,3 +137,148 @@ def allow_with_leaky_bucket(
         leak_rate_per_second=leak_rate,
     )
     return allowed
+
+def _compute_lock_retry_delay(
+    attempt: int,
+    *,
+    base_seconds: int = LOCK_RETRY_BASE_SECONDS,
+    max_seconds: int = LOCK_RETRY_MAX_SECONDS,
+    jitter_ratio: float = LOCK_RETRY_JITTER_RATIO,
+) -> int:
+    """ Calcula atraso para retry com backoff exponencial e jitter leve """
+    sanitized_attempt = max(1, attempt)
+    exponential_delay = base_seconds * (2 ** (sanitized_attempt - 1))
+    capped_delay = min(exponential_delay, max_seconds)
+    #Aplica jitter leve para evitar colisão de reexecuções simultâneas
+    jitter_multiplier = 1 + ((random.random() * 2) - 1) * jitter_ratio
+    delay = int(max(1, capped_delay * jitter_multiplier))
+    return delay
+
+def _compute_scrape_retry_delay(
+    attempt: int,
+    *,
+    base_seconds: int = SCRAPE_RETRY_BASE_SECONDS,
+    max_seconds: int = SCRAPE_RETRY_MAX_SECONDS,
+    jitter_ratio: float = SCRAPE_RETRY_JITTER_RATIO,
+    retry_after: int | None = None,
+) -> int:
+    """ Calcula atraso para falhas temporárias usando backoff e ``Retry-After`` """
+    if retry_after is not None and retry_after > 0:
+        return int(min(retry_after, max_seconds))
+    return _compute_lock_retry_delay(
+        attempt,
+        base_seconds=base_seconds,
+        max_seconds=max_seconds,
+        jitter_ratio=jitter_ratio,
+    )
+
+def _increment_invalid_url_attempt(
+    product_id: str | None,
+    *,
+    ttl_seconds: int,
+) -> int | None:
+    """ Incrementa contador de URls inválidas para limitar reprocessamentos """
+    if product_id is None:
+        return None
+    client = get_redis_client()
+    if client is None:
+        return None
+    
+    key = f"market_alert:scrape_invalid:{product_id}"
+    try:
+        pipeline = client.pipeline(True)
+        pipeline.incr(key)
+        pipeline.expire(key, ttl_seconds)
+        current, _ = pipeline.execute()
+        return int(current)
+    except Exception:
+        return None
+    
+def _reset_invalid_url_attempt(product_id: str | None) -> None:
+    """ Reseta contador de URLs inválidas após bloqueio """
+    if product_id is None:
+        return
+    client = get_redis_client()
+    if client is None:
+        return
+    try:
+        client.delete(f"market_alert:scrape_invalid:{product_id}")
+    except Exception:
+        pass
+
+def _increment_temporary_failure_attempt(
+    product_id: str | None,
+    *,
+    ttl_seconds: int,
+) -> int | None:
+    """ Incrementa contador de falhas temporárias para limitar reprocessamentos """
+    if product_id is None:
+        return None
+    client = get_redis_client()
+    if client is None:
+        return None
+    
+    key = f"market_alert:scrape_retry:{product_id}"
+    try:
+        pipeline = client.pipeline(True)
+        pipeline.incr(key)
+        pipeline.expire(key, ttl_seconds)
+        current, _ = pipeline.execute()
+        return int(current)
+    except Exception:
+        return None
+    
+def _reset_temporary_failure_attempt(product_id: str | None) -> None:
+    """ Reseta contador de falhas temporárias quando o limite é atingido """
+    if product_id is None:
+        return
+    client = get_redis_client()
+    if client is None:
+        return
+    try:
+        client.delete(f"market_alert:scrape_retry:{product_id}")
+    except Exception:
+        pass
+
+def _register_scrape_cooldown(
+    product_id: str | None,
+    *,
+    ttl_seconds: int,
+) -> bool | None:
+    """ Registra cooldown para reduzir coletas consecutivas """
+    if product_id is None:
+        return None
+    return set_key_with_ttl(
+        f"market_alert:scrape_cooldown:{product_id}",
+        "1",
+        ttl_seconds,
+        only_if_absent=True,
+    )
+
+def _resolve_cooldown_seconds(product_id: str) -> int | None:
+    """ Verifica se há cooldown ativo para evitar coletas consecutivas """
+    client = get_redis_client()
+    if client is None:
+        return None
+    try:
+        ttl = client.ttl(f"market_alert:scrape_cooldown:{product_id}")
+    except Exception:
+        return None
+    if ttl is None or ttl < 0:
+        return None
+    return int(ttl)
+
+
+__all__ = [
+    "RateLimiter",
+    "allow_with_leaky_bucket",
+    "parse_rate_limit_config",
+    "_compute_lock_retry_delay",
+    "_compute_scrape_retry_delay",
+    "_increment_invalid_url_attempt",
+    "_reset_invalid_url_attempt",
+    "_increment_temporary_failure_attempt",
+    "_reset_temporary_failure_attempt",
+    "_register_scrape_cooldown",
+    "_resolve_cooldown_seconds",
+]

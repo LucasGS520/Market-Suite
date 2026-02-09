@@ -8,13 +8,11 @@ apenas o lock Redis aplicado aqui é utilizado para exclusão mútua.
 from __future__ import annotations
 
 import time
-import random
-from datetime import datetime, timezone
-from typing import Mapping
+from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping
 from uuid import UUID
 
 import structlog
-from sqlalchemy import event
 from sqlalchemy.orm import Session
 from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
@@ -24,241 +22,44 @@ from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.exceptions import ScraperError
 from shared.infra.db import SessionLocal
-from shared.utils.redis_client import is_scraping_suspended, set_key_with_ttl
+from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.celery_app import celery_app
+from market_alert.core.config_alert import settings
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import MonitoredStatus
+from market_alert.scraper.scraper_client import ScraperClientError
+from market_alert.utils.price_comparator import _parse_force_compare_, _schedule_comparison_after_commit
+from market_alert.utils.collector_result import (
+    INVALID_URL_ERRORS_CODES,
+    _extract_host,
+    _is_rate_limit_error,
+    _resolve_no_result_reason,
+    _resolve_outcome,
+    _should_block_invalid_url,
+    _should_schedule_temporary_retry,
+    _validate_payload,
+)
+from market_alert.utils.rate_limiter import (
+    _compute_lock_retry_delay,
+    _compute_scrape_retry_delay,
+    _increment_invalid_url_attempt,
+    _increment_temporary_failure_attempt,
+    _register_scrape_cooldown,
+    _reset_invalid_url_attempt,
+    _reset_temporary_failure_attempt,
+)
 
 
 logger = structlog.get_logger("collector_product_task")
 
-LOCK_RETRY_BASE_SECONDS = 5
-LOCK_RETRY_MAX_SECONDS = 60
 LOCK_RETRY_MAX_RETRIES = 3
-LOCK_RETRY_JITTER_RATIO = 0.2
-COMPARE_DEBOUNCE_TTL_SECONDS = 600
-COMPARE_DISPATCH_COUNTDOWN_SECONDS = 3
-
-def _compute_lock_retry_delay(
-    attempt: int,
-    *,
-    base_seconds: int = LOCK_RETRY_BASE_SECONDS,
-    max_seconds: int = LOCK_RETRY_MAX_SECONDS,
-    jitter_ratio: float = LOCK_RETRY_JITTER_RATIO,
-) -> int:
-    """ Calcula atraso para retry com backoff exponencial e jitter leve """
-    sanitized_attempt = max(1, attempt)
-    exponential_delay = base_seconds * (2 ** (sanitized_attempt - 1))
-    capped_delay = min(exponential_delay, max_seconds)
-    #Aplica jitter leve para evitar colisão de reexecuções simultâneas
-    jitter_multiplier = 1 + ((random.random() * 2) - 1) * jitter_ratio
-    delay = int(max(1, capped_delay * jitter_multiplier))
-    return delay
-
-def _validate_payload(payload: Mapping[str, str | None] | None) -> tuple[str, UUID | None, UUID | None, str | None]:
-    """ Valida campos mínimos, retornando tipo, IDs e URL.
-
-    A validação impede que a tarefa tente acessar campos ausentes e garante
-    que tenhamos um identificador claro para aplicar o lock. Em caso de
-    inconsistências retornamos identificadores nulos para facilitar logs.
-    """
-    if payload is None:
-        return "unknown", None, None, None
-
-    competitor_id_value = payload.get("competitor_id")
-    monitored_id_value = payload.get("monitored_id")
-    url = payload.get("url")
-
-    competitor_id = None
-    monitored_id = None
-
-    try:
-        competitor_id = UUID(str(competitor_id_value)) if competitor_id_value else None
-    except Exception:
-        competitor_id = None
-
-    try:
-        monitored_id = UUID(str(monitored_id_value)) if monitored_id_value else None
-    except Exception:
-        monitored_id = None
-
-    kind = "competitor" if competitor_id is not None else "monitored"
-    if monitored_id is None and competitor_id is None:
-        kind = payload.get("kind", "unknown") or "unknown"
-
-    return kind, monitored_id, competitor_id, url
-
-def _resolve_outcome(
-    kind: str,
-    result: ScrapeResult | None,
-    *,
-    lock_status: str,
-    reason: str | None,
-) -> str:
-    """ Normaliza o desfecho do coletor para o contrato esperado pelo pipeline """
-    if lock_status == "skipped":
-        return "no_result"
-    
-    if reason == "scraping_suspended":
-        return "no_result"
-
-    if reason == "invalid_payload":
-        return "error"
-    
-    if reason == "missing_target":
-        return "no_result"
-
-    if reason in {"scraper_error", "unexpected_error"}:
-        return "error"
-
-    if result is None:
-        return "error"
-    
-    if result.status == "no_result":
-        return "no_result"
-
-    if result.status == "not_modified":
-        return "not_modified"
-
-    if result.status == "success":
-        return "success"
-
-    return "error"
-
-def _resolve_no_result_reason(result: ScrapeResult | None) -> str:
-    """ Determina uma razão decritiva para status ``no_result`` """
-    if result is None:
-        return "validation"
-    
-    error_code = (result.error_code or "").strip().lower()
-    if "robot" in error_code:
-        return "robots"
-    
-    if error_code in {"rate_limit", "too_many_requests", "429"} or result.http_status == 429:
-        return "rate_limit"
-    
-    if "timeout" in error_code or result.http_status in {408, 504}:
-        return "timeout"
-    
-    if error_code == "no_result":
-        return "validation"
-    
-    return "validation"
-
-def _dispatch_comparison(
-    monitored_id: UUID | None,
-    result: ScrapeResult | None,
-    trace_id: str | None,
-    *,
-    force: bool = False,
-    countdown_seconds: int = COMPARE_DISPATCH_COUNTDOWN_SECONDS,
-) -> None:
-    """ Agenda comparação apenas quando scraping trouxe alteração relevante """
-    if monitored_id is None or result is None:
-        return
-    
-    if result.persisted_at is None:
-        #Evita enfileirar comparação antes do commit terminar de persistir dados
-        logger.warning(
-            "compare_dispatch_skipped_missing_persisted_at",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-            status=result.status,
-        )
-        return
-    
-    changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
-    if not (force or changed):
-        return
-    
-    debounce_key = f"compare:debounce:{monitored_id}"
-    debounce_registered = set_key_with_ttl(
-        debounce_key,
-        "1",
-        COMPARE_DEBOUNCE_TTL_SECONDS,
-        only_if_absent=True,
-    )
-    if debounce_registered is False:
-        #Evita duplicidade de comparação em janela curta para o mesmo monitorado
-        logger.info(
-            "compare_prices_debounced",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-            ttl_seconds=COMPARE_DEBOUNCE_TTL_SECONDS,
-        )
-        return
-    if debounce_registered is None:
-        #Mantém o fluxo mesmo sem Redis para não perder comparações relevantes
-        logger.warning(
-            "compare_debounce_unavailable",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-        )
-
-    #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
-    celery_app.send_task(
-        "market_alert.tasks.compare_prices_task.compare_prices_task",
-        args=[
-            str(monitored_id),
-            bool(getattr(result, "price_changed", False)),
-            bool(getattr(result, "availability_changed", False)),
-            trace_id,
-        ],
-        #Mantém comparação na fila dedicada para não saturar o worker do coletor contínuo
-        queue="compare",
-        #Pequeno atraso para reduzir janelas de leitura suja após commit
-        countdown=countdown_seconds,
-    )
-    logger.info(
-        "compare_prices_enqueued",
-        monitored_id=str(monitored_id),
-        trace_id=trace_id,
-        forced=force,
-        changed=changed,
-        countdown_seconds=countdown_seconds,
-    )
-
-def _schedule_comparison_after_commit(
-    session_manager: Session,
-    monitored_id: UUID | None,
-    result: ScrapeResult | None,
-    trace_id: str | None,
-    *,
-    force: bool,
-) -> None:
-    """ Registra callback para disparar comparação após commit da sessão """
-    transaction = session_manager.get_transaction()
-
-    def _dispatch_callback() -> None:
-        _dispatch_comparison(
-            monitored_id,
-            result,
-            trace_id,
-            force=force,
-        )
-
-    if transaction is not None and hasattr(transaction, "on_commit"):
-        #Usa hook nativo do SQLAlchemy 2 para garantir execução pós-commit
-        transaction.on_commit(_dispatch_callback)
-        return
-    
-    if transaction is not None:
-        #Fallback registra evento quando o hook on_commit não está disponível
-        event.listen(session_manager, "after_commit", lambda _session: _dispatch_callback(), once=True)
-        return
-    
-    #Sem transação ativa, a persistência já ocorreu
-    _dispatch_callback()
-
-def _parse_force_compare_(value: str | None) -> bool:
-    """ Normaliza o flag de disparo forçado para comparação """
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+SCRAPE_RETRY_MAX_SECONDS = 15 * 60
+SCRAPE_RETRY_MAX_ATTEMPTS = 5
+SCRAPE_RETRY_TTL_SECONDS = 60 * 60
 
 def _activate_pending_monitored(
     db: Session,
@@ -266,6 +67,7 @@ def _activate_pending_monitored(
     *,
     task_logger,
     trace_id: str | None,
+    commit: bool = True,
 ) -> None:
     """ Atualiza monitorado pendente para ativo após coleta bem-sucedida """
     if monitored_id is None:
@@ -283,13 +85,54 @@ def _activate_pending_monitored(
         return
     
     monitored.status = MonitoredStatus.active
-    db.commit()
-    db.refresh(monitored)
+    if commit:
+        db.commit()
+        db.refresh(monitored)
+    else:
+        #Mantém a alteração persistida na transação sem finalizar o commit externo.
+        db.flush()
     task_logger.info(
         "monitored_status_activated",
         monitored_id=str(monitored_id),
         trace_id=trace_id,
     )
+
+def _mark_invalid_product(
+    *,
+    monitored_id: UUID | None,
+    competitor_id: UUID | None,
+    kind: str,
+    url: str | None,
+    attempts: int,
+    trace_id: str | None,
+) -> None:
+    """ Marca produto como inválido após falhas repetidas de URL """
+    if monitored_id is None and competitor_id is None:
+        return
+    with SessionLocal() as db:
+        if monitored_id is not None:
+            from market_alert.crud.crud_monitored import mark_monitored_product_failed
+            mark_monitored_product_failed(db, monitored_id)
+            logger.warning(
+                "scrape_invalid_url_blocked",
+                kind=kind,
+                monitored_id=str(monitored_id),
+                url=url,
+                attempts=attempts,
+                trace_id=trace_id,
+            )
+            return
+        if competitor_id is not None:
+            from market_alert.crud.crud_competitor import update_competitor_pause_state
+            update_competitor_pause_state(db, competitor_id, is_paused=True)
+            logger.warning(
+                "scrape_invalid_url_blocked",
+                kind=kind,
+                competitor_id=str(competitor_id),
+                url=url,
+                attempts=attempts,
+                trace_id=trace_id,
+            )
 
 def collect_product(
     payload: Mapping[str, str | None] | None,
@@ -299,14 +142,15 @@ def collect_product(
     lock_ttl_seconds: int | None = None,
     logger_bound=None,
     db: Session | None = None,
-) -> tuple[str, ScrapeResult | None]:
+) -> tuple[str, ScrapeResult | None, str | None]:
     """ Executa coleta de produto de forma reutilizável para tasks e orquestradores.
 
     A função aplica validação de payload e coordena lock distribuído quando
     ``use_lock`` estiver habilitado. O TTL do lock segue ``PRODUCT_LOCK_TTL_SECONDS``
     ou valor informado em  ``lock_ttl_seconds``. Quando ``db`` é fornecida, 
     reutilizamos a sessão compartilhada para garantir consistência transacional e reduzir 
-    overhead de conexões, mantendo commits e refresh no mesmo contexto.
+    overhead de conexões, evitando commits internos e usando ``flush`` na ativação do monitorado
+    para permitir que o chamador controle o commit final.
     """
     #Mede latência com relógio monotônico para evitar valores negativos
     started_perf = time.perf_counter()
@@ -363,7 +207,7 @@ def collect_product(
                 except Exception:
                     user_uuid = None
 
-                def _collect_with_db(session_manager: Session) -> None:
+                def _collect_with_db(session_manager: Session, *, commit_activation: bool) -> None:
                     nonlocal monitored_id, reason, result
 
                     competitor_row: CompetitorProduct | None = None
@@ -463,12 +307,13 @@ def collect_product(
                                     monitored_id,
                                     task_logger=task_logger,
                                     trace_id=trace_id,
+                                    commit=commit_activation,
                                 )
 
                 #Mantém a sessão compartilhada quando fornecida para preservar consistência transacional.
                 if db is None:
                     with SessionLocal() as session_manager:
-                        _collect_with_db(session_manager)
+                        _collect_with_db(session_manager, commit_activation=True)
                         if dispatch_comparison:
                             _schedule_comparison_after_commit(
                                 session_manager,
@@ -478,7 +323,7 @@ def collect_product(
                                 force=force_compare,
                             )
                 else:
-                    _collect_with_db(db)
+                    _collect_with_db(db, commit_activation=False)
                     if dispatch_comparison:
                         _schedule_comparison_after_commit(
                             db,
@@ -487,15 +332,51 @@ def collect_product(
                             trace_id,
                             force=force_compare,
                         )
+
+    except ScraperClientError as exc:
+        reason = "scraper_client_error"
+        error_code = "scraper_client_error"
+        if exc.status_code == 429:
+            error_code = "rate_limit"
+        elif exc.status_code in {503, 504}:
+            error_code = "service_unavailable"
+        result = ScrapeResult(
+            status="error",
+            product_id=str(lock_target) if lock_target else None,
+            http_status=exc.status_code,
+            error_code=error_code,
+            retry_after=exc.retry_after,
+        )
+        task_logger.warning(
+            "scraper_client_error",
+            kind=kind,
+            error=str(exc),
+            http_status=exc.status_code,
+        )
                             
     except ScraperError as exc:
         reason = "scraper_error"
+        result = ScrapeResult(
+            status="error",
+            product_id=str(lock_target) if lock_target else None,
+            http_status=exc.status_code,
+            error_code="scraper_error",
+        )
         task_logger.warning("scraper_error", kind=kind, error=str(exc))
     except Exception:
         reason = "unexpected_error"
+        result = ScrapeResult(
+            status="error",
+            product_id=str(lock_target) if lock_target else None,
+            error_code="unexpected_error",
+        )
         task_logger.exception("collect_unexpected", kind=kind)
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
+        if result is not None and reason is None:
+            error_code = (result.error_code or "").strip().lower()
+            if error_code in INVALID_URL_ERRORS_CODES:
+                reason = "invalid_url"
         if result is not None and result.status == "no_result" and reason is None:
             #Garante que ``no_result`` sempre carregue motivo descritivo para diagnóstico
             reason = _resolve_no_result_reason(result)
@@ -527,7 +408,7 @@ def collect_product(
             enqueued_at=enqueued_at,
         )
 
-    return outcome, result
+    return outcome, result, reason
 
 @celery_app.task(
     bind=True,
@@ -538,7 +419,7 @@ def collect_product(
     soft_time_limit=90,
     time_limit=120,
 )
-def collect_product_task(self, payload: Mapping[str, str | None] | None = None) -> str:
+def collect_product_task(self, payload: Mapping[str, str | None] | None = None) -> dict[str, Any]:
     """Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
 
     A task valida o payload mínimo, aplica o lock Redis para o produto alvo e
@@ -547,7 +428,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     lock não pode ser adquirido, retorna ``no_result`` para manter o contrato
     de status enxuto previsto pelo pipeline e agenda retry com backoff leve.
     """
-    outcome, result = collect_product(
+    outcome, result, reason = collect_product(
         payload,
         use_lock=True,
         dispatch_comparison=True,
@@ -590,4 +471,99 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     trace_id=trace_id,
                     attempt=attempt,
                 )
-    return outcome
+    temporary_failure = False
+    blocked_invalid = False
+    next_retry_at = None
+    retry_attempt = None
+    if payload and lock_target and _should_block_invalid_url(result):
+        invalid_attempt = _increment_invalid_url_attempt(
+            str(lock_target),
+            ttl_seconds=settings.SCRAPER_INVALID_URL_TTL_SECONDS,
+        )
+        if invalid_attempt is None:
+            invalid_attempt = 1
+        if invalid_attempt >= settings.SCRAPER_INVALID_URL_MAX_ATTEMPTS:
+            _reset_invalid_url_attempt(str(lock_target))
+            blocked_invalid = True
+            reason = "invalid_url_blocked"
+            _mark_invalid_product(
+                monitored_id=monitored_id,
+                competitor_id=competitor_id,
+                kind=kind,
+                url=payload.get("url") if payload else None,
+                attempts=invalid_attempt,
+                trace_id=trace_id,
+            )
+        else:
+            now = datetime.now(timezone.utc)
+            delay = _compute_scrape_retry_delay(
+                invalid_attempt,
+                max_seconds=min(SCRAPE_RETRY_MAX_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+            )
+            next_retry_at = now + timedelta(seconds=delay)
+            temporary_failure = True
+            logger.warning(
+                "scrape_invalid_url_retry_scheduled",
+                kind=kind,
+                product_id=str(lock_target),
+                trace_id=trace_id,
+                attempts=invalid_attempt,
+                delay_seconds=delay,
+                next_retry_at=next_retry_at.isoformat(),
+            )
+    
+    if payload and lock_target and _should_schedule_temporary_retry(result, reason) and not blocked_invalid:
+        retry_attempt = _increment_temporary_failure_attempt(
+            str(lock_target),
+            ttl_seconds=SCRAPE_RETRY_TTL_SECONDS,
+        )
+        if retry_attempt is None:
+            retry_attempt = 1
+        now = datetime.now(timezone.utc)
+        if retry_attempt > SCRAPE_RETRY_MAX_ATTEMPTS:
+            #Reinicia contador para evitar loops infinitos após atingir o limite
+            _reset_temporary_failure_attempt(str(lock_target))
+            delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
+            next_retry_at = now + timedelta(seconds=delay)
+            temporary_failure = True
+            logger.warning(
+                "scrape_retry_exhausted",
+                kind=kind,
+                product_id=str(lock_target),
+                trace_id=trace_id,
+                attempts=retry_attempt,
+                delay_seconds=delay,
+                next_retry_at=next_retry_at.isoformat(),
+            )
+        else:
+            delay = _compute_scrape_retry_delay(
+                retry_attempt,
+                max_seconds=min(SCRAPE_RETRY_MAX_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                retry_after=getattr(result, "retry_after", None),
+            )
+            next_retry_at = now + timedelta(seconds=delay)
+            temporary_failure = True
+            if _is_rate_limit_error(result, reason):
+                _register_scrape_cooldown(
+                    str(lock_target),
+                    ttl_seconds=settings.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS,
+                )
+            logger.warning(
+                "scrape_temporary_failure_scheduled",
+                kind=kind,
+                product_id=str(lock_target),
+                trace_id=trace_id,
+                host=_extract_host(payload.get("url") if payload else None),
+                attempts=retry_attempt,
+                delay_seconds=delay,
+                next_retry_at=next_retry_at.isoformat(),
+            )
+
+    status = "blocked" if blocked_invalid else ("temporary_failure" if temporary_failure else outcome)
+    return {
+        "outcome": outcome,
+        "status": status,
+        "reason": reason,
+        "next_retry_at": next_retry_at.isoformat() if next_retry_at else None,
+        "product_id": str(lock_target) if lock_target else None,
+    }

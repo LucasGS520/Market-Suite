@@ -56,8 +56,9 @@ market_alert/
 | `Celery` | `tasks.compare_prices_task.compare_prices_task` | Idempotente e leve; recalcula comparação e `competitiveness_status` quando acionado. |
 | `Celery` | `tasks.notifications_enqueue_task.enqueue_notifications_task` | Normaliza notificações pendentes e calcula backoff exponencial antes de novos disparos. |
 
-### Integração com os Serviços
-- **`market_scraper`**: consumido por `scraper/scraper_client.ScraperClient`, que envia `ParserRequest` valida `ParserResponse` do pacote e trata `304 Not Modified` retornando `None` quando nada mudou. O `ParserResponse` retorna sempre `price|currency` (pode ser `null`), `availability`, `last_status`, `etag` e `not_modified`, permitindo marcar anúncios inativos sem gravar preços `0.00`.
+### Integração com o `market_scraper`
+- **Cliente dedicado**: `scraper/scraper_client.ScraperClient` envia `ParserRequest` e valida `ParserResponse`, tratando `304 Not Modified` como ausência de mudanças e preservando `last_checked`.
+- **Force refresh**: quando `force_refresh=True`, o cliente ignora `ETag`/`If-Modified-Since`, envia `metadata.force_refresh` e força download novo no `market_scraper`.
 - **`shared/`**: reutiliza abstrações de configuração, segurança e utilidades comuns.
 - **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs.
 - **Codificação numérica**: valores monetários são serializados como string (`Decimal` → `"1099.90"`) em quase todos os contratos, exceto no resumo de comparação que mantém encoder numérico para compatibilidade.
@@ -122,7 +123,7 @@ O Redis do `docker-compose.yml` utiliza AOF com snapshots para manter filas Cele
 | Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
 | Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
 | Agendamento contínuo | `CONTINUOUS_COLLECTOR_AUTOSTART`, `CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS`, `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
-| Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX` |
+| Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX`, `SCRAPER_HOST_RATE_LIMIT`, `SCRAPER_HOST_RATE_WINDOW_SECONDS`, `SCRAPER_HOST_RETRY_MAX_ATTEMPTS`, `SCRAPER_HOST_RETRY_WINDOW_SECONDS`, `SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS`, `SCRAPER_INVALID_URL_MAX_ATTEMPTS`, `SCRAPER_INVALID_URL_TTL_SECONDS` |
 | Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER`, `NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS`, `NOTIFICATION_EMAIL_PROVIDER`, `NOTIFICATION_SMS_PROVIDER`, `NOTIFICATION_WHATSAPP_PROVIDER`, `NOTIFICATION_PUSH_PROVIDER`, `NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` |
 
 ### Padrões de contratos
@@ -167,6 +168,13 @@ SCRAPER_READ_TIMEOUT=25.0
 SCRAPER_TOTAL_TIMEOUT=8.0
 SCRAPER_SERVICE_AUTH_HEADER=X-Internal-Token
 SCRAPER_SERVICE_AUTH_TOKEN=token-exemplo
+SCRAPER_HOST_RATE_LIMIT=20
+SCRAPER_HOST_RATE_WINDOW_SECONDS=60
+SCRAPER_HOST_RETRY_MAX_ATTEMPTS=4
+SCRAPER_HOST_RETRY_WINDOW_SECONDS=60
+SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS=600
+SCRAPER_INVALID_URL_MAX_ATTEMPTS=3
+SCRAPER_INVALID_URL_TTL_SECONDS=86400
 
 SMTP_HOST=smtp.mailtrap.io
 SMTP_PORT=587

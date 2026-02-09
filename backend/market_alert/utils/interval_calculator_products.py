@@ -20,6 +20,34 @@ STABILITY_UNSTABLE = 0
 STABILITY_STABLE = 1
 STABILITY_VERY_STABLE = 2
 
+def _utc_now() -> datetime:
+    """ Retorna timestamp em UTC sem microssegundos para logs """
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+def _resolve_next_check_at(
+    monitored: MonitoredProduct,
+    next_check_at: datetime | None,
+) -> tuple[datetime, datetime]:
+    """ Resolve o próximo check garantindo data válida e retorna também o horário base """
+    now = _utc_now()
+    resolved_next_check_at = next_check_at or monitored.next_check_at or now
+    if resolved_next_check_at < now:
+        #Evita reenqueue com horário no passado para impedir loops ociosos
+        resolved_next_check_at = now
+    return resolved_next_check_at, now
+
+def _parse_next_retry_at(value: str | None) -> datetime | None:
+    """ Converte string ISO de retry para datetime com timezone """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
 def _normalize_datetime(value: datetime | None) -> datetime | None:
     """ Normaliza datas para UTC preservando valores nulos """
     if value is None:
@@ -98,3 +126,15 @@ def calculate_next_check_at(
         return normalized_collected
     interval_seconds = calculate_next_interval(product, reference_time=normalized_collected)
     return normalized_collected + timedelta(seconds=interval_seconds)
+
+__all__ = [
+    "STABILITY_UNSTABLE",
+    "STABILITY_STABLE",
+    "STABILITY_VERY_STABLE",
+    "calculate_stability_score",
+    "calculate_next_interval",
+    "calculate_next_check_at",
+    "_utc_now",
+    "_resolve_next_check_at",
+    "_parse_next_retry_at",
+]

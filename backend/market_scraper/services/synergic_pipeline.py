@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from time import perf_counter
+from uuid import uuid4
 from typing import Any, Literal, Sequence
 
 import structlog
@@ -27,6 +28,8 @@ class PipelineContext:
     url: str
     source: str
     default_step_timeout: float
+    force_refresh: bool = False
+    trace_id: str | None = None
     html: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
 
@@ -36,14 +39,46 @@ class PipelineContext:
         Garante que as etapas sempre encontrem informações básicas
         sem depender de inicialização externa.
         """
+        if not self.trace_id:
+            #Geramos o trace_id para garantir rastreabilidade mesmo em chamadas internas.
+            self.trace_id = str(uuid4())
         self.data.setdefault("url", self.url)
         self.data.setdefault("source", self.source)
         self.data.setdefault("domain", self.source)
         self.data.setdefault("step_timeout", self.default_step_timeout)
+        #Registramos o sinal de refresh para evitar decisões inconsistentes em etapas posteriores
+        self.data.setdefault("force_refresh", self.force_refresh)
+        self.data.setdefault("trace_id", self.trace_id)
+
+    def build_log_context(
+        self,
+        *,
+        result: str,
+        duration_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """ Centraliza campos obrigatórios para logs do pipeline """
+        log_context: dict[str, Any] = {
+            "url": sanitize_log_data(self.url),
+            "domain": self.source,
+            "result": result,
+        }
+        if duration_ms is not None:
+            log_context["duration_ms"] = duration_ms
+        if self.trace_id:
+            log_context["trace_id"] = self.trace_id
+        return log_context
 
     def set_html(self, html: str) -> None:
         """ Guarda o HTML obtido para que etapas posteriores possam reutilizá-lo """
         self.html = html
+
+    def should_use_cache(self, cache_name: str) -> bool:
+        """ Centraliza a decisão de uso de cache para o pipeline """
+        if self.force_refresh:
+            #Registramos o cache ignorado para depuração de requisições forçadas
+            self.data.setdefault("cache_bypass", []).append(cache_name)
+            return False
+        return True
 
     def build_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """ Normaliza o payload principal adicionando origem e URL canônica
@@ -173,11 +208,11 @@ class SynergicPipeline:
                     logger.warning(
                         "step_timeout",
                         step=step.name,
-                        duration_ms=int(duration * 1000),
                         timeout=timeout_value,
-                        url=sanitize_log_data(context.url),
-                        domain=context.source,
-                        result=result_label,
+                        **context.build_log_context(
+                            result=result_label,
+                            duration_ms=int(duration * 1000),
+                        ),
                     )
                     continue
                 except Exception as exc:
@@ -195,10 +230,10 @@ class SynergicPipeline:
                     logger.exception(
                         "step_error",
                         step=step.name,
-                        duration_ms=int(duration * 1000),
-                        url=sanitize_log_data(context.url),
-                        domain=context.source,
-                        result=result_label,
+                        **context.build_log_context(
+                            result=result_label,
+                            duration_ms=int(duration * 1000),
+                        ),
                         error=sanitize_log_data(str(exc)),
                     )
                     continue
@@ -239,11 +274,11 @@ class SynergicPipeline:
             logger.error(
                 "pipeline_timeout",
                 timeout=self._pipeline_timeout,
-                url=sanitize_log_data(context.url),
                 step_count=len(self._steps),
-                duration_ms=int((perf_counter() - pipeline_start) * 1000),
-                domain=context.source,
-                result=final_result_label,
+                **context.build_log_context(
+                    result=final_result_label,
+                    duration_ms=int((perf_counter() - pipeline_start) * 1000),
+                ),
             )
             raise PipelineTimeoutError("Tempo limite do pipeline excedido") from exc
         
@@ -260,12 +295,22 @@ class SynergicPipeline:
                 logger.warning(
                     "unknown_result_label",
                     last_result=last_result_label,
-                    domain=context.source,
-                    url=sanitize_log_data(context.url),
-                    result=final_result_label,
+                    **context.build_log_context(
+                        result=final_result_label,
+                    ),
                 )
             
             status = final_result_label
+
+        logger.info(
+            "pipeline_completed",
+            status=status,
+            step_count=len(self._steps),
+            **context.build_log_context(
+                result=final_result_label,
+                duration_ms=int((perf_counter() - pipeline_start) * 1000),
+            ),
+        )
 
         return PipelineOutcome(
             status=status,

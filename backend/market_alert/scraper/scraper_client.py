@@ -178,13 +178,6 @@ class ScraperClient:
                 status_code=503,
             )
         
-        #Aplicamos token bucket por host para diluir bursts e reduzir 429 do scraper
-        if not rate_limiter.allow(host):
-            raise ScraperClientError(
-                "Limite de requisições para host excedido",
-                status_code=429,
-            )
-        
         headers: dict[str, str] = {}
         if not force_refresh and etag:
             headers["If-None-Match"] = etag
@@ -218,6 +211,21 @@ class ScraperClient:
 
         while True:
             attempt += 1
+            if not rate_limiter.allow(host):
+                retry_count = self._register_host_retry_window(host)
+                if self._host_retry_exhausted(retry_count):
+                    raise ScraperClientError(
+                        "Limite de tentativas por host excedido",
+                        status_code=429,
+                        retry_after=settings.SCRAPER_HOST_RETRY_WINDOW_SECONDS,
+                    )
+                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
+                    raise ScraperClientError(
+                        "Limite de requisições para host excedido",
+                        status_code=429,
+                    )
+                time.sleep(self._calculate_retry_delay(backoff, attempt, None))
+                continue
             try:
                 response = self.client.post(
                     "/scraper/parse",
@@ -293,10 +301,35 @@ class ScraperClient:
                     headers=response.headers,
                     error_code=error_code,
                 )
+            
+            if status_code in {400, 403}:
+                try:
+                    body = response.json()
+                except ValueError as exc:
+                    circuit_breaker.record_failure(host)
+                    raise ScraperClientError(
+                        "Corpo JSON inválido retornado pelo serviço de scraping",
+                        status_code=500,
+                    ) from exc
+                error_code = body.get("error_code")
+                circuit_breaker.record_success(host)
+                return ScraperFetchResult(
+                    status_code=status_code,
+                    payload=None,
+                    headers=response.headers,
+                    error_code=error_code,
+                )
 
             if status_code in {429}:
                 circuit_breaker.record_failure(host)
                 retry_after = self._extract_retry_after(response)
+                retry_count = self._register_host_retry_window(host)
+                if self._host_retry_exhausted(retry_count):
+                    raise ScraperClientError(
+                        "Limite de tentativas por host excedido",
+                        status_code=status_code,
+                        retry_after=retry_after,
+                    )
                 if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
                     raise ScraperClientError(
                         "Serviço de scraping respondeu com 429",
@@ -387,9 +420,9 @@ class ScraperClient:
     
     @staticmethod
     def _calculate_retry_delay(base: float, attempt: int, retry_after: int | None) -> float:
-        """ Seleciona entre ``Retry-After`` e backoff exponencial """
+        """ Seleciona entre ``Retry-After`` e backoff exponencial com jitter"""
         if retry_after is not None:
-            return float(retry_after)
+            return float(retry_after) + random.uniform(0, base)
         return ScraperClient._compute_backoff(base, attempt)
     
     @staticmethod
@@ -418,4 +451,27 @@ class ScraperClient:
             now = datetime.now(timezone.utc)
             delay_seconds = (retry_at - now).total_seconds()
             return max(0, int(delay_seconds))
+        
+    @staticmethod
+    def _register_host_retry_window(host: str) -> int | None:
+        """ Registra tentativa por host para limiar backoffs em janelas curtas """
+        client = get_redis_client()
+        if client is None:
+            return None
+        try:
+            key = f"scraper:host-retry:{host}"
+            pipeline = client.pipeline(True)
+            pipeline.incr(key)
+            pipeline.expire(key, settings.SCRAPER_HOST_RETRY_WINDOW_SECONDS)
+            current, _ = pipeline.execute()
+            return int(current)
+        except Exception:
+            return None
+        
+    @staticmethod
+    def _host_retry_exhausted(counter: int | None) -> bool:
+        """ Indica se o limite de tentativas por host foi atingido """
+        if counter is None:
+            return False
+        return counter >= settings.SCRAPER_HOST_RETRY_MAX_ATTEMPTS
         

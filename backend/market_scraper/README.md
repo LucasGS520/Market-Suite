@@ -42,7 +42,7 @@ O cliente oficial vive em [`market_alert/scraper/scraper_client.py`](../market_a
 ## Pipeline de Parsing
 O pipeline sequencial é registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado pelo `SynergicPipeline` (`services/synergic_pipeline.py`). Ordem padrão:
 
-1. **FetchHTMLStep** – normaliza URL, verifica `robots.txt`, consulta cache LRU/TTL e singleflight antes de baixar HTML via `httpx` com retries leves.
+1. **FetchHTMLStep** – normaliza URL, verifica `robots.txt`, consulta cache LRU/TTL usa singleflight e aplica inferência de disponibilidade por status HTTP quando necessário.
 2. **DomainSpecificParserStep** – ativa parsers dedicados (`parsers/domain_parsers.py`) quando o domínio possui regras especializadas.
 3. **JsonLdParserStep** – procura dados estruturados `application/ld+json`.
 4. **HtmlMetadataParserStep** – coleta metadados e marcações estruturais com BeautifulSoup.
@@ -57,7 +57,7 @@ As variáveis padrão estão em [`core/config_scraper.py`](core/config_scraper.p
 |-----------|---------------------|
 | Timeouts | `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS`, `SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_DNS_TIMEOUT` |
 | HTTP | `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, `SCRAPER_DEFAULT_USER_AGENT`, `SCRAPER_USER_AGENT_POOL`, `SCRAPER_HEADERS_*` |
-| Cache | `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES`, `SCRAPER_SINGLEFLIGHT_LOCK_TTL` |
+| Cache | `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES`, `SCRAPER_SINGLEFLIGHT_LOCK_TTL`, `SCRAPER_SINGLEFLIGHT_MAX_ENTRIES` |
 | Parsing | `SCRAPER_PRICE_TOLERANCE`, `SCRAPER_ALLOWED_DOMAINS`, flags em `parsers/` |
 | Observabilidade | `SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `LOG_LEVEL` |
 
@@ -65,6 +65,7 @@ As variáveis padrão estão em [`core/config_scraper.py`](core/config_scraper.p
 - `services/synergic_pipeline.py` – organiza execução do pipeline e tratamento de exceções.
 - `services/pipeline_steps.py` – lista etapas (`FetchHTMLStep`, `DomainSpecificParserStep`, `JsonLdParserStep`, `HtmlMetadataParserStep`, `GenericFallbackParserStep`).
 - `services/parser_runner.py` – valida dados extraídos e gera `ParserResponse` final.
+- `services/availability_inference.py` – inferência centralizada de disponibilidade por HTTP e heurísticas de HTML.
 - `utils/http_utils.py` – resolve DNS com cache e previne SSRF.
 - `utils/http_download.py` – realiza download com retries configuráveis.
 - `utils/cache.py` – implementa cache LRU/TTL.
@@ -76,6 +77,7 @@ Exemplo mínimo de `.env.market_scraper`:
 SCRAPER_CACHE_TTL_SECONDS=3600
 SCRAPER_CACHE_MAX_ENTRIES=5000
 SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
+SCRAPER_SINGLEFLIGHT_MAX_ENTRIES=2000
 
 SCRAPER_STEP_TIMEOUT_SECONDS=8.0
 SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
@@ -83,7 +85,10 @@ SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
 SCRAPER_HTTP_RETRIES=2
 SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
 
-SERVICE_NAME=market-scraper
+SCRAPER_PRICE_TOLERANCE=0.0
+
+MAX_RESPONSE_BYTES=2000000
+STREAM_TO_DISK_THRESHOLD=0
 ```
 
 ## Segurança e Observabilidade
