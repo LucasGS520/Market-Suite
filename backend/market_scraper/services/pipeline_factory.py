@@ -26,7 +26,13 @@ from market_scraper.services.synergic_pipeline import (
 
 logger = structlog.get_logger("services_scraper_common")
 
-def _build_context(url: str, step_timeout: float, *, force_refresh: bool = False) -> PipelineContext:
+def _build_context(
+    url: str,
+    step_timeout: float,
+    *,
+    force_refresh: bool = False,
+    trace_id: str | None = None,    
+) -> PipelineContext:
     """ Cria o contexto compartilhado a partir da URL normalizada """
     parsed = urlparse(url)
     source = parsed.hostname or parsed.netloc or "unknown"
@@ -35,6 +41,7 @@ def _build_context(url: str, step_timeout: float, *, force_refresh: bool = False
         source=source,
         default_step_timeout=step_timeout,
         force_refresh=force_refresh,
+        trace_id=trace_id,
     )
 
 def create_pipeline(
@@ -56,10 +63,16 @@ def build_context(
     *,
     step_timeout: Optional[float] = None,
     force_refresh: bool = False,
+    trace_id: str | None = None,
 ) -> PipelineContext:
     """ Encapsula a criação do contexto para facilitar testes """
     timeout_step = step_timeout or settings.SCRAPER_STEP_TIMEOUT_SECONDS
-    return _build_context(url, timeout_step, force_refresh=force_refresh)
+    return _build_context(
+        url,
+        timeout_step,
+        force_refresh=force_refresh,
+        trace_id=trace_id,
+    )
 
 async def run_pipeline(
     url: str,
@@ -67,10 +80,16 @@ async def run_pipeline(
     step_timeout: Optional[float] = None,
     pipeline_timeout: Optional[float] = None,
     force_refresh: bool = False,
+    trace_id: str | None = None,
 ) -> PipelineOutcome:
     """ Execute o pipeline padrão e retorna o ``PipelineOutcome`` resultante """
     timeout_step = step_timeout or settings.SCRAPER_STEP_TIMEOUT_SECONDS
-    context = _build_context(url, timeout_step, force_refresh=force_refresh)
+    context = _build_context(
+        url,
+        timeout_step,
+        force_refresh=force_refresh,
+        trace_id=trace_id,
+    )
     pipeline = create_pipeline(
         step_timeout=timeout_step,
         pipeline_timeout=pipeline_timeout,

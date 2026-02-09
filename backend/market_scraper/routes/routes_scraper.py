@@ -103,16 +103,30 @@ async def parse_endpoint(
         )
     
     force_refresh = bool(payload.metadata.get("force_refresh")) if payload.metadata else False
+    if force_refresh:
+        request_logger.info(
+            "http_cache_force_refresh",
+            url=sanitize_log_data(normalized_url),
+            reason="force_refresh_metadata",
+        )
     cached_metadata = None
+    cache_status = "miss"
     if not force_refresh:
         #Cache HTTP aqui é independente do cache interno do pipeline
+        request_logger.info(
+            "http_cache_lookup",
+            url=sanitize_log_data(normalized_url),
+        )
         cached_metadata = get_cached_response(normalized_url)
+        if cached_metadata:
+            cache_status = "hit"
         if cached_metadata and should_return_not_modified(
             if_none_match=request.headers.get("if-none-match"),
             if_modified_since=parse_if_modified_since(request.headers.get("if-modified-since")),
             metadata=cached_metadata,
         ):
             headers = build_cache_headers(cached_metadata)
+            headers["X-MarketScraper-Cache-Status"] = cache_status
             request_logger.info(
                 "parse_not_modified",
                 url=sanitize_log_data(normalized_url),
@@ -120,9 +134,17 @@ async def parse_endpoint(
                 source=cached_metadata.payload.source,
             )
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+        if cached_metadata:
+            cache_status = "revalidated"
+    else:
+        cache_status = "bypass"
 
     try:
-        outcome = await run_pipeline(normalized_url, force_refresh=force_refresh)
+        outcome = await run_pipeline(
+            normalized_url,
+            force_refresh=force_refresh,
+            trace_id=trace_id,
+        )
     except PipelineTimeoutError as exc:
         issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline excedido")
         return _http_error(
@@ -180,8 +202,17 @@ async def parse_endpoint(
         current_price=price,
     )
     metadata = store_response(normalized_url, parse_response)
+    request_logger.info(
+        "http_cache_stored",
+        url=sanitize_log_data(normalized_url),
+        etag=metadata.etag,
+        source=metadata.payload.source,
+        cache_status=cache_status,
+    )
     for key, value in build_cache_headers(metadata).items():
         response.headers[key] = value
+    #Cabeçalho customizado facilita inspeção de decisões do cache HTTP pelo cliente
+    response.headers["X-MarketScraper-Cache-Status"] = cache_status
     return parse_response
 
 

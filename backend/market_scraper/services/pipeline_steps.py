@@ -55,6 +55,13 @@ class FetchHTMLStep(PipelineStep):
         
         #Decisão de cache é centralizada no contexto para manter coerência entre etapas
         if context.should_use_cache("html"):
+            logger.info(
+                "html_cache_check",
+                url=context.url,
+                domain=context.source,
+                cache_name="html",
+                force_refresh=context.force_refresh,
+            )
             cached_html: str | None = cache.get(context.url)
             if cached_html is not None:
                 context.set_html(cached_html)
@@ -137,6 +144,13 @@ class FetchHTMLStep(PipelineStep):
         context.set_html(html)
         #Armazenamos o HTML recém obtido para acelerar futuras requisições
         cache.set(context.url, html, settings.SCRAPER_CACHE_TTL_SECONDS)
+        logger.info(
+            "html_cache_store",
+            url=context.url,
+            domain=context.source,
+            cache_name="html",
+            ttl_seconds=settings.SCRAPER_CACHE_TTL_SECONDS,
+        )
         return StepResult.success(message="HTML baixado com sucesso")
     
 class _BaseParserStep(PipelineStep):
