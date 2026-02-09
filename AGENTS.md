@@ -39,7 +39,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Segurança**: não exponha segredos. Utilize arquivos `.env` e helpers para acessar configurações.
 - **Compatibilidade local/Docker**: mantenha portas alinhadas ao `docker-compose.yml`; evite conflitos.
 - **Manutenção documental**: ao final de cada mudança extensa nos códigos, sprint ou mudança estrutural, sinalize ou execute atualizações necessárias nos determinados `README.md` e `AGENTS.md`.
-- **Scraper**: a inferência de disponibilidade ocorre antes do validador e deve propagar `last_status` em ordem de precedência (payload > inferência > validador). A rota `GET /monitored/` lista itens sem preço para indicar indisponibilidade.
+- **Scraper**: a inferência de disponibilidade ocorre em `market_scraper/services/availability_inference.py`, antes do validador, e deve propagar `last_status` em ordem de precedência (payload > inferência > validador). A rota `GET /monitored/` lista itens sem preço para indicar indisponibilidade. O singleflight usa a chave `url|force_refresh` para evitar race condition entre coletas com intenção divergente.
 
 ---
 
@@ -109,6 +109,8 @@ Carregamento: `backend/shared/core/config_base.py` carrega `./.env.common` e, po
 - **Redis indisponível**: valide conectividade e credenciais; o coletor registra `continuous_queue_unavailable` quando o Redis não responde.
 - **Itens presos em processamento**: o loop reaproveita o conjunto de processamento após o TTL configurado em `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`. Verifique logs de `continuous_processing_reclaimed`.
 - **Monitorados pausados**: itens com `paused=true` são ignorados e não retornam para a fila; retome manualmente para reativar a coleta.
+- **Cache HTTP do scraper**: procure logs `http_cache_lookup`, `parse_not_modified` e `http_cache_force_refresh` para validar hits, revalidação e bypass por `force_refresh`.
+- **Cache HTML do pipeline**: logs `html_cache_check`, `html_cache_store` e `html_fetch_coalesced` ajudam a verificar reutilização de HTML e coalescing via singleflight.
 
 ---
 
