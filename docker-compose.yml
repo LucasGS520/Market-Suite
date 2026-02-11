@@ -190,7 +190,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=4"
+      - "--concurrency=1"
       - "-Q"
       - "monitor"
     user:

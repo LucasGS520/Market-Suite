@@ -85,6 +85,7 @@ const Products: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState(''); // texto de busca
   const [statusFilter, setStatusFilter] = useState(''); // filtro por status de competitividade
   const [page, setPage] = useState(1); // página atual para paginação em modo lista
+  const listPageSize = 5; // quantidade de itens por página solicitada ao backend
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto
@@ -104,14 +105,22 @@ const Products: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Query para buscar produtos monitorados. A chave depende de pagina, busca e filtro.
+  /**
+   * Consulta principal de produtos monitorados
+   * 
+   * Inclui `page` e `per_page` na chave/cache para garantir paginação server-side,
+   * mantendo consistência entre navegação de páginas e filtros ativos.
+   */
   const { data, isLoading, error } = useQuery({
-    queryKey: ['monitoredProducts', searchQuery, statusFilter],
+    queryKey: ['monitoredProducts', searchQuery, statusFilter, page, listPageSize],
     queryFn: () =>
       productsService.getMonitoredProducts({
+        page,
+        per_page: listPageSize,
         query: searchQuery || undefined,
         status: statusFilter || undefined,
       }),
+    placeholderData: (previousData) => previousData,
   });
 
   useEffect(() => {
@@ -135,7 +144,6 @@ const Products: React.FC = () => {
     }
   }, [searchQuery, statusFilter, viewMode, page]);
 
-  const listPageSize = 5;
   /**
    * Normaliza valores para comparação numérica evitando zeros como preços válidos
    */
@@ -143,7 +151,7 @@ const Products: React.FC = () => {
     return normalizePriceInput(value);
   };
   /**
-   * Ajusta lista de itens visíveis respeitando coleta inicial e paginação
+   * Itens já paginados pelo backend conforme a página/filtro atual.
    */
   const visibleItems = useMemo(() => {
     if (!data?.items) return [] as MonitoredProduct[];
@@ -151,16 +159,10 @@ const Products: React.FC = () => {
     return data.items;
   }, [data]);
 
-  const paginatedItems = useMemo(() => {
-    if (!visibleItems || viewMode !== 'list') return visibleItems ?? [];
-    const offset = (page - 1) * listPageSize;
-    return visibleItems.slice(offset, offset + listPageSize);
-  }, [visibleItems, page, viewMode]);
-
   const totalPages = useMemo(() => {
-    if (!visibleItems || viewMode !== 'list') return 1;
-    return Math.max(1, Math.ceil(visibleItems.length / listPageSize));
-  }, [visibleItems, viewMode]);
+    const totalItems = data?.meta?.total ?? 0;
+    return Math.max(1, Math.ceil(totalItems / listPageSize));
+  }, [data?.meta?.total, listPageSize]);
 
   useEffect(() => {
     if (page > totalPages) {
@@ -390,7 +392,7 @@ const Products: React.FC = () => {
         viewMode === 'list' ? (
           // Modo Lista - exibe cartões por produto
           <Grid container spacing={3}>
-            {paginatedItems.map((product) => {
+            {visibleItems.map((product) => {
               const competitorsWithPrice = product.comparison_summary?.competitors_with_price_count ?? 0;
               const lowestCompetitorLabel =
                 competitorsWithPrice > 0
@@ -544,7 +546,7 @@ const Products: React.FC = () => {
                 </Grid>
               );
             })}
-            {visibleItems.length > listPageSize && (
+            {totalPages > 1 && (
               <Grid item xs={12}>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
                   <Button
