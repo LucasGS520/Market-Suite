@@ -83,6 +83,13 @@ const sanitizePageParam = (value: string | null): number => {
 };
 
 /**
+ * Normaliza texto vindo da URL para evitar `null` nos estados controlados
+ */
+const sanitizeTextParam = (value: string | null): string => {
+  return value ?? '';
+}
+
+/**
  * Componente principal da página de Produtos Monitorados.
  * - Buscar produtos monitorados com paginação, busca e filtro de status.
  * - Permitir alternância de visualização (lista / tabela).
@@ -99,8 +106,8 @@ const Products: React.FC = () => {
   // Estado da UI
   // A URL é a fonte de verdade para preservar contexto ao navegar entre lista e detalhes.
   const [viewMode, setViewMode] = useState<'list' | 'table'>(() => sanitizeViewMode(searchParams.get('view')));
-  const [searchQuery, setSearchQuery] = useState(''); // texto de busca
-  const [statusFilter, setStatusFilter] = useState(''); // filtro por status de competitividade
+  const [searchQuery, setSearchQuery] = useState(() => sanitizeTextParam(searchParams.get('q'))); // texto de busca
+  const [statusFilter, setStatusFilter] = useState(() => sanitizeTextParam(searchParams.get('status'))); // filtro por status de competitividade
   const [page, setPage] = useState<number>(() => sanitizePageParam(searchParams.get('page'))); // página atual para paginação em modo lista
   const listPageSize = 5; // quantidade de itens por página solicitada ao backend
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
@@ -240,6 +247,36 @@ const Products: React.FC = () => {
       return nextParams;
     }, { replace: true });
   }, [page, setSearchParams]);
+
+  // Mantém `q` na URL para preservar o termo de busca ao navegar para detalhes e voltar.
+  useEffect(() => {
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+
+      if (!searchQuery) {
+        nextParams.delete('q');
+      } else {
+        nextParams.set('q', searchQuery);
+      }
+
+      return nextParams;
+    }, { replace: true });
+  }, [searchQuery, setSearchParams]);
+
+  // Mantém `status` sincronizado na URL, sem apagar outras chaves existentes.
+  useEffect(() => {
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+
+      if (!statusFilter) {
+        nextParams.delete('status');
+      } else {
+        nextParams.set('status', statusFilter);
+      }
+
+      return nextParams;
+    }, { replace: true });
+  }, [setSearchParams, statusFilter]);
 
   /**
    * Normaliza valores para comparação numérica evitando zeros como preços válidos
