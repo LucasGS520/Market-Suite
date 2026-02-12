@@ -125,21 +125,32 @@ const Products: React.FC = () => {
   /**
    * Consulta principal de produtos monitorados
    * 
-   * Inclui `page` e `per_page` na chave/cache para garantir paginação server-side,
-   * mantendo consistência entre navegação de páginas e filtros ativos.
+   * No modo lista, envia `page` e `per_page` para manter a paginação server-side.
+   * No modo tabela, envia apenas filtros para receber o conjunto completo do backend.
    * 
    * `keepPreviousData` evita piscar a tabela/lista durante troca de página,
    * enquanto `staleTime` reduz refetch agressivo em navegação paginada rápida.
    */
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['monitoredProducts', searchQuery, statusFilter, page, listPageSize],
-    queryFn: () =>
-      productsService.getMonitoredProducts({
+  const monitoredProductsParams = useMemo(() => {
+    const baseFilters = {
+      query: searchQuery || undefined,
+      status: statusFilter || undefined,
+    };
+
+    if (viewMode === 'list') {
+      return {
+        ...baseFilters,
         page,
         per_page: listPageSize,
-        query: searchQuery || undefined,
-        status: statusFilter || undefined,
-      }),
+      };
+    }
+
+    return baseFilters;
+  }, [listPageSize, page, searchQuery, statusFilter, viewMode]);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['monitoredProducts', viewMode, monitoredProductsParams],
+    queryFn: () => productsService.getMonitoredProducts(monitoredProductsParams),
     placeholderData: keepPreviousData,
     staleTime: 8 * 1000,
   });
@@ -202,7 +213,10 @@ const Products: React.FC = () => {
     return normalizePriceInput(value);
   };
   /**
-   * Itens já paginados pelo backend conforme a página/filtro atual.
+   * Itens visíveis na UI para ambos os modos.
+   *
+   * Em lista: backend já retorna o recorte paginado.
+   * Em tabela: backend retorna todos os itens filtrados.
    */
   const visibleItems = useMemo(() => {
     if (!data?.items) return [] as MonitoredProduct[];
@@ -211,15 +225,19 @@ const Products: React.FC = () => {
   }, [data]);
 
   const totalPages = useMemo(() => {
+    if (viewMode !== 'list') return 1;
+
     const totalItems = data?.meta?.total ?? 0;
     return Math.max(1, Math.ceil(totalItems / listPageSize));
-  }, [data?.meta?.total, listPageSize]);
+  }, [data?.meta?.total, listPageSize, viewMode]);
 
   useEffect(() => {
+    if (viewMode !== 'list') return;
+
     if (page > totalPages) {
       startTransition(() => setPage(totalPages));
     }
-  }, [page, totalPages]);
+  }, [page, totalPages, viewMode]);
 
   const handlePageSelect = (newPage: number) => {
     const boundedPage = Math.min(Math.max(newPage, 1), totalPages);
@@ -355,11 +373,17 @@ const Products: React.FC = () => {
     const hasActiveFilters = Boolean(searchQuery || statusFilter);
 
     if (hasActiveFilters) {
-      return filteredTotal ?? 0;
+      return filteredTotal ?? visibleItems.length;
     }
 
-    return filteredTotal ?? globalTotal ?? 0;
-  }, [data?.meta?.total, totalMonitored?.meta?.total, searchQuery, statusFilter]);
+    return filteredTotal ?? globalTotal ?? visibleItems.length;
+  }, [
+    data?.meta?.total,
+    totalMonitored?.meta?.total,
+    searchQuery,
+    statusFilter,
+    visibleItems.length,
+  ]);
 
   /**
    * Define cor do destaque visual com base no badge centralizado.
