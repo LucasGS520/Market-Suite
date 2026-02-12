@@ -236,6 +236,17 @@ def _schedule_comparison_after_commit(
     countdown_seconds: int = 3,
 ) -> None:
     """ Registra callback para disparar comparação após commit da sessão """
+    if result is not None and result.persisted_at is not None:
+        _dispatch_comparison(
+            monitored_id,
+            result,
+            trace_id,
+            force=force,
+            debounce_ttl_seconds=debounce_ttl_seconds,
+            countdown_seconds=countdown_seconds,
+        )
+        return
+    
     transaction = session_manager.get_transaction()
 
     def _dispatch_callback() -> None:
