@@ -148,10 +148,31 @@ const Products: React.FC = () => {
     return baseFilters;
   }, [listPageSize, page, searchQuery, statusFilter, viewMode]);
 
+  /**
+   * Discriminador de cache da consulta principal.
+   *
+   * Incluímos explicitamente modo e estratégia de paginação para evitar colisão de cache
+   * entre payloads distintos (ex.: tabela sem paginação vs lista paginada).
+   */
+  const monitoredProductsQueryKey = useMemo(() => {
+    const paginationStrategy = viewMode === 'list' ? 'paged' : 'full';
+
+    return [
+      'monitoredProducts',
+      {
+        viewMode,
+        paginationStrategy,
+        query: searchQuery,
+        status: statusFilter,
+        page: viewMode === 'list' ? page : undefined,
+      },
+    ] as const;
+  }, [page, searchQuery, statusFilter, viewMode]);
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['monitoredProducts', viewMode, monitoredProductsParams],
+    queryKey: monitoredProductsQueryKey,
     queryFn: () => productsService.getMonitoredProducts(monitoredProductsParams),
-    placeholderData: keepPreviousData,
+    placeholderData: viewMode === 'list' ? keepPreviousData : undefined,
     staleTime: 8 * 1000,
   });
 
