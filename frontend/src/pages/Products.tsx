@@ -7,7 +7,7 @@
 
 import React, { useEffect, useMemo, useState, startTransition } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   Typography,
@@ -110,6 +110,9 @@ const Products: React.FC = () => {
    * 
    * Inclui `page` e `per_page` na chave/cache para garantir paginação server-side,
    * mantendo consistência entre navegação de páginas e filtros ativos.
+   * 
+   * `keepPreviousData` evita psicar a tabela/lista durante troca de página,
+   * enquanto `staleTime` reduz refetch agressivo em navegação paginada rápida.
    */
   const { data, isLoading, error } = useQuery({
     queryKey: ['monitoredProducts', searchQuery, statusFilter, page, listPageSize],
@@ -120,7 +123,8 @@ const Products: React.FC = () => {
         query: searchQuery || undefined,
         status: statusFilter || undefined,
       }),
-    placeholderData: (previousData) => previousData,
+    placeholderData: keepPreviousData,
+    staleTime: 8 * 1000,
   });
 
   useEffect(() => {
@@ -274,6 +278,10 @@ const Products: React.FC = () => {
     return `Ranking #${positionRank} de ${totalSellers}`;
   };
 
+  /**
+   * Prioriza o total filtrado retornado em `data.meta.total` para que as
+   * mensagens de empty state reflitam primeiro o universo filtrado atual.
+   */
   const totalCount = useMemo(() => {
     const filteredTotal = data?.meta?.total;
     const globalTotal = totalMonitored?.meta?.total;
@@ -282,7 +290,7 @@ const Products: React.FC = () => {
       return filteredTotal ?? globalTotal ?? 0;
     }
 
-    return globalTotal ?? filteredTotal ?? 0;
+    return filteredTotal ?? globalTotal ?? 0;
   }, [data?.meta?.total, totalMonitored?.meta?.total, searchQuery, statusFilter]);
 
   /**
