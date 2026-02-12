@@ -111,7 +111,7 @@ const Products: React.FC = () => {
    * Inclui `page` e `per_page` na chave/cache para garantir paginação server-side,
    * mantendo consistência entre navegação de páginas e filtros ativos.
    * 
-   * `keepPreviousData` evita psicar a tabela/lista durante troca de página,
+   * `keepPreviousData` evita piscar a tabela/lista durante troca de página,
    * enquanto `staleTime` reduz refetch agressivo em navegação paginada rápida.
    */
   const { data, isLoading, error } = useQuery({
@@ -141,12 +141,12 @@ const Products: React.FC = () => {
     }
   }, [dismissToast, error, showToast]);
 
-  // Ajusta paginação client-side quando filtros ou modo de visualização mudam
+  // Mantém a página corrente durante paginação e só reseta quando filtros/visão mudam.
   useEffect(() => {
     if (page !== 1) {
       startTransition(() => setPage(1));
     }
-  }, [searchQuery, statusFilter, viewMode, page]);
+  }, [searchQuery, statusFilter, viewMode]);
 
   /**
    * Normaliza valores para comparação numérica evitando zeros como preços válidos
@@ -286,8 +286,10 @@ const Products: React.FC = () => {
     const filteredTotal = data?.meta?.total;
     const globalTotal = totalMonitored?.meta?.total;
 
-    if (!searchQuery && !statusFilter) {
-      return filteredTotal ?? globalTotal ?? 0;
+    const hasActiveFilters = Boolean(searchQuery || statusFilter);
+
+    if (hasActiveFilters) {
+      return filteredTotal ?? 0;
     }
 
     return filteredTotal ?? globalTotal ?? 0;
