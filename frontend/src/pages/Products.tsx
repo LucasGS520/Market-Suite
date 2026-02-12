@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useMemo, useState, startTransition } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
@@ -68,6 +68,21 @@ const getApiErrorDetail = (error: unknown): string | undefined => {
 };
 
 /**
+ * Normaliza o modo de visualização para evitar estados inválidos vindos da URL.
+ */
+const sanitizeViewMode = (value: string | null): 'list' | 'table' => {
+  return value === 'table' ? 'table' : 'list';
+};
+
+/**
+ * Normaliza o número de página garantindo inteiro positivo e fallback em 1.
+ */
+const sanitizePageParam = (value: string | null): number => {
+  const parsedPage = Number.parseInt(value ?? '1', 10);
+  return Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+};
+
+/**
  * Componente principal da página de Produtos Monitorados.
  * - Buscar produtos monitorados com paginação, busca e filtro de status.
  * - Permitir alternância de visualização (lista / tabela).
@@ -77,14 +92,16 @@ const getApiErrorDetail = (error: unknown): string | undefined => {
  */
 const Products: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { showToast, dismissToast } = useToast();
 
   // Estado da UI
-  const [viewMode, setViewMode] = useState<'list' | 'table'>('list'); // modo de exibição
+  // A URL é a fonte de verdade para preservar contexto ao navegar entre lista e detalhes.
+  const [viewMode, setViewMode] = useState<'list' | 'table'>(() => sanitizeViewMode(searchParams.get('view')));
   const [searchQuery, setSearchQuery] = useState(''); // texto de busca
   const [statusFilter, setStatusFilter] = useState(''); // filtro por status de competitividade
-  const [page, setPage] = useState(1); // página atual para paginação em modo lista
+  const [page, setPage] = useState<number>(() => sanitizePageParam(searchParams.get('page'))); // página atual para paginação em modo lista
   const listPageSize = 5; // quantidade de itens por página solicitada ao backend
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
@@ -141,12 +158,42 @@ const Products: React.FC = () => {
     }
   }, [dismissToast, error, showToast]);
 
-  // Mantém a página corrente durante paginação e só reseta quando filtros/visão mudam.
+  // Ao alterar busca/filtro, reinicia paginação para manter resultado consistente.
   useEffect(() => {
     if (page !== 1) {
       startTransition(() => setPage(1));
     }
-  }, [searchQuery, statusFilter, viewMode]);
+  }, [page, searchQuery, statusFilter]);
+
+  // Mantém `view` na URL para evitar perda de contexto ao trocar rota.
+  useEffect(() => {
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+
+      if (viewMode === 'list') {
+        nextParams.delete('view');
+      } else {
+        nextParams.set('view', viewMode);
+      }
+
+      return nextParams;
+    }, { replace: true });
+  }, [setSearchParams, viewMode]);
+
+  // Mantém `page` na URL para refletir paginação atual e facilitar compartilhamento.
+  useEffect(() => {
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+
+      if (page <= 1) {
+        nextParams.delete('page');
+      } else {
+        nextParams.set('page', String(page));
+      }
+
+      return nextParams;
+    }, { replace: true });
+  }, [page, setSearchParams]);
 
   /**
    * Normaliza valores para comparação numérica evitando zeros como preços válidos
@@ -177,6 +224,25 @@ const Products: React.FC = () => {
   const handlePageSelect = (newPage: number) => {
     const boundedPage = Math.min(Math.max(newPage, 1), totalPages);
     setPage(boundedPage);
+  };
+
+  /**
+   * Troca o modo de visualização mantendo o estado refletido na URL.
+   */
+  const handleViewModeChange = (_: React.MouseEvent<HTMLElement>, newMode: 'list' | 'table' | null) => {
+    if (!newMode) return;
+    setViewMode(newMode);
+  };
+
+  /**
+   * Navega para detalhes preservando os filtros/página atuais via query string.
+   */
+  const navigateToProductDetail = (productId: string) => {
+    const currentSearch = searchParams.toString();
+    navigate({
+      pathname: `/product/${productId}`,
+      search: currentSearch ? `?${currentSearch}` : '',
+    });
   };
 
   // Mutation para criação de produto monitorado.
@@ -377,7 +443,7 @@ const Products: React.FC = () => {
         <ToggleButtonGroup
           value={viewMode}
           exclusive
-          onChange={(_, newMode) => newMode && setViewMode(newMode)}
+          onChange={handleViewModeChange}
           size="small"
         >
           <ToggleButton value="list">
@@ -543,7 +609,7 @@ const Products: React.FC = () => {
                               <Button
                                 variant="contained"
                                 size="small"
-                                onClick={() => navigate(`/product/${product.id}`)}
+                                onClick={() => navigateToProductDetail(product.id)}
                               >
                                 Ver Detalhes
                               </Button>
@@ -712,7 +778,7 @@ const Products: React.FC = () => {
                           <Button
                             variant="contained"
                             size="small"
-                            onClick={() => navigate(`/product/${product.id}`)}
+                            onClick={() => navigateToProductDetail(product.id)}
                           >
                             Ver Detalhes
                           </Button>
