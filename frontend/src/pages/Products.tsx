@@ -5,7 +5,7 @@
  * adicionar produtos monitorados pelo usuário.
  */
 
-import React, { useEffect, useMemo, useState, startTransition } from 'react';
+import React, { useEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -107,6 +107,8 @@ const Products: React.FC = () => {
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto
   const [newCompetitorUrl, setNewCompetitorUrl] = useState(''); // URL opcional do concorrente inicial
+  const previousFiltersRef = useRef<{ searchQuery: string; statusFilter: string } | null>(null); // Ref para comparar filtros anteriores e evitar reset de página desnecessário
+  const currentPageRef = useRef(page); // Ref para manter a página atual durante mudanças de filtro
 
   /**
    * Busca quantidade total de produtos monitorados do usuário para personalizar mensagens de vazio.
@@ -177,6 +179,10 @@ const Products: React.FC = () => {
   });
 
   useEffect(() => {
+    currentPageRef.current = page;
+  }, [page]);
+
+  useEffect(() => {
     if (error) {
       showToast({
         key: 'monitoring:products:load-error',
@@ -192,10 +198,18 @@ const Products: React.FC = () => {
 
   // Ao alterar busca/filtro, reinicia paginação para manter resultado consistente.
   useEffect(() => {
-    if (page !== 1) {
+    const previousFilters = previousFiltersRef.current;
+    previousFiltersRef.current = { searchQuery, statusFilter };
+
+    // Evita reset em montagem inicial; só paginamos para 1 quando houve mudança real dos filtros.
+    if (!previousFilters) {
+      return;
+    }
+
+    if (currentPageRef.current !== 1) {
       startTransition(() => setPage(1));
     }
-  }, [page, searchQuery, statusFilter]);
+  }, [searchQuery, statusFilter]);
 
   // Mantém `view` na URL para evitar perda de contexto ao trocar rota.
   useEffect(() => {
