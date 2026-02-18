@@ -300,6 +300,14 @@ def _handle_processing_requeue(
     """ Conclui o fluxo de processamento movendo o item de volta para o ready """
     queue_service = PriorityQueueService()
     normalized_reason = reason or collect_outcome or "unknown"
+    normalized_outcome = (collect_outcome or "").strip().lower()
+
+    #Nos desfechos de sucesso, o collector já persiste `next_check_at`` no CRUD.
+    #Reusar esse valor evita recalcular janela e preserva o contrato de estabilidade.
+    success_without_explicit_retry = (
+        normalized_outcome in {"success", "not_modified"}
+        and next_retry_at is None
+    )
 
     with SessionLocal() as db:
         monitored = _load_monitored(db, monitored_id)
@@ -324,20 +332,30 @@ def _handle_processing_requeue(
             )
             return
 
-        resolved_next_check_at, now = _resolve_next_check_at(monitored, next_retry_at)
-        scheduling = calculate_schedule(
-            monitored,
-            reference_time=now,
-            event_type=EVENT_RETRY,
-            retry_context=RetryContext(
-                reason=normalized_reason,
-                next_retry_at=resolved_next_check_at,
-            ),
-        )
+        schedule_reason: str
+        schedule_source: str
+        if success_without_explicit_retry:
+            scheduling_next_check_at, _ = _resolve_next_check_at(monitored, monitored.next_check_at)
+            schedule_reason = "persisted_next_check_at"
+            schedule_source = "requeue_from_persisted_schedule"
+        else:
+            resolved_next_check_at, now = _resolve_next_check_at(monitored, next_retry_at)
+            scheduling = calculate_schedule(
+                monitored,
+                reference_time=now,
+                event_type=EVENT_RETRY,
+                retry_context=RetryContext(
+                    reason=normalized_reason,
+                    next_retry_at=resolved_next_check_at,
+                ),
+            )
+            scheduling_next_check_at = scheduling.next_check_at
+            schedule_reason = scheduling.reason
+            schedule_source = "requeue_from_retry_policy"
 
         requeued, effective_next_check_at = _requeue_monitored(
             monitored=monitored,
-            next_check_at=scheduling.next_check_at,
+            next_check_at=scheduling_next_check_at,
             queue_service=queue_service,
         )
 
@@ -348,7 +366,8 @@ def _handle_processing_requeue(
             monitored_id=monitored_id,
             next_check_at=effective_next_check_at.isoformat(),
             reason=normalized_reason,
-            schedule_reason=scheduling.reason,
+            schedule_reason=schedule_reason,
+            schedule_source=schedule_source,
             outcome=collect_outcome,
             trace_id=trace_id,
         )
