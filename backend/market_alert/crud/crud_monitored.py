@@ -31,7 +31,7 @@ from market_alert.services.services_priority_queue_manager import (
     enqueue_monitored_now,
     remove_from_priority_queue,
 )
-from market_alert.utils.interval_calculator_products import calculate_next_check_at, STABILITY_UNSTABLE
+from market_alert.utils.interval_calculator_products import calculate_next_check_at, calculate_stability_score, STABILITY_UNSTABLE
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
@@ -332,7 +332,6 @@ def create_or_update_monitored_product_scraped(
             existing.last_checked = last_checked
             existing.last_scraped_at = last_checked
             existing.collected_at = collected_reference
-            existing.next_check_at = calculate_next_check_at(existing, collected_at=last_checked)
             existing.status = MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active
             existing.availability = availability
             existing.last_status = last_status
@@ -375,6 +374,12 @@ def create_or_update_monitored_product_scraped(
                 old_price=previous_price,
                 collected_at=collected_reference,
             )
+            #A estabilidade precisa ser recalculada antes do agendamento para refletir mudanças de preço no mesmo ciclo
+            existing.stability_score = calculate_stability_score(
+                existing,
+                reference_time=last_checked,
+            )
+            existing.next_check_at = calculate_next_check_at(existing, collected_at=last_checked)
 
             db.commit()
         except Exception:
@@ -425,13 +430,17 @@ def create_or_update_monitored_product_scraped(
         availability=availability,
         last_status=last_status,
     )
-    new.next_check_at = calculate_next_check_at(new, collected_at=last_checked)
     _update_price_change_tracking(
         new,
         new_price=resolved_price,
         old_price=None,
         collected_at=collected_at or last_checked,
     )
+    new.stability_score = calculate_stability_score(
+        new,
+        reference_time=last_checked,
+    )
+    new.next_check_at = calculate_next_check_at(new, collected_at=last_checked)
     
     try:
         db.add(new)
