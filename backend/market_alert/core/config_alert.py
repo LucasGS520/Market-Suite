@@ -93,19 +93,19 @@ class Settings(ConfigBase):
 
     #Intervalos do agendamento contínuo (em segundos)
     COLLECT_INTERVAL_UNSTABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_UNSTABLE_MIN", str(2 * 60))
+        os.getenv("COLLECT_INTERVAL_UNSTABLE_MIN", str(5 * 60))
     ) #Intervalo mínimo para produtos instáveis
     COLLECT_INTERVAL_UNSTABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_UNSTABLE_MAX", str(5 * 60))
+        os.getenv("COLLECT_INTERVAL_UNSTABLE_MAX", str(10 * 60))
     ) #Intervalo máximo para produtos instáveis
     COLLECT_INTERVAL_STABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_STABLE_MIN", str(5 * 60))
+        os.getenv("COLLECT_INTERVAL_STABLE_MIN", str(10 * 60))
     ) #Intervalo mínimo para produtos estáveis
     COLLECT_INTERVAL_STABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_STABLE_MAX", str(15 * 60))
+        os.getenv("COLLECT_INTERVAL_STABLE_MAX", str(20 * 60))
     ) #Intervalo máximo para produtos estáveis
     COLLECT_INTERVAL_VERY_STABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MIN", str(10 * 60))
+        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MIN", str(20 * 60))
     ) #Intervalo mínimo para produtos muito estáveis
     COLLECT_INTERVAL_VERY_STABLE_MAX: int = int(
         os.getenv("COLLECT_INTERVAL_VERY_STABLE_MAX", str(30 * 60))

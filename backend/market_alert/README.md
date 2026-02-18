@@ -126,6 +126,12 @@ O Redis do `docker-compose.yml` utiliza AOF com snapshots para manter filas Cele
 | Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX`, `SCRAPER_HOST_RATE_LIMIT`, `SCRAPER_HOST_RATE_WINDOW_SECONDS`, `SCRAPER_HOST_RETRY_MAX_ATTEMPTS`, `SCRAPER_HOST_RETRY_WINDOW_SECONDS`, `SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS`, `SCRAPER_INVALID_URL_MAX_ATTEMPTS`, `SCRAPER_INVALID_URL_TTL_SECONDS` |
 | Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER`, `NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS`, `NOTIFICATION_EMAIL_PROVIDER`, `NOTIFICATION_SMS_PROVIDER`, `NOTIFICATION_WHATSAPP_PROVIDER`, `NOTIFICATION_PUSH_PROVIDER`, `NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` |
 
+### Janelas padrão de rechecagem contínua
+- **Instável:** entre `5` e `10` minutos (`300s` a `600s`).
+- **Estável:** entre `10` e `20` minutos (`600s` a `1200s`).
+- **Muito estável:** entre `20` e `30` minutos (`1200s` a `1800s`).
+- Esses valores são os defaults de runtime em `core/config_alert.py` e podem ser sobrescritos via `.env.market_alert`.
+
 ### Padrões de contratos
 - **Paginação**: todas as rotas de listagem utilizam envelope `{ items: [], meta: { total, page, per_page } }` com paginação base 1. Quando `per_page` não é enviado em `/monitored`, a API retorna todos os registros disponíveis preservando um teto de segurança.
 - **Campos monetários**: valores `Decimal` são serializados como string (`"1099.90"`) por padrão. O resumo de comparação mantém encoder que envia números (`1099.9`) e deve ser tratado pelo frontend.
@@ -198,11 +204,11 @@ REFRESH_TOKEN_COOKIE_SECURE=0
 REFRESH_TOKEN_COOKIE_SAMESITE=none
 FRONTEND_ORIGINS=http://localhost:5173
 
-COLLECT_INTERVAL_UNSTABLE_MIN=120
-COLLECT_INTERVAL_UNSTABLE_MAX=300
-COLLECT_INTERVAL_STABLE_MIN=300
-COLLECT_INTERVAL_STABLE_MAX=900
-COLLECT_INTERVAL_VERY_STABLE_MIN=600
+COLLECT_INTERVAL_UNSTABLE_MIN=300
+COLLECT_INTERVAL_UNSTABLE_MAX=600
+COLLECT_INTERVAL_STABLE_MIN=600
+COLLECT_INTERVAL_STABLE_MAX=1200
+COLLECT_INTERVAL_VERY_STABLE_MIN=1200
 COLLECT_INTERVAL_VERY_STABLE_MAX=1800
 
 STABILITY_DAYS_UNSTABLE=1

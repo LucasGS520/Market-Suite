@@ -49,6 +49,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 - **Infraestrutura de apoio**: PostgreSQL e Redis são orquestrados via `docker-compose.yml`.
 - **Fluxo alto nível**: usuários interagem com o frontend → frontend chama a API `market_alert` → API agenda tarefas Celery em filas específicas → workers dedicados consomem e processam → scraper coleta dados → eventos de domínio geram notificações.
 - **Agendamento contínuo**: o worker `celery-worker-monitor` executa indefinidamente `run_continuous_collector`, que consome a fila de prioridade Redis (sorted sets), dispara coletas assíncronas de monitorados + concorrentes na fila `scraping` e mantém o reenqueue pendente até a coleta finalizar.
+- **Janelas padrão de rechecagem**: `COLLECT_INTERVAL_UNSTABLE_MIN/MAX = 5*60/10*60`, `COLLECT_INTERVAL_STABLE_MIN/MAX = 10*60/20*60` e `COLLECT_INTERVAL_VERY_STABLE_MIN/MAX = 20*60/30*60`. Mantenha runtime e documentação sincronizados sempre que esses defaults mudarem.
 
 ### Responsabilidades das tarefas Celery (`market_alert`) e Organização de Workers
 
