@@ -28,10 +28,17 @@ from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.services.services_priority_queue_manager import (
-    enqueue_monitored_now,
+    enqueue_monitored_at,
     remove_from_priority_queue,
 )
-from market_alert.utils.interval_calculator_products import calculate_next_check_at, calculate_stability_score, STABILITY_UNSTABLE
+from market_alert.utils.interval_calculator_products import (
+    EVENT_AVAILABILITY_CHANGED,
+    EVENT_PRICE_CHANGED,
+    EVENT_RESUMED,
+    EVENT_STANDARD,
+    STABILITY_UNSTABLE,
+    calculate_schedule,
+)
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
@@ -105,6 +112,19 @@ def _update_price_change_tracking(
             new_price=str(new_price) if new_price is not None else None,
             collected_at=collected_reference.isoformat(),
         )
+
+def _resolve_schedule_event(*, price_changed: bool, availability_changed: bool) -> str:
+    """ Define evento de agendamento priorizando mudanças mais sensíveis
+    
+    A ordem de precedência evita ambiguidade quando preço e disponibilidade
+    mudam no mesmo ciclo: priporizamos preço por representar alteração com maior
+    impacto no loop de comparação.
+    """
+    if price_changed:
+        return EVENT_PRICE_CHANGED
+    if availability_changed:
+        return EVENT_AVAILABILITY_CHANGED
+    return EVENT_STANDARD
 
 def _derive_name_from_url(product_url: str) -> str:
     """ Extrai um identificador legível da URL quando o usuário não fornece nome """
@@ -244,7 +264,13 @@ def create_pending_monitored_product(
     )
 
     #Calcula o próximo agendamento após istanciar o objeto para reutilizar referências e evitar uso de variáveis inexistentes
-    pending.next_check_at = calculate_next_check_at(pending, collected_at=reference_time)
+    pending_schedule = calculate_schedule(
+        pending,
+        reference_time=reference_time,
+        event_type=EVENT_STANDARD,
+    )
+    pending.stability_score = pending_schedule.stability_score
+    pending.next_check_at = pending_schedule.next_check_at
     db.add(pending)
 
     try:
@@ -375,11 +401,18 @@ def create_or_update_monitored_product_scraped(
                 collected_at=collected_reference,
             )
             #A estabilidade precisa ser recalculada antes do agendamento para refletir mudanças de preço no mesmo ciclo
-            existing.stability_score = calculate_stability_score(
+            availability_changed = previous_status != existing.status
+            schedule_event = _resolve_schedule_event(
+                price_changed=price_changed,
+                availability_changed=availability_changed,
+            )
+            schedule_decision = calculate_schedule(
                 existing,
                 reference_time=last_checked,
+                event_type=schedule_event,
             )
-            existing.next_check_at = calculate_next_check_at(existing, collected_at=last_checked)
+            existing.stability_score = schedule_decision.stability_score
+            existing.next_check_at = schedule_decision.next_check_at
 
             db.commit()
         except Exception:
@@ -436,11 +469,13 @@ def create_or_update_monitored_product_scraped(
         old_price=None,
         collected_at=collected_at or last_checked,
     )
-    new.stability_score = calculate_stability_score(
+    initial_schedule = calculate_schedule(
         new,
         reference_time=last_checked,
+        event_type=EVENT_STANDARD,
     )
-    new.next_check_at = calculate_next_check_at(new, collected_at=last_checked)
+    new.stability_score = initial_schedule.stability_score
+    new.next_check_at = initial_schedule.next_check_at
     
     try:
         db.add(new)
@@ -753,7 +788,13 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
     was_paused = bool(monitored.paused)
     monitored.paused = False
     monitored.paused_at = None
-    monitored.next_check_at = calculate_next_check_at(monitored, collected_at=reference)
+    resumed_schedule = calculate_schedule(
+        monitored,
+        reference_time=reference,
+        event_type=EVENT_RESUMED,
+    )
+    monitored.stability_score = resumed_schedule.stability_score
+    monitored.next_check_at = resumed_schedule.next_check_at
 
     competitors_updated = crud_competitor.update_competitors_pause_state(
         db,
@@ -780,7 +821,11 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
         )
     
     try:
-        enqueue_monitored_now(monitored.id, source="user_resumed")
+        enqueue_monitored_at(
+            monitored.id,
+            monitored.next_check_at or reference,
+            source="user_resumed",
+        )
     except Exception as exc:
         #Mantém a retomada mesmo que o Redis não responda
         logger.warning(

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import structlog
@@ -19,14 +19,19 @@ from sqlalchemy.orm import Session
 from shared.infra.db import SessionLocal
 
 from market_alert.core.celery_app import celery_app
-from market_alert.core.config_alert import settings
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.orchestrator.collector_service_orchestrator import build_competitor_payload, build_monitored_payload
 from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.services.services_priority_queue_manager import enqueue_monitored_at
-from market_alert.utils.interval_calculator_products import _resolve_next_check_at, _utc_now
+from market_alert.utils.interval_calculator_products import (
+    EVENT_RETRY,
+    RetryContext,
+    _resolve_next_check_at,
+    _utc_now,
+    calculate_schedule,
+)
 from market_alert.utils.rate_limiter import _resolve_cooldown_seconds
 
 
@@ -320,14 +325,19 @@ def _handle_processing_requeue(
             return
 
         resolved_next_check_at, now = _resolve_next_check_at(monitored, next_retry_at)
-        if normalized_reason in {"rate_limit", "too_many_requests", "429", "temporary_failure"}:
-            cooldown_at = now + timedelta(seconds=settings.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS)
-            if resolved_next_check_at < cooldown_at:
-                resolved_next_check_at = cooldown_at
+        scheduling = calculate_schedule(
+            monitored,
+            reference_time=now,
+            event_type=EVENT_RETRY,
+            retry_context=RetryContext(
+                reason=normalized_reason,
+                next_retry_at=resolved_next_check_at,
+            ),
+        )
 
         requeued, effective_next_check_at = _requeue_monitored(
             monitored=monitored,
-            next_check_at=resolved_next_check_at,
+            next_check_at=scheduling.next_check_at,
             queue_service=queue_service,
         )
 
@@ -338,6 +348,7 @@ def _handle_processing_requeue(
             monitored_id=monitored_id,
             next_check_at=effective_next_check_at.isoformat(),
             reason=normalized_reason,
+            schedule_reason=scheduling.reason,
             outcome=collect_outcome,
             trace_id=trace_id,
         )

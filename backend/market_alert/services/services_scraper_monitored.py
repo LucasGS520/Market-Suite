@@ -28,7 +28,7 @@ from market_alert.services._scraper_common import (
     normalize_currency_code,
     resolve_conditional_headers,
 )
-from market_alert.utils.interval_calculator_products import calculate_next_check_at
+from market_alert.utils.interval_calculator_products import EVENT_NOT_MODIFIED, calculate_schedule
 
 
 #Logger específico para o fluxo de monitorados
@@ -71,7 +71,13 @@ def _handle_response(
                 product.last_checked = last_checked
                 product.collected_at = collected_at
                 product.status = MonitoredStatus.active
-                product.next_check_at = calculate_next_check_at(product, collected_at=last_checked)
+                scheduling = calculate_schedule(
+                    product,
+                    reference_time=last_checked,
+                    event_type=EVENT_NOT_MODIFIED,
+                )
+                product.stability_score = scheduling.stability_score
+                product.next_check_at = scheduling.next_check_at
                 db.commit()
                 persisted_at = datetime.now(timezone.utc)
                 try:

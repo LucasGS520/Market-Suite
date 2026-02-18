@@ -84,7 +84,6 @@ def test_sem_mudanca_de_preco_mantem_ou_evolui_estabilidade(monkeypatch) -> None
         now,
     )
 
-    assert updated.stability_score == crud_monitored.calculate_stability_score(updated, reference_time=now)
     assert updated.stability_score == 2
     assert updated.next_check_at == now + timedelta(seconds=1800)
 
@@ -115,7 +114,7 @@ def test_com_mudanca_de_preco_reseta_para_instavel_e_janela_curta(monkeypatch) -
 
 
 def test_next_check_at_considera_nova_estabilidade_no_mesmo_ciclo(monkeypatch) -> None:
-    """ Garante que o agendamento enxerga stability_score já recalculada. """
+    """ Garante que o helper central recebe o evento de transição no mesmo ciclo. """
     _configurar_janelas_deterministicas(monkeypatch)
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -123,15 +122,21 @@ def test_next_check_at_considera_nova_estabilidade_no_mesmo_ciclo(monkeypatch) -
     product_data, scraped_info = _build_inputs("130.00")
     fake_db = SimpleNamespace(commit=lambda: None, rollback=lambda: None, refresh=lambda _: None)
 
-    stability_seen: list[int | None] = []
+    event_seen: list[str] = []
+    original_calculate_schedule = crud_monitored.calculate_schedule
 
-    def _calculate_next_check_spy(product, collected_at):
-        #Registramos o score observado para provar que o cálculo acontece após o recálculo.
-        stability_seen.append(product.stability_score)
-        return collected_at + timedelta(seconds=300)
+    def _calculate_schedule_spy(product, *, reference_time, event_type, retry_context=None):
+        #Registramos o evento para comprovar que mudança de preço força transição instável.
+        event_seen.append(event_type)
+        return original_calculate_schedule(
+            product,
+            reference_time=reference_time,
+            event_type=event_type,
+            retry_context=retry_context,
+        )
 
     monkeypatch.setattr(crud_monitored, "get_monitored_product_by_user_and_url", lambda *_: existing)
-    monkeypatch.setattr(crud_monitored, "calculate_next_check_at", _calculate_next_check_spy)
+    monkeypatch.setattr(crud_monitored, "calculate_schedule", _calculate_schedule_spy)
     monkeypatch.setattr(crud_monitored.crud_price_history, "create_for_monitored", lambda *args, **kwargs: None)
 
     crud_monitored.create_or_update_monitored_product_scraped(
@@ -142,5 +147,5 @@ def test_next_check_at_considera_nova_estabilidade_no_mesmo_ciclo(monkeypatch) -
         now,
     )
 
-    assert stability_seen == [crud_monitored.STABILITY_UNSTABLE]
+    assert event_seen == [crud_monitored.EVENT_PRICE_CHANGED]
     
