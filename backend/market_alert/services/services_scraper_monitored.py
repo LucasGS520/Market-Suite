@@ -19,7 +19,6 @@ from market_alert.crud.crud_monitored import (
     create_or_update_monitored_product_scraped,
     get_monitored_product_by_user_and_url,
 )
-from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
 from market_alert.services._scraper_common import (
     compute_force_refresh,
@@ -70,7 +69,6 @@ def _handle_response(
                 #Marca checagem e scraping para evitar lacunas de monitoramento mesmo sem mudanças.
                 product.last_checked = last_checked
                 product.collected_at = collected_at
-                product.status = MonitoredStatus.active
                 scheduling = calculate_schedule(
                     product,
                     reference_time=last_checked,
@@ -92,8 +90,10 @@ def _handle_response(
                     )
 
                 logger.info(
-                    "monitored_not_modified",
+                    "monitored_not_modified_status_unchanged",
                     product_id=str(product.id),
+                    status_before=str(product.status),
+                    status_after=str(product.status),
                     normalized_url=lookup_url,
                     last_checked=last_checked.isoformat(),
                     collected_at=collected_at.isoformat(),
