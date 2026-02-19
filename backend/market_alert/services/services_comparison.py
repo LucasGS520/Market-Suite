@@ -900,41 +900,28 @@ def build_comparison_summary(
     *,
     competitors_count: int,
     stored_summary: PriceComparisonSummary | None = None,
+    force_recompute: bool = False,
 ) -> Dict[str, Any]:
-    """ Normaliza os dados de resumo para exposição na API pública """
-    if stored_summary is not None:
-        stored_payload = stored_summary.aggregates or {}
-        recomputed_payload = _compute_summary_from_payload(
-            stored_payload,
-            timestamp=stored_summary.timestamp,
-            comparison_id=stored_summary.comparison_id,
+    """ Normaliza o resumo competitivo em dois modos explícitos 
+    
+    Modo padrão (``force_recompute=False``): normaliza o snapshot persistido
+    em ``stored_summary`` quando disponível.
+    Modo recompute (``force_recompute=True``): recalcula o resumo a partir do
+    estado mais atual conhecido (payload da comparação corrente) sem usar
+    ``stored_summary.aggregates`` como fonte principal de discrepâncias,
+    mínimos, máximos e média.
+    """
+    if force_recompute:
+        return _build_recomputed_summary(
+            comparison=comparison,
+            stored_summary=stored_summary,
             competitors_count=competitors_count,
         )
-
-        #Preferir valores recomputados quando disponíveis (sobrescrever snapshots antigos) 
-        #Garantir que classificações reflitam os preços atuais sempre que houver dados novos.
-        merged_payload = stored_payload.copy()
-        for key, value in recomputed_payload.items():
-            if value is None:
-                continue
-            
-            if key == "last_comparison_at" and merged_payload.get(key) is not None:
-                continue
-            
-            if (
-                key == "competitors_with_price_count"
-                and merged_payload.get(key)
-                and value == 0
-            ):
-                continue
-            
-            merged_payload[key] = value
-
-        #Garante que a contagem reflita o valor recalculado, mesmo com snapshot presente
-        merged_payload["competitors_count"] = competitors_count
-
+    
+    if stored_summary is not None:
+        stored_payload = stored_summary.aggregates or {}
         return _apply_summary_defaults(
-            merged_payload,
+            stored_payload,
             timestamp=stored_summary.timestamp,
             comparison_id=stored_summary.comparison_id,
             competitors_count=competitors_count,
@@ -965,6 +952,52 @@ def build_comparison_summary(
         comparison_id=comparison.id,
         competitors_count=competitors_count,
     )
+
+def _build_recomputed_summary(
+    *,
+    comparison: PriceComparison | None,
+    stored_summary: PriceComparisonSummary | None,
+    competitors_count: int,
+) -> Dict[str, Any]:
+    """ Recalcula resumo sem carregar agregados antigos como base.
+
+    O objetivo é eliminar ambiguidade quando o snapshot está defasado: os
+    valores calculados agora devem substituir integralmente agregados antigos,
+    principalmente ``discrepancies`` e estatísticas de preço.
+    """
+    if comparison is not None:
+        payload = comparison.data or {}
+        if isinstance(payload, dict):
+            embedded_summary = payload.get("summary")
+            if isinstance(embedded_summary, dict):
+                #Usa o resumo embutido quando ele já representa o estado atual.
+                return _apply_summary_defaults(
+                    embedded_summary,
+                    timestamp=comparison.timestamp,
+                    comparison_id=comparison.id,
+                    competitors_count=competitors_count,
+                )
+
+        return _compute_summary_from_payload(
+            payload,
+            timestamp=comparison.timestamp,
+            comparison_id=comparison.id,
+            competitors_count=competitors_count,
+        )
+
+    if stored_summary is not None:
+        #Sem comparação atual disponível, normaliza o snapshot existente.
+        return _apply_summary_defaults(
+            stored_summary.aggregates or {},
+            timestamp=stored_summary.timestamp,
+            comparison_id=stored_summary.comparison_id,
+            competitors_count=competitors_count,
+        )
+
+    summary = _empty_summary(competitors_count)
+    if competitors_count == 0:
+        summary["reason"] = "sem_concorrentes_disponiveis"
+    return summary
 
 def _resolve_monitored_inactive_reason(monitored: Any) -> str | None:
     """ Determina se o monitorado deve ser tratado como inativo na comparação """
