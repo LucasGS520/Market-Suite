@@ -1,7 +1,6 @@
 """ Funções CRUD para manipular produtos concorrentes """
 from __future__ import annotations
 
-import os
 from uuid import UUID
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -16,13 +15,10 @@ from fastapi import HTTPException, status
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_competitor_url, normalize_product_url_for_storage
-from shared.utils.redis_client import set_key_with_ttl
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
-from market_alert.core.celery_app import celery_app
-from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.utils.name_derivation import derive_name_from_url, prepare_effective_name, should_replace_with_scraped
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 from market_alert.utils.price_decimal import to_decimal, different_price
@@ -46,59 +42,6 @@ def _resolve_compare_enqueue_reason(
     if recollection_refreshed:
         return "recollection_refresh"
     return None
-
-
-def _enqueue_compare_recompute(
-    monitored_product_id: UUID,
-    *,
-    reason: str,
-) -> None:
-    """ Enfileira recomputação de comparação após persistir concorrente.
-
-    O disparo é tolerante a falhas para não invalidar transações já
-    confirmadas no banco quando o broker estiver indisponível.
-    """
-    debounce_ttl_seconds = int(os.getenv("COMPARE_RECOMPUTE_DEBOUNCE_TTL_SECONDS", "600"))
-    debounce_key = f"compare:debounce:{monitored_product_id}"
-    debounce_registered = set_key_with_ttl(
-        debounce_key,
-        "1",
-        debounce_ttl_seconds,
-        only_if_absent=True,
-    )
-    if debounce_registered is False:
-        logger.info(
-            "compare_recompute_debounced_after_competitor_persist",
-            monitored_id=str(monitored_product_id),
-            reason=reason,
-            ttl_seconds=debounce_ttl_seconds,
-        )
-        return
-    if debounce_registered is None:
-        #Mantém enqueue sem Redis para não comprometer a consistência do resumo
-        logger.warning(
-            "compare_recompute_debounce_unavailable_after_competitor_persist",
-            monitored_id=str(monitored_product_id),
-            reason=reason,
-        )
-
-    try:
-        celery_app.send_task(
-            "market_alert.tasks.compare_prices_task.compare_prices_task",
-            args=[str(monitored_product_id)],
-            queue="compare",
-        )
-        logger.info(
-            "compare_recompute_enqueued_after_competitor_persist",
-            monitored_id=str(monitored_product_id),
-            reason=reason,
-        )
-    except Exception:
-        logger.exception(
-            "compare_recompute_enqueue_failed_after_competitor_persist",
-            monitored_id=str(monitored_product_id),
-            reason=reason,
-        )
 
 def _normalize_competitor_storage_url(product_url: str) -> str:
     """ Normaliza URL de concorrente garantindo consistência com o armazenamento """
@@ -331,6 +274,8 @@ def create_or_update_competitor_product_scraped(
 
     if existing:
         resolved_price = normalize_scraped_price(scraped_info.current_price)
+        existing._recompute_comparison = False
+        existing._recompute_reason = None
         
         #Atualiza somente campos relevantes
         if provided_name and existing.name_competitor != resolved_name:
@@ -440,8 +385,9 @@ def create_or_update_competitor_product_scraped(
         )
 
         if enqueue_reason:
-            #Inclui recoleta persistida para reduzir descompasso entre endpoints
-            _enqueue_compare_recompute(existing.monitored_product_id, reason=enqueue_reason)
+            #Sinaliza ao serviço que o resumo precisa ser recalculado fora do CRUD
+            existing._recompute_comparison = True
+            existing._recompute_reason = enqueue_reason
 
         logger.info(
             "updated_competitor",
@@ -529,7 +475,8 @@ def create_or_update_competitor_product_scraped(
     db.refresh(new)
     new._price_changed = True
     new._availability_changed = True
-    _enqueue_compare_recompute(new.monitored_product_id, reason="material_change")
+    new._recompute_comparison = True
+    new._recompute_reason = "material_change"
     return new
 
 def get_all_competitor_products(db: Session, *, include_paused: bool = False) -> List[CompetitorProduct]:
@@ -582,46 +529,18 @@ def get_competitors_by_monitored_id(
         )
     return query.all()
 
-def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) -> List[CompetitorProduct]:
-    """ Remove todos os produtos concorrentes vinculados a um produto monitorado """
+def delete_competitors_by_monitored_id(db: Session, monitored_product_id: UUID) -> List[UUID]:
+    """ Remove concorrentes vinculados a um monitorado e retorna os IDs removidos """
     competitors = get_competitors_by_monitored_id(db, monitored_product_id, include_paused=True)
-    queue_service = PriorityQueueService()
+    deleted_ids: List[UUID] = []
     for item in competitors:
-        removed = queue_service.remove(str(item.id))
-        if removed:
-            logger.info(
-                "competitor_removed_from_priority_queue",
-                competitor_id=str(item.id),
-                reason="competitor_delete",
-            )
-        else:
-            #Mantém remoção de concorrente mesmo sem Redis disponível
-            logger.warning(
-                "competitor_priority_queue_remove_failed",
-                competitor_id=str(item.id),
-                reason="competitor_delete",
-            )
+        deleted_ids.append(item.id)
         db.delete(item)
     db.commit()
-    return competitors
+    return deleted_ids
 
 def delete_competitor(db: Session, competitor: CompetitorProduct) -> None:
     """ Remove concorrente específico garantindo flush para cascatas """
-    queue_service = PriorityQueueService()
-    removed = queue_service.remove(str(competitor.id))
-    if removed:
-        logger.info(
-            "competitor_removed_from_priority_queue",
-            competitor_id=str(competitor.id),
-            reason="competitor_delete",
-        )
-    else:
-        #Evita falha de deleção quando Redis estiver indisponível
-        logger.warning(
-            "competitor_priority_queue_remove_failed",
-            competitor_id=str(competitor.id),
-            reason="competitor_delete",
-        )
     db.delete(competitor)
     db.flush()
 

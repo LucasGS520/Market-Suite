@@ -27,3 +27,10 @@ def different_prices(
     previous = to_decimal(previous_price)
     current = to_decimal(current_price)
     return previous != current
+
+def different_price(
+    previous_price: Decimal | float | int | str | None,
+    current_price: Decimal | float | int | str | None,
+) -> bool:
+    """ Mantém compatibilidade com chamadas legadas para comparação de preço. """
+    return different_prices(previous_price, current_price)

@@ -19,6 +19,7 @@ from market_alert.crud.crud_competitor import (
     get_competitor_by_monitored_and_url,
 )
 from market_alert.models.models_products import CompetitorProduct
+from market_alert.utils.price_comparator import request_comparison_recompute
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 from market_alert.services._scraper_common import (
     execute_scraper_fetch,
@@ -186,6 +187,10 @@ def scrape_competitor_product(
     )
 
     persisted_at = datetime.now(timezone.utc)
+    if getattr(competitor, "_recompute_comparison", False):
+        recompute_reason = getattr(competitor, "_recompute_reason", "material_change")
+        request_comparison_recompute(competitor.monitored_product_id, recompute_reason)
+
     logger.info(
         "competitor_scrape_persisted",
         competitor_id=str(competitor.id),

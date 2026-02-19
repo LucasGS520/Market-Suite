@@ -32,7 +32,7 @@ from market_alert.utils.interval_calculator_products import calculate_next_check
 from market_alert.core.config_alert import settings
 
 from shared.utils.url_validation import normalize_and_validate_product_url
-from market_alert.core.celery_app import celery_app
+from market_alert.utils.price_comparator import request_comparison_recompute
 
 
 logger = structlog.get_logger(__name__)
@@ -260,28 +260,6 @@ def create_competitor_scrape_request(
                 **context,
             )
 
-    try:
-        #Antecipamos a recomputação para reduzir janela de inconsistência entre endpoints
-        celery_app.send_task(
-            "market_alert.tasks.compare_prices_task.compare_prices_task",
-            args=[str(monitored_product.id)],
-            queue="compare",
-        )
-        logger.info(
-            "compare_recompute_requested_after_competitor_request",
-            competitor_id=str(pending.id),
-            monitored_id=str(monitored_product.id),
-            **context,
-        )
-    except Exception:
-        #Não interrompe criação do concorrente quando o broker falhar.
-        logger.warning(
-            "compare_recompute_request_failed_after_competitor_request",
-            competitor_id=str(pending.id),
-            monitored_id=str(monitored_product.id),
-            **context,
-        )
-
     logger.info(
         "competitor_scrape_scheduled",
         competitor_id=str(pending.id),
@@ -402,12 +380,23 @@ def delete_competitor_entry(
             monitored_id=str(monitored_id),
         )
 
-        #Enfileira recálculo via Celery sem importar a task diretamente para evitar ciclo
-        celery_app.send_task(
-            "market_alert.tasks.compare_prices_task.compare_prices_task",
-            args=[str(monitored_id)],
-            queue="compare",
-        )
+        queue_service = PriorityQueueService()
+        removed = queue_service.remove(str(competitor_id))
+        if removed:
+            logger.info(
+                "competitor_removed_from_priority_queue",
+                competitor_id=str(competitor_id),
+                reason="competitor_delete",
+            )
+        else:
+            #Não bloqueia remoção do banco quando houver falha de Redis
+            logger.warning(
+                "competitor_priority_queue_remove_failed",
+                competitor_id=str(competitor_id),
+                reason="competitor_delete",
+            )
+
+        request_comparison_recompute(monitored_id, "competitor_deleted")
         logger.info(
             "competitor_delete_recalculation_enqueued",
             monitored_id=str(monitored_id),
@@ -431,8 +420,8 @@ def clear_competitors_from_monitored(
     monitored_product_id: UUID,
     user: User,
     context: dict[str, str] | None = None,
-) -> list[CompetitorProduct]:
-    """ Apaga todos os concorrentes vinculados ao monitorado do usuário """
+) -> list[UUID]:
+    """ Apaga concorrentes do monitorado e remove os IDs da fila de prioridade """
     monitored = ensure_user_can_access_monitored(
         db=db,
         product_id=monitored_product_id,
@@ -454,4 +443,21 @@ def clear_competitors_from_monitored(
             detail="Monitoramento pausado. Retome o produto para remover concorrentes.",
         )
     
-    return delete_competitors_by_monitored_id(db, monitored_product_id)
+    deleted_ids = delete_competitors_by_monitored_id(db, monitored_product_id)
+    queue_service = PriorityQueueService()
+    for competitor_id in deleted_ids:
+        removed = queue_service.remove(str(competitor_id))
+        if removed:
+            logger.info(
+                "competitor_removed_from_priority_queue",
+                competitor_id=str(competitor_id),
+                reason="competitor_delete",
+            )
+        else:
+            #Mantém remoção em banco mesmo quando Redis estiver indisponível
+            logger.warning(
+                "competitor_priority_queue_remove_failed",
+                competitor_id=str(competitor_id),
+                reason="competitor_delete",
+            )
+    return deleted_ids

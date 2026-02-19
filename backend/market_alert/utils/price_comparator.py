@@ -5,6 +5,7 @@ utilizados pelos cards do frontend. O foco permanece em identificar o menor e o
 maior preço, média dos concorrentes e ranking básico.
 """
 
+import os
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any, Optional
 from uuid import UUID
@@ -19,6 +20,58 @@ from shared.utils.redis_client import set_key_with_ttl
 
 
 logger = structlog.get_logger("price_comparator")
+
+def request_comparison_recompute(monitored_id: UUID, reason: str) -> None:
+    """ Despacha ``compare_prices_task`` com debounce Redis para um monitorado.
+
+    Centraliza o disparo de recomputação para manter uma única regra de
+    debounce e um único ponto de integração com Celery para comparações.
+    """
+    debounce_ttl_seconds = int(os.getenv("COMPARE_RECOMPUTE_DEBOUNCE_TTL_SECONDS", "600"))
+    debounce_key = f"compare:debounce:{monitored_id}"
+    debounce_registered = set_key_with_ttl(
+        debounce_key,
+        "1",
+        debounce_ttl_seconds,
+        only_if_absent=True,
+    )
+
+    if debounce_registered is False:
+        logger.info(
+            "compare_recompute_debounced",
+            monitored_id=str(monitored_id),
+            reason=reason,
+            ttl_seconds=debounce_ttl_seconds,
+        )
+        return
+
+    if debounce_registered is None:
+        #Permite continuar sem Redis para não perder consistência de comparação
+        logger.warning(
+            "compare_recompute_debounce_unavailable",
+            monitored_id=str(monitored_id),
+            reason=reason,
+        )
+
+    from market_alert.core.celery_app import celery_app
+
+    try:
+        celery_app.send_task(
+            "market_alert.tasks.compare_prices_task.compare_prices_task",
+            args=[str(monitored_id)],
+            queue="compare",
+        )
+        logger.info(
+            "compare_recompute_enqueued",
+            monitored_id=str(monitored_id),
+            reason=reason,
+        )
+    except Exception:
+        logger.exception(
+            "compare_recompute_enqueue_failed",
+            monitored_id=str(monitored_id),
+            reason=reason,
+        )
 
 def calculate_discrepancies(
     competitor: CompetitorProduct,
@@ -176,46 +229,8 @@ def _dispatch_comparison(
     if not (force or changed):
         return
 
-    debounce_key = f"compare:debounce:{monitored_id}"
-    debounce_registered = set_key_with_ttl(
-        debounce_key,
-        "1",
-        debounce_ttl_seconds,
-        only_if_absent=True,
-    )
-    if debounce_registered is False:
-        #Evita duplicidade de comparação em janela curta para o mesmo monitorado
-        logger.info(
-            "compare_prices_debounced",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-            ttl_seconds=debounce_ttl_seconds,
-        )
-        return
-    if debounce_registered is None:
-        #Mantém o fluxo mesmo sem Redis para não perder comparações relevantes
-        logger.warning(
-            "compare_debounce_unavailable",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-        )
-
-    #Usa send_task para evitar importação direta e quebrar ciclos entre tasks
-    from market_alert.core.celery_app import celery_app
-
-    celery_app.send_task(
-        "market_alert.tasks.compare_prices_task.compare_prices_task",
-        args=[
-            str(monitored_id),
-            bool(getattr(result, "price_changed", False)),
-            bool(getattr(result, "availability_changed", False)),
-            trace_id,
-        ],
-        #Mantém comparação a fila dedicada para não saturar o worker do coletor contínuo
-        queue="compare",
-        #Pequeno atraso para reduzir janelas de leitura suja após commit
-        countdown=countdown_seconds,
-    )
+    reason = "forced_scrape" if force else "material_change"
+    request_comparison_recompute(monitored_id, reason)
     logger.info(
         "compare_prices_enqueued",
         monitored_id=str(monitored_id),
@@ -282,6 +297,7 @@ def _parse_force_compare_(value: str | None) -> bool:
 __all__ = [
     "calculate_discrepancies",
     "compare_prices",
+    "request_comparison_recompute",
     "_dispatch_comparison",
     "_schedule_comparison_after_commit",
     "_parse_force_compare_",
