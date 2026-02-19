@@ -4,9 +4,8 @@ from __future__ import annotations
 import os
 from uuid import UUID
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import List, Sequence
-from urllib.parse import unquote, urlparse
 
 import structlog
 from sqlalchemy import desc, func
@@ -24,8 +23,9 @@ from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
 from market_alert.core.celery_app import celery_app
 from market_alert.services.services_priority_queue import PriorityQueueService
+from market_alert.utils.name_derivation import derive_name_from_url, prepare_effective_name, should_replace_with_scraped
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
-
+from market_alert.utils.price_decimal import to_decimal, different_price
 
 logger = structlog.get_logger("crud_competitor")
 
@@ -108,23 +108,6 @@ def _normalize_competitor_storage_url(product_url: str) -> str:
     #Mantém um fallback mínimo para evitar escrita de URLs vazias no banco
     return str(product_url or "").strip()
 
-def _to_decimal(value: Decimal | float | int | str | None) -> Decimal | None:
-    """ Converte valor para `Decimal` preservando `None` e falhas de parsing """
-    if value is None:
-        return None
-    if isinstance(value, Decimal):
-        return value
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError):
-        return None
-    
-def _different_price(previous_price: Decimal | float | int | str | None, current_price: Decimal | float | int | str | None) -> bool:
-    """ Normaliza para `Decimal` antes de comparar e evitar falsos negativos """
-    previous = _to_decimal(previous_price)
-    current = _to_decimal(current_price)
-    return previous != current
-
 def _update_competitor_price_change_tracking(
     competitor: CompetitorProduct,
     new_price: Decimal | None,
@@ -133,7 +116,7 @@ def _update_competitor_price_change_tracking(
 ) -> None:
     """ Atualiza o registro de mudança de preço do concorrente quando necessário """
     collected_reference = collected_at.astimezone(timezone.utc) if collected_at.tzinfo else collected_at.replace(tzinfo=timezone.utc)
-    if _different_price(old_price, new_price):
+    if different_price(old_price, new_price):
         competitor.last_price_change_at = collected_reference
         logger.info(
             "competitor_price_change_detected",
@@ -219,53 +202,6 @@ def update_competitor_pause_state(
         db.commit()
     return bool(updated)
 
-def _derive_competitor_name_from_url(product_url: str) -> str:
-    """Gera um nome provisório a partir da URL para preencher o cadastro pendente."""
-    parsed = urlparse(product_url)
-    caminho = unquote(parsed.path or "").strip("/")
-    ultimo_segmento = caminho.split("/")[-1] if caminho else ""
-    candidato = ultimo_segmento or parsed.netloc or str(product_url)
-    normalizado = candidato.replace("-", " ").replace("_", " ").strip()
-    sanitizado = sanitize_text(normalizado)
-
-    if sanitizado:
-        return sanitizado
-
-    host = sanitize_text(parsed.netloc)
-    if host:
-        return host
-
-    #Mantém um fallback amigável evitando valores vazios no banco
-    return "Concorrente pendente"
-
-def _prepare_competitor_name(
-    provided_name: str | None,
-    scraped_name: str | None,
-    product_url: str,
-) -> tuple[str, str]:
-    """ Determina o nome final aplicando prioridade usuário -> scraoping -> URL """
-    fallback = _derive_competitor_name_from_url(product_url)
-    sanitized_provided = sanitize_text(provided_name) if provided_name else None
-    sanitized_scraped = sanitize_text(scraped_name)
-    if sanitized_provided:
-        return sanitized_provided, fallback
-    if sanitized_scraped:
-        return sanitized_scraped, fallback
-    return fallback, fallback
-
-def _should_replace_competitor_with_scraped(
-    existing_name: str | None,
-    fallback_name: str,
-    scraped_name: str | None,
-) -> bool:
-    """ Decide se substituímos o nome atual quando ele é apenas o fallback da URL """
-    sanitized_scraped = sanitize_text(scraped_name)
-    if not sanitized_scraped:
-        return False
-    if existing_name is None:
-        return True
-    return existing_name.strip().casefold() == fallback_name.strip().casefold()
-
 def create_pending_competitor_product(
     db: Session,
     monitored_product_id: UUID,
@@ -307,7 +243,7 @@ def create_pending_competitor_product(
         return existing
     
     sanitized_display_name = sanitize_text(display_name) if display_name else None
-    resolved_display_name = sanitized_display_name or _derive_competitor_name_from_url(product_url)
+    resolved_display_name = sanitized_display_name or derive_name_from_url(product_url, fallback="Concorrente pendente")
 
     pending = CompetitorProduct(
         monitored_product_id=monitored_product_id,
@@ -386,10 +322,11 @@ def create_or_update_competitor_product_scraped(
         or getattr(product_data, "display_name", None)
         or getattr(product_data, "name_identification", None)
     )
-    resolved_name, fallback_name = _prepare_competitor_name(
+    resolved_name, fallback_name = prepare_effective_name(
         provided_name,
         scraped_info.name,
         normalized_url,
+        fallback_name="Concorrente pendente",
     )
 
     if existing:
@@ -398,7 +335,7 @@ def create_or_update_competitor_product_scraped(
         #Atualiza somente campos relevantes
         if provided_name and existing.name_competitor != resolved_name:
             existing.name_competitor = resolved_name
-        elif _should_replace_competitor_with_scraped(existing.name_competitor, fallback_name, scraped_info.name):
+        elif should_replace_with_scraped(existing.name_competitor, fallback_name, scraped_info.name):
             #Substitui o placeholder derivado da URL pelo nome real do scraping
             existing.name_competitor = sanitize_text(scraped_info.name) or fallback_name
         elif existing.name_competitor is None:
@@ -422,7 +359,7 @@ def create_or_update_competitor_product_scraped(
                 resolved_price=str(resolved_price),
             )
 
-        price_changed = _different_price(previous_price, resolved_price)
+        price_changed = different_price(previous_price, resolved_price)
         availability_changed = previous_status != resolved_status
         resolved_currency = currency or scraped_info.currency or existing.currency
 
@@ -541,7 +478,7 @@ def create_or_update_competitor_product_scraped(
         name_competitor=resolved_name,
         product_url=normalized_url,
         current_price=resolved_price,
-        old_price=_to_decimal(scraped_info.old_price),
+        old_price=to_decimal(scraped_info.old_price),
         free_shipping=scraped_info.free_shipping,
         seller=scraped_info.seller,
         seller_rating=scraped_info.seller_rating,

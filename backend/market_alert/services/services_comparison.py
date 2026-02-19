@@ -37,6 +37,7 @@ from market_alert.schemas.schemas_comparisons import (
     PriceComparisonSummaryResponse,
 )
 from market_alert.utils.price_comparator import compare_prices
+from market_alert.utils.price_decimal import to_decimal
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 
@@ -251,7 +252,7 @@ def rebuild_summary_from_current_state(
             competitors_count=competitors_count,
         )
     
-    monitored_price = _to_decimal(getattr(monitored, "current_price", None))
+    monitored_price = to_decimal(getattr(monitored, "current_price", None))
     deduped_competitors = _deduplicate_competitors(competitors)
     competitor_entries: list[tuple[CompetitorProduct, Decimal]] = []
     tolerance = Decimal(str(settings.PRICE_TOLERANCE))
@@ -548,19 +549,7 @@ def _resolve_competitor_comparison_price(
         .limit(1)
         .scalar()
     )
-    return _to_decimal(latest_price), "price_history"
-
-def _to_decimal(value: Any) -> Optional[Decimal]:
-    """ Converte valores do JSON armazenado para Decimal quando possível """
-    if value is None:
-        return None
-    if isinstance(value, Decimal):
-        return value
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError, TypeError):
-        #Retorna None quando o valor não pode ser convertido sem perdas
-        return None
+    return to_decimal(latest_price), "price_history"
     
 def _extract_competitors_count(
     stored_summary: PriceComparisonSummary | None,
@@ -733,7 +722,7 @@ def _compute_summary_from_payload(
 ) -> Dict[str, Any]:
     """ Calcula o resumo competitivo a partir do payload cru armazenado.
 
-    O cálculo utiliza todos os preços convertidos via ``_to_decimal`` e aplica:
+    O cálculo utiliza todos os preços convertidos via ``to_decimal`` e aplica:
     - ``competitors_mean``: média aritmética dos preços dos concorrentes (2 casas decimais, ``ROUND_HALF_UP``)
     - ``competitors_min``/``competitors_max``: menor e maior preço conhecido
     - ``position_rank``: 1 + quantidade de concorrentes com preço menor que o monitorado
@@ -760,7 +749,7 @@ def _compute_summary_from_payload(
         summary["discrepancies"] = (
             discrepancies_raw if isinstance(discrepancies_raw, list) else []
         )
-        monitored_price = _to_decimal(payload.get("monitored_price"))
+        monitored_price = to_decimal(payload.get("monitored_price"))
 
         summary["ignored_due_to_inactive"] = bool(payload.get("ignored_due_to_inactive"))
         reason = payload.get("reason") or summary.get("reason")
@@ -772,7 +761,7 @@ def _compute_summary_from_payload(
         competitor_prices: list[Decimal] = []
 
         def _append_price(value: Any) -> None:
-            price = _to_decimal(value)
+            price = to_decimal(value)
             if price is not None and price not in competitor_prices:
                 competitor_prices.append(price)
 
@@ -782,8 +771,8 @@ def _compute_summary_from_payload(
 
         lowest_raw = payload.get("lowest_competitor") or {}
         highest_raw = payload.get("highest_competitor") or {}
-        lowest_price = _to_decimal(lowest_raw.get("price"))
-        highest_price = _to_decimal(highest_raw.get("price"))
+        lowest_price = to_decimal(lowest_raw.get("price"))
+        highest_price = to_decimal(highest_raw.get("price"))
 
         _append_price(lowest_price)
         _append_price(highest_price)
@@ -981,7 +970,7 @@ def _coerce_decimal_fields(summary: Dict[str, Any]) -> Dict[str, Any]:
 
     for key in monetary_keys:
         if key in summary:
-            summary[key] = _to_decimal(summary.get(key))
+            summary[key] = to_decimal(summary.get(key))
 
     return summary
 

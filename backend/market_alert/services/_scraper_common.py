@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 from uuid import UUID
 
 from backend.shared.schemas.shared_schemas_scraper import ParserResponse
+from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.utils import sanitize_text
 
 from market_alert.scraper.scraper_client import (
@@ -15,6 +16,8 @@ from market_alert.scraper.scraper_client import (
     ScraperClientError,
     ScraperFetchResult,
 )
+from market_alert.utils.interval_calculator_products import EVENT_NOT_MODIFIED, calculate_schedule
+from market_alert.utils.price_decimal import to_decimal as _shared_to_decimal
 
 
 def resolve_conditional_headers(entity: Any) -> tuple[str | None, datetime | None]:
@@ -101,13 +104,8 @@ def normalize_currency_code(value: str | None) -> str | None:
     return normalized
 
 def to_decimal(value: Any) -> Decimal | None:
-    """ Converte valores genéricos para ``Decimal`` com tolerância """
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except Exception:
-        return None
+    """ Converte valores para ``Decimal`` usando utilitário compartilhado. """
+    return _shared_to_decimal(value)
     
 def to_float(value: Any) -> float | None:
     """ Converte valores genéricos para ``float`` com tolerância """
@@ -198,6 +196,64 @@ def execute_scraper_fetch(
         metadata=metadata,
     )
 
+def resolve_availability(
+    price: Decimal | None,
+    availability_flag: bool | None,
+) -> bool:
+    """ Resolve disponibilidade canônica priorizando presença de preço. """
+    if price is not None:
+        return True
+    if availability_flag is False:
+        return False
+    return availability_flag is True
+
+
+def handle_not_modified_response(
+    entity: Any,
+    db: Any,
+    *,
+    now: datetime,
+    entity_type: Literal["monitored", "competitor"],
+) -> ScrapeResult:
+    """ Trata resposta 304 com atualização de `last_checked` e efeitos colaterais.
+
+    Para monitorados, além de persistir o timestamp, recalcula estabilidade e
+    dispara enfileiramento assíncrono de concorrentes vinculados.
+    """
+    persisted_at: datetime | None = None
+    if entity is not None:
+        entity.last_checked = now
+        entity.collected_at = now
+
+        if entity_type == "monitored":
+            schedule = calculate_schedule(
+                entity,
+                reference_time=now,
+                event_type=EVENT_NOT_MODIFIED,
+            )
+            entity.stability_score = schedule.stability_score
+            entity.next_check_at = schedule.next_check_at
+
+        db.commit()
+        persisted_at = datetime.now(timezone.utc)
+
+        if entity_type == "monitored":
+            try:
+                #Import local evita acoplamento forte entre serviços durante bootstrap.
+                from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+
+                enqueue_competitors_for_monitored(db, monitored_id=entity.id)
+            except Exception:
+                #Falha no enqueue não deve invalidar persistência já confirmada.
+                pass
+
+    return ScrapeResult(
+        status="not_modified",
+        product_id=str(entity.id) if entity is not None else None,
+        http_status=304,
+        persisted_at=persisted_at,
+    )
+
 
 __all__ = [
     "ensure_price",
@@ -208,4 +264,6 @@ __all__ = [
     "compute_force_refresh",
     "maybe_call_mocked_parse",
     "execute_scraper_fetch",
+    "resolve_availability",
+    "handle_not_modified_response",
 ]

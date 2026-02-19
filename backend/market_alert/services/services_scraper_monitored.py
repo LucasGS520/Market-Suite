@@ -24,10 +24,11 @@ from market_alert.services._scraper_common import (
     compute_force_refresh,
     ensure_price,
     execute_scraper_fetch,
+    handle_not_modified_response,
     normalize_currency_code,
+    resolve_availability,
     resolve_conditional_headers,
 )
-from market_alert.utils.interval_calculator_products import EVENT_NOT_MODIFIED, calculate_schedule
 
 
 #Logger específico para o fluxo de monitorados
@@ -52,60 +53,34 @@ def _handle_response(
     `price_changed` e `availability_changed`. 
     """
     status_code = fetch_result.status_code
-    persisted_at: datetime | None = None
     if status_code == 304:
+        product = None
         if existing_id:
             try:
                 lookup_url = normalize_product_url(str(monitored_payload.product_url))
             except ValueError:
                 lookup_url = str(monitored_payload.product_url)
 
-            product = get_monitored_product_by_user_and_url(
-                db,
-                user_id,
-                lookup_url,
-            )
-            if product:
-                #Marca checagem e scraping para evitar lacunas de monitoramento mesmo sem mudanças.
-                product.last_checked = last_checked
-                product.collected_at = collected_at
-                scheduling = calculate_schedule(
-                    product,
-                    reference_time=last_checked,
-                    event_type=EVENT_NOT_MODIFIED,
-                )
-                product.stability_score = scheduling.stability_score
-                product.next_check_at = scheduling.next_check_at
-                db.commit()
-                persisted_at = datetime.now(timezone.utc)
-                try:
-                    #Garante rechecagem assíncrona dos concorrentes sem bloquear a resposta
-                    from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+            product = get_monitored_product_by_user_and_url(db, user_id, lookup_url)
 
-                    enqueue_competitors_for_monitored(db, monitored_id=product.id)
-                except Exception:
-                    logger.exception(
-                        "enqueue_competitors_failed",
-                        monitored_id=str(product.id),
-                    )
-
-                logger.info(
-                    "monitored_not_modified_status_unchanged",
-                    product_id=str(product.id),
-                    status_before=str(product.status),
-                    status_after=str(product.status),
-                    normalized_url=lookup_url,
-                    last_checked=last_checked.isoformat(),
-                    collected_at=collected_at.isoformat(),
-                    persisted_at=persisted_at.isoformat(),
-                )
-
-        return ScrapeResult(
-            status="not_modified",
-            product_id=str(existing_id) if existing_id else None,
-            http_status=304,
-            persisted_at=persisted_at,
+        response = handle_not_modified_response(
+            product,
+            db,
+            now=last_checked,
+            entity_type="monitored",
         )
+        if product and response.persisted_at is not None:
+            logger.info(
+                "monitored_not_modified_status_unchanged",
+                product_id=str(product.id),
+                status_before=str(product.status),
+                status_after=str(product.status),
+                normalized_url=lookup_url,
+                last_checked=last_checked.isoformat(),
+                collected_at=collected_at.isoformat(),
+                persisted_at=response.persisted_at.isoformat(),
+            )
+        return response
     
     if status_code in {400, 403, 422}:
         error_code = fetch_result.error_code or "validation_error"
@@ -141,9 +116,11 @@ def _handle_response(
 
     availability_flag = bool(availability) if availability is not None else None
     price_value = None
-    if payload.current_price is not None and availability_flag is not False:
+    if payload.current_price is not None:
         price_value = ensure_price(payload, request_url)
-    elif availability_flag is False:
+    
+    resolved_availability = resolve_availability(price_value, availability_flag)
+    if resolved_availability is False:
         logger.info(
             "monitored_unavailable_payload",
             url=request_url,
@@ -157,7 +134,7 @@ def _handle_response(
         thumbnail=sanitized_thumbnail,
         free_shipping=bool(metadata.get("free_shipping", False)),
         currency=sanitized_currency,
-        availability=availability_flag,
+        availability=resolved_availability,
         last_status=last_status,
     )
 

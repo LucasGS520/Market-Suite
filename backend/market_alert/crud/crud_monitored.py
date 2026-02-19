@@ -1,16 +1,15 @@
-""" Operações CRUD para produtos monitorados pelo sistema """
-
-from typing import List, Optional, Tuple
+""" Funções CRUD para produtos monitorados pelo sistema """
 
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from urllib.parse import unquote, urlparse
+from typing import List, Optional, Tuple
 
+import structlog
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
-import structlog
+
 
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
@@ -27,10 +26,7 @@ from market_alert.crud import crud_competitor, crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.services.services_priority_queue import PriorityQueueService
-from market_alert.services.services_priority_queue_manager import (
-    enqueue_monitored_at,
-    remove_from_priority_queue,
-)
+from market_alert.services.services_priority_queue_manager import enqueue_monitored_at, remove_from_priority_queue
 from market_alert.utils.interval_calculator_products import (
     EVENT_AVAILABILITY_CHANGED,
     EVENT_PRICE_CHANGED,
@@ -39,7 +35,9 @@ from market_alert.utils.interval_calculator_products import (
     STABILITY_UNSTABLE,
     calculate_schedule,
 )
+from market_alert.utils.name_derivation import prepare_effective_name, should_replace_with_scraped
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
+from market_alert.utils.price_decimal import different_price
 
 
 logger = structlog.get_logger("crud_monitored")
@@ -70,27 +68,6 @@ class MonitoredNotFoundError(LookupError):
 class MonitoredLockError(RuntimeError):
     """Erro lançado quando o lock exclusivo não pode ser adquirido"""
 
-def _to_decimal(value: Decimal | float | int | str | None) -> Decimal | None:
-    """ Converte valores diversos para `Decimal` preservando `None`
-    
-    A normalização evita comparações inconsistentes quando preço chega como
-    string ou float após coleta do scraper
-    """
-    if value is None:
-        return None
-    if isinstance(value, Decimal):
-        return value
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError):
-        return None
-    
-def _different_price(previous_price: Decimal | float | int | str | None, current_price: Decimal | float | int | str | None) -> bool:
-    """ Compara preços convertendo para `Decimal` para evitar falsos negativos """
-    previous = _to_decimal(previous_price)
-    current = _to_decimal(current_price)
-    return previous != current
-
 def _update_price_change_tracking(
     monitored: MonitoredProduct,
     new_price: Decimal | None,
@@ -101,7 +78,7 @@ def _update_price_change_tracking(
     collected_reference = collected_at.astimezone(timezone.utc) if collected_at.tzinfo else collected_at.replace(tzinfo=timezone.utc)
     monitored.group_collected_at = collected_reference
 
-    if _different_price(old_price, new_price):
+    if different_price(old_price, new_price):
         #Resetamos estabilidade para acelerar rechecagem após mudança de preço
         monitored.last_price_change_at = collected_reference
         monitored.stability_score = STABILITY_UNSTABLE
@@ -125,50 +102,6 @@ def _resolve_schedule_event(*, price_changed: bool, availability_changed: bool) 
     if availability_changed:
         return EVENT_AVAILABILITY_CHANGED
     return EVENT_STANDARD
-
-def _derive_name_from_url(product_url: str) -> str:
-    """ Extrai um identificador legível da URL quando o usuário não fornece nome """
-    parsed = urlparse(product_url)
-    #Utiliza o último segmento do path como base do nome
-    path_segment = unquote(parsed.path or "").strip("/")
-    last_piece = path_segment.split("/")[-1] if path_segment else ""
-    candidate = last_piece or parsed.netloc or str(product_url)
-    normalized = candidate.replace("-", " ").replace("_", " ").strip()
-    sanitized = sanitize_text(normalized)
-    if sanitized:
-        return sanitized
-    host = sanitize_text(parsed.netloc)
-    if host:
-        return host
-    #Fallback amigável para evitar persistir string vazia
-    return "Produto monitorado"
-
-def _prepare_effective_name(
-    provided_name: str | None,
-    scraped_name: str | None,
-    product_url: str,
-) -> tuple[str, str]:
-    """ Determina o nome final aplicando prioridade usuário → scraping → URL """
-    fallback = _derive_name_from_url(product_url)
-    sanitized_scraped = sanitize_text(scraped_name)
-    if provided_name:
-        return provided_name, fallback
-    if sanitized_scraped:
-        return sanitized_scraped, fallback
-    return fallback, fallback
-
-def _should_replace_with_scraped(
-    existing_name: str | None,
-    fallback_name: str,
-    scraped_name: str | None,
-) -> bool:
-    """ Decide se devemos substituir nome atual pela identificação vinda do scraping """
-    sanitized_scraped = sanitize_text(scraped_name)
-    if not sanitized_scraped:
-        return False
-    if existing_name is None:
-        return True
-    return existing_name.strip().casefold() == fallback_name.strip().casefold()
 
 def _resolve_availability(
     scraped_availability: bool | None, last_status: str | None
@@ -240,10 +173,11 @@ def create_pending_monitored_product(
             db.refresh(existing)
         return existing
     
-    effective_name, _ = _prepare_effective_name(
+    effective_name, _ = prepare_effective_name(
         name_identification,
-        scraped_name=None,
-        product_url=normalized_url,
+        None,
+        normalized_url,
+        fallback_label="Produto pendente",
     )
 
     reference_time = datetime.now(timezone.utc)
@@ -310,10 +244,11 @@ def create_or_update_monitored_product_scraped(
     #Verifica se o produto já existe para o usuário
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
 
-    resolved_name, fallback_name = _prepare_effective_name(
+    resolved_name, fallback_name = prepare_effective_name(
         product_data.name_identification,
         scraped_name,
         normalized_url,
+        fallback_label="Produto pendente",
     )
 
     if existing:
@@ -325,14 +260,14 @@ def create_or_update_monitored_product_scraped(
         #Atualiza somente campos relevantes
         if product_data.name_identification and existing.name_identification != product_data.name_identification:
             existing.name_identification = product_data.name_identification
-        elif _should_replace_with_scraped(existing.name_identification, fallback_name, scraped_name):
+        elif should_replace_with_scraped(existing.name_identification, fallback_name, scraped_name):
             #Substituímos o placeholder por nome real vindo do scraping
             existing.name_identification = sanitize_text(scraped_name) or fallback_name
         elif existing.name_identification is None:
             existing.name_identification = resolved_name
         previous_price = existing.current_price
         previous_status = existing.status
-        price_changed = _different_price(previous_price, resolved_price)
+        price_changed = different_price(previous_price, resolved_price)
         resolved_currency = currency or scraped_info.currency or existing.currency
 
         #Executa commit único garantindo atomicidade com o histórico

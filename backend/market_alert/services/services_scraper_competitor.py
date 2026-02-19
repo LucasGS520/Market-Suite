@@ -24,7 +24,9 @@ from market_alert.services._scraper_common import (
     execute_scraper_fetch,
     ensure_name,
     ensure_price,
+    handle_not_modified_response,
     normalize_currency_code,
+    resolve_availability,
     resolve_conditional_headers,
     to_decimal,
     to_float,
@@ -94,30 +96,24 @@ def scrape_competitor_product(
     status_code = response.status_code
     now = collected_at or datetime.now(timezone.utc)
 
-    persisted_at: datetime | None = None
-
     if status_code == 304:
-        if existing:
-            #Atualiza marcações de checagem para manter cadência mesmo sem alterações de conteúdo.
-            existing.last_checked = now
-            existing.collected_at = now
-            db.commit()
-            persisted_at = datetime.now(timezone.utc)
+        response_result = handle_not_modified_response(
+            existing,
+            db,
+            now=now,
+            entity_type="competitor",
+        )
+        if existing and response_result.persisted_at is not None:
             logger.info(
                 "competitor_not_modified",
                 product_id=str(existing.id),
                 normalized_url=normalized_url,
                 last_checked=now.isoformat(),
                 collected_at=now.isoformat(),
-                persisted_at=persisted_at.isoformat(),
+                persisted_at=response_result.persisted_at.isoformat(),
             )
 
-        return ScrapeResult(
-            status="not_modified",
-            product_id=str(existing.id) if existing else None,
-            http_status=304,
-            persisted_at=persisted_at,
-        )
+        return response_result
 
     if status_code in {400, 403, 422}:
         error_code = response.error_code or "validation_error"
@@ -155,17 +151,14 @@ def scrape_competitor_product(
     price_value = None
     if payload_model.current_price is not None:
         price_value = ensure_price(payload_model, normalized_url)
-        if price_value is not None:
-            availability_flag = True
-    if availability_flag is False and price_value is None:
+        
+    resolved_availability = resolve_availability(price_value, availability_flag)
+    if resolved_availability is False:
         logger.info(
             "competitor_unavailable_payload",
             url=normalized_url,
             last_status=last_status,
         )
-    if price_value is not None and availability_flag is None:
-        #Interferência defensiva para garantir disponibilidade quando há preço válido
-        availability_flag = True
 
     scraped_info = CompetitorScrapedInfo(
         name=ensure_name(payload_model, normalized_url),
@@ -177,7 +170,7 @@ def scrape_competitor_product(
         seller=sanitized_seller,
         seller_rating=to_float(metadata.get("seller_rating")),
         currency=sanitized_currency,
-        availability=availability_flag,
+        availability=resolved_availability,
         last_status=last_status,
     )
 
