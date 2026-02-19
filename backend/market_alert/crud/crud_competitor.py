@@ -1,6 +1,7 @@
 """ Funções CRUD para manipular produtos concorrentes """
 from __future__ import annotations
 
+import os
 from uuid import UUID
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -16,6 +17,7 @@ from fastapi import HTTPException, status
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_competitor_url, normalize_product_url_for_storage
+from shared.utils.redis_client import set_key_with_ttl
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
@@ -27,12 +29,59 @@ from market_alert.utils.price_utils import normalize_scraped_price, should_creat
 
 logger = structlog.get_logger("crud_competitor")
 
-def _enqueue_compare_recompute(monitored_product_id: UUID) -> None:
+def _resolve_compare_enqueue_reason(
+    *,
+    price_changed: bool,
+    availability_changed: bool,
+    recollection_refreshed: bool,
+) -> str | None:
+    """ Define o motivo principal para reprocessar o resumo de comparação.
+
+    Priorizamos alterações materiais (preço/disponibilidade) para facilitar
+    observabilidade. Quando não há mudança material, aceitamos a recoleta
+    persistida como gatilho secundário para manter snapshots consistentes.
+    """
+    if price_changed or availability_changed:
+        return "material_change"
+    if recollection_refreshed:
+        return "recollection_refresh"
+    return None
+
+
+def _enqueue_compare_recompute(
+    monitored_product_id: UUID,
+    *,
+    reason: str,
+) -> None:
     """ Enfileira recomputação de comparação após persistir concorrente.
 
     O disparo é tolerante a falhas para não invalidar transações já
     confirmadas no banco quando o broker estiver indisponível.
     """
+    debounce_ttl_seconds = int(os.getenv("COMPARE_RECOMPUTE_DEBOUNCE_TTL_SECONDS", "600"))
+    debounce_key = f"compare:debounce:{monitored_product_id}"
+    debounce_registered = set_key_with_ttl(
+        debounce_key,
+        "1",
+        debounce_ttl_seconds,
+        only_if_absent=True,
+    )
+    if debounce_registered is False:
+        logger.info(
+            "compare_recompute_debounced_after_competitor_persist",
+            monitored_id=str(monitored_product_id),
+            reason=reason,
+            ttl_seconds=debounce_ttl_seconds,
+        )
+        return
+    if debounce_registered is None:
+        #Mantém enqueue sem Redis para não comprometer a consistência do resumo
+        logger.warning(
+            "compare_recompute_debounce_unavailable_after_competitor_persist",
+            monitored_id=str(monitored_product_id),
+            reason=reason,
+        )
+
     try:
         celery_app.send_task(
             "market_alert.tasks.compare_prices_task.compare_prices_task",
@@ -42,11 +91,13 @@ def _enqueue_compare_recompute(monitored_product_id: UUID) -> None:
         logger.info(
             "compare_recompute_enqueued_after_competitor_persist",
             monitored_id=str(monitored_product_id),
+            reason=reason,
         )
     except Exception:
         logger.exception(
             "compare_recompute_enqueue_failed_after_competitor_persist",
             monitored_id=str(monitored_product_id),
+            reason=reason,
         )
 
 def _normalize_competitor_storage_url(product_url: str) -> str:
@@ -354,6 +405,8 @@ def create_or_update_competitor_product_scraped(
             existing.name_competitor = resolved_name
         previous_price = existing.current_price
         previous_status = existing.status
+        previous_last_checked = existing.last_checked
+        previous_collected_at = existing.collected_at
         existing.old_price = existing.current_price
         availability = scraped_info.availability
         last_status = scraped_info.last_status or existing.last_status
@@ -439,16 +492,27 @@ def create_or_update_competitor_product_scraped(
         db.refresh(existing)
         existing._price_changed = price_changed
         existing._availability_changed = availability_changed
+        recollection_refreshed = bool(
+            previous_last_checked != existing.last_checked
+            or previous_collected_at != existing.collected_at
+        )
+        enqueue_reason = _resolve_compare_enqueue_reason(
+            price_changed=existing._price_changed,
+            availability_changed=existing._availability_changed,
+            recollection_refreshed=recollection_refreshed,
+        )
 
-        if existing._price_changed or existing._availability_changed:
-            #Evita snapshots defasados entre endpoints após alterações relevantes
-            _enqueue_compare_recompute(existing.monitored_product_id)
+        if enqueue_reason:
+            #Inclui recoleta persistida para reduzir descompasso entre endpoints
+            _enqueue_compare_recompute(existing.monitored_product_id, reason=enqueue_reason)
 
         logger.info(
             "updated_competitor",
             product_id=str(existing.id),
             price_changed=existing._price_changed,
             availability_changed=existing._availability_changed,
+            enqueue_reason=enqueue_reason,
+            recollection_refreshed=recollection_refreshed,
             last_checked=last_checked.isoformat(),
             availability=existing.availability,
             last_status=existing.last_status,
@@ -528,7 +592,7 @@ def create_or_update_competitor_product_scraped(
     db.refresh(new)
     new._price_changed = True
     new._availability_changed = True
-    _enqueue_compare_recompute(new.monitored_product_id)
+    _enqueue_compare_recompute(new.monitored_product_id, reason="material_change")
     return new
 
 def get_all_competitor_products(db: Session, *, include_paused: bool = False) -> List[CompetitorProduct]:
