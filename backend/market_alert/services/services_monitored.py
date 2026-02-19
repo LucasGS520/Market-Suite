@@ -33,6 +33,7 @@ from market_alert.crud.crud_comparison import (
     get_latest_summaries_for_products,
     get_latest_summary,
 )
+from market_alert.crud.crud_competitor import count_competitors_by_monitored
 from market_alert.models import MonitoredProduct, User
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
@@ -43,6 +44,11 @@ from market_alert.schemas.schemas_products import (
 )
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
+from market_alert.services.services_comparison import (
+    _extract_competitors_count,
+    _should_refresh_competitors_count,
+    build_comparison_summary,
+)
 from market_alert.services.services_competitors import create_competitor_scrape_request
 from market_alert.services.services_priority_queue_manager import enqueue_monitored_now
 from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
@@ -51,6 +57,46 @@ from market_alert.utils.interval_calculator_products import calculate_next_check
 
 
 logger = structlog.get_logger("monitored_service")
+
+def _refresh_stale_summary_if_needed(
+    *,
+    db: Session,
+    product_id: UUID,
+    summary,
+):
+    """ Recalcula contagem de concorrentes quando o snapshot está defasado.
+
+    A função protege endpoints que reutilizam snapshots de comparação e garante
+    que a contagem de concorrentes reflita cadastros criados após ``computed_at``.
+    """
+    if summary is None:
+        return summary
+
+    competitors_count = _extract_competitors_count(summary)
+    if not _should_refresh_competitors_count(
+        db=db,
+        monitored_id=product_id,
+        summary_timestamp=summary.timestamp,
+    ):
+        return summary
+
+    refreshed_count = count_competitors_by_monitored(
+        db,
+        product_id,
+        include_paused=True,
+    )
+    normalized_summary = build_comparison_summary(
+        None,
+        competitors_count=refreshed_count,
+        stored_summary=summary,
+    )
+    logger.info(
+        "monitored_summary_competitors_count_refreshed",
+        monitored_id=str(product_id),
+        previous_count=competitors_count,
+        refreshed_count=refreshed_count,
+    )
+    return normalized_summary
 
 def _enqueue_resume_collection(monitored: MonitoredProduct, user: User) -> None:
     """ Agenda coleta imediata com comparação forçada para retomadas """
@@ -121,10 +167,15 @@ def list_monitored_products(
 
     response_payload: list[MonitoredProductResponse] = []
     for product, _ in products_with_count:
+        normalized_summary = _refresh_stale_summary_if_needed(
+            db=db,
+            product_id=product.id,
+            summary=summaries_map.get(product.id),
+        )
         response_payload.append(
             build_monitored_response(
                 product,
-                summary=summaries_map.get(product.id),
+                summary=normalized_summary,
                 allow_missing_price=True,
             )
         )
@@ -189,7 +240,11 @@ def get_monitored_product(
             detail="Produto não encontrado.",
         )
 
-    summary = get_latest_summary(db, product_id)
+    summary = _refresh_stale_summary_if_needed(
+        db=db,
+        product_id=product_id,
+        summary=get_latest_summary(db, product_id),
+    )
     last_price_change_at = get_last_price_change_for_monitored(db, product_id)
 
     return build_monitored_response(

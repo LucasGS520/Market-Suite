@@ -62,7 +62,7 @@ Este arquivo é um guia específico com instruções operacionais para agentes d
 **Tasks principais:**
 - **Collector (`tasks.collector_product_task.collect_product_task`, fila `scraping`)**: processa uma URL por vez (monitorado ou concorrente), tenta obter lock Redis e retorna `ScrapeResult` padronizado (`success`, `not_modified`, `no_result`, `error`).
 - **Coletor contínuo (`tasks.continuous_collector_task.run_continuous_collector`, fila `monitor`)**: **task que roda indefinidamente** no worker-monitor, consome a fila de prioridade Redis (sorted sets), despacha monitorado + concorrentes para a fila `scraping` e mantém o item em processamento até a coleta terminar. Inicia via `CONTINUOUS_COLLECTOR_AUTOSTART=1`.
-- **Comparação (`tasks.compare_prices_task.compare_prices_task`, fila `compare`)**: idempotente e leve; disparada automaticamente após coletas com mudanças de preço/disponibilidade.
+- **Comparação (`tasks.compare_prices_task.compare_prices_task`, fila `compare`)**: idempotente e leve; disparada automaticamente após coletas com mudanças de preço/disponibilidade e também após persistência de concorrente para reduzir janelas de inconsistência entre `/monitored` e `/comparisons/*`.
 - **Notificações (`tasks.send_notification_task.send_notification_task`, fila `notifications`)**: entrega alertas com retry e backoff exponencial, registra em `notification_attempt`.
 
 **Política de locks**: apenas o collector aplica o `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando race conditions e usando Redis como único mecanismo de exclusão mútua (sem flags em banco).

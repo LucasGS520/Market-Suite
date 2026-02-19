@@ -20,11 +20,34 @@ from shared.utils.url_validation import normalize_competitor_url, normalize_prod
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
+from market_alert.core.celery_app import celery_app
 from market_alert.services.services_priority_queue import PriorityQueueService
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 
 
 logger = structlog.get_logger("crud_competitor")
+
+def _enqueue_compare_recompute(monitored_product_id: UUID) -> None:
+    """ Enfileira recomputação de comparação após persistir concorrente.
+
+    O disparo é tolerante a falhas para não invalidar transações já
+    confirmadas no banco quando o broker estiver indisponível.
+    """
+    try:
+        celery_app.send_task(
+            "market_alert.tasks.compare_prices_task.compare_prices_task",
+            args=[str(monitored_product_id)],
+            queue="compare",
+        )
+        logger.info(
+            "compare_recompute_enqueued_after_competitor_persist",
+            monitored_id=str(monitored_product_id),
+        )
+    except Exception:
+        logger.exception(
+            "compare_recompute_enqueue_failed_after_competitor_persist",
+            monitored_id=str(monitored_product_id),
+        )
 
 def _normalize_competitor_storage_url(product_url: str) -> str:
     """ Normaliza URL de concorrente garantindo consistência com o armazenamento """
@@ -347,6 +370,7 @@ def create_or_update_competitor_product_scraped(
             )
 
         price_changed = _different_price(previous_price, resolved_price)
+        availability_changed = previous_status != resolved_status
         resolved_currency = currency or scraped_info.currency or existing.currency
 
         collected_reference = collected_at or last_checked
@@ -414,7 +438,11 @@ def create_or_update_competitor_product_scraped(
 
         db.refresh(existing)
         existing._price_changed = price_changed
-        existing._availability_changed = previous_status != existing.status
+        existing._availability_changed = availability_changed
+
+        if existing._price_changed or existing._availability_changed:
+            #Evita snapshots defasados entre endpoints após alterações relevantes
+            _enqueue_compare_recompute(existing.monitored_product_id)
 
         logger.info(
             "updated_competitor",
@@ -500,6 +528,7 @@ def create_or_update_competitor_product_scraped(
     db.refresh(new)
     new._price_changed = True
     new._availability_changed = True
+    _enqueue_compare_recompute(new.monitored_product_id)
     return new
 
 def get_all_competitor_products(db: Session, *, include_paused: bool = False) -> List[CompetitorProduct]:

@@ -51,11 +51,6 @@ Operação atômica central via script Lua:
 - **Scripts Lua** garantem atomicidade sem race conditions entre múltiplos workers tentando consumir o mesmo item
 - O conjunto de **processamento separado** permite rastrear quais itens estão sendo coletados e recuperá-los (`reclaim_stale_processing`) se o worker morrer antes de concluir
 
-**Alternativas consideradas:** 
-- Celery Beat com tarefas agendadas individuais → não escala para milhares de produtos
-- Banco de dados como fila → latência maior e carga desnecessária no PostgreSQL
-- RabbitMQ delayed messages → adiciona dependência extra e não oferece vantagem clara sobre Redis
-
 **Como se Encaixa no Todo:**  
 A fila é alimentada quando:
 1. Um novo produto é criado via routes_monitored.py
@@ -326,4 +321,4 @@ Usuário cria um produto monitorado via `POST /monitored/scrape` com URL do prod
 
 ---
 
-> **Nota final:** Este sistema está funcionando como um **protótipo avançado tentando operar em produção**. A arquitetura base é sólida (workers dedicados, fila de prioridade, locks distribuídos), mas faltam mecanismos de resiliência, observabilidade e controle de fluxo necessários para operação 24/7 confiável. As melhorias críticas incluem: healthchecks ativos, circuit breakers, backpressure, e migração do loop bloqueante para modelo orientado a eventos.
+> **Nota final:** Este sistema está funcionando como um **protótipo avançado tentando operar em produção**. A arquitetura base é sólida (workers dedicados, fila de prioridade, locks distribuídos), mas faltam mecanismos de resiliência, observabilidade e controle de fluxo necessários para operação 24/7 confiável.

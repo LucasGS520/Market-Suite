@@ -125,22 +125,33 @@ def build_monitored_response(
 
     competitiveness_status: CompetitivenessStatus | None = None
     comparison_summary: PriceComparisonSummaryResponse | None = None
-    if summary and summary.aggregates:
-        competitiveness_value = summary.aggregates.get("competitiveness_status")
+    
+    #summary pode ser um ORM PriceComparisonSummary OU um dict já normalizado
+    normalized_summary: dict | None = None
+    if summary is not None:
+        #Caso já recebamos um dict (ex.: _refresh_stale_summary_if_needed), use direto
+        if isinstance(summary, dict):
+            normalized_summary = summary
+        else:
+            #summary é um objeto ORM PriceComparisonSummary (possui .aggregates)
+            aggregates = getattr(summary, "aggregates", None) or {}
+            #Reutiliza a normalização padrão para evitar formatos divergentes no frontend
+            from market_alert.services.services_comparison import _extract_competitors_count, build_comparison_summary
+
+            normalized_summary = build_comparison_summary(
+                None,
+                competitors_count=_extract_competitors_count(summary),
+                stored_summary=summary,
+            )
+    
+    if normalized_summary:
+        competitiveness_value = normalized_summary.get("competitiveness_status")
         if competitiveness_value:
             try:
                 competitiveness_status = CompetitivenessStatus(competitiveness_value)
             except ValueError:
                 #Ignora valores inesperados no agregado para não quebrar o contrato
                 competitiveness_status = None
-
-        from market_alert.services.services_comparison import _extract_competitors_count, build_comparison_summary
-        #Reutiliza a normalização padrão para evitar formatos divergentes no frontend
-        normalized_summary = build_comparison_summary(
-            None,
-            competitors_count=_extract_competitors_count(summary),
-            stored_summary=summary,
-        )
 
         comparison_summary = PriceComparisonSummaryResponse(
             monitored_product_id=monitored.id,

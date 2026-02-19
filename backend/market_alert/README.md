@@ -39,15 +39,15 @@ market_alert/
 | `POST` | `/auth/logout` | Revoga o refresh token informado. |
 | `POST` | `/users` | Cadastro de usuário pendente com verificação. |
 | `POST` | `/users/resend-verification` | Reenvia verificação de email ou telefone. |
-| `GET` | `/monitored` | Lista monitorados usando envelope `{ items, meta }` com filtros `page`, `per_page`, `query` e `status`. O parâmetro `per_page` é opcional e, quando omitido, retorna todos os itens dentro do limite defensivo aplicado pela API.  |
-| `GET` | `/monitored/{id}` | Retorna detalhes do monitorado com `owner_id`, `thumbnail`, `current_price` (`Decimal` serializado) e datas derivadas (`created_at`, `last_price_change_at`). |
+| `GET` | `/monitored` | Lista monitorados usando envelope `{ items, meta }` com filtros `page`, `per_page`, `query` e `status`. O parâmetro `per_page` é opcional e, quando omitido, retorna todos os itens dentro do limite defensivo aplicado pela API. Quando o snapshot de comparação estiver defasado, a API recalcula a contagem de concorrentes antes de responder.  |
+| `GET` | `/monitored/{id}` | Retorna detalhes do monitorado com `owner_id`, `thumbnail`, `current_price` (`Decimal` serializado) e datas derivadas (`created_at`, `last_price_change_at`). A contagem de concorrentes do resumo é recalculada quando detectado snapshot stale. |
 | `GET` | `/monitored/featured` | Retorna até 3 monitorados em destaque respeitando `is_featured` e ordenação configurada. |
 | `POST` | `/monitored/scrape` | Valida duplicidade por usuário + URL, cria recurso mínimo (`id`, `url`, `created_at`, `next_check_at`), dispara coleta imediata na fila `scraping` e agenda o monitorado na fila contínua de prioridade para rechecagens. |
 | `POST` | `/monitored` | Cria produto monitorado associado ao usuário autenticado (fluxo alternativo ao scrape imediato). |
 | `GET` | `/comparisons/{monitored_id}` | Lista comparações paginadas (`items` + `meta`) para o monitorado informado. |
 | `GET` | `/comparisons/{monitored_id}/summary` | Consolida resumo de comparação; `Decimal` enviado como número apenas no resumo (encoder existente). |
 | `GET` | `/competitors` | Lista todos os concorrentes vinculados (incluindo pausados e indisponíveis por padrão), aceita `include_inactive`/`include_paused` e retorna contadores `competitors_total`, `competitors_with_price_count` e `excluded_due_to_inactive_count`. |
-| `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo, dispara coleta imediata na fila `scraping` e garante o monitorado na fila contínua de prioridade para rechecagens. |
+| `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo, dispara coleta imediata na fila `scraping`, solicita recomputação assíncrona em `compare` (tolerante a falhas) e garante o monitorado na fila contínua de prioridade para rechecagens. |
 | `GET` | `/notifications` | Lista histórico de notificações do usuário com paginação padrão. |
 | `GET` | `/notifications/preferences` | Retorna preferências de notificação do usuário. |
 | `POST` | `/notifications/preferences` | Cria ou atualiza preferência para canal e tipo de alerta. |

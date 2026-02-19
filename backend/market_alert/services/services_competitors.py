@@ -260,6 +260,28 @@ def create_competitor_scrape_request(
                 **context,
             )
 
+    try:
+        #Antecipamos a recomputação para reduzir janela de inconsistência entre endpoints
+        celery_app.send_task(
+            "market_alert.tasks.compare_prices_task.compare_prices_task",
+            args=[str(monitored_product.id)],
+            queue="compare",
+        )
+        logger.info(
+            "compare_recompute_requested_after_competitor_request",
+            competitor_id=str(pending.id),
+            monitored_id=str(monitored_product.id),
+            **context,
+        )
+    except Exception:
+        #Não interrompe criação do concorrente quando o broker falhar.
+        logger.warning(
+            "compare_recompute_request_failed_after_competitor_request",
+            competitor_id=str(pending.id),
+            monitored_id=str(monitored_product.id),
+            **context,
+        )
+
     logger.info(
         "competitor_scrape_scheduled",
         competitor_id=str(pending.id),
