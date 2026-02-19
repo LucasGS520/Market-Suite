@@ -47,6 +47,7 @@ from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_comparison import (
     _extract_competitors_count,
     _should_refresh_competitors_count,
+    persist_rebuilt_summary_if_needed,
     rebuild_summary_from_current_state,
 )
 from market_alert.services.services_competitors import create_competitor_scrape_request
@@ -95,6 +96,12 @@ def _refresh_stale_summary_if_needed(
         db=db,
         monitored=monitored,
         competitors=competitors,
+        stored_summary=summary,
+    )
+    normalized_summary = persist_rebuilt_summary_if_needed(
+        db=db,
+        monitored_id=product_id,
+        normalized_summary=normalized_summary,
         stored_summary=summary,
     )
     logger.info(

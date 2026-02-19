@@ -108,7 +108,98 @@ def get_comparison_summary_for_user(
         stored_summary=stored_summary,
     )
 
+    normalized_summary = persist_rebuilt_summary_if_needed(
+        db=db,
+        monitored_id=monitored_id,
+        normalized_summary=normalized_summary,
+        stored_summary=stored_summary,
+    )
+
     return PriceComparisonSummaryResponse(monitored_product_id=monitored_id, **normalized_summary)
+
+def _build_material_summary_snapshot(payload: Dict[str, Any] | None) -> Dict[str, Any]:
+    """ Extrai somente campos críticos para comparar mudanças materiais no resumo.
+
+    O snapshot ignora campos de tempo para evitar persistências desnecessárias
+    quando apenas o relógio da requisição muda, mantendo a atualização idempotente.
+    """
+    if not isinstance(payload, dict):
+        return {}
+
+    critical_fields = (
+        "comparison_id",
+        "monitored_price",
+        "competitors_count",
+        "competitors_with_price_count",
+        "competitors_mean",
+        "competitors_min",
+        "competitors_max",
+        "position_rank",
+        "potential_adjustment",
+        "ignored_due_to_inactive",
+        "competitiveness_status",
+        "comparison_insights",
+        "discrepancies",
+        "reason",
+    )
+
+    return {field: payload.get(field) for field in critical_fields}
+
+def persist_rebuilt_summary_if_needed(
+    *,
+    db: Session,
+    monitored_id: UUID,
+    normalized_summary: Dict[str, Any],
+    stored_summary: PriceComparisonSummary | None,
+) -> Dict[str, Any]:
+    """ Persiste resumo recomposto apenas quando houver mudança material.
+
+    A função garante idempotência no refresh stale e preserva ``comparison_id``
+    do snapshot prévio quando o resumo recomposto não traz o campo.
+    """
+    comparison_raw = normalized_summary.get("comparison_id")
+    if comparison_raw is None and stored_summary is not None:
+        comparison_raw = stored_summary.comparison_id
+
+    if comparison_raw is None:
+        #Sem comparação associada não existe chave estável para upsert.
+        return normalized_summary
+
+    comparison_id = comparison_raw
+    if isinstance(comparison_id, str):
+        try:
+            comparison_id = UUID(comparison_id)
+        except ValueError:
+            logger.warning(
+                "comparison_summary_invalid_comparison_id",
+                monitored_id=str(monitored_id),
+                comparison_id_raw=comparison_raw,
+            )
+            return normalized_summary
+
+    candidate_summary = dict(normalized_summary)
+    candidate_summary["comparison_id"] = str(comparison_id)
+
+    current_snapshot = _build_material_summary_snapshot(
+        stored_summary.aggregates if stored_summary is not None else {},
+    )
+    rebuilt_snapshot = _build_material_summary_snapshot(candidate_summary)
+    if current_snapshot == rebuilt_snapshot:
+        #Mantém idempotência ao evitar escrita em banco sem alteração material.
+        return candidate_summary
+
+    persisted_summary = upsert_price_comparison_summary(
+        db,
+        monitored_id,
+        comparison_id,
+        jsonable_encoder(candidate_summary),
+    )
+    return _apply_summary_defaults(
+        persisted_summary.aggregates or {},
+        timestamp=persisted_summary.timestamp,
+        comparison_id=persisted_summary.comparison_id,
+        competitors_count=_extract_competitors_count(persisted_summary),
+    )
 
 def rebuild_summary_from_current_state(
     *,
