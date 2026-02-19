@@ -6,6 +6,7 @@ frontend.
 """
 
 from uuid import UUID
+from datetime import datetime, timezone
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
@@ -16,7 +17,7 @@ import structlog
 import json
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.crud.crud_competitor import get_competitors_by_monitored_id, count_competitors_by_monitored
+from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_comparison import (
     create_price_comparison,
     get_comparison_by_id,
@@ -86,35 +87,145 @@ def get_comparison_summary_for_user(
     ensure_user_can_view_monitored(db=db, monitored_id=monitored_id, user=user)
 
     stored_summary = get_latest_summary(db, monitored_product_id=monitored_id)
-    comparison = None
-
-    if stored_summary is None:
-        #Busca direto no banco para evitar resumo vazio quando ainda não há snapshot salvo
-        competitors_count = count_competitors_by_monitored(
-            db, monitored_id, include_paused=True
+    monitored = get_monitored_product_by_id(db, monitored_id)
+    if monitored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Produto monitorado não encontrado.",
         )
-    else:
-        competitors_count = _extract_competitors_count(stored_summary)
-        if _should_refresh_competitors_count(
-            db=db,
-            monitored_id=monitored_id,
-            summary_timestamp=stored_summary.timestamp,
-        ):
-            #Recalcula a contagem para refletir concorrentes adicionados após o snapshot
-            competitors_count = count_competitors_by_monitored(
-                db, monitored_id, include_paused=True
-            )
+    
+    competitors = get_competitors_by_monitored_id(
+        db,
+        monitored_id,
+        include_paused=True,
+        include_inactive=True,
+    )
 
-    if stored_summary and stored_summary.comparison_id:
-        comparison = get_comparison_by_id(db, stored_summary.comparison_id)
-
-    normalized_summary = build_comparison_summary(
-        comparison,
-        competitors_count=competitors_count,
+    normalized_summary = rebuild_summary_from_current_state(
+        db=db,
+        monitored=monitored,
+        competitors=competitors,
         stored_summary=stored_summary,
     )
 
     return PriceComparisonSummaryResponse(monitored_product_id=monitored_id, **normalized_summary)
+
+def rebuild_summary_from_current_state(
+    *,
+    db: Session,
+    monitored: Any,
+    competitors: List[CompetitorProduct],
+    stored_summary: PriceComparisonSummary | None,
+) -> Dict[str, Any]:
+    """ Recompõe um resumo competitivo usando o estado atual de monitorado e concorrentes
+
+    A recomposição padroniza os campos usados por ``/monitored`` e
+    ``/comparisons/{id}/summary`` para evitar divergência entre endpoints.
+    O fluxo reaproveita o fallback de preço histórico dos concorrentes quando
+    ``current_price`` está ausente e preserva o motivo do snapshot anterior
+    apenas quando o monitorado não estiver em estado inativo.
+    """
+    competitors_count = len(competitors)
+    comparison_id = getattr(stored_summary, "comparison_id", None)
+    timestamp = (
+        getattr(stored_summary, "timestamp", None)
+        if stored_summary is not None
+        else None
+    )
+
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+
+    inactive_reason = _resolve_monitored_inactive_reason(monitored)
+    stored_payload = (
+        stored_summary.aggregates
+        if stored_summary is not None and isinstance(stored_summary.aggregates, dict)
+        else {}
+    )
+    stored_reason = stored_payload.get("reason")
+
+    if inactive_reason:
+        payload_stub = {
+            "monitored_price": None,
+            "discrepancies": [],
+            "lowest_competitor": None,
+            "highest_competitor": None,
+            "reason": inactive_reason,
+            "ignored_due_to_inactive": True,
+        }
+        return _build_summary_from_result(
+            payload_stub,
+            timestamp=timestamp,
+            comparison_id=comparison_id,
+            competitors_count=competitors_count,
+        )
+    
+    monitored_price = _to_decimal(getattr(monitored, "current_price", None))
+    deduped_competitors = _deduplicate_competitors(competitors)
+    competitor_entries: list[tuple[CompetitorProduct, Decimal]] = []
+    tolerance = Decimal(str(settings.PRICE_TOLERANCE))
+
+    for competitor in deduped_competitors:
+        status_value = getattr(competitor, "status", ProductStatus.available)
+        if status_value in {ProductStatus.unavailable, ProductStatus.removed}:
+            continue
+        if getattr(competitor, "availability", None) is False:
+            continue
+
+        resolved_price, _ = _resolve_competitor_comparison_price(db, competitor)
+        if resolved_price is None:
+            continue
+
+        competitor_entries.append((competitor, resolved_price))
+
+    competitor_entries.sort(key=lambda entry: entry[1])
+
+    discrepancies: list[Dict[str, Any]] = []
+    if competitor_entries:
+        min_price = competitor_entries[0][1]
+        for competitor, price in competitor_entries:
+            pct_below_monitored: Optional[Decimal] = None
+            delta_x_monitored: Optional[Decimal] = None
+            if monitored_price is not None:
+                if monitored_price > Decimal("0") and price < monitored_price:
+                    pct_below_monitored = (
+                        (monitored_price - price) / monitored_price * Decimal("100")
+                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                delta_x_monitored = (price - monitored_price).quantize(
+                    tolerance,
+                    rounding=ROUND_HALF_UP,
+                )
+
+            discrepancy = {
+                "competitor_id": str(getattr(competitor, "id", "")),
+                "name": getattr(competitor, "name_competitor", "Concorrente"),
+                "price": price,
+                "pct_below_monitored": pct_below_monitored,
+                "delta_x_min_competitor": (price - min_price).quantize(
+                    tolerance,
+                    rounding=ROUND_HALF_UP,
+                ),
+                "delta_x_monitored": delta_x_monitored,
+            }
+            discrepancies.append(discrepancy)
+
+    payload = {
+        "monitored_price": monitored_price,
+        "discrepancies": discrepancies,
+        "lowest_competitor": discrepancies[0] if discrepancies else None,
+        "highest_competitor": discrepancies[-1] if discrepancies else None,
+        "ignored_due_to_inactive": False,
+    }
+
+    if stored_reason:
+        payload["reason"] = stored_reason
+
+    return _build_summary_from_result(
+        payload,
+        timestamp=timestamp,
+        comparison_id=comparison_id,
+        competitors_count=competitors_count,
+    )
 
 def get_comparison_detail_for_user(
     *,

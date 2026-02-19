@@ -33,7 +33,7 @@ from market_alert.crud.crud_comparison import (
     get_latest_summaries_for_products,
     get_latest_summary,
 )
-from market_alert.crud.crud_competitor import count_competitors_by_monitored
+from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.models import MonitoredProduct, User
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
@@ -47,7 +47,7 @@ from market_alert.services.services_products import build_monitored_response
 from market_alert.services.services_comparison import (
     _extract_competitors_count,
     _should_refresh_competitors_count,
-    build_comparison_summary,
+    rebuild_summary_from_current_state,
 )
 from market_alert.services.services_competitors import create_competitor_scrape_request
 from market_alert.services.services_priority_queue_manager import enqueue_monitored_now
@@ -80,14 +80,21 @@ def _refresh_stale_summary_if_needed(
     ):
         return summary
 
-    refreshed_count = count_competitors_by_monitored(
+    monitored = get_monitored_product_by_id(db, product_id)
+    if monitored is None:
+        return summary
+
+    competitors = get_competitors_by_monitored_id(
         db,
         product_id,
         include_paused=True,
+        include_inactive=True,
     )
-    normalized_summary = build_comparison_summary(
-        None,
-        competitors_count=refreshed_count,
+    refreshed_count = len(competitors)
+    normalized_summary = rebuild_summary_from_current_state(
+        db=db,
+        monitored=monitored,
+        competitors=competitors,
         stored_summary=summary,
     )
     logger.info(
