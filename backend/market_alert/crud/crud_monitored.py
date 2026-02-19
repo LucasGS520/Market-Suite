@@ -25,8 +25,7 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.crud import crud_competitor, crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
-from market_alert.services.services_priority_queue import PriorityQueueService
-from market_alert.services.services_priority_queue_manager import enqueue_monitored_at, remove_from_priority_queue
+from market_alert.services.services_priority_queue_manager import enqueue_monitored_at
 from market_alert.utils.interval_calculator_products import (
     EVENT_AVAILABILITY_CHANGED,
     EVENT_PRICE_CHANGED,
@@ -358,6 +357,9 @@ def create_or_update_monitored_product_scraped(
         db.refresh(existing)
         existing._price_changed = price_changed
         existing._availability_changed = previous_status != existing.status
+
+        existing._recompute_comparison = bool(existing._price_changed or existing._availability_changed)
+        existing._recompute_reason = "material_change" if existing._recompute_comparison else None
         
         logger.info(
             "updated_monitored",
@@ -443,6 +445,8 @@ def create_or_update_monitored_product_scraped(
 
     new._price_changed = True
     new._availability_changed = True
+    new._recompute_comparison = True
+    new._recompute_reason = "material_change"
     return new
 
 def _join_latest_summary(query, db: Session):
@@ -704,16 +708,6 @@ def pause_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPro
         already_paused=was_paused,
     )
 
-    try:
-        remove_from_priority_queue(monitored.id, source="user_paused")
-    except Exception as exc:
-        #Evita bloquear a pausa quando Redis estiver indisponível
-        logger.warning(
-            "monitored_priority_queue_remove_failed",
-            monitored_id=str(monitored.id),
-            error=str(exc),
-        )
-
     return monitored
 
 def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
@@ -771,8 +765,8 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
 
     return monitored
 
-def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
-    """ Remove monitorado utilizando sessão dedicada para isolar a transação """
+def delete_monitored(db: Session, monitored_id: UUID, user: User) -> list[UUID]:
+    """ Remove monitorado e retorna IDs para limpeza de fila no serviço """
     lock_owner: str | None = None
     dedicated_session: Session | None = None
     try:
@@ -780,24 +774,9 @@ def delete_monitored(db: Session, monitored_id: UUID, user: User) -> None:
         dedicated_session = SessionLocal()
         monitored = _ensure_monitored_access(dedicated_session, monitored_id, user)
         lock_owner = _acquire_monitored_lock(monitored_id)
-        queue_service = PriorityQueueService()
-        removed = queue_service.remove(str(monitored_id))
-        if removed:
-            logger.info(
-                "monitored_removed_from_priority_queue",
-                monitored_id=str(monitored_id),
-                reason="monitored_deleted",
-            )
-        else:
-            #Garante a deleção mesmo que o redis esteja indisponível
-            logger.warning(
-                "monitored_priority_queue_remove_failed",
-                monitored_id=str(monitored_id),
-                reason="monitored_deleted",
-            )
-
         dedicated_session.delete(monitored)
         dedicated_session.commit()
+        return [monitored_id]
 
     finally:
         if dedicated_session:

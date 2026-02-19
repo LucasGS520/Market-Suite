@@ -20,6 +20,7 @@ from market_alert.crud.crud_monitored import (
     get_monitored_product_by_user_and_url,
 )
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
+from market_alert.utils.price_comparator import request_comparison_recompute
 from market_alert.services._scraper_common import (
     compute_force_refresh,
     ensure_price,
@@ -153,6 +154,10 @@ def _handle_response(
 
     price_changed = bool(getattr(product, "_price_changed", True))
     availability_changed = bool(getattr(product, "_availability_changed", True))
+
+    if getattr(product, "_recompute_comparison", False):
+        recompute_reason = getattr(product, "_recompute_reason", "material_change")
+        request_comparison_recompute(product.id, recompute_reason)
 
     try:
         #Reenfileira concorrentes vinculados após atualizar o monitorado

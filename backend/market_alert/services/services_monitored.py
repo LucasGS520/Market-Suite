@@ -51,7 +51,7 @@ from market_alert.services.services_comparison import (
     rebuild_summary_from_current_state,
 )
 from market_alert.services.services_competitors import create_competitor_scrape_request
-from market_alert.services.services_priority_queue_manager import enqueue_monitored_now
+from market_alert.services.services_priority_queue_manager import enqueue_monitored_now, remove_from_priority_queue
 from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import calculate_next_check_at
@@ -148,6 +148,20 @@ def _raise_from_monitored_error(exc: Exception) -> None:
             detail="Monitorado em processamento, tente novamente em instantes.",
         ) from exc
     raise exc
+
+def _remove_ids_from_priority_queue(product_ids: list[UUID], *, source: str) -> None:
+    """ Remove IDs da fila de prioridade fora do CRUD para manter separação de responsabilidades """
+    for product_id in product_ids:
+        try:
+            remove_from_priority_queue(product_id, source=source)
+        except Exception as exc:
+            #Mantém o fluxo principal mesmo quando Redis estiver indisponível
+            logger.warning(
+                "priority_queue_remove_failed",
+                product_id=str(product_id),
+                source=source,
+                error=str(exc),
+            )
 
 def list_monitored_products(
     *,
@@ -284,6 +298,7 @@ def pause_monitored_product_entry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Produto não encontrado")
 
     logger.info("monitored_paused", product_id=str(product_id), user_id=str(user.id))
+    _remove_ids_from_priority_queue([product_id], source="user_paused")
     summary = get_latest_summary(db, product_id)
     return build_monitored_response(
         refreshed,
@@ -351,11 +366,14 @@ def update_monitored_pause_state(
 def delete_monitored_product_entry(
     *, db: Session, product_id: UUID, user: User
 ) -> None:
-    """ Remove monitorado aplicando lock e sem payload de resposta """
+    """ Remove monitorado e limpa a fila de prioridade após persistir exclusão """
     try:
-        delete_monitored(db, product_id, user)
+        deleted_ids = delete_monitored(db, product_id, user)
     except Exception as exc:
         _raise_from_monitored_error(exc)
+        return
+
+    _remove_ids_from_priority_queue(deleted_ids, source="monitored_deleted")
 
 def schedule_monitored_scrape(
     *,

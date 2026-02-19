@@ -22,26 +22,10 @@ from market_alert.crud import crud_price_history
 from market_alert.utils.name_derivation import derive_name_from_url, prepare_effective_name, should_replace_with_scraped
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 from market_alert.utils.price_decimal import to_decimal, different_price
+from market_alert.utils.price_comparator import resolve_recompute_reason
+
 
 logger = structlog.get_logger("crud_competitor")
-
-def _resolve_compare_enqueue_reason(
-    *,
-    price_changed: bool,
-    availability_changed: bool,
-    recollection_refreshed: bool,
-) -> str | None:
-    """ Define o motivo principal para reprocessar o resumo de comparação.
-
-    Priorizamos alterações materiais (preço/disponibilidade) para facilitar
-    observabilidade. Quando não há mudança material, aceitamos a recoleta
-    persistida como gatilho secundário para manter snapshots consistentes.
-    """
-    if price_changed or availability_changed:
-        return "material_change"
-    if recollection_refreshed:
-        return "recollection_refresh"
-    return None
 
 def _normalize_competitor_storage_url(product_url: str) -> str:
     """ Normaliza URL de concorrente garantindo consistência com o armazenamento """
@@ -378,7 +362,7 @@ def create_or_update_competitor_product_scraped(
             previous_last_checked != existing.last_checked
             or previous_collected_at != existing.collected_at
         )
-        enqueue_reason = _resolve_compare_enqueue_reason(
+        enqueue_reason = resolve_recompute_reason(
             price_changed=existing._price_changed,
             availability_changed=existing._availability_changed,
             recollection_refreshed=recollection_refreshed,

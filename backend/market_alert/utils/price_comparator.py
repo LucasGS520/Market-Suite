@@ -73,6 +73,23 @@ def request_comparison_recompute(monitored_id: UUID, reason: str) -> None:
             reason=reason,
         )
 
+def resolve_recompute_reason(
+    *,
+    price_changed: bool,
+    availability_changed: bool,
+    recollection_refreshed: bool,
+) -> str | None:
+    """Define o motivo principal de recomputação para monitorados e concorrentes.
+
+    A prioridade de precedência mantém consistência nos logs e evita que cada
+    CRUD implemente regras próprias para o mesmo cenário.
+    """
+    if price_changed or availability_changed:
+        return "material_change"
+    if recollection_refreshed:
+        return "recollection_refresh"
+    return None
+
 def calculate_discrepancies(
     competitor: CompetitorProduct,
     monitored_price: Decimal | None,
@@ -202,7 +219,7 @@ def compare_prices(
     logger.debug("comparison_result", lowest=str(lowest.id), highest=str(highest.id))
     return result
 
-def _dispatch_comparison(
+def dispatch_comparison_for_scrape_result(
     monitored_id: UUID | None,
     result: ScrapeResult | None,
     trace_id: str | None,
@@ -240,7 +257,7 @@ def _dispatch_comparison(
         countdown_seconds=countdown_seconds,
     )
 
-def _schedule_comparison_after_commit(
+def schedule_comparison_after_commit(
     session_manager: Session,
     monitored_id: UUID | None,
     result: ScrapeResult | None,
@@ -252,7 +269,7 @@ def _schedule_comparison_after_commit(
 ) -> None:
     """ Registra callback para disparar comparação após commit da sessão """
     if result is not None and result.persisted_at is not None:
-        _dispatch_comparison(
+        dispatch_comparison_for_scrape_result(
             monitored_id,
             result,
             trace_id,
@@ -265,7 +282,7 @@ def _schedule_comparison_after_commit(
     transaction = session_manager.get_transaction()
 
     def _dispatch_callback() -> None:
-        _dispatch_comparison(
+        dispatch_comparison_for_scrape_result(
             monitored_id,
             result,
             trace_id,
@@ -297,8 +314,9 @@ def _parse_force_compare_(value: str | None) -> bool:
 __all__ = [
     "calculate_discrepancies",
     "compare_prices",
+    "resolve_recompute_reason",
     "request_comparison_recompute",
-    "_dispatch_comparison",
-    "_schedule_comparison_after_commit",
+    "dispatch_comparison_for_scrape_result",
+    "schedule_comparison_after_commit",
     "_parse_force_compare_",
 ]

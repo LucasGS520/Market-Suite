@@ -32,7 +32,7 @@ from market_alert.services.services_scraper_monitored import scrape_monitored_pr
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperClientError
-from market_alert.utils.price_comparator import _parse_force_compare_, _schedule_comparison_after_commit
+from market_alert.utils.price_comparator import _parse_force_compare_, schedule_comparison_after_commit
 from market_alert.utils.collector_result import (
     INVALID_URL_ERRORS_CODES,
     _extract_host,
@@ -315,7 +315,7 @@ def collect_product(
                     with SessionLocal() as session_manager:
                         _collect_with_db(session_manager, commit_activation=True)
                         if dispatch_comparison:
-                            _schedule_comparison_after_commit(
+                            schedule_comparison_after_commit(
                                 session_manager,
                                 monitored_id,
                                 result,
@@ -325,7 +325,7 @@ def collect_product(
                 else:
                     _collect_with_db(db, commit_activation=False)
                     if dispatch_comparison:
-                        _schedule_comparison_after_commit(
+                        schedule_comparison_after_commit(
                             db,
                             monitored_id,
                             result,
