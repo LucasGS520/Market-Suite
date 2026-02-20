@@ -245,30 +245,25 @@ def rebuild_summary_from_current_state(
             "reason": inactive_reason,
             "ignored_due_to_inactive": True,
         }
-        return _build_summary_from_result(
-            payload_stub,
+        return _apply_summary_defaults(
+            _compute_summary_from_payload(
+                payload_stub,
+                timestamp=timestamp,
+                comparison_id=comparison_id,
+                competitors_count=competitors_count,
+            ),
             timestamp=timestamp,
             comparison_id=comparison_id,
             competitors_count=competitors_count,
         )
     
     monitored_price = to_decimal(getattr(monitored, "current_price", None))
-    deduped_competitors = _deduplicate_competitors(competitors)
-    competitor_entries: list[tuple[CompetitorProduct, Decimal]] = []
+    filtered_competitors = _filter_competitors_for_comparison(db, competitors)
+    competitor_entries = [
+        (item.competitor, item.price)
+        for item in filtered_competitors.entries
+    ]
     tolerance = Decimal(str(settings.PRICE_TOLERANCE))
-
-    for competitor in deduped_competitors:
-        status_value = getattr(competitor, "status", ProductStatus.available)
-        if status_value in {ProductStatus.unavailable, ProductStatus.removed}:
-            continue
-        if getattr(competitor, "availability", None) is False:
-            continue
-
-        resolved_price, _ = _resolve_competitor_comparison_price(db, competitor)
-        if resolved_price is None:
-            continue
-
-        competitor_entries.append((competitor, resolved_price))
 
     competitor_entries.sort(key=lambda entry: entry[1])
 
@@ -312,8 +307,13 @@ def rebuild_summary_from_current_state(
     if stored_reason:
         payload["reason"] = stored_reason
 
-    return _build_summary_from_result(
-        payload,
+    return _apply_summary_defaults(
+        _compute_summary_from_payload(
+            payload,
+            timestamp=timestamp,
+            comparison_id=comparison_id,
+            competitors_count=competitors_count,
+        ),
         timestamp=timestamp,
         comparison_id=comparison_id,
         competitors_count=competitors_count,
@@ -362,37 +362,13 @@ def run_price_comparison(
         competitors = get_competitors_by_monitored_id(
             db, monitored_id, include_paused=True, include_inactive=True
         )
-        competitors = _deduplicate_competitors(competitors)
-        #Define total antes dos filtros para persistir a contagem completa
-        total_competitors = len(competitors)
-        
-        filtered_reasons: dict[str, int] = {}
-        available_competitors: list[CompetitorProduct] = []
-        for competitor in competitors:
-            if getattr(competitor, "is_paused", False):
-                filtered_reasons["paused"] = filtered_reasons.get("paused", 0) + 1
-                continue
-            
-            status_value = getattr(competitor, "status", ProductStatus.available)
-            if status_value in {ProductStatus.unavailable, ProductStatus.removed}:
-                filtered_reasons["status_unavailable"] = filtered_reasons.get("status_unavailable", 0) + 1
-                continue
-            
-            resolved_price, price_source = _resolve_competitor_comparison_price(db, competitor)
-            if resolved_price is None:
-                filtered_reasons["missing_price"] = filtered_reasons.get("missing_price", 0) + 1
-                continue
-            
-            if competitor.availability is False:
-                filtered_reasons["availability_false"] = filtered_reasons.get("availability_false", 0) + 1
-                continue
-            
-            if competitor.current_price is None:
-                #Usa o último preço do histórico apenas para comparação, sem persistir no banco
-                competitor.current_price = resolved_price
-                competitor._comparison_price_source = price_source
-
-            available_competitors.append(competitor)
+        filtered_competitors = _filter_competitors_for_comparison(db, competitors)
+        total_competitors = filtered_competitors.total_competitors
+        available_competitors = filtered_competitors.total_competitors
+        available_competitors = [
+            item.competitor
+            for item in filtered_competitors.entries
+        ]
 
         filtered_out = total_competitors - len(available_competitors)
         if filtered_out:
@@ -401,7 +377,7 @@ def run_price_comparison(
                 filtered=filtered_out,
                 total=total_competitors,
                 available=len(available_competitors),
-                reasons=filtered_reasons,
+                reasons=filtered_competitors.filtered_reasons,
             )
 
         inactive_reason = _resolve_monitored_inactive_reason(monitored)
@@ -476,8 +452,13 @@ def run_price_comparison(
         )
 
         comparison = create_price_comparison(db, monitored.id, stored_payload)
-        summary_payload = _build_summary_from_result(
-            encoded_result,
+        summary_payload = _apply_summary_defaults(
+            _compute_summary_from_payload(
+                encoded_result,
+                timestamp=comparison.timestamp,
+                comparison_id=comparison.id,
+                competitors_count=total_competitors,
+            ),
             timestamp=comparison.timestamp,
             comparison_id=comparison.id,
             competitors_count=total_competitors,
@@ -674,44 +655,6 @@ def _calculate_competitiveness_status(
     if percentage <= COMPETITIVENESS_ATTENTION_PCT:
         return CompetitivenessStatus.ATTENTION.value
     return CompetitivenessStatus.URGENT.value
-
-def _build_summary_from_result(
-    payload: Dict[str, Any] | None,
-    *,
-    timestamp: Any,
-    comparison_id: UUID | None,
-    competitors_count: int,
-) -> Dict[str, Any]:
-    """ Monta um resumo completo a partir do resultado do comparador.
-
-    A lógica reaproveita o cálculo detalhado para garantir que média,
-    mínimos, ranking e ajuste potencial sejam persistidos sempre que
-    o endpoint de comparação for chamado.
-    """
-    if not isinstance(payload, dict):
-        logger.warning(
-            "comparison_payload_invalid_type",
-            expected="dict",
-            received_type=type(payload).__name__,
-            comparison_id=str(comparison_id) if comparison_id else None,
-        )
-        payload_dict: dict[str, Any] = {}
-    else:
-        payload_dict = payload
-
-    detailed_summary = _compute_summary_from_payload(
-        payload_dict,
-        timestamp=timestamp,
-        comparison_id=comparison_id,
-        competitors_count=competitors_count,
-    )
-
-    return _apply_summary_defaults(
-        detailed_summary,
-        timestamp=timestamp,
-        comparison_id=comparison_id,
-        competitors_count=competitors_count,
-    )
 
 def _compute_summary_from_payload(
     payload: Dict[str, Any] | None,
@@ -974,12 +917,10 @@ def _coerce_decimal_fields(summary: Dict[str, Any]) -> Dict[str, Any]:
 
     return summary
 
-
-def build_comparison_summary(
+def summarize_comparison(
     comparison: PriceComparison | None,
-    *,
-    competitors_count: int,
     stored_summary: PriceComparisonSummary | None = None,
+    *,
     force_recompute: bool = False,
 ) -> Dict[str, Any]:
     """ Normaliza o resumo competitivo em dois modos explícitos 
@@ -991,6 +932,14 @@ def build_comparison_summary(
     ``stored_summary.aggregates`` como fonte principal de discrepâncias,
     mínimos, máximos e média.
     """
+    competitors_count = _extract_competitors_count(stored_summary)
+    if competitors_count == 0 and comparison is not None:
+        payload = comparison.data or {}
+        if isinstance(payload, dict):
+            discrepancies = payload.get("discrepancies")
+            if isinstance(discrepancies, list):
+                competitors_count = len(discrepancies)
+    
     if force_recompute:
         return _build_recomputed_summary(
             comparison=comparison,
@@ -1097,3 +1046,78 @@ def _resolve_monitored_inactive_reason(monitored: Any) -> str | None:
         return "monitored_without_price"
 
     return None
+
+class FilteredCompetitorsResult:
+    """ Agrupa concorrentes elegíveis para comparação e métricas de filtragem."""
+
+    def __init__(
+        self,
+        *,
+        entries: list["ComparisonCompetitorEntry"],
+        filtered_reasons: dict[str, int],
+        total_competitors: int,
+    ) -> None:
+        self.entries = entries
+        self.filtered_reasons = filtered_reasons
+        self.total_competitors = total_competitors
+
+
+class ComparisonCompetitorEntry:
+    """Representa um concorrente válido com o preço resolvido para comparação."""
+
+    def __init__(self, *, competitor: CompetitorProduct, price: Decimal, price_source: str) -> None:
+        self.competitor = competitor
+        self.price = price
+        self.price_source = price_source
+
+
+def _filter_competitors_for_comparison(
+    db: Session,
+    competitors: List[CompetitorProduct],
+) -> FilteredCompetitorsResult:
+    """Filtra concorrentes com uma única regra canônica reutilizada no serviço.
+
+    Esta função elimina duplicação entre os fluxos de comparação e de
+    recomposição de resumo, garantindo os mesmos critérios de elegibilidade.
+    """
+    deduped_competitors = _deduplicate_competitors(competitors)
+    filtered_reasons: dict[str, int] = {}
+    entries: list[ComparisonCompetitorEntry] = []
+
+    for competitor in deduped_competitors:
+        if getattr(competitor, "is_paused", False):
+            filtered_reasons["paused"] = filtered_reasons.get("paused", 0) + 1
+            continue
+
+        status_value = getattr(competitor, "status", ProductStatus.available)
+        if status_value in {ProductStatus.unavailable, ProductStatus.removed}:
+            filtered_reasons["status_unavailable"] = filtered_reasons.get("status_unavailable", 0) + 1
+            continue
+
+        if getattr(competitor, "availability", None) is False:
+            filtered_reasons["availability_false"] = filtered_reasons.get("availability_false", 0) + 1
+            continue
+
+        resolved_price, price_source = _resolve_competitor_comparison_price(db, competitor)
+        if resolved_price is None:
+            filtered_reasons["missing_price"] = filtered_reasons.get("missing_price", 0) + 1
+            continue
+
+        if competitor.current_price is None:
+            # Mantém preço transitório somente em memória para o comparador usar fallback do histórico.
+            competitor.current_price = resolved_price
+            competitor._comparison_price_source = price_source
+
+        entries.append(
+            ComparisonCompetitorEntry(
+                competitor=competitor,
+                price=resolved_price,
+                price_source=price_source,
+            )
+        )
+
+    return FilteredCompetitorsResult(
+        entries=entries,
+        filtered_reasons=filtered_reasons,
+        total_competitors=len(deduped_competitors),
+    )

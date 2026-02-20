@@ -134,14 +134,12 @@ def build_monitored_response(
             normalized_summary = summary
         else:
             #summary é um objeto ORM PriceComparisonSummary (possui .aggregates)
-            aggregates = getattr(summary, "aggregates", None) or {}
             #Reutiliza a normalização padrão para evitar formatos divergentes no frontend
-            from market_alert.services.services_comparison import _extract_competitors_count, build_comparison_summary
+            from market_alert.services.services_comparison import summarize_comparison
 
-            normalized_summary = build_comparison_summary(
+            normalized_summary = summarize_comparison(
                 None,
-                competitors_count=_extract_competitors_count(summary),
-                stored_summary=summary,
+                summary,
             )
     
     if normalized_summary:
