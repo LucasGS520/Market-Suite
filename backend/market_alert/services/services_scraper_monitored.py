@@ -19,6 +19,7 @@ from market_alert.crud.crud_monitored import (
     create_or_update_monitored_product_scraped,
     get_monitored_product_by_user_and_url,
 )
+from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
 from market_alert.utils.price_comparator import request_comparison_recompute
 from market_alert.services._scraper_common import (
@@ -161,8 +162,6 @@ def _handle_response(
 
     try:
         #Reenfileira concorrentes vinculados após atualizar o monitorado
-        from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
-
         enqueue_competitors_for_monitored(db, monitored_id=product.id)
     except Exception:
         logger.exception("enqueue_competitors_failed", monitored_id=str(product.id))

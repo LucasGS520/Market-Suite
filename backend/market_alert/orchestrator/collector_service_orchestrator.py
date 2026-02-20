@@ -11,6 +11,7 @@ import random
 from uuid import UUID, uuid4
 
 import structlog
+from celery import current_app
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
@@ -73,13 +74,12 @@ def enqueue_collect(
     countdown: float | None = None
 ) -> None:
     """ Enfileira coleta na fila ``scraping`` mantendo única porta de entrada """
-    from market_alert.tasks.collector_product_task import collect_product_task
-
     #Garante rastreio mínimo caso o payload venha de integrações antigas
     if not payload.get("trace_id"):
         payload["trace_id"] = str(uuid4())
 
-    collect_product_task.apply_async(
+    current_app.send_task(
+        "market_alert.tasks.collector_product_task.collect_product_task",
         kwargs={"payload": payload},
         queue="scraping",
         countdown=countdown,

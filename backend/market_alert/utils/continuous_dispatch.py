@@ -20,6 +20,7 @@ from shared.infra.db import SessionLocal
 
 from market_alert.core.celery_app import celery_app
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.orchestrator.collector_service_orchestrator import build_competitor_payload, build_monitored_payload
@@ -103,8 +104,6 @@ def _collect_group(
     enqueued_at: datetime | None,
 ) -> CollectDispatchDecision:
     """ Dispara coletas do monitorado e concorrentes retornando decisão de reenqueue """
-    #Import local para evitar ciclo com módulos de CRUD que usam este utilitário
-    from market_alert.crud.crud_monitored import get_monitored_product_by_id
     with SessionLocal() as db:
         refreshed = get_monitored_product_by_id(db, monitored.id)
         if refreshed:
@@ -284,8 +283,6 @@ def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
         parsed_id = UUID(monitored_id)
     except Exception:
         return None
-    #Import local para evitar ciclo com módulos de CRUD que usam este utilitário
-    from market_alert.crud.crud_monitored import get_monitored_product_by_id
     return get_monitored_product_by_id(db, parsed_id)
 
 def _handle_processing_requeue(
