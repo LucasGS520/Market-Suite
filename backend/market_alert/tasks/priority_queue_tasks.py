@@ -17,7 +17,7 @@ from shared.infra.db import SessionLocal
 from market_alert.core.celery_app import celery_app
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
-from market_alert.services.services_priority_queue_manager import enqueue_monitored_at
+from market_alert.services.services_priority_queue import enqueue_monitored_at
 
 
 logger = structlog.get_logger("priority_queue_tasks")

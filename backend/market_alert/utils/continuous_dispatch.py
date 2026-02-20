@@ -23,8 +23,7 @@ from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.orchestrator.collector_service_orchestrator import build_competitor_payload, build_monitored_payload
-from market_alert.services.services_priority_queue import PriorityQueueService
-from market_alert.services.services_priority_queue_manager import enqueue_monitored_at
+from market_alert.services.services_priority_queue import PriorityQueueService, enqueue_monitored_at
 from market_alert.utils.interval_calculator_products import (
     EVENT_RETRY,
     RetryContext,

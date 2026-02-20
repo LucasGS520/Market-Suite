@@ -25,7 +25,7 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.crud import crud_competitor, crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
-from market_alert.services.services_priority_queue_manager import enqueue_monitored_at
+from market_alert.services.services_priority_queue import enqueue_monitored_at
 from market_alert.utils.interval_calculator_products import (
     EVENT_AVAILABILITY_CHANGED,
     EVENT_PRICE_CHANGED,
@@ -231,18 +231,15 @@ def create_or_update_monitored_product_scraped(
     scraped_name: str | None = None,
     collected_at: datetime | None = None,
 ) -> MonitoredProduct:
-    """ Cria ou atualiza um produto monitorado a partir de dados de scraping """
+    """ Cria ou atualiza um monitorado a partir do payload consolidade de scraping """
     normalized_url = normalize_product_url_for_storage(product_data.product_url)
-    #A URL chega validada pela API e é preservada para manter unicidade baseada na entrada do usuário
+    checked_at = (
+        last_checked.replace(tzinfo=timezone.utc)
+        if last_checked.tzinfo is None
+        else last_checked.astimezone(timezone.utc)
+    )
 
-    if last_checked.tzinfo is None:
-        last_checked = last_checked.replace(tzinfo=timezone.utc)
-    else:
-        last_checked = last_checked.astimezone(timezone.utc)
-
-    #Verifica se o produto já existe para o usuário
     existing = get_monitored_product_by_user_and_url(db, user_id, normalized_url)
-
     resolved_name, fallback_name = prepare_effective_name(
         product_data.name_identification,
         scraped_name,
@@ -250,134 +247,183 @@ def create_or_update_monitored_product_scraped(
         fallback_label="Produto pendente",
     )
 
-    if existing:
-        resolved_price = normalize_scraped_price(scraped_info.current_price)
-        availability = _resolve_availability(scraped_info.availability, scraped_info.last_status)
-        last_status = scraped_info.last_status or existing.last_status
-        inactive_due_to_data = availability is False or resolved_price is None
-
-        #Atualiza somente campos relevantes
-        if product_data.name_identification and existing.name_identification != product_data.name_identification:
-            existing.name_identification = product_data.name_identification
-        elif should_replace_with_scraped(existing.name_identification, fallback_name, scraped_name):
-            #Substituímos o placeholder por nome real vindo do scraping
-            existing.name_identification = sanitize_text(scraped_name) or fallback_name
-        elif existing.name_identification is None:
-            existing.name_identification = resolved_name
-        previous_price = existing.current_price
-        previous_status = existing.status
-        price_changed = different_price(previous_price, resolved_price)
-        resolved_currency = currency or scraped_info.currency or existing.currency
-
-        #Executa commit único garantindo atomicidade com o histórico
-        logger.info(
-            "monitored_commit_preview",
-            product_id=str(existing.id),
-            availability=availability,
-            last_status=last_status,
-            resolved_price=str(resolved_price) if resolved_price is not None else None,
-            price_changed=price_changed,
+    if existing is not None:
+        return _persist_existing_monitored(
+            db,
+            existing,
+            product_data=product_data,
+            scraped_info=scraped_info,
+            normalized_url=normalized_url,
+            resolved_name=resolved_name,
+            fallback_name=fallback_name,
+            scraped_name=scraped_name,
+            checked_at=checked_at,
+            collected_at=collected_at,
+            currency=currency,
+            etag=etag,
+            last_modified=last_modified,
         )
-        collected_reference = collected_at or last_checked
 
-        try:
-            existing.current_price = resolved_price
+    return _persist_new_monitored(
+        db,
+        user_id=user_id,
+        scraped_info=scraped_info,
+        normalized_url=normalized_url,
+        resolved_name=resolved_name,
+        checked_at=checked_at,
+        collected_at=collected_at,
+        currency=currency,
+        etag=etag,
+        last_modified=last_modified,
+    )
 
-            #Atualiza thumbnail, frete, moeda, etag, timestamps e status
-            existing.thumbnail = scraped_info.thumbnail
-            existing.free_shipping = scraped_info.free_shipping
-            existing.currency = resolved_currency
-            existing.etag = etag or existing.etag
-            existing.last_modified = last_modified or existing.last_modified
-            existing.last_checked = last_checked
-            existing.last_scraped_at = last_checked
-            existing.collected_at = collected_reference
-            existing.status = MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active
-            existing.availability = availability
-            existing.last_status = last_status
-            existing.normalized_url = normalized_url
+def _persist_existing_monitored(
+    db: Session,
+    existing: MonitoredProduct,
+    *,
+    product_data: MonitoredProductCreateScraping,
+    scraped_info: MonitoredScrapedInfo,
+    normalized_url: str,
+    resolved_name: str,
+    fallback_name: str,
+    scraped_name: str | None,
+    checked_at: datetime,
+    collected_at: datetime | None,
+    currency: str | None,
+    etag: str | None,
+    last_modified: datetime | None,
+) -> MonitoredProduct:
+    """ Persiste atualização de monitorado existente em transação única. """
+    resolved_price = normalize_scraped_price(scraped_info.current_price)
+    availability = _resolve_availability(scraped_info.availability, scraped_info.last_status)
+    last_status = scraped_info.last_status or existing.last_status
+    inactive_due_to_data = availability is False or resolved_price is None
+    collected_reference = collected_at or checked_at
 
-            history_allowed = should_create_price_history(resolved_price, availability)
-            price_history_needed = price_changed and history_allowed
+    if product_data.name_identification and existing.name_identification != product_data.name_identification:
+        existing.name_identification = product_data.name_identification
+    elif should_replace_with_scraped(existing.name_identification, fallback_name, scraped_name):
+        existing.name_identification = sanitize_text(scraped_name) or fallback_name
+    elif existing.name_identification is None:
+        existing.name_identification = resolved_name
 
-            if not history_allowed:
-                logger.info(
-                    "product_marked_unavailable",
-                    product_id=str(existing.id),
-                    availability=availability,
-                    last_status=last_status,
-                    availability_inferred=availability is None,
-                    price_missing=resolved_price is None,
-                )
+    previous_price = existing.current_price
+    previous_status = existing.status
+    price_changed = different_price(previous_price, resolved_price)
+    resolved_currency = currency or scraped_info.currency or existing.currency
 
+    logger.info(
+        "monitored_commit_preview",
+        product_id=str(existing.id),
+        availability=availability,
+        last_status=last_status,
+        resolved_price=str(resolved_price) if resolved_price is not None else None,
+        price_changed=price_changed,
+    )
+
+    try:
+        existing.current_price = resolved_price
+        existing.thumbnail = scraped_info.thumbnail
+        existing.free_shipping = scraped_info.free_shipping
+        existing.currency = resolved_currency
+        existing.etag = etag or existing.etag
+        existing.last_modified = last_modified or existing.last_modified
+        existing.last_checked = checked_at
+        existing.last_scraped_at = checked_at
+        existing.collected_at = collected_reference
+        existing.status = MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active
+        existing.availability = availability
+        existing.last_status = last_status
+        existing.normalized_url = normalized_url
+
+        history_allowed = should_create_price_history(resolved_price, availability)
+        price_history_needed = price_changed and history_allowed
+        if not history_allowed:
             logger.info(
-                "updated_monitored_product_scraped",
+                "product_marked_unavailable",
                 product_id=str(existing.id),
-                previous_price=str(previous_price) if previous_price is not None else None,
-                new_price=str(resolved_price) if resolved_price is not None else None,
-                price_history_will_be_created=price_history_needed,
+                availability=availability,
+                last_status=last_status,
+                availability_inferred=availability is None,
+                price_missing=resolved_price is None,
             )
-
-            #Persistimos histórico antes do refresh para alinhar commit único à alteração de preço
-            if price_history_needed:
-                crud_price_history.create_for_monitored(
-                    db,
-                    existing.id,
-                    resolved_price,
-                    resolved_currency,
-                    last_checked,
-                )
-
-            _update_price_change_tracking(
-                existing,
-                new_price=resolved_price,
-                old_price=previous_price,
-                collected_at=collected_reference,
-            )
-            #A estabilidade precisa ser recalculada antes do agendamento para refletir mudanças de preço no mesmo ciclo
-            availability_changed = previous_status != existing.status
-            schedule_event = _resolve_schedule_event(
-                price_changed=price_changed,
-                availability_changed=availability_changed,
-            )
-            schedule_decision = calculate_schedule(
-                existing,
-                reference_time=last_checked,
-                event_type=schedule_event,
-            )
-            existing.stability_score = schedule_decision.stability_score
-            existing.next_check_at = schedule_decision.next_check_at
-
-            db.commit()
-        except Exception:
-            #Rollback evita manter sessão suja em falhas de gravação e previne transações aninhadas
-            db.rollback()
-            raise
-
-        db.refresh(existing)
-        existing._price_changed = price_changed
-        existing._availability_changed = previous_status != existing.status
-
-        existing._recompute_comparison = bool(existing._price_changed or existing._availability_changed)
-        existing._recompute_reason = "material_change" if existing._recompute_comparison else None
         
         logger.info(
-            "updated_monitored",
+            "updated_monitored_product_scraped",
             product_id=str(existing.id),
-            price_changed=existing._price_changed,
-            availability_changed=existing._availability_changed,
-            last_checked=last_checked.isoformat(),
-            availability=existing.availability,
-            last_status=existing.last_status,
+            previous_price=str(previous_price) if previous_price is not None else None,
+            new_price=str(resolved_price) if resolved_price is not None else None,
+            price_history_will_be_created=price_history_needed,
         )
-        return existing
+        if price_history_needed:
+            crud_price_history.create_for_monitored(
+                db,
+                existing.id,
+                resolved_price,
+                resolved_currency,
+                checked_at,
+            )
 
-    #Se não existir, cria o registro
+        _update_price_change_tracking(
+            existing,
+            new_price=resolved_price,
+            old_price=previous_price,
+            collected_at=collected_reference,
+        )
+        availability_changed = previous_status != existing.status
+        schedule_event = _resolve_schedule_event(
+            price_changed=price_changed,
+            availability_changed=availability_changed,
+        )
+        schedule_decision = calculate_schedule(
+            existing,
+            reference_time=checked_at,
+            event_type=schedule_event,
+        )
+        existing.stability_score = schedule_decision.stability_score
+        existing.next_check_at = schedule_decision.next_check_at
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(existing)
+    existing._price_changed = price_changed
+    existing._availability_changed = previous_status != existing.status
+    existing._recompute_comparison = bool(existing._price_changed or existing._availability_changed)
+    existing._recompute_reason = "material_change" if existing._recompute_comparison else None
+
+    logger.info(
+        "updated_monitored",
+        product_id=str(existing.id),
+        price_changed=existing._price_changed,
+        availability_changed=existing._availability_changed,
+        last_checked=checked_at.isoformat(),
+        availability=existing.availability,
+        last_status=existing.last_status,
+    )
+    return existing
+
+
+def _persist_new_monitored(
+    db: Session,
+    *,
+    user_id: UUID,
+    scraped_info: MonitoredScrapedInfo,
+    normalized_url: str,
+    resolved_name: str,
+    checked_at: datetime,
+    collected_at: datetime | None,
+    currency: str | None,
+    etag: str | None,
+    last_modified: datetime | None,
+) -> MonitoredProduct:
+    """ Persiste criação de monitorado novo e histórico inicial. """
     resolved_price = normalize_scraped_price(scraped_info.current_price)
     resolved_currency = currency or scraped_info.currency
     availability = _resolve_availability(scraped_info.availability, scraped_info.last_status)
-    last_status = scraped_info.last_status
     inactive_due_to_data = availability is False or resolved_price is None
+    collected_reference = collected_at or checked_at
 
     new = MonitoredProduct(
         user_id=user_id,
@@ -390,25 +436,25 @@ def create_or_update_monitored_product_scraped(
         free_shipping=scraped_info.free_shipping,
         monitoring_type=MonitoringType.scraping,
         status=MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active,
-        last_checked=last_checked,
-        last_scraped_at=last_checked,
-        collected_at=collected_at or last_checked,
+        last_checked=checked_at,
+        last_scraped_at=checked_at,
+        collected_at=collected_reference,
         next_check_at=None,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
         availability=availability,
-        last_status=last_status,
+        last_status=scraped_info.last_status,
     )
     _update_price_change_tracking(
         new,
         new_price=resolved_price,
         old_price=None,
-        collected_at=collected_at or last_checked,
+        collected_at=collected_reference,
     )
     initial_schedule = calculate_schedule(
         new,
-        reference_time=last_checked,
+        reference_time=checked_at,
         event_type=EVENT_STANDARD,
     )
     new.stability_score = initial_schedule.stability_score
@@ -423,7 +469,7 @@ def create_or_update_monitored_product_scraped(
                 "product_marked_unavailable",
                 product_id=str(new.id),
                 availability=availability,
-                last_status=last_status,
+                last_status=scraped_info.last_status,
                 availability_inferred=availability is None,
                 price_missing=resolved_price is None,
             )
@@ -433,16 +479,14 @@ def create_or_update_monitored_product_scraped(
                 new.id,
                 resolved_price,
                 resolved_currency,
-                last_checked,
+                checked_at,
             )
         db.commit()
     except Exception:
-        #Rollback mantém atomicidade entre produto e histórico quando ocorrer falha
         db.rollback()
         raise
 
     db.refresh(new)
-
     new._price_changed = True
     new._availability_changed = True
     new._recompute_comparison = True

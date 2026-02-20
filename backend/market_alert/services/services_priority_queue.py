@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Mapping
+from uuid import UUID
 
 from redis import Redis
 
@@ -316,4 +317,95 @@ class PriorityQueueService:
     def is_available(self) -> bool:
         """ Indica se o Redis está disponível para operação imediata """
         return self._client() is not None
+    
+def _utc_now() -> datetime:
+    """ Retorna horário UTC truncado para facilitar correlação de logs."""
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+def enqueue_monitored_now(
+    monitored_id: UUID,
+    *,
+    source: str,
+    queue_service: PriorityQueueService | None = None,
+) -> bool:
+    """ Enfileira monitorado para execução imediata no coletor contínuo."""
+    service = queue_service or PriorityQueueService()
+    enqueued_at = _utc_now()
+    if not service.enqueue_now(str(monitored_id)):
+        logger.warning(
+            "priority_queue_enqueue_failed",
+            extra={"monitored_id": str(monitored_id), "source": source},
+        )
+        return False
+
+    service.set_enqueued_at(str(monitored_id), enqueued_at)
+    logger.info(
+        "priority_queue_enqueued",
+        extra={
+            "monitored_id": str(monitored_id),
+            "source": source,
+            "enqueued_at": enqueued_at.isoformat(),
+        },
+    )
+    return True
+
+def enqueue_monitored_at(
+    monitored_id: UUID,
+    scheduled_at: datetime,
+    *,
+    source: str,
+    queue_service: PriorityQueueService | None = None,
+) -> bool:
+    """ Enfileira monitorado para execução futura respeitando horário alvo."""
+    service = queue_service or PriorityQueueService()
+    normalized_time = (
+        scheduled_at.replace(tzinfo=timezone.utc)
+        if scheduled_at.tzinfo is None
+        else scheduled_at
+    )
+
+    enqueued_at = _utc_now()
+    if not service.enqueue(str(monitored_id), normalized_time):
+        logger.warning(
+            "priority_queue_schedule_failed",
+            extra={
+                "monitored_id": str(monitored_id),
+                "source": source,
+                "scheduled_at": normalized_time.isoformat(),
+            },
+        )
+        return False
+
+    service.set_enqueued_at(str(monitored_id), enqueued_at)
+    logger.info(
+        "priority_queue_scheduled",
+        extra={
+            "monitored_id": str(monitored_id),
+            "source": source,
+            "enqueued_at": enqueued_at.isoformat(),
+            "scheduled_at": normalized_time.isoformat(),
+        },
+    )
+    return True
+
+def remove_from_priority_queue(
+    product_id: UUID,
+    *,
+    source: str,
+    queue_service: PriorityQueueService | None = None,
+) -> bool:
+    """ Remove item da fila de prioridade ao pausar ou excluir monitoramento."""
+    service = queue_service or PriorityQueueService()
+    removed = service.remove(str(product_id))
+    if removed:
+        logger.info(
+            "priority_queue_removed",
+            extra={"product_id": str(product_id), "source": source},
+        )
+    else:
+        logger.warning(
+            "priority_queue_remove_failed",
+            extra={"product_id": str(product_id), "source": source},
+        )
+    return removed
     

@@ -51,7 +51,7 @@ from market_alert.services.services_comparison import (
     rebuild_summary_from_current_state,
 )
 from market_alert.services.services_competitors import create_competitor_scrape_request
-from market_alert.services.services_priority_queue_manager import enqueue_monitored_now, remove_from_priority_queue
+from market_alert.services.services_priority_queue import enqueue_monitored_now, remove_from_priority_queue
 from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import calculate_next_check_at

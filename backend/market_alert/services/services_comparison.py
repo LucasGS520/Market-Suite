@@ -340,149 +340,145 @@ def get_comparison_detail_for_user(
 
     return comparison
 
+def _load_and_filter_competitors(
+    db: Session,
+    monitored_id: UUID,
+    monitored: Any,
+) -> tuple[list[CompetitorProduct], int]:
+    """ Carrega concorrentes do monitorado e aplica filtro canônico de comparação. """
+    competitors = get_competitors_by_monitored_id(
+        db,
+        monitored_id,
+        include_paused=True,
+        include_inactive=True,
+    )
+    filtered_competitors = _filter_competitors_for_comparison(db, competitors)
+    available = [item.competitor for item in filtered_competitors.entries]
+    total = filtered_competitors.total_competitors
+    filtered_out = total - len(available)
+    if filtered_out:
+        logger.info(
+            "comparison_filtered_competitors",
+            filtered=filtered_out,
+            total=total,
+            available=len(available),
+            reasons=filtered_competitors.filtered_reasons,
+        )
+    return available, total
+
+
+def _persist_comparison_result(
+    db: Session,
+    *,
+    monitored: Any,
+    result: Dict[str, Any],
+    total: int,
+    available: list[CompetitorProduct],
+) -> Dict[str, Any]:
+    """ Persiste comparação e devolve payload final normalizado para os consumidores. """
+    persist_raw_result = getattr(settings, "COMPARISON_STORE_RAW_RESULT", False)
+    stored_payload = (
+        result
+        if persist_raw_result
+        else {
+            "monitored_price": result.get("monitored_price"),
+            "discrepancies": result.get("discrepancies", []),
+            "lowest_competitor": result.get("lowest_competitor"),
+            "highest_competitor": result.get("highest_competitor"),
+        }
+    )
+
+    comparison = create_price_comparison(db, monitored.id, stored_payload)
+    summary_payload = _apply_summary_defaults(
+        _compute_summary_from_payload(
+            result,
+            timestamp=comparison.timestamp,
+            comparison_id=comparison.id,
+            competitors_count=total,
+        ),
+        timestamp=comparison.timestamp,
+        comparison_id=comparison.id,
+        competitors_count=total,
+    )
+    encoded_summary = jsonable_encoder(summary_payload)
+    if not available:
+        encoded_summary["reason"] = encoded_summary.get("reason") or "no_available_competitors"
+    upsert_price_comparison_summary(db, monitored.id, comparison.id, encoded_summary)
+
+    result["summary"] = encoded_summary
+    result["comparison_id"] = str(comparison.id)
+    result["monitored_id"] = str(monitored.id)
+    result["user_id"] = str(monitored.user_id)
+    return result
+
+        
 def run_price_comparison(
     db: Session,
     monitored_id: UUID,
     tolerance: Decimal | None = None,
 ) -> Dict[str, Any]:
-    """Executa a comparação de preços retornando apenas o resumo essencial.
-
-    O fluxo evita cálculos derivados quando já trabalhamos com resumos pré-existentes
-    e persiste o payload completo somente quando configurado para depuração.
-    """
-    result: Dict[str, Any] | None = None
-
-    try:
-        #Carrega o produto monitorado para validação
-        monitored = get_monitored_product_by_id(db, monitored_id)
-        if not monitored:
-            raise ValueError(f"Monitored product {monitored_id} not found")
-
-        #Recupera concorrentes associados
-        competitors = get_competitors_by_monitored_id(
-            db, monitored_id, include_paused=True, include_inactive=True
-        )
-        filtered_competitors = _filter_competitors_for_comparison(db, competitors)
-        total_competitors = filtered_competitors.total_competitors
-        available_competitors = filtered_competitors.total_competitors
-        available_competitors = [
-            item.competitor
-            for item in filtered_competitors.entries
-        ]
-
-        filtered_out = total_competitors - len(available_competitors)
-        if filtered_out:
-            logger.info(
-                "comparison_filtered_competitors",
-                filtered=filtered_out,
-                total=total_competitors,
-                available=len(available_competitors),
-                reasons=filtered_competitors.filtered_reasons,
-            )
-
-        inactive_reason = _resolve_monitored_inactive_reason(monitored)
-        if inactive_reason:
-            logger.info(
-                "comparison_skipped_inactive_monitored",
-                monitored_id=str(monitored_id),
-                reason=inactive_reason,
-                competitors_count=total_competitors,
-            )
-            payload_stub = {
-                "monitored_price": None,
-                "discrepancies": [],
-                "lowest_competitor": None,
-                "highest_competitor": None,
-                "reason": inactive_reason,
-                "ignored_due_to_inactive": True,
-            }
-            comparison = create_price_comparison(db, monitored.id, payload_stub)
-            summary_payload = _apply_summary_defaults(
-                payload_stub,
-                timestamp=comparison.timestamp,
-                comparison_id=comparison.id,
-                competitors_count=total_competitors,
-            )
-            summary_payload["competitors_with_price_count"] = 0
-            summary_payload["competitiveness_status"] = None
-            summary_payload["comparison_insights"] = None
-            summary_payload["ignored_due_to_inactive"] = True
-
-            encoded_summary = jsonable_encoder(summary_payload)
-            upsert_price_comparison_summary(
-                db,
-                monitored.id,
-                comparison.id,
-                encoded_summary,
-            )
-            encoded_result = {
-                "summary": encoded_summary,
-                "comparison_id": str(comparison.id),
-                "monitored_id": str(monitored.id),
-                "user_id": str(monitored.user_id),
-                "lowest_competitor": None,
-                "highest_competitor": None,
-            }
-            result = encoded_result
-            return result
-
+    """ Executa comparação de preços e retorna resumo persistido para o monitorado. """
+    monitored = get_monitored_product_by_id(db, monitored_id)
+    if not monitored:
+        raise ValueError(f"Monitored product {monitored_id} not found")
+    
+    available_competitors, total_competitors = _load_and_filter_competitors(db, monitored_id, monitored)
+    inactive_reason = _resolve_monitored_inactive_reason(monitored)
+    if inactive_reason:
         logger.info(
-            "comparison_started",
+            "comparison_skipped_inactive_monitored",
             monitored_id=str(monitored_id),
+            reason=inactive_reason,
             competitors_count=total_competitors,
-            competitors_with_price_count=len(available_competitors),
         )
-
-        tol = tolerance if tolerance is not None else Decimal(str(settings.PRICE_TOLERANCE))
-
-        #Processa comparação e persiste resultado
-        raw_result = compare_prices(monitored, available_competitors, tol)
-        encoded_result = jsonable_encoder(raw_result)
-
-        persist_raw_result = getattr(settings, "COMPARISON_STORE_RAW_RESULT", False)
-        stored_payload = (
-            encoded_result
-            if persist_raw_result
-            else {
-                "monitored_price": encoded_result.get("monitored_price"),
-                "discrepancies": encoded_result.get("discrepancies", []),
-                "lowest_competitor": encoded_result.get("lowest_competitor"),
-                "highest_competitor": encoded_result.get("highest_competitor"),
-            }
-        )
-
-        comparison = create_price_comparison(db, monitored.id, stored_payload)
+        payload_stub = {
+            "monitored_price": None,
+            "discrepancies": [],
+            "lowest_competitor": None,
+            "highest_competitor": None,
+            "reason": inactive_reason,
+            "ignored_due_to_inactive": True,
+        }
+        comparison = create_price_comparison(db, monitored.id, payload_stub)
         summary_payload = _apply_summary_defaults(
-            _compute_summary_from_payload(
-                encoded_result,
-                timestamp=comparison.timestamp,
-                comparison_id=comparison.id,
-                competitors_count=total_competitors,
-            ),
+            payload_stub,
             timestamp=comparison.timestamp,
             comparison_id=comparison.id,
             competitors_count=total_competitors,
         )
+        summary_payload["competitors_with_price_count"] = 0
+        summary_payload["competitiveness_status"] = None
+        summary_payload["comparison_insights"] = None
+        summary_payload["ignored_due_to_inactive"] = True
         encoded_summary = jsonable_encoder(summary_payload)
-        if not available_competitors:
-            encoded_summary["reason"] = encoded_summary.get("reason") or "no_available_competitors"
-        upsert_price_comparison_summary(
-            db,
-            monitored.id,
-            comparison.id,
-            encoded_summary,
-        )
-        encoded_result["summary"] = encoded_summary
-        encoded_result["comparison_id"] = str(comparison.id)
-        encoded_result["monitored_id"] = str(monitored.id)
-        encoded_result["user_id"] = str(monitored.user_id)
-        result = encoded_result
-        logger.info("comparison_finished", monitored_id=str(monitored_id))
+        upsert_price_comparison_summary(db, monitored.id, comparison.id, encoded_summary)
+        return {
+            "summary": encoded_summary,
+            "comparison_id": str(comparison.id),
+            "monitored_id": str(monitored.id),
+            "user_id": str(monitored.user_id),
+            "lowest_competitor": None,
+            "highest_competitor": None,
+        }
 
-    except Exception:
-        raise
-
-    return result
+    logger.info(
+        "comparison_started",
+        monitored_id=str(monitored_id),
+        competitors_count=total_competitors,
+        competitors_with_price_count=len(available_competitors),
+    )
+    tol = tolerance if tolerance is not None else Decimal(str(settings.PRICE_TOLERANCE))
+    raw_result = compare_prices(monitored, available_competitors, tol)
+    encoded_result = jsonable_encoder(raw_result)
+    persisted_result = _persist_comparison_result(
+        db,
+        monitored=monitored,
+        result=encoded_result,
+        total=total_competitors,
+        available=available_competitors,
+    )
+    logger.info("comparison_finished", monitored_id=str(monitored_id))
+    return persisted_result
 
 def _deduplicate_competitors(competitors: List[CompetitorProduct]) -> List[CompetitorProduct]:
     """Remove duplicidades simples mantendo o concorrente mais recente por ID """

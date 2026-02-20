@@ -225,25 +225,22 @@ def create_or_update_competitor_product_scraped(
     last_modified: datetime | None = None,
     collected_at: datetime | None = None,
 ) -> CompetitorProduct:
-    """ Atualiza ou cria um produto concorrente a partir dos dados extraídos pelo scraping """
+    """ Atualiza ou cria concorrente usando informações normalizadas do scraping """
     normalized_url = normalize_product_url_for_storage(str(product_data.product_url))
     if not normalized_url:
-        #Mantém fallback para registros antigos que já passaram pela validação externa
         normalized_url = _normalize_competitor_storage_url(product_data.product_url)
 
-    if last_checked.tzinfo is None:
-        last_checked = last_checked.replace(tzinfo=timezone.utc)
-    else:
-        last_checked = last_checked.astimezone(timezone.utc)
-
-    #Verifica se já existe um concorrente com o mesmo monitorado e URL canônica
+    checked_at = (
+        last_checked.replace(tzinfo=timezone.utc)
+        if last_checked.tzinfo is None
+        else last_checked.astimezone(timezone.utc)
+    )
     existing = get_competitor_by_monitored_and_url(
         db,
         product_data.monitored_product_id,
         normalized_url,
     )
 
-    #Aceita múltiplos campos para compatibilidade entre payloads antigos e novos
     provided_name = (
         getattr(product_data, "name", None)
         or getattr(product_data, "display_name", None)
@@ -257,152 +254,196 @@ def create_or_update_competitor_product_scraped(
     )
 
     if existing:
-        resolved_price = normalize_scraped_price(scraped_info.current_price)
-        existing._recompute_comparison = False
-        existing._recompute_reason = None
-        
-        #Atualiza somente campos relevantes
-        if provided_name and existing.name_competitor != resolved_name:
-            existing.name_competitor = resolved_name
-        elif should_replace_with_scraped(existing.name_competitor, fallback_name, scraped_info.name):
-            #Substitui o placeholder derivado da URL pelo nome real do scraping
-            existing.name_competitor = sanitize_text(scraped_info.name) or fallback_name
-        elif existing.name_competitor is None:
-            existing.name_competitor = resolved_name
-        previous_price = existing.current_price
-        previous_status = existing.status
-        previous_last_checked = existing.last_checked
-        previous_collected_at = existing.collected_at
-        existing.old_price = existing.current_price
-        availability = scraped_info.availability
-        last_status = scraped_info.last_status or existing.last_status
-        resolved_availability, resolved_status, unavailable_by_data = _resolve_scraped_availability_status(
-            availability,
-            resolved_price,
-        )
-        if availability is False and resolved_price is not None:
-            logger.info(
-                "competitor_availability_overridden_by_price",
-                product_id=str(existing.id),
-                availability=availability,
-                resolved_price=str(resolved_price),
-            )
-
-        price_changed = different_price(previous_price, resolved_price)
-        availability_changed = previous_status != resolved_status
-        resolved_currency = currency or scraped_info.currency or existing.currency
-
-        collected_reference = collected_at or last_checked
-
-        try:
-            existing.current_price = resolved_price
-
-            #Atualiza thumbnail, frete, moeda, etag, timestamps e status
-            existing.thumbnail = scraped_info.thumbnail
-            existing.free_shipping = scraped_info.free_shipping
-            existing.currency = resolved_currency
-            existing.etag = etag or existing.etag
-            existing.last_modified = last_modified or existing.last_modified
-            existing.last_checked = last_checked
-            existing.last_scraped_at = collected_reference
-            existing.collected_at = collected_reference
-            existing.status = resolved_status
-            existing.availability = resolved_availability
-            existing.last_status = last_status
-            existing.product_url = normalized_url
-
-            history_allowed = should_create_price_history(resolved_price, resolved_availability)
-            price_history_needed = price_changed and history_allowed
-
-            if not history_allowed:
-                logger.info(
-                    "product_marked_unavailable",
-                    product_id=str(existing.id),
-                    availability=resolved_availability,
-                    last_status=last_status,
-                    availability_inferred=resolved_availability is None,
-                    price_missing=resolved_price is None,
-                )
-
-            logger.info(
-                "update_competitor_product_scraped",
-                product_id=str(existing.id),
-                previous_price=str(previous_price) if previous_price is not None else None,
-                new_price=str(resolved_price) if resolved_price is not None else None,
-                price_history_will_be_created=price_history_needed,
-            )
-
-            #Salvamos histórico junto ao commit do produto apenas quando houver alteração real
-            if price_history_needed:
-                crud_price_history.create_for_competitor(
-                    db,
-                    existing.id,
-                    resolved_price,
-                    resolved_currency,
-                    last_checked,
-                )
-
-            _update_competitor_price_change_tracking(
-                existing,
-                new_price=resolved_price,
-                old_price=previous_price,
-                collected_at=collected_reference,
-            )
-
-            db.commit()
-        except Exception:
-            #Rollback evita sessões sujas quando o chamador controla a transação externamente
-            db.rollback()
-            raise
-
-        db.refresh(existing)
-        existing._price_changed = price_changed
-        existing._availability_changed = availability_changed
-        recollection_refreshed = bool(
-            previous_last_checked != existing.last_checked
-            or previous_collected_at != existing.collected_at
-        )
-        enqueue_reason = resolve_recompute_reason(
-            price_changed=existing._price_changed,
-            availability_changed=existing._availability_changed,
-            recollection_refreshed=recollection_refreshed,
+        return _persist_existing_competitor(
+            db,
+            existing,
+            scraped_info=scraped_info,
+            normalized_url=normalized_url,
+            provided_name=provided_name,
+            resolved_name=resolved_name,
+            fallback_name=fallback_name,
+            checked_at=checked_at,
+            collected_at=collected_at,
+            currency=currency,
+            etag=etag,
+            last_modified=last_modified,
         )
 
-        if enqueue_reason:
-            #Sinaliza ao serviço que o resumo precisa ser recalculado fora do CRUD
-            existing._recompute_comparison = True
-            existing._recompute_reason = enqueue_reason
+    return _persist_new_competitor(
+        db,
+        product_data=product_data,
+        scraped_info=scraped_info,
+        normalized_url=normalized_url,
+        resolved_name=resolved_name,
+        checked_at=checked_at,
+        collected_at=collected_at,
+        currency=currency,
+        etag=etag,
+        last_modified=last_modified,
+    )
 
-        logger.info(
-            "updated_competitor",
-            product_id=str(existing.id),
-            price_changed=existing._price_changed,
-            availability_changed=existing._availability_changed,
-            enqueue_reason=enqueue_reason,
-            recollection_refreshed=recollection_refreshed,
-            last_checked=last_checked.isoformat(),
-            availability=existing.availability,
-            last_status=existing.last_status,
-        )
-        return existing
-
-    #Caso não exista, cria um registro
+def _persist_existing_competitor(
+    db: Session,
+    existing: CompetitorProduct,
+    *,
+    scraped_info: CompetitorScrapedInfo,
+    normalized_url: str,
+    provided_name: str | None,
+    resolved_name: str,
+    fallback_name: str,
+    checked_at: datetime,
+    collected_at: datetime | None,
+    currency: str | None,
+    etag: str | None,
+    last_modified: datetime | None,
+) -> CompetitorProduct:
+    """ Persiste atualização de concorrente existente com commit único. """
     resolved_price = normalize_scraped_price(scraped_info.current_price)
-    resolved_currency = currency or scraped_info.currency
-    availability = scraped_info.availability
-    last_status = scraped_info.last_status
-    resolved_availability, resolved_status, unavailable_by_data = _resolve_scraped_availability_status(
-        availability,
+    existing._recompute_comparison = False
+    existing._recompute_reason = None
+
+    if provided_name and existing.name_competitor != resolved_name:
+        existing.name_competitor = resolved_name
+    elif should_replace_with_scraped(existing.name_competitor, fallback_name, scraped_info.name):
+        existing.name_competitor = sanitize_text(scraped_info.name) or fallback_name
+    elif existing.name_competitor is None:
+        existing.name_competitor = resolved_name
+
+    previous_price = existing.current_price
+    previous_status = existing.status
+    previous_last_checked = existing.last_checked
+    previous_collected_at = existing.collected_at
+    existing.old_price = existing.current_price
+    last_status = scraped_info.last_status or existing.last_status
+    resolved_availability, resolved_status, _ = _resolve_scraped_availability_status(
+        scraped_info.availability,
         resolved_price,
     )
-    if availability is False and resolved_price is not None:
+    if scraped_info.availability is False and resolved_price is not None:
+        logger.info(
+            "competitor_availability_overridden_by_price",
+            product_id=str(existing.id),
+            availability=scraped_info.availability,
+            resolved_price=str(resolved_price),
+        )
+
+    price_changed = different_price(previous_price, resolved_price)
+    availability_changed = previous_status != resolved_status
+    resolved_currency = currency or scraped_info.currency or existing.currency
+    collected_reference = collected_at or checked_at
+
+    try:
+        existing.current_price = resolved_price
+        existing.thumbnail = scraped_info.thumbnail
+        existing.free_shipping = scraped_info.free_shipping
+        existing.currency = resolved_currency
+        existing.etag = etag or existing.etag
+        existing.last_modified = last_modified or existing.last_modified
+        existing.last_checked = checked_at
+        existing.last_scraped_at = collected_reference
+        existing.collected_at = collected_reference
+        existing.status = resolved_status
+        existing.availability = resolved_availability
+        existing.last_status = last_status
+        existing.product_url = normalized_url
+
+        history_allowed = should_create_price_history(resolved_price, resolved_availability)
+        price_history_needed = price_changed and history_allowed
+        if not history_allowed:
+            logger.info(
+                "product_marked_unavailable",
+                product_id=str(existing.id),
+                availability=resolved_availability,
+                last_status=last_status,
+                availability_inferred=resolved_availability is None,
+                price_missing=resolved_price is None,
+            )
+
+        logger.info(
+            "update_competitor_product_scraped",
+            product_id=str(existing.id),
+            previous_price=str(previous_price) if previous_price is not None else None,
+            new_price=str(resolved_price) if resolved_price is not None else None,
+            price_history_will_be_created=price_history_needed,
+        )
+        if price_history_needed:
+            crud_price_history.create_for_competitor(
+                db,
+                existing.id,
+                resolved_price,
+                resolved_currency,
+                checked_at,
+            )
+
+        _update_competitor_price_change_tracking(
+            existing,
+            new_price=resolved_price,
+            old_price=previous_price,
+            collected_at=collected_reference,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(existing)
+    existing._price_changed = price_changed
+    existing._availability_changed = availability_changed
+    recollection_refreshed = bool(
+        previous_last_checked != existing.last_checked
+        or previous_collected_at != existing.collected_at
+    )
+    enqueue_reason = resolve_recompute_reason(
+        price_changed=existing._price_changed,
+        availability_changed=existing._availability_changed,
+        recollection_refreshed=recollection_refreshed,
+    )
+    if enqueue_reason:
+        existing._recompute_comparison = True
+        existing._recompute_reason = enqueue_reason
+
+    logger.info(
+        "updated_competitor",
+        product_id=str(existing.id),
+        price_changed=existing._price_changed,
+        availability_changed=existing._availability_changed,
+        enqueue_reason=enqueue_reason,
+        recollection_refreshed=recollection_refreshed,
+        last_checked=checked_at.isoformat(),
+        availability=existing.availability,
+        last_status=existing.last_status,
+    )
+    return existing
+
+def _persist_new_competitor(
+    db: Session,
+    *,
+    product_data: CompetitorProductCreateScraping,
+    scraped_info: CompetitorScrapedInfo,
+    normalized_url: str,
+    resolved_name: str,
+    checked_at: datetime,
+    collected_at: datetime | None,
+    currency: str | None,
+    etag: str | None,
+    last_modified: datetime | None,
+) -> CompetitorProduct:
+    """ Persiste criação de concorrente novo e seu histórico inicial. """
+    resolved_price = normalize_scraped_price(scraped_info.current_price)
+    resolved_currency = currency or scraped_info.currency
+    resolved_availability, resolved_status, _ = _resolve_scraped_availability_status(
+        scraped_info.availability,
+        resolved_price,
+    )
+    if scraped_info.availability is False and resolved_price is not None:
         logger.info(
             "competitor_availability_overridden_by_price",
             product_id="pending",
-            availability=availability,
+            availability=scraped_info.availability,
             resolved_price=str(resolved_price),
         )
     
+    collected_reference = collected_at or checked_at
     new = CompetitorProduct(
         monitored_product_id=product_data.monitored_product_id,
         name_competitor=resolved_name,
@@ -414,20 +455,20 @@ def create_or_update_competitor_product_scraped(
         seller_rating=scraped_info.seller_rating,
         thumbnail=scraped_info.thumbnail,
         status=resolved_status,
-        last_checked=last_checked,
-        last_scraped_at=last_checked,
-        collected_at=collected_at or last_checked,
+        last_checked=checked_at,
+        last_scraped_at=checked_at,
+        collected_at=collected_reference,
         currency=resolved_currency,
         etag=etag,
         last_modified=last_modified,
         availability=resolved_availability,
-        last_status=last_status,
-        )
+        last_status=scraped_info.last_status,
+    )
     _update_competitor_price_change_tracking(
         new,
         new_price=resolved_price,
         old_price=None,
-        collected_at=collected_at or last_checked
+        collected_at=collected_reference,
     )
     try:
         db.add(new)
@@ -438,7 +479,7 @@ def create_or_update_competitor_product_scraped(
                 "product_marked_unavailable",
                 product_id=str(new.id),
                 availability=resolved_availability,
-                last_status=last_status,
+                last_status=scraped_info.last_status,
                 availability_inferred=resolved_availability is None,
                 price_missing=resolved_price is None,
             )
@@ -448,11 +489,10 @@ def create_or_update_competitor_product_scraped(
                 new.id,
                 resolved_price,
                 resolved_currency,
-                last_checked,
+                checked_at,
             )
         db.commit()
     except Exception:
-        #Rollback mantém atomicidade entre criação do concorrente e histórico de preços
         db.rollback()
         raise
 
