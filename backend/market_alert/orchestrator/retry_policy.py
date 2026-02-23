@@ -89,14 +89,25 @@ class RetryPolicy:
     def should_retry_scrape_failure(
         reason: str,
         attempt: int,
+        retry_after: int | None = None,
+        max_seconds: int | None = None,
         max_attempts: int = SCRAPE_RETRY_MAX_ATTEMPTS,
+        now: datetime | None = None,
     ) -> tuple[bool, datetime | None]:
-        """ Decide se deve retentar após falha de scraping.
+        """ Decide se deve retentar falhas de scraping e calcula o próximo check.
+
+        Este método centraliza o contrato de retry para falhas temporárias:
+        recebe contexto da falha, calcula o delay com
+        ``compute_scrape_retry_delay`` e devolve ``next_check_at`` pronto para
+        persistência/log.
 
         Args:
             reason: motivo da falha (ex.: 'rate_limit', 'timeout').
             attempt: número da tentativa atual.
+            retry_after: valor ``Retry-After`` retornado pelo servidor.
+            max_seconds: limite máximo de delay permitido para o retry.
             max_attempts: número máximo de tentativas permitidas.
+            now: referência temporal injetável para testes determinísticos.
 
         Returns:
             (deve_retry: bool, next_check_at: datetime | None)
@@ -105,8 +116,14 @@ class RetryPolicy:
         if attempt > max_attempts:
             return False, None
 
-        delay = RetryPolicy.compute_scrape_retry_delay(reason, attempt)
-        next_check_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        delay = RetryPolicy.compute_scrape_retry_delay(
+            reason,
+            attempt,
+            retry_after=retry_after,
+            max_seconds=max_seconds,
+        )
+        reference_now = now or datetime.now(timezone.utc)
+        next_check_at = reference_now + timedelta(seconds=delay)
         return True, next_check_at
 
     @staticmethod

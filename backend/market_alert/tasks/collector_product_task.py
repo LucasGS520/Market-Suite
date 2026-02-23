@@ -8,7 +8,7 @@ apenas o lock Redis aplicado aqui é utilizado para exclusão mútua.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import UUID
 
@@ -513,23 +513,27 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                 trace_id=trace_id,
             )
         else:
-            now = datetime.now(timezone.utc)
-            delay = RetryPolicy.compute_scrape_retry_delay(
+            #A policy centraliza cálculo de delay e next_retry_at para manter consistência entre logs, payload de retorno e futuras mudanças.
+            base_now = datetime.now(timezone.utc)
+            should_retry, next_retry_at = RetryPolicy.should_retry_scrape_failure(
                 "invalid_url",
                 invalid_attempt,
+                max_attempts=settings.SCRAPER_INVALID_URL_MAX_ATTEMPTS,
                 max_seconds=min(RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                now=base_now,
             )
-            next_retry_at = now + timedelta(seconds=delay)
-            temporary_failure = True
-            logger.warning(
-                "scrape_invalid_url_retry_scheduled",
-                kind=kind,
-                product_id=str(lock_target),
-                trace_id=trace_id,
-                attempts=invalid_attempt,
-                delay_seconds=delay,
-                next_retry_at=next_retry_at.isoformat(),
-            )
+            if should_retry and next_retry_at is not None:
+                delay = (next_retry_at - base_now).total_seconds()
+                temporary_failure = True
+                logger.warning(
+                    "scrape_invalid_url_retry_scheduled",
+                    kind=kind,
+                    product_id=str(lock_target),
+                    trace_id=trace_id,
+                    attempts=invalid_attempt,
+                    delay_seconds=delay,
+                    next_retry_at=next_retry_at.isoformat(),
+                )
     
     if payload and lock_target and _should_schedule_temporary_retry(result, reason) and not blocked_invalid:
         retry_attempt = _increment_temporary_failure_attempt(
@@ -538,12 +542,20 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
         )
         if retry_attempt is None:
             retry_attempt = 1
-        now = datetime.now(timezone.utc)
         if retry_attempt > RetryPolicy.SCRAPE_RETRY_MAX_ATTEMPTS:
             #Reinicia contador para evitar loops infinitos após atingir o limite
             _reset_temporary_failure_attempt(str(lock_target))
             delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
-            next_retry_at = now + timedelta(seconds=delay)
+            base_now = datetime.now(timezone.utc)
+            should_retry, next_retry_at = RetryPolicy.should_retry_scrape_failure(
+                reason or "unknown",
+                retry_attempt,
+                max_attempts=retry_attempt,
+                max_seconds=delay,
+                now=base_now,
+            )
+            if not should_retry:
+                next_retry_at = None
             temporary_failure = True
             logger.warning(
                 "scrape_retry_exhausted",
@@ -552,32 +564,36 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                 trace_id=trace_id,
                 attempts=retry_attempt,
                 delay_seconds=delay,
-                next_retry_at=next_retry_at.isoformat(),
+                next_retry_at=next_retry_at.isoformat() if next_retry_at else None,
             )
         else:
-            delay = RetryPolicy.compute_scrape_retry_delay(
+            #Falhas temporárias padrão usam policy única para evitar divergência de cálculo de next_retry_at entre consumidores.
+            base_now = datetime.now(timezone.utc)
+            should_retry, next_retry_at = RetryPolicy.should_retry_scrape_failure(
                 reason or "unknown",
                 retry_attempt,
                 retry_after=getattr(result, "retry_after", None),
                 max_seconds=min(RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                now=base_now,
             )
-            next_retry_at = now + timedelta(seconds=delay)
-            temporary_failure = True
-            if _is_rate_limit_error(result, reason):
-                _register_scrape_cooldown(
-                    str(lock_target),
-                    ttl_seconds=settings.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS,
+            if should_retry and next_retry_at is not None:
+                delay = (next_retry_at - base_now).total_seconds()
+                temporary_failure = True
+                if _is_rate_limit_error(result, reason):
+                    _register_scrape_cooldown(
+                        str(lock_target),
+                        ttl_seconds=settings.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS,
+                    )
+                logger.warning(
+                    "scrape_temporary_failure_scheduled",
+                    kind=kind,
+                    product_id=str(lock_target),
+                    trace_id=trace_id,
+                    host=_extract_host(payload.get("url") if payload else None),
+                    attempts=retry_attempt,
+                    delay_seconds=delay,
+                    next_retry_at=next_retry_at.isoformat(),
                 )
-            logger.warning(
-                "scrape_temporary_failure_scheduled",
-                kind=kind,
-                product_id=str(lock_target),
-                trace_id=trace_id,
-                host=_extract_host(payload.get("url") if payload else None),
-                attempts=retry_attempt,
-                delay_seconds=delay,
-                next_retry_at=next_retry_at.isoformat(),
-            )
 
     status = "blocked" if blocked_invalid else ("temporary_failure" if temporary_failure else outcome)
     return {
