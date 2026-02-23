@@ -199,9 +199,13 @@ class CollectionQueue:
     def get_collection_status(self, monitored_id: UUID) -> str:
         """ Retorna o estado atual do monitorado na fila Redis.
 
+        A verificação prioriza o ``processing set`` antes da fila principal.
+        Isso evita ambiguidade em janelas transitórias onde o mesmo item pode
+        aparecer nos dois sets por concorrência entre workers.
+
         Returns:
-            'queued'     — na fila principal aguardando coleta.
             'processing' — no processing set (coleta em andamento).
+            'queued'     — na fila principal aguardando coleta.
             'not_found'  — não está em nenhum dos sets.
         """
         product_id = str(monitored_id)
@@ -210,12 +214,14 @@ class CollectionQueue:
             return "not_found"
 
         try:
-            in_queue = client.zscore(self._svc._queue_key, product_id) is not None
-            if in_queue:
-                return "queued"
             in_processing = client.zscore(self._svc._processing_key, product_id) is not None
             if in_processing:
                 return "processing"
+            
+            #A fila principal é verificada depois para manter a precedência de "processing" quando aparecer em dois conjuntos.
+            in_queue = client.zscore(self._svc._queue_key, product_id) is not None
+            if in_queue:
+                return "queued"
         except Exception as exc:
             logger.warning("collection_queue_status_error: %s", exc)
 
