@@ -15,11 +15,11 @@ from market_alert.schemas.schemas_products import (
     CompetitorScrapeCreationResponse,
     CompetitorsListResponse,
 )
-from market_alert.services.services_competitors import (
+from market_alert.services.services_competitors import list_competitors_with_pagination
+from market_alert.services.services_competitor_lifecycle import (
     clear_competitors_from_monitored,
     create_competitor_scrape_request,
     delete_competitor_entry,
-    list_competitors_with_pagination,
 )
 from market_alert.core.security import get_current_user
 

@@ -18,11 +18,13 @@ from market_alert.schemas.schemas_products import (
 )
 from market_alert.core.security import get_current_user
 from market_alert.services.services_monitored import (
-    delete_monitored_product_entry,
     get_monitored_product,
     list_featured_monitored_products,
     list_monitored_products as list_monitored_products_service,
-    schedule_monitored_scrape,
+)
+from market_alert.services.services_monitored_lifecycle import (
+    create_monitored_product,
+    delete_monitored_product_entry,
     update_monitored_pause_state,
 )
 
@@ -45,7 +47,7 @@ def create_scrape_product(
     user: User = Depends(get_current_user),
 ):
     """ Delegação enxuta para criar monitorado e enfileirar na fila de prioridade """
-    return schedule_monitored_scrape(
+    return create_monitored_product(
         db=db,
         user=user,
         product_data=product_data,

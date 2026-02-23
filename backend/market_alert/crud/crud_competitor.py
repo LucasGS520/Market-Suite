@@ -10,8 +10,6 @@ import structlog
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
-
 from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_competitor_url, normalize_product_url_for_storage
@@ -19,6 +17,7 @@ from shared.utils.url_validation import normalize_competitor_url, normalize_prod
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
+from market_alert.domain.product_lifecycle import update_competitor_price_change_tracking
 from market_alert.utils.name_derivation import derive_name_from_url, prepare_effective_name, should_replace_with_scraped
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 from market_alert.utils.price_decimal import to_decimal, different_price
@@ -34,25 +33,6 @@ def _normalize_competitor_storage_url(product_url: str) -> str:
         return normalized
     #Mantém um fallback mínimo para evitar escrita de URLs vazias no banco
     return str(product_url or "").strip()
-
-def _update_competitor_price_change_tracking(
-    competitor: CompetitorProduct,
-    new_price: Decimal | None,
-    old_price: Decimal | None,
-    collected_at: datetime,
-) -> None:
-    """ Atualiza o registro de mudança de preço do concorrente quando necessário """
-    collected_reference = collected_at.astimezone(timezone.utc) if collected_at.tzinfo else collected_at.replace(tzinfo=timezone.utc)
-    if different_price(old_price, new_price):
-        competitor.last_price_change_at = collected_reference
-        logger.info(
-            "competitor_price_change_detected",
-            competitor_id=str(competitor.id),
-            monitored_id=str(competitor.monitored_product_id),
-            old_price=str(old_price) if old_price is not None else None,
-            new_price=str(new_price) if new_price is not None else None,
-            collected_at=collected_reference.isoformat(),
-        )
 
 def _resolve_scraped_availability_status(
     availability: bool | None,
@@ -138,32 +118,17 @@ def create_pending_competitor_product(
     is_paused: bool | None = None,
 ) -> CompetitorProduct:
     """ Cria um concorrente pendente garantindo unicidade por monitorado e URL.
-    
-    O nome exibido é sanitizado quando fornecido manualmente, caso contrário, 
+
+    O nome exibido é sanitizado quando fornecido manualmente, caso contrário,
     um rótulo é derivado da URL para evitar que o frontend exiba o ID bruto.
-    Bloqueia criação se o monitoramento do produto estiver pausado.
+    Validações de negócio (pausa, URL duplicada, limites) são responsabilidade
+    da camada de serviço antes de chamar esta função.
     """
-    monitored = (
-        db.query(MonitoredProduct)
-        .filter(MonitoredProduct.id == monitored_product_id)
-        .first()
-    )
-    if monitored and monitored.paused:
-        #Garante a defesa mesmo quando a validação de serviço não é acionada
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Monitoramento pausado. Retome o produto para adicionar concorrentes.",
-        )
-    resolved_is_paused = is_paused if is_paused is not None else bool(getattr(monitored, "paused", False))
     normalized_url = normalize_product_url_for_storage(str(product_url))
     if not normalized_url:
         normalized_url = _normalize_competitor_storage_url(str(product_url))
-    if monitored and normalized_url == monitored.product_url:
-        #Evita concorrente auto-referenciado ao salvar direto no CRUD
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="URL do concorrente não pode ser igual ao monitorado.",
-        )
+
+    resolved_is_paused = is_paused if is_paused is not None else False
     existing = get_competitor_by_monitored_and_url(db, monitored_product_id, normalized_url)
 
     if existing:
@@ -375,7 +340,7 @@ def _persist_existing_competitor(
                 checked_at,
             )
 
-        _update_competitor_price_change_tracking(
+        update_competitor_price_change_tracking(
             existing,
             new_price=resolved_price,
             old_price=previous_price,
@@ -464,7 +429,7 @@ def _persist_new_competitor(
         availability=resolved_availability,
         last_status=scraped_info.last_status,
     )
-    _update_competitor_price_change_tracking(
+    update_competitor_price_change_tracking(
         new,
         new_price=resolved_price,
         old_price=None,

@@ -25,14 +25,14 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.crud import crud_competitor, crud_price_history
 from market_alert.core.config_alert import settings
 from market_alert.models import User
-from market_alert.services.services_priority_queue import enqueue_monitored_at
+from market_alert.domain.product_lifecycle import (
+    compute_next_check_at,
+    resolve_scheduling_event,
+    update_price_change_tracking,
+)
 from market_alert.utils.interval_calculator_products import (
-    EVENT_AVAILABILITY_CHANGED,
-    EVENT_PRICE_CHANGED,
     EVENT_RESUMED,
     EVENT_STANDARD,
-    STABILITY_UNSTABLE,
-    calculate_schedule,
 )
 from market_alert.utils.name_derivation import prepare_effective_name, should_replace_with_scraped
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
@@ -66,41 +66,6 @@ class MonitoredNotFoundError(LookupError):
 
 class MonitoredLockError(RuntimeError):
     """Erro lançado quando o lock exclusivo não pode ser adquirido"""
-
-def _update_price_change_tracking(
-    monitored: MonitoredProduct,
-    new_price: Decimal | None,
-    old_price: Decimal | None,
-    collected_at: datetime,
-) -> None:
-    """ Atualiza rastreio de mudança de preço e marca coleta em grupo """
-    collected_reference = collected_at.astimezone(timezone.utc) if collected_at.tzinfo else collected_at.replace(tzinfo=timezone.utc)
-    monitored.group_collected_at = collected_reference
-
-    if different_price(old_price, new_price):
-        #Resetamos estabilidade para acelerar rechecagem após mudança de preço
-        monitored.last_price_change_at = collected_reference
-        monitored.stability_score = STABILITY_UNSTABLE
-        logger.info(
-            "monitored_price_change_detected",
-            monitored_id=str(monitored.id),
-            old_price=str(old_price) if old_price is not None else None,
-            new_price=str(new_price) if new_price is not None else None,
-            collected_at=collected_reference.isoformat(),
-        )
-
-def _resolve_schedule_event(*, price_changed: bool, availability_changed: bool) -> str:
-    """ Define evento de agendamento priorizando mudanças mais sensíveis
-    
-    A ordem de precedência evita ambiguidade quando preço e disponibilidade
-    mudam no mesmo ciclo: priporizamos preço por representar alteração com maior
-    impacto no loop de comparação.
-    """
-    if price_changed:
-        return EVENT_PRICE_CHANGED
-    if availability_changed:
-        return EVENT_AVAILABILITY_CHANGED
-    return EVENT_STANDARD
 
 def _resolve_availability(
     scraped_availability: bool | None, last_status: str | None
@@ -197,7 +162,7 @@ def create_pending_monitored_product(
     )
 
     #Calcula o próximo agendamento após istanciar o objeto para reutilizar referências e evitar uso de variáveis inexistentes
-    pending_schedule = calculate_schedule(
+    pending_schedule = compute_next_check_at(
         pending,
         reference_time=reference_time,
         event_type=EVENT_STANDARD,
@@ -364,18 +329,18 @@ def _persist_existing_monitored(
                 checked_at,
             )
 
-        _update_price_change_tracking(
+        update_price_change_tracking(
             existing,
             new_price=resolved_price,
             old_price=previous_price,
             collected_at=collected_reference,
         )
         availability_changed = previous_status != existing.status
-        schedule_event = _resolve_schedule_event(
+        schedule_event = resolve_scheduling_event(
             price_changed=price_changed,
             availability_changed=availability_changed,
         )
-        schedule_decision = calculate_schedule(
+        schedule_decision = compute_next_check_at(
             existing,
             reference_time=checked_at,
             event_type=schedule_event,
@@ -446,13 +411,13 @@ def _persist_new_monitored(
         availability=availability,
         last_status=scraped_info.last_status,
     )
-    _update_price_change_tracking(
+    update_price_change_tracking(
         new,
         new_price=resolved_price,
         old_price=None,
         collected_at=collected_reference,
     )
-    initial_schedule = calculate_schedule(
+    initial_schedule = compute_next_check_at(
         new,
         reference_time=checked_at,
         event_type=EVENT_STANDARD,
@@ -761,7 +726,7 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
     was_paused = bool(monitored.paused)
     monitored.paused = False
     monitored.paused_at = None
-    resumed_schedule = calculate_schedule(
+    resumed_schedule = compute_next_check_at(
         monitored,
         reference_time=reference,
         event_type=EVENT_RESUMED,
@@ -792,21 +757,9 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
             monitored_id=str(monitored.id),
             count=competitors_updated,
         )
-    
-    try:
-        enqueue_monitored_at(
-            monitored.id,
-            monitored.next_check_at or reference,
-            source="user_resumed",
-        )
-    except Exception as exc:
-        #Mantém a retomada mesmo que o Redis não responda
-        logger.warning(
-            "monitored_resume_queue_enqueue_failed",
-            monitored_id=str(monitored.id),
-            error=str(exc),
-        )
 
+    # O enfileiramento na fila de prioridade Redis é responsabilidade da camada
+    # de serviço (services_monitored_lifecycle). O CRUD apenas persiste o estado.
     return monitored
 
 def delete_monitored(db: Session, monitored_id: UUID, user: User) -> list[UUID]:
