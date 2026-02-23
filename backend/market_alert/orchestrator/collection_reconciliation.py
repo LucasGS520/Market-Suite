@@ -112,7 +112,8 @@ def reconcile_collection_queue(
 
     Verifica o estado de cada monitorado ativo na fila Redis. Monitorados
     ausentes são enfileirados com o ``next_check_at`` do banco. Monitorados
-    já na fila são ignorados (operação idempotente).
+    em ``processing`` ou já na fila principal são ignorados para evitar
+    reenfileiramento indevido durante janelas transitórias de concorrência.
 
     Usa flag Redis para evitar reconciliações simultâneas. Se já houver uma
     reconciliação em andamento, retorna imediatamente com ``skipped=1``.
@@ -144,6 +145,17 @@ def reconcile_collection_queue(
             for monitored_id, next_check_at in _iter_active_monitored(db):
                 total += 1
                 scheduled_at = _normalize_next_check(next_check_at, now)
+
+                status = queue.get_collection_status(monitored_id)
+                if status != "not_found":
+                    logger.debug(
+                        "reconciliation_skip_existing_item",
+                        extra={
+                            "monitored_id": str(monitored_id),
+                            "status": status,
+                        },
+                    )
+                    continue
 
                 if queue.enqueue_for_collection(
                     monitored_id,
