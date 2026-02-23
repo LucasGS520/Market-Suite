@@ -30,7 +30,6 @@ from backend.shared.schemas.shared_schemas_products import (
 )
 from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
-from shared.infra.db import SessionLocal
 
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import (
@@ -443,23 +442,19 @@ def update_monitored_pause_state(
 def delete_monitored_product_entry(
     *, db: Session, product_id: UUID, user: User
 ) -> None:
-    """ Remove monitorado com lock/sessão no service e limpa a fila de prioridade.
+    """ Remove monitorado com lock Redis e limpeza da fila de prioridade.
 
-    O fluxo usa uma sessão dedicada para isolar a transação de exclusão do
-    request principal e aplica lock Redis para evitar corrida com coletor.
+    A sessão é sempre recebida da camada de rota para manter o padrão de
+    injeção de dependências (CRUD recebe Session e nunca instancia SessionLocal).
     """
     lock_owner: str | None = None
-    dedicated_session: Session | None = None
     try:
-        dedicated_session = SessionLocal()
         lock_owner = _acquire_monitored_lock(product_id)
-        deleted_ids = delete_monitored(dedicated_session, product_id, user)
+        deleted_ids = delete_monitored(db, product_id, user)
     except Exception as exc:
         _raise_from_monitored_error(exc)
         return
     finally:
-        if dedicated_session is not None:
-            dedicated_session.close()
         if lock_owner:
             release_product_lock(product_id, lock_owner)
 

@@ -55,42 +55,42 @@ Nenhum arquivos de nível inferior deve importar de nível superior.
 
 #### Fase 1.1 — Preparação e Análise Estrutural
 
-- [ ] **Auditoria:** Listar todas as funções em crud_monitored.py que contêm lógica de negócio (não apenas CRUD):
+- [X] **Auditoria:** Listar todas as funções em crud_monitored.py que contêm lógica de negócio (não apenas CRUD):
   - Função `_update_price_change_tracking`
   - Função `_resolve_schedule_event`
   - Qualquer função privada que decidir estado, intervalo ou agendamento
   - Documentar exatamente qual é a regra e sua precedência
 
-- [ ] **Auditoria:** Listar todas as funções em `services_monitored.py` que misturam responsabilidades:
+- [X] **Auditoria:** Listar todas as funções em `services_monitored.py` que misturam responsabilidades:
   - Funções que consultam comparações E filas E concorrentes
   - Funções que validam acesso E modificam estado E retornam schema
   - Documentar o fluxo de cada função principal
 
-- [ ] **Mapa de Dependências:** Desenhar o grafo atual de imports entre `crud_monitored`, `services_monitored`, `services_priority_queue`, `services_comparison`, `services_competitors`. Identificar ciclos ou paths complexas.
+- [X] **Mapa de Dependências:** Desenhar o grafo atual de imports entre `crud_monitored`, `services_monitored`, `services_priority_queue`, `services_comparison`, `services_competitors`. Identificar ciclos ou paths complexas.
 
 #### Fase 1.2 — Criar Módulo de Domínio para Decisões de Produto
 
-- [ ] **Criar arquivo:** `market_alert/domain/product_lifecycle.py`
+- [X] **Criar arquivo:** `market_alert/domain/product_lifecycle.py`
   - Este arquivo conterá apenas **funções puras** (sem efeitos colaterais, sem DB, sem Redis)
   - Responsabilidades:
     - Decidir transição de status (pending → active, active → failed, paused/resumed)
     - Decidir agendamento subsequente (próximo check_at e intervalo)
     - Validar precondições de operações (ex: só pode pausar se ativo)
   
-- [ ] **Extrair função:** `resolve_scheduling_event(price_changed: bool, availability_changed: bool) -> str`
+- [X] **Extrair função:** `resolve_scheduling_event(price_changed: bool, availability_changed: bool) -> str`
   - Remove a versão privada de `crud_monitored.py`
   - Retorna nome do evento (EVENT_PRICE_CHANGED, EVENT_AVAILABILITY_CHANGED, EVENT_STANDARD)
   - Sem dependência externa
   
-- [ ] **Extrair função:** `compute_next_check_at(product: MonitoredProduct, event: str, retry_context: RetryContext | None) -> datetime`
+- [X] **Extrair função:** `compute_next_check_at(product: MonitoredProduct, event: str, retry_context: RetryContext | None) -> datetime`
   - Encapsula lógica atual de `interval_calculator_products.calculate_schedule()`
   - Consulta o produto em memória para decidir intervalo
   - Retorna timestamp calculado
 
-- [ ] **Extrair função:** `validate_status_transition(current_status: MonitoredStatus, target_status: MonitoredStatus) -> bool`
+- [X] **Extrair função:** `validate_status_transition(current_status: MonitoredStatus, target_status: MonitoredStatus) -> bool`
   - Valida se transição é permitida (ex: não há transição de "failed" para "active" sem restart)
   
-- [ ] **Criar arquivo:** `market_alert/domain/stability.py`
+- [X] **Criar arquivo:** `market_alert/domain/stability.py`
   - Mover função `calculate_stability_score()` atualmente em `crud_monitored.py` ou `interval_calculator_products.py`
   - Função pura que recebe um produto e retorna score (0, 1, 2)
   - Sem efeitos colaterais
@@ -105,18 +105,18 @@ Nenhum arquivos de nível inferior deve importar de nível superior.
 
 #### Fase 2.1 — Remover Lógica de Serviço do CRUD
 
-- [ ] **Refatorar:** `crud_monitored.py`
-  - [ ] Remover import de `services_priority_queue`; deixar apenas `crud_competitor`, `crud_price_history`, models e queries SQL
-  - [ ] Remover funções privadas `_update_price_change_tracking`, `_resolve_schedule_event`, `_activate_pending_monitored` — estas migram para domain ou services
-  - [ ] Remover imports locais dentro de funções (sintoma de dependência circular)
-  - [ ] Documentar: "Este arquivo contém apenas operações de leitura e escrita. Decisões de estado ou agendamento ocorrem na camada domain ou services."
+- [X] **Refatorar:** `crud_monitored.py`
+  - [X] Remover import de `services_priority_queue`; deixar apenas `crud_competitor`, `crud_price_history`, models e queries SQL
+  - [X] Remover funções privadas `_update_price_change_tracking`, `_resolve_schedule_event`, `_activate_pending_monitored` — estas migram para domain ou services
+  - [X] Remover imports locais dentro de funções (sintoma de dependência circular)
+  - [X] Documentar: "Este arquivo contém apenas operações de leitura e escrita. Decisões de estado ou agendamento ocorrem na camada domain ou services."
 
-- [ ] **Refatorar:** `crud_competitor.py`
-  - [ ] Aplicar mesma limpeza: remover lógica de serviço, manter apenas CRUD
-  - [ ] Remover efeitos colaterais de enfileiramento
+- [X] **Refatorar:** `crud_competitor.py`
+  - [X] Aplicar mesma limpeza: remover lógica de serviço, manter apenas CRUD
+  - [X] Remover efeitos colaterais de enfileiramento
 
-- [ ] **Refatorar:** `crud_errors.py`
-  - [ ] Validar se tem lógica de negócio escondida; limpar se necessário
+- [X] **Refatorar:** `crud_errors.py`
+  - [X] Validar se tem lógica de negócio escondida; limpar se necessário
 
 - [ ] **Testes:** Validar que CRUD não quebrou
   - Testes simples de create/read/update/delete sem mock
@@ -124,7 +124,7 @@ Nenhum arquivos de nível inferior deve importar de nível superior.
 
 #### Fase 2.2 — Criar Interfaces Claras de CRUD
 
-- [ ] **Criar:** Documentação (docstrings e README) explicando que CRUD é agnóstico a domínio
+- [X] **Criar:** Documentação (docstrings e README) explicando que CRUD é agnóstico a domínio
   - Listar as funções públicas esperadas
   - Indicar que efeitos colaterais devem ser tratados no nível de serviço
 
@@ -134,7 +134,7 @@ Nenhum arquivos de nível inferior deve importar de nível superior.
 
 #### Fase 3.1 — Quebrar services_monitored.py em Serviços Menores
 
-- [ ] **Criar arquivo:** `market_alert/services/services_monitored_lifecycle.py`
+- [X] **Criar arquivo:** `market_alert/services/services_monitored_lifecycle.py`
   - Responsabilidade única: **Criar, pausar, retomar e deletar produtos monitorados**
   - Funções esperadas:
     - `create_monitored_product(db, user, product_data, request_context) -> MonitoredScrapeCreationResponse`
@@ -144,7 +144,7 @@ Nenhum arquivos de nível inferior deve importar de nível superior.
   - Cada função chama domain para validação/decisão, depois CRUD para persister, depois orchestrator se precisar enfileirar
   - Não conhece comparações, notificações ou dashboards
 
-- [ ] **Criar arquivo:** `market_alert/services/services_competitor_lifecycle.py`
+- [X] **Criar arquivo:** `market_alert/services/services_competitor_lifecycle.py`
   - Responsabilidade única: **Criar, pausar e deletar produtos concorrentes**
   - Funções esperadas:
     - `create_competitor(db, user, product_data, request_context) -> CompetitorScrapeCreationResponse`
@@ -152,20 +152,20 @@ Nenhum arquivos de nível inferior deve importar de nível superior.
     - `delete_competitor(db, user, competitor_id, monitored_id) -> bool`
   - Similar a `services_monitored_lifecycle.py`, mas para concorrentes
 
-- [ ] **Refatorar:** `services_monitored.py` (arquivo original)
+- [X] **Refatorar:** `services_monitored.py` (arquivo original)
   - Manter apenas funções de listagem/paginação que **não alteram estado**:
     - `list_monitored_products(db, user_id, pagination) -> PaginatedMonitoredProductsResponse`
     - `get_monitored_product(db, user, product_id) -> MonitoredProductResponse`
     - `list_featured_monitored_products(db, user_id) -> list[MonitoredProductResponse]`
   - Estas funções são **read-only** e podem coexistir com lógica de comparação se necessário
 
-- [ ] **Refatorar:** `services_competitors.py`
+- [X] **Refatorar:** `services_competitors.py`
   - Separar funções de listagem (read-only) das de criação/deleção
   - Lifecyle → novo arquivo, queries → permanecer.
 
 #### Fase 3.2 — Definir Contrato Claro de Cada Service
 
-- [ ] **Docstring centralizada:** Cada novo service file começa com uma seção que explica:
+- [X] **Docstring centralizada:** Cada novo service file começa com uma seção que explica:
   - Qual é sua responsabilidade única
   - Quais imports ele faz (CRUD, domain, orchestrator)
   - Quais não faz (comparação, notificação, limite de taxa)
@@ -177,49 +177,49 @@ Nenhum arquivos de nível inferior deve importar de nível superior.
 
 #### Fase 4.1 — Atualizar Routes
 
-- [ ] **Refatorar:** `routes_monitored.py`
-  - [ ] Endpoint `POST /monitored/scrape` chama `services_monitored_lifecycle.create_monitored_product()`
-  - [ ] Endpoint `GET /monitored/` chama `services_monitored_queries.list_monitored_products()` (ou similar)
-  - [ ] Endpoint `PUT /monitored/{id}/paused` chama `services_monitored_lifecycle.pause_monitored()` ou `resume_monitored()`
-  - [ ] Endpoint `DELETE /monitored/{id}` chama `services_monitored_lifecycle.delete_monitored()`
+- [X] **Refatorar:** `routes_monitored.py`
+  - [X] Endpoint `POST /monitored/scrape` chama `services_monitored_lifecycle.create_monitored_product()`
+  - [X] Endpoint `GET /monitored/` chama `services_monitored_queries.list_monitored_products()` (ou similar)
+  - [X] Endpoint `PUT /monitored/{id}/paused` chama `services_monitored_lifecycle.pause_monitored()` ou `resume_monitored()`
+  - [X] Endpoint `DELETE /monitored/{id}` chama `services_monitored_lifecycle.delete_monitored()`
   - Validar que routes não chama CRUD diretamente; tudo passa por services
 
-- [ ] **Refatorar:** `routes_competitors.py`
-  - [ ] Endpoint `POST /competitors/scrape` chama `services_competitor_lifecycle.create_competitor()`
-  - [ ] Endpoint `DELETE /competitors/{id}` chama `services_competitor_lifecycle.delete_competitor()`
+- [X] **Refatorar:** `routes_competitors.py`
+  - [X] Endpoint `POST /competitors/scrape` chama `services_competitor_lifecycle.create_competitor()`
+  - [X] Endpoint `DELETE /competitors/{id}` chama `services_competitor_lifecycle.delete_competitor()`
   - Validar que não chama CRUD diretamente
 
-- [ ] **Testes:** Testar cada route com chamada aos serviços refatorados
+- [] **Testes:** Testar cada route com chamada aos serviços refatorados
   - Mock de CRUD e domain
   - Validar request/response contracts
 
 #### Fase 4.2 — Atualizar Orchestrator
 
-- [ ] **Validar:** `collector_service_orchestrator.py`
+- [X] **Validar:** `collector_service_orchestrator.py`
   - Continua seu trabalho de construir payloads e enfileirar tasks
   - Verificar se chama CRUD diretamente; se sim, documentar por quê ou refatorar
   - Atualizar imports se `services_monitored_lifecycle` ou `services_competitor_lifecycle` mudaram de local
 
 #### Fase 4.3 — Atualizar Tasks
 
-- [ ] **Validar:** `collector_product_task.py`
+- [X] **Validar:** `collector_product_task.py`
   - Função `collect_product()` executa coleta e precisa **persistir mudanças de estado**
   - Esta função deve chamar `domain/product_lifecycle.py` para decidir próximo check_at
   - Depois chamar `crud_monitored.update()` para persistir
   - Depois chamar `orchestrator.enqueue_monitored_at()` se necessário
   - Validar que não há lógica de domínio espalhada pela task; tudo vem de `domain/`
 
-- [ ] **Validar:** `scraper_tasks.py`
+- [X] **Validar:** `scraper_tasks.py`
   - Remover ou atualizar se tem chamadas diretas a CRUD que desapareceram
 
 #### Fase 4.4 — Atualizar Utils
 
-- [ ] **Validar:** `interval_calculator_products.py`
+- [X] **Validar:** `interval_calculator_products.py`
   - Função `calculate_schedule()` já existe e é boa
   - Garantir que `domain/product_lifecycle.py` reutiliza lógica daqui ou absorve
   - Não criar duplicação
 
-- [ ] **Validar:** `price_utils.py`, `name_derivation.py`
+- [X] **Validar:** `price_utils.py`, `name_derivation.py`
   - Estas são utilitários puros; não precisam de mudança
 
 ---
