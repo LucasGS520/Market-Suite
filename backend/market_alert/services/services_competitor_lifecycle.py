@@ -46,7 +46,8 @@ from market_alert.services.services_priority_queue import (
 )
 from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
-from market_alert.utils.interval_calculator_products import calculate_next_check_at
+from market_alert.domain.product_lifecycle import compute_next_check_at
+from market_alert.utils.interval_calculator_products import EVENT_STANDARD
 from market_alert.core.config_alert import settings
 from market_alert.utils.price_comparator import request_comparison_recompute
 
@@ -231,10 +232,14 @@ def create_competitor_scrape_request(
     #Garante que o monitorado está na fila de prioridade para coletar o novo concorrente no próximo ciclo.
     #Usa enqueue_monitored_at via wrapper funcional em vez de acessar PriorityQueueService diretamente.
     reference_time = datetime.now(timezone.utc)
-    monitored_product.next_check_at = calculate_next_check_at(
+    #Atualiza estabilidade e próximo agendamento de forma atômica para evitar inconsistência entre score e janela de coleta.
+    schedule = compute_next_check_at(
         monitored_product,
-        collected_at=reference_time,
+        reference_time=reference_time,
+        event_type=EVENT_STANDARD,
     )
+    monitored_product.stability_score = schedule.stability_score
+    monitored_product.next_check_at = schedule.next_check_at
     db.commit()
     db.refresh(monitored_product)
 

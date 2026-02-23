@@ -14,8 +14,6 @@ from sqlalchemy.orm import Session, aliased
 from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url_for_storage
-from shared.utils.redis_locks import acquire_product_lock, release_product_lock
-from shared.infra.db import SessionLocal
 
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparisonSummary
@@ -23,7 +21,6 @@ from market_alert.models.models_price_history import PriceHistory
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.crud import crud_competitor, crud_price_history
-from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.domain.product_lifecycle import (
     compute_next_check_at,
@@ -40,7 +37,6 @@ from market_alert.utils.price_decimal import different_price
 
 
 logger = structlog.get_logger("crud_monitored")
-_LOCK_TTL_SECONDS = min(settings.PRODUCT_LOCK_TTL_SECONDS, 30)
 
 def _ensure_monitored_access(db: Session, monitored_id: UUID, user: User) -> MonitoredProduct:
     """ Obtém monitorado garantindo posse do usuário """
@@ -50,13 +46,6 @@ def _ensure_monitored_access(db: Session, monitored_id: UUID, user: User) -> Mon
     if product.user_id != user.id:
         raise MonitoredOwnershipError("Usuário sem permissão para este monitorado")
     return product
-
-def _acquire_monitored_lock(monitored_id: UUID) -> str:
-    """ Adquire lock curto para operações críticas do monitorado """
-    acquired, owner = acquire_product_lock(monitored_id, ttl_seconds=_LOCK_TTL_SECONDS)
-    if not acquired:
-        raise MonitoredLockError("Não foi possível adquirir lock do monitorado")
-    return owner or ""
 
 class MonitoredOwnershipError(PermissionError):
     """Erro lançado quando o usuário não possui acesso ao monitorado"""
@@ -144,7 +133,6 @@ def create_pending_monitored_product(
         fallback_label="Produto pendente",
     )
 
-    reference_time = datetime.now(timezone.utc)
     #Substituímos o nome derivado da URL apenas após o scraping devolver informação confiável
     pending = MonitoredProduct(
         user_id=user_id,
@@ -160,15 +148,6 @@ def create_pending_monitored_product(
         last_checked=None,
         next_check_at=None,
     )
-
-    #Calcula o próximo agendamento após istanciar o objeto para reutilizar referências e evitar uso de variáveis inexistentes
-    pending_schedule = compute_next_check_at(
-        pending,
-        reference_time=reference_time,
-        event_type=EVENT_STANDARD,
-    )
-    pending.stability_score = pending_schedule.stability_score
-    pending.next_check_at = pending_schedule.next_check_at
     db.add(pending)
 
     try:
@@ -763,23 +742,15 @@ def resume_monitored(db: Session, monitored_id: UUID, user: User) -> MonitoredPr
     return monitored
 
 def delete_monitored(db: Session, monitored_id: UUID, user: User) -> list[UUID]:
-    """ Remove monitorado e retorna IDs para limpeza de fila no serviço """
-    lock_owner: str | None = None
-    dedicated_session: Session | None = None
-    try:
-        #Utiliza nova sessão para evitar interferência de transações externas do ciclo da requisição
-        dedicated_session = SessionLocal()
-        monitored = _ensure_monitored_access(dedicated_session, monitored_id, user)
-        lock_owner = _acquire_monitored_lock(monitored_id)
-        dedicated_session.delete(monitored)
-        dedicated_session.commit()
-        return [monitored_id]
-
-    finally:
-        if dedicated_session:
-            dedicated_session.close()
-        if lock_owner:
-            release_product_lock(monitored_id, lock_owner)
+    """ Remove monitorado na sessão recebida e retorna IDs para limpeza externa
+    
+    A gestão transacional e de lock fica na camada de serviço para manter o
+    CRUD focado em persistência.
+    """
+    monitored = _ensure_monitored_access(db, monitored_id, user)
+    db.delete(monitored)
+    db.commit()
+    return [monitored_id]
 
 def mark_monitored_product_failed(
     db: Session,

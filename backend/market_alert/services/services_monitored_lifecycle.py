@@ -29,6 +29,8 @@ from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
 )
 from shared.utils.url_validation import normalize_and_validate_product_url
+from shared.utils.redis_locks import acquire_product_lock, release_product_lock
+from shared.infra.db import SessionLocal
 
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_monitored import (
@@ -58,10 +60,12 @@ from market_alert.services.services_priority_queue import (
 )
 from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
-from market_alert.utils.interval_calculator_products import calculate_next_check_at
+from market_alert.domain.product_lifecycle import compute_next_check_at
+from market_alert.utils.interval_calculator_products import EVENT_STANDARD
 
 
 logger = structlog.get_logger("services_monitored_lifecycle")
+_LOCK_TTL_SECONDS = min(settings.PRODUCT_LOCK_TTL_SECONDS, 30)
 
 # ---------------------------------------------------------------------------
 # Helpers internos
@@ -85,6 +89,17 @@ def _raise_from_monitored_error(exc: Exception) -> None:
             detail="Monitorado em processamento, tente novamente em instantes.",
         ) from exc
     raise exc
+
+def _acquire_monitored_lock(monitored_id: UUID) -> str:
+    """ Adquire lock Redis curto para operações destrutivas do monitorado
+    
+    Mantemos o lock no service para impedir concorrência entre requests sem
+    acoplar a infraestrutura Redis à camada CRUD.
+    """
+    acquired, owner = acquire_product_lock(monitored_id, ttl_seconds=_LOCK_TTL_SECONDS)
+    if not acquired:
+        raise MonitoredLockError("Não foi possível adquirir lock do monitorado")
+    return owner or ""
 
 def _remove_ids_from_priority_queue(product_ids: list[UUID], *, source: str) -> None:
     """ Remove IDs da fila de prioridade fora do CRUD para manter separação de responsabilidades """
@@ -239,7 +254,14 @@ def create_monitored_product(
     )
 
     reference_time = datetime.now(timezone.utc)
-    pending.next_check_at = calculate_next_check_at(pending, collected_at=reference_time)
+    #O service centraliza a decisão de agendamento para manter estabilidade e janela de coleta atualizadas em conjunto.
+    pending_schedule = compute_next_check_at(
+        pending,
+        reference_time=reference_time,
+        event_type=EVENT_STANDARD,
+    )
+    pending.stability_score = pending_schedule.stability_score
+    pending.next_check_at = pending_schedule.next_check_at
     db.commit()
     db.refresh(pending)
 
@@ -421,11 +443,24 @@ def update_monitored_pause_state(
 def delete_monitored_product_entry(
     *, db: Session, product_id: UUID, user: User
 ) -> None:
-    """ Remove monitorado e limpa a fila de prioridade após persistir exclusão """
+    """ Remove monitorado com lock/sessão no service e limpa a fila de prioridade.
+
+    O fluxo usa uma sessão dedicada para isolar a transação de exclusão do
+    request principal e aplica lock Redis para evitar corrida com coletor.
+    """
+    lock_owner: str | None = None
+    dedicated_session: Session | None = None
     try:
-        deleted_ids = delete_monitored(db, product_id, user)
+        dedicated_session = SessionLocal()
+        lock_owner = _acquire_monitored_lock(product_id)
+        deleted_ids = delete_monitored(dedicated_session, product_id, user)
     except Exception as exc:
         _raise_from_monitored_error(exc)
         return
+    finally:
+        if dedicated_session is not None:
+            dedicated_session.close()
+        if lock_owner:
+            release_product_lock(product_id, lock_owner)
 
     _remove_ids_from_priority_queue(deleted_ids, source="monitored_deleted")

@@ -215,7 +215,7 @@ def create_or_update_competitor_product_scraped(
         provided_name,
         scraped_info.name,
         normalized_url,
-        fallback_name="Concorrente pendente",
+        fallback_label="Concorrente pendente",
     )
 
     if existing:
