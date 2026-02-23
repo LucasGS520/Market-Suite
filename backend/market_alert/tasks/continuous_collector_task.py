@@ -3,13 +3,15 @@
 Este módulo implementa um loop dedicado que consulta a fila ordenada em Redis,
 executa a coleta do monitorado e de seus concorrentes em sequência e recalcula
 as janelas de rechecagem com base na estabilidade observada.
+
+Fila Redis acessada exclusivamente via ``CollectionQueue`` — nunca via
+``PriorityQueueService`` diretamente.
 """
 
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
-from typing import Iterable, Any
+from typing import Any
 
 import structlog
 from billiard.exceptions import TimeLimitExceeded
@@ -26,7 +28,7 @@ from shared.utils.redis_locks import (
 from market_alert.core.celery_app import celery_app
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.services.services_priority_queue import PriorityQueueService
+from market_alert.orchestrator.collection_queue import CollectionQueue
 from market_alert.utils.continuous_dispatch import (
     CollectDispatchDecision,
     _collect_group,
@@ -41,10 +43,6 @@ from market_alert.utils.collector_result import _parse_collect_result
 
 logger = structlog.get_logger("continuous_collector_task")
 
-
-def _drain_processing(queue_service: PriorityQueueService, product_ids: Iterable[str]) -> None:
-    """ Remove itens processados do conjunto auxiliar de processamento """
-    queue_service.drain_processing(product_ids)
 
 @celery_app.task(
     name="market_alert.tasks.continuous_collector_task.finalize_processing_requeue",
@@ -66,6 +64,7 @@ def finalize_processing_requeue(
         next_retry_at=next_retry_at,
     )
 
+
 @celery_app.task(
     name="market_alert.tasks.continuous_collector_task.finalize_processing_requeue_error",
     queue="monitor",
@@ -77,13 +76,14 @@ def finalize_processing_requeue_error(
     monitored_id: str,
     trace_id: str | None = None,
 ) -> None:
-    """ Reenfileira monitorado quando a task de coleta falha inesperadamente """
+    """Reenfileira monitorado quando a task de coleta falha inesperadamente."""
     _handle_processing_requeue(
         monitored_id=monitored_id,
         collect_outcome=None,
         reason="collect_task_exception",
         trace_id=trace_id,
     )
+
 
 @celery_app.task(
     bind=True,
@@ -98,15 +98,17 @@ def finalize_processing_requeue_error(
     soft_time_limit=None,
 )
 def run_continuous_collector(self) -> None:
-    """ Loop contínuo que consome a fila de prioridade e dispara coletas
-    
+    """ Loop contínuo que consome a fila de prioridade e dispara coletas.
+
     Faz polling em intervalo fixo para garantir consumo contínuo sem pausas
     progressivas, mantendo o worker ativo 24/7. Esta task é contínua e não
     deve herdar hard time limit para evitar encerramento forçado do worker.
+
+    A fila Redis é acessada exclusivamente via ``CollectionQueue``.
     """
     bound_logger = logger.bind(task_id=getattr(self.request, "id", None))
     started_at = time.monotonic()
-    queue_service = PriorityQueueService()
+    queue = CollectionQueue()
     batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
     processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
     poll_interval = float(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
@@ -123,7 +125,7 @@ def run_continuous_collector(self) -> None:
             lock_owner=lock_owner,
         )
         return
-    
+
     last_lock_refresh = time.monotonic()
 
     try:
@@ -132,7 +134,7 @@ def run_continuous_collector(self) -> None:
             if _should_abort(getattr(self, "request", None)):
                 bound_logger.warning("continuous_worker_aborted")
                 return
-            
+
             if time.monotonic() - last_lock_refresh >= lock_refresh_interval:
                 if not refresh_continuous_collector_lock(
                     owner_id=lock_owner,
@@ -144,30 +146,30 @@ def run_continuous_collector(self) -> None:
                     )
                     return
                 last_lock_refresh = time.monotonic()
-            
+
             try:
                 if is_scraping_suspended():
                     bound_logger.warning("continuous_scraping_suspended")
                     time.sleep(poll_interval)
                     continue
-                
-                if not queue_service.is_available():
+
+                if not queue.is_available():
                     bound_logger.error("continuous_queue_unavailable")
                     time.sleep(poll_interval)
                     continue
-                
-                queue_size = queue_service.size()
-                ready_total = queue_service.ready_count()
+
+                queue_size = queue.size()
+                ready_total = queue.ready_count()
 
                 #Mantém um log por ciclo enquanto o lock está válido
                 bound_logger.info(
                     "continuous_loop_iteration",
                     queue_size=queue_size,
                     ready_total=ready_total,
-                    timestamp=_utc_now().isoformat(),   
+                    timestamp=_utc_now().isoformat(),
                 )
 
-                reclaimed = queue_service.reclaim_stale_processing(processing_ttl)
+                reclaimed = queue.reclaim_stale_items(processing_ttl)
                 if reclaimed:
                     #Recoloca itens travados para garantir novas tentativas no loop contínuo
                     bound_logger.warning(
@@ -176,17 +178,17 @@ def run_continuous_collector(self) -> None:
                     )
 
                 for _ in range(batch_size):
-                    next_id = queue_service.pop_due()
+                    next_id = queue.pop_next_for_collection()
                     if not next_id:
                         break
-                    
+
                     with SessionLocal() as db:
                         monitored = _load_monitored(db, next_id)
                         if monitored is None:
                             bound_logger.warning("continuous_monitored_missing", monitored_id=next_id)
                             processed_ids.append(next_id)
                             continue
-                        
+
                         if monitored.paused or monitored.status in {MonitoredStatus.failed}:
                             bound_logger.info(
                                 "continuous_skipped_paused",
@@ -194,8 +196,8 @@ def run_continuous_collector(self) -> None:
                             )
                             processed_ids.append(str(monitored.id))
                             continue
-                    
-                    enqueued_at = queue_service.get_enqueued_at(next_id)
+
+                    enqueued_at = queue.get_enqueued_at(next_id)
                     try:
                         decision = _collect_group(
                             monitored=monitored,
@@ -216,7 +218,6 @@ def run_continuous_collector(self) -> None:
                     if decision.retain_processing:
                         #Mantém o item em processamento até a coleta terminar
                         pass
-                    
                     else:
                         processed_ids.append(str(monitored.id))
 
@@ -224,7 +225,7 @@ def run_continuous_collector(self) -> None:
                         requeue_success, _ = _requeue_monitored(
                             monitored=monitored,
                             next_check_at=decision.next_check_at,
-                            queue_service=queue_service,
+                            queue=queue,
                         )
                         if not requeue_success:
                             #Mantém no conjunto de processamento para permitir reclaim futuro
@@ -243,8 +244,9 @@ def run_continuous_collector(self) -> None:
                     )
 
                 if processed_ids:
-                    _drain_processing(queue_service, processed_ids)
+                    queue.mark_as_done(processed_ids)
                 time.sleep(poll_interval)
+
             except TimeLimitExceeded:
                 #Registra o limite de tempo excedido para sinalizar reinícios forçados
                 bound_logger.warning(
@@ -252,7 +254,6 @@ def run_continuous_collector(self) -> None:
                     uptime_seconds=round(time.monotonic() - started_at, 2),
                     reason="time_limit",
                 )
-
                 time.sleep(poll_interval)
                 continue
             except SoftTimeLimitExceeded:
@@ -270,4 +271,3 @@ def run_continuous_collector(self) -> None:
 
     finally:
         release_continuous_collector_lock(owner_id=lock_owner)
-            

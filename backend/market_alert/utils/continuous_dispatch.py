@@ -3,6 +3,9 @@
 Centraliza a lógica de envio de tasks, decisões de requeue e reaproveitamento
 de itens processados, mantendo o loop principal do worker mais enxuto e fácil
 de manter.
+
+Fila Redis acessada exclusivamente via ``CollectionQueue`` — nunca via
+``PriorityQueueService`` diretamente.
 """
 
 from __future__ import annotations
@@ -24,7 +27,8 @@ from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.orchestrator.collector_service_orchestrator import build_competitor_payload, build_monitored_payload
-from market_alert.services.services_priority_queue import PriorityQueueService, enqueue_monitored_at
+from market_alert.orchestrator.collection_enqueuer import CollectionEnqueuer
+from market_alert.orchestrator.collection_queue import CollectionQueue
 from market_alert.utils.interval_calculator_products import (
     EVENT_RETRY,
     RetryContext,
@@ -45,6 +49,7 @@ class CollectDispatchDecision:
     should_requeue: bool
     retain_processing: bool
 
+
 def _should_abort(task_request) -> bool:
     """ Verifica se a task foi sinalizada para abortar """
     if task_request is None:
@@ -54,12 +59,14 @@ def _should_abort(task_request) -> bool:
         return False
     return bool(abort_fn())
 
+
 def _should_skip_requeue(monitored: MonitoredProduct, reason: str | None) -> bool:
     """ Decide se o monitorado deve ficar fora da fila após falha crítica """
     if monitored.paused or monitored.status in {MonitoredStatus.failed}:
         return True
     normalized_reason = (reason or "").strip().lower()
     return normalized_reason in {"blocked", "invalid_url_blocked"}
+
 
 def _dispatch_collect_task(
     *,
@@ -71,14 +78,19 @@ def _dispatch_collect_task(
     on_complete: Signature | None = None,
     on_error: Signature | None = None,
 ) -> bool:
-    """ Dispara coleta assíncrona mantendo logs do coletor contínuo """
+    """ Dispara coleta assíncrona delegando para CollectionEnqueuer.
+
+    Recebe payload já serializado (dict) e delega o envio ao Celery
+    exclusivamente via ``CollectionEnqueuer._send()``, mantendo um único
+    ponto de chamada para ``celery_app.send_task()`` de coletas.
+    """
+    from market_alert.schemas.schemas_collection_payload import validate_payload as _vp
     try:
-        celery_app.send_task(
-            "market_alert.tasks.collector_product_task.collect_product_task",
-            kwargs={"payload": payload},
-            queue="scraping",
-            link=on_complete,
-            link_error=on_error,
+        typed_payload = _vp(payload)
+        CollectionEnqueuer()._send(
+            typed_payload,
+            on_complete=on_complete,
+            on_error=on_error,
         )
         logger.info(
             "continuous_collect_dispatched",
@@ -97,7 +109,8 @@ def _dispatch_collect_task(
             trace_id=trace_id,
         )
         return False
-    
+
+
 def _collect_group(
     *,
     monitored: MonitoredProduct,
@@ -149,12 +162,13 @@ def _collect_group(
         trace_id=trace_id,
     )
 
+    #Builders retornam CollectionPayload tipado — serializa para dict ao enviar para Celery
     monitored_payload = build_monitored_payload(
         monitored,
         user_id=monitored.user_id,
         enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
+        trace_id=trace_id,
     )
-    monitored_payload["trace_id"] = trace_id
 
     with SessionLocal() as db:
         competitors = get_competitors_by_monitored_id(
@@ -165,7 +179,7 @@ def _collect_group(
         )
 
     monitored_enqueued = _dispatch_collect_task(
-        payload=monitored_payload,
+        payload=monitored_payload.model_dump(mode="json"),
         kind="monitored",
         monitored_id=str(monitored.id),
         trace_id=trace_id,
@@ -204,10 +218,10 @@ def _collect_group(
             competitor,
             user_id=monitored.user_id,
             enqueued_at=enqueued_at.isoformat() if enqueued_at else None,
+            trace_id=trace_id,
         )
-        competitor_payload["trace_id"] = trace_id
         dispatched = _dispatch_collect_task(
-            payload=competitor_payload,
+            payload=competitor_payload.model_dump(mode="json"),
             kind="competitor",
             monitored_id=str(monitored.id),
             competitor_id=str(competitor.id),
@@ -238,21 +252,24 @@ def _collect_group(
         retain_processing=True,
     )
 
+
 def _requeue_monitored(
     *,
     monitored: MonitoredProduct,
     next_check_at: datetime | None = None,
-    queue_service: PriorityQueueService,
+    queue: CollectionQueue,
 ) -> tuple[bool, datetime]:
-    """ Reenfileira monitorado e informa se houve sucesso no enqueue """
+    """ Reenfileira monitorado via CollectionQueue e informa se houve sucesso.
+
+    Tenta reenfileirar com o ``next_check_at`` calculado. Se falhar,
+    tenta novamente com timestamp imediato para minimizar impacto transitório.
+    """
     #Usa a janela calculada pela coleta para garantir o reenqueue correto
     resolved_next_check_at, now = _resolve_next_check_at(monitored, next_check_at)
-    #Centraliza o reenqueue para registrar logs padronizados
-    if enqueue_monitored_at(
+    if queue.reenqueue_after_collection(
         monitored.id,
         resolved_next_check_at,
         source="continuous_worker",
-        queue_service=queue_service,
     ):
         return True, resolved_next_check_at
 
@@ -262,11 +279,10 @@ def _requeue_monitored(
         next_check_at=resolved_next_check_at.isoformat(),
     )
     #Tenta reenfileirar imediatamente para minimizar impacto de falhas transitórias
-    if enqueue_monitored_at(
+    if queue.reenqueue_after_collection(
         monitored.id,
         now,
         source="continuous_worker",
-        queue_service=queue_service,
     ):
         logger.warning(
             "continuous_requeue_retry_succeeded",
@@ -277,6 +293,7 @@ def _requeue_monitored(
 
     return False, resolved_next_check_at
 
+
 def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
     """ Carrega monitorado por ID garantindo UUID válido """
     try:
@@ -284,6 +301,7 @@ def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
     except Exception:
         return None
     return get_monitored_product_by_id(db, parsed_id)
+
 
 def _handle_processing_requeue(
     *,
@@ -293,8 +311,11 @@ def _handle_processing_requeue(
     trace_id: str | None = None,
     next_retry_at: datetime | None = None,
 ) -> None:
-    """ Conclui o fluxo de processamento movendo o item de volta para o ready """
-    queue_service = PriorityQueueService()
+    """ Conclui o fluxo de processamento movendo o item de volta para o ready.
+
+    Fila Redis acessada via ``CollectionQueue`` — nunca diretamente.
+    """
+    queue = CollectionQueue()
     normalized_reason = reason or collect_outcome or "unknown"
     normalized_outcome = (collect_outcome or "").strip().lower()
 
@@ -314,11 +335,14 @@ def _handle_processing_requeue(
                 reason="monitored_missing",
                 trace_id=trace_id,
             )
-            queue_service.drain_processing([monitored_id])
+            queue.mark_as_done([monitored_id])
             return
 
         if _should_skip_requeue(monitored, normalized_reason):
-            queue_service.remove(monitored_id)
+            try:
+                queue.remove_from_collection(UUID(monitored_id), source="continuous_requeue_blocked")
+            except Exception:
+                queue.mark_as_done([monitored_id])
             logger.warning(
                 "continuous_processing_blocked",
                 monitored_id=monitored_id,
@@ -352,11 +376,11 @@ def _handle_processing_requeue(
         requeued, effective_next_check_at = _requeue_monitored(
             monitored=monitored,
             next_check_at=scheduling_next_check_at,
-            queue_service=queue_service,
+            queue=queue,
         )
 
     if requeued:
-        queue_service.drain_processing([monitored_id])
+        queue.mark_as_done([monitored_id])
         logger.info(
             "continuous_processing_returned_to_ready",
             monitored_id=monitored_id,
@@ -377,6 +401,7 @@ def _handle_processing_requeue(
         outcome=collect_outcome,
         trace_id=trace_id,
     )
+
 
 __all__ = [
     "CollectDispatchDecision",

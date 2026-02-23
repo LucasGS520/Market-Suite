@@ -32,6 +32,8 @@ from market_alert.services.services_scraper_monitored import scrape_monitored_pr
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperClientError
+from market_alert.orchestrator.retry_policy import RetryPolicy
+from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
 from market_alert.utils.price_comparator import _parse_force_compare_, schedule_comparison_after_commit
 from market_alert.utils.collector_result import (
     INVALID_URL_ERRORS_CODES,
@@ -44,8 +46,6 @@ from market_alert.utils.collector_result import (
     _validate_payload,
 )
 from market_alert.utils.rate_limiter import (
-    _compute_lock_retry_delay,
-    _compute_scrape_retry_delay,
     _increment_invalid_url_attempt,
     _increment_temporary_failure_attempt,
     _register_scrape_cooldown,
@@ -55,11 +55,6 @@ from market_alert.utils.rate_limiter import (
 
 
 logger = structlog.get_logger("collector_product_task")
-
-LOCK_RETRY_MAX_RETRIES = 3
-SCRAPE_RETRY_MAX_SECONDS = 15 * 60
-SCRAPE_RETRY_MAX_ATTEMPTS = 5
-SCRAPE_RETRY_TTL_SECONDS = 60 * 60
 
 def _activate_pending_monitored(
     db: Session,
@@ -422,7 +417,7 @@ def collect_product(
 
 @celery_app.task(
     bind=True,
-    max_retries=LOCK_RETRY_MAX_RETRIES,
+    max_retries=RetryPolicy.LOCK_RETRY_MAX_RETRIES,
     name="market_alert.tasks.collector_product_task.collect_product_task",
     queue="scraping",
     acks_late=True,
@@ -430,14 +425,27 @@ def collect_product(
     time_limit=120,
 )
 def collect_product_task(self, payload: Mapping[str, str | None] | None = None) -> dict[str, Any]:
-    """Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
+    """ Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
 
-    A task valida o payload mínimo, aplica o lock Redis para o produto alvo e
-    invoca o serviço de scraping adequado. Não executa orquestrações extras,
-    mantendo a granularidade por item e favorecendo retries simples. Quando o
-    lock não pode ser adquirido, retorna ``no_result`` para manter o contrato
-    de status enxuto previsto pelo pipeline e agenda retry com backoff leve.
+    A task valida o payload contra o schema ``CollectionPayload`` antes de
+    qualquer lógica. Payloads inválidos retornam ``error`` imediatamente sem
+    acionar retry. Em seguida aplica o lock Redis, invoca o serviço de scraping
+    e retorna o desfecho para o pipeline. Quando o lock não pode ser adquirido,
+    retorna ``no_result`` e agenda retry com backoff leve.
     """
+    #Valida o payload contra o schema tipado antes de qualquer outra operação.
+    #Payloads antigos (sem version) são aceitos com version=1 como fallback.
+    if payload is not None:
+        try:
+            validate_collection_payload(payload)
+        except ValueError as exc:
+            logger.warning(
+                "collect_product_task_invalid_payload",
+                error=str(exc),
+                task_id=getattr(self.request, "id", None),
+            )
+            return {"outcome": "error", "status": "error", "reason": "invalid_payload", "next_retry_at": None, "product_id": None}
+
     outcome, result, reason = collect_product(
         payload,
         use_lock=True,
@@ -457,7 +465,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
         error_code = getattr(result, "error_code", None)
         if error_code == "lock_skipped":
             attempt = int(getattr(self.request, "retries", 0)) + 1
-            delay = _compute_lock_retry_delay(attempt)
+            delay = RetryPolicy.compute_lock_retry_delay(attempt)
             logger.warning(
                 "collect_lock_retry_scheduled",
                 kind=kind,
@@ -470,7 +478,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                 #Evita disparar exceção para manter o retorno compatível com o contrato
                 self.retry(
                     countdown=delay,
-                    max_retries=LOCK_RETRY_MAX_RETRIES,
+                    max_retries=RetryPolicy.LOCK_RETRY_MAX_RETRIES,
                     throw=False,
                 )
             except self.MaxRetriesExceededError:
@@ -506,9 +514,10 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             )
         else:
             now = datetime.now(timezone.utc)
-            delay = _compute_scrape_retry_delay(
+            delay = RetryPolicy.compute_scrape_retry_delay(
+                "invalid_url",
                 invalid_attempt,
-                max_seconds=min(SCRAPE_RETRY_MAX_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                max_seconds=min(RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
             )
             next_retry_at = now + timedelta(seconds=delay)
             temporary_failure = True
@@ -525,12 +534,12 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     if payload and lock_target and _should_schedule_temporary_retry(result, reason) and not blocked_invalid:
         retry_attempt = _increment_temporary_failure_attempt(
             str(lock_target),
-            ttl_seconds=SCRAPE_RETRY_TTL_SECONDS,
+            ttl_seconds=RetryPolicy.SCRAPE_RETRY_TTL_SECONDS,
         )
         if retry_attempt is None:
             retry_attempt = 1
         now = datetime.now(timezone.utc)
-        if retry_attempt > SCRAPE_RETRY_MAX_ATTEMPTS:
+        if retry_attempt > RetryPolicy.SCRAPE_RETRY_MAX_ATTEMPTS:
             #Reinicia contador para evitar loops infinitos após atingir o limite
             _reset_temporary_failure_attempt(str(lock_target))
             delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
@@ -546,10 +555,11 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                 next_retry_at=next_retry_at.isoformat(),
             )
         else:
-            delay = _compute_scrape_retry_delay(
+            delay = RetryPolicy.compute_scrape_retry_delay(
+                reason or "unknown",
                 retry_attempt,
-                max_seconds=min(SCRAPE_RETRY_MAX_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
                 retry_after=getattr(result, "retry_after", None),
+                max_seconds=min(RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
             )
             next_retry_at = now + timedelta(seconds=delay)
             temporary_failure = True

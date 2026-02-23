@@ -5,7 +5,7 @@ Responsabilidade única: criar, pausar e deletar concorrentes.
 Fluxo de dependências:
     Routes → este service → CRUD (persistência)
     Routes → este service → Orchestrator (enfileiramento Celery)
-    Routes → este service → services_priority_queue (fila Redis via wrappers)
+    Routes → este service → Orchestrator (fila Redis via CollectionQueue)
 
 NÃO conhece: comparações, notificações, dashboards, rate limiting de monitorados.
 
@@ -40,10 +40,7 @@ from market_alert.crud.crud_competitor import (
 from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
 from market_alert.services.services_products import build_competitor_response
 from market_alert.services.services_access import ensure_user_can_access_monitored
-from market_alert.services.services_priority_queue import (
-    enqueue_monitored_at,
-    remove_from_priority_queue,
-)
+from market_alert.orchestrator.collection_queue import CollectionQueue
 from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.domain.product_lifecycle import compute_next_check_at
@@ -230,7 +227,6 @@ def create_competitor_scrape_request(
     )
 
     #Garante que o monitorado está na fila de prioridade para coletar o novo concorrente no próximo ciclo.
-    #Usa enqueue_monitored_at via wrapper funcional em vez de acessar PriorityQueueService diretamente.
     reference_time = datetime.now(timezone.utc)
     #Atualiza estabilidade e próximo agendamento de forma atômica para evitar inconsistência entre score e janela de coleta.
     schedule = compute_next_check_at(
@@ -243,7 +239,7 @@ def create_competitor_scrape_request(
     db.commit()
     db.refresh(monitored_product)
 
-    enqueued = enqueue_monitored_at(
+    enqueued = CollectionQueue().enqueue_for_collection(
         monitored_product.id,
         monitored_product.next_check_at,
         source="competitor_create",
@@ -332,7 +328,7 @@ def delete_competitor_entry(
         #Cascatas de relacionamento cuidam do histórico de preços e dependências
         logger.info("competitor_deleted", **log_context, monitored_id=str(monitored_id))
 
-        removed = remove_from_priority_queue(competitor_id, source="competitor_delete")
+        removed = CollectionQueue().remove_from_collection(competitor_id, source="competitor_delete")
         if not removed:
             #Não bloqueia remoção do banco quando houver falha de Redis
             logger.warning(
@@ -390,7 +386,7 @@ def clear_competitors_from_monitored(
 
     deleted_ids = delete_competitors_by_monitored_id(db, monitored_product_id)
     for competitor_id in deleted_ids:
-        removed = remove_from_priority_queue(competitor_id, source="competitor_delete")
+        removed = CollectionQueue().remove_from_collection(competitor_id, source="competitor_delete")
         if not removed:
             #Mantém remoção em banco mesmo quando Redis estiver indisponível
             logger.warning(

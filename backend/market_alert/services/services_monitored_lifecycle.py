@@ -52,11 +52,7 @@ from market_alert.schemas.schemas_products import (
     MonitoredScrapeCreationResponse,
 )
 from market_alert.services.services_products import build_monitored_response
-from market_alert.services.services_priority_queue import (
-    enqueue_monitored_at,
-    enqueue_monitored_now,
-    remove_from_priority_queue,
-)
+from market_alert.orchestrator.collection_queue import CollectionQueue
 from market_alert.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.domain.product_lifecycle import compute_next_check_at
@@ -104,7 +100,7 @@ def _remove_ids_from_priority_queue(product_ids: list[UUID], *, source: str) -> 
     """ Remove IDs da fila de prioridade fora do CRUD para manter separação de responsabilidades """
     for product_id in product_ids:
         try:
-            remove_from_priority_queue(product_id, source=source)
+            CollectionQueue().remove_from_collection(product_id, source=source)
         except Exception as exc:
             #Mantém o fluxo principal mesmo quando Redis estiver indisponível
             logger.warning(
@@ -121,9 +117,9 @@ def _enqueue_resume_collection(monitored: MonitoredProduct, user: User) -> None:
         user_id=user.id,
         trace_id=str(uuid4()),
     )
-    payload["force_compare"] = "true"
+    payload_forced = payload.model_copy(update={"force_compare": "true"})
     try:
-        enqueue_collect(payload)
+        enqueue_collect(payload_forced)
     except Exception:
         #Evita bloquear a retomada caso a fila de scraping esteja indisponível
         logger.warning(
@@ -144,7 +140,7 @@ def _enqueue_monitored_at_priority_queue(
     atualiza o next_check_at; este service responsabiliza-se pelo enfileiramento.
     """
     try:
-        enqueue_monitored_at(
+        CollectionQueue().enqueue_for_collection(
             monitored.id,
             monitored.next_check_at or reference,
             source=source,
@@ -279,7 +275,7 @@ def create_monitored_product(
             trace_id=immediate_trace_id,
         )
         #Mantém monitorado na fila contínua para rechecagens subsequentes
-        enqueued = enqueue_monitored_now(pending.id, source="new_monitored")
+        enqueued = CollectionQueue().enqueue_now(pending.id, source="new_monitored")
         if not enqueued:
             logger.warning(
                 "monitored_enqueue_failed_fallback",

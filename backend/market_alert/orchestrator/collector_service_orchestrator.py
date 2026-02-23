@@ -4,24 +4,30 @@ O módulo centraliza helpers para construir payloads consistentes e enfileirar
 coletas na ``collect_product_task``. O mesmo fluxo atende rechecagens e
 coletas manuais, garantindo que o controle de concorrência ocorra somente via
 lock Redis aplicado pelo collector.
+
+Contrato de payload:
+    Todos os builders retornam ``CollectionPayload`` tipado (Pydantic).
+    Ao enfileirar no Celery, o payload é serializado via ``.model_dump(mode='json')``.
+    Isso garante validação na origem e compatibilidade com a fila de dicts do Celery.
 """
 from __future__ import annotations
 
 import random
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import structlog
 from celery import current_app
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
-
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.schemas.schemas_collection_payload import CollectionPayload
 from shared.utils.url_validation import normalize_competitor_url
 
 
 logger = structlog.get_logger("collector_service")
+
 
 def build_monitored_payload(
     monitored: MonitoredProduct,
@@ -29,20 +35,23 @@ def build_monitored_payload(
     user_id: UUID,
     enqueued_at: str | None = None,
     trace_id: str | None = None,
-) -> dict[str, str | None]:
-    """ Constrói payload padrão para coletas de monitorados """
+) -> CollectionPayload:
+    """ Constrói payload tipado para coletas de monitorados.
+
+    O ``trace_id`` é gerado automaticamente pelo ``CollectionPayload`` se não
+    informado, garantindo rastreamento mesmo em chamadas legadas.
+    """
     resolved_url = monitored.normalized_url or monitored.product_url
-    payload = {
-        "kind": "monitored",
-        "monitored_id": str(monitored.id),
-        "user_id": str(user_id),
-        "url": resolved_url,
-        "name": monitored.name_identification,
-        "trace_id": trace_id,
-    }
-    if enqueued_at:
-        payload["enqueued_at"] = enqueued_at
-    return payload
+    return CollectionPayload(
+        kind="monitored",
+        monitored_id=monitored.id,
+        user_id=user_id,
+        url=resolved_url,
+        name=monitored.name_identification,
+        trace_id=trace_id or "",
+        enqueued_at=enqueued_at,
+    )
+
 
 def build_competitor_payload(
     competitor: CompetitorProduct,
@@ -50,40 +59,49 @@ def build_competitor_payload(
     user_id: UUID | None = None,
     enqueued_at: str | None = None,
     trace_id: str | None = None,
-) -> dict[str, str | None]:
-    """ Constrói payload padrão para coletas de concorrentes vinculados """
+) -> CollectionPayload:
+    """ Constrói payload tipado para coletas de concorrentes vinculados.
+
+    O ``trace_id`` é gerado automaticamente se não informado.
+    """
     normalized_url = normalize_competitor_url(competitor.product_url)
     resolved_url = normalized_url or competitor.product_url
-    payload: dict[str, str | None] = {
-        "kind": "competitor",
-        "monitored_id": str(competitor.monitored_product_id),
-        "url": resolved_url,
-        "competitor_id": str(competitor.id),
-        "name": competitor.name_competitor,
-        "trace_id": trace_id,
-    }
-    if user_id:
-        payload["user_id"] = str(user_id)
-    if enqueued_at:
-        payload["enqueued_at"] = enqueued_at
-    return payload
+    return CollectionPayload(
+        kind="competitor",
+        monitored_id=competitor.monitored_product_id,
+        competitor_id=competitor.id,
+        url=resolved_url,
+        name=competitor.name_competitor,
+        user_id=user_id,
+        trace_id=trace_id or "",
+        enqueued_at=enqueued_at,
+    )
+
 
 def enqueue_collect(
-    payload: dict[str, str | None],
+    payload: CollectionPayload | dict,
     *,
-    countdown: float | None = None
+    countdown: float | None = None,
 ) -> None:
-    """ Enfileira coleta na fila ``scraping`` mantendo única porta de entrada """
-    #Garante rastreio mínimo caso o payload venha de integrações antigas
-    if not payload.get("trace_id"):
-        payload["trace_id"] = str(uuid4())
+    """ Enfileira coleta na fila ``scraping`` mantendo única porta de entrada.
+
+    Aceita tanto ``CollectionPayload`` (novo padrão) quanto ``dict`` (legado).
+    Dicts são enviados diretamente para manter compatibilidade com payloads já
+    na fila durante a migração gradual.
+    """
+    if isinstance(payload, CollectionPayload):
+        payload_dict = payload.model_dump(mode="json")
+    else:
+        #Compatibilidade com payloads legados em dict — mantém rastreio mínimo
+        payload_dict = dict(payload)
 
     current_app.send_task(
         "market_alert.tasks.collector_product_task.collect_product_task",
-        kwargs={"payload": payload},
+        kwargs={"payload": payload_dict},
         queue="scraping",
         countdown=countdown,
     )
+
 
 def enqueue_monitored_collection(
     monitored: MonitoredProduct,
@@ -101,15 +119,15 @@ def enqueue_monitored_collection(
         )
         return
 
-    resolved_trace_id = trace_id or str(uuid4())
-    payload = build_monitored_payload(monitored, user_id=user_id, trace_id=resolved_trace_id)
+    payload = build_monitored_payload(monitored, user_id=user_id, trace_id=trace_id)
     logger.info(
         "enqueue_monitored_collection",
         monitored_id=str(monitored.id),
         user_id=str(user_id),
-        trace_id=resolved_trace_id,
+        trace_id=payload.trace_id,
     )
     enqueue_collect(payload, countdown=settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS)
+
 
 def enqueue_competitor_collection(
     competitor: CompetitorProduct,
@@ -118,19 +136,19 @@ def enqueue_competitor_collection(
     countdown: float | None = None,
     trace_id: str | None = None,
 ) -> None:
-    """ Enfileira coleta de concorrente mantendo padrão de payload """
-    resolved_trace_id = trace_id or str(uuid4())
-    payload = build_competitor_payload(competitor, user_id=user_id, trace_id=resolved_trace_id)
+    """ Enfileira coleta de concorrente mantendo padrão de payload tipado """
+    payload = build_competitor_payload(competitor, user_id=user_id, trace_id=trace_id)
     logger.info(
         "enqueue_competitor_collection",
         competitor_id=str(competitor.id),
         monitored_id=str(competitor.monitored_product_id),
-        trace_id=resolved_trace_id,
+        trace_id=payload.trace_id,
     )
     enqueue_collect(
         payload,
         countdown=countdown if countdown is not None else settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS,
     )
+
 
 def enqueue_competitors_for_monitored(
     db: Session,
@@ -140,7 +158,6 @@ def enqueue_competitors_for_monitored(
     base_delay: float | None = None,
 ) -> None:
     """ Agenda coleta para concorrentes vinculados aplicando batching e jitter """
-
     try:
         resolved_batch_size = batch_size or settings.CONTINUOUS_WORKER_BATCH_SIZE
         resolved_base_delay = base_delay or settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS
@@ -158,7 +175,7 @@ def enqueue_competitors_for_monitored(
         if len(competitors) == 0:
             logger.info("enqueue_competitors_skipped_none", monitored_id=str(monitored_id))
             return
-        
+
         for batch_start in range(0, len(competitors), resolved_batch_size):
             batch = competitors[batch_start : batch_start + resolved_batch_size]
             for index_in_batch, competitor in enumerate(batch):
@@ -187,6 +204,8 @@ def enqueue_competitors_for_monitored(
 
 
 __all__ = [
+    "build_monitored_payload",
+    "build_competitor_payload",
     "enqueue_collect",
     "enqueue_monitored_collection",
     "enqueue_competitor_collection",
