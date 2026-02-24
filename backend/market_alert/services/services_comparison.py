@@ -1,65 +1,92 @@
-""" Serviço de comparação e persistência de preços
+""" Serviço de orquestração de comparação de preços
 
-O fluxo mantém apenas as etapas essenciais: carregamento de produtos,
-execução da comparação e armazenamento do último resumo para consumo do
-frontend.
+Responsabilidade única: coordenar o fluxo completo de comparação —
+autorização, carregamento, cálculo, idempotência e persistência.
+
+Este arquivo NÃO contém:
+- Lógica de cálculo (→ services_comparison_calculator.py)
+- Filtragem e carregamento de produtos (→ services_comparison_utils.py)
+- Regras de competitividade (→ domain/price_competitiveness.py)
+- Comparação de snapshots (→ utils/snapshot_comparator.py)
+
+Fluxo principal:
+    API/Task → run_price_comparison()
+        → load_monitored_and_competitors()     [utils]
+        → resolve_monitored_inactive_reason()  [calculator]
+        → compare_prices()                     [price_comparator]
+        → _persist_comparison_result()         [aqui, orquestra CRUD]
+        → retorno para consumidores
 """
 
 from uuid import UUID
-from datetime import datetime, timezone
-from sqlalchemy import desc, func
-from sqlalchemy.orm import Session
+from typing import Any, Dict, List, Optional
+from decimal import Decimal
+
+import structlog
+
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from typing import Dict, Any, Optional, List
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-import structlog
-import json
+from sqlalchemy.orm import Session
 
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_comparison import (
     create_price_comparison,
     get_comparison_by_id,
-    get_latest_comparisons_for_products,
     get_latest_summary,
     paginate_comparisons,
     upsert_price_comparison_summary,
 )
-from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
-from market_alert.models.models_price_history import PriceHistory
-from market_alert.models.models_products import CompetitorProduct
-from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
 from market_alert.models import User
+from market_alert.models.models_comparisons import PriceComparisonSummary
+from market_alert.models.models_products import CompetitorProduct
 from market_alert.schemas.schemas_comparisons import (
     PaginatedPriceComparisonResponse,
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
 )
+from market_alert.services.services_comparison_calculator import (
+    apply_summary_defaults,
+    compute_summary_from_payload,
+    rebuild_summary_from_current_state,
+    resolve_monitored_inactive_reason,
+    summarize_comparison,
+)
+from market_alert.utils.comparison_utils import load_monitored_and_competitors
 from market_alert.utils.price_comparator import compare_prices
-from market_alert.utils.price_decimal import to_decimal
+from market_alert.utils.snapshot_comparator import extract_material_snapshot, snapshot_has_changed
 from market_alert.core.config_alert import settings
-from market_alert.enums.enums_comparisons import CompetitivenessStatus
 
 
 logger = structlog.get_logger("comparison_service")
 
-#Limiares em porcentagem para classificar a competitividade frente ao menor preço.
-COMPETITIVENESS_NON_COMPETITIVE_PCT = Decimal("1")  # Até 1% -> atenção (anteriormente 'nao_competitivo')
-COMPETITIVENESS_ATTENTION_PCT = Decimal("5")      #>1% até 5% -> atencao
+#Re-exporta summarize_comparison para consumidores legados
+#(services_products.py e outros que importam daqui)
+__all__ = [
+    "ensure_user_can_view_monitored",
+    "get_paginated_comparisons_for_user",
+    "get_comparison_summary_for_user",
+    "get_comparison_detail_for_user",
+    "run_price_comparison",
+    "persist_rebuilt_summary_if_needed",
+    "rebuild_summary_from_current_state",
+    "summarize_comparison",
+]
+
 
 def ensure_user_can_view_monitored(
     *, db: Session, monitored_id: UUID, user: User
-):
-    """ Valida se o monitorado pertence ao usuário autenticado """
+) -> None:
+    """Valida se o monitorado pertence ao usuário autenticado."""
     from market_alert.services.services_access import ensure_user_can_access_monitored
-    
+
     return ensure_user_can_access_monitored(
         db=db,
         product_id=monitored_id,
         user=user,
         context={"monitored_id": str(monitored_id)},
     )
+
 
 def get_paginated_comparisons_for_user(
     *,
@@ -69,22 +96,29 @@ def get_paginated_comparisons_for_user(
     page: int,
     per_page: int,
 ) -> PaginatedPriceComparisonResponse:
-    """ Monta envelope paginado de comparações garantindo propriedade do monitorado """
+    """Monta envelope paginado de comparações garantindo propriedade do monitorado."""
     ensure_user_can_view_monitored(db=db, monitored_id=monitored_id, user=user)
     total, comparisons = paginate_comparisons(
         db, monitored_product_id=monitored_id, page=page, per_page=per_page
     )
-
-    #Preenche o schema de resposta já com a estrutura de paginação esperada pelo frontend
     return PaginatedPriceComparisonResponse(
         items=comparisons,
         meta={"total": total, "page": page, "per_page": per_page},
     )
 
+
 def get_comparison_summary_for_user(
     *, db: Session, monitored_id: UUID, user: User
 ) -> PriceComparisonSummaryResponse:
-    """Retorna o resumo mais recente garantindo que o produto pertença ao usuário."""
+    """Retorna o resumo mais recente garantindo que o produto pertença ao usuário.
+
+    Fluxo:
+    1. Valida autorização
+    2. Carrega monitorado e todos os concorrentes (incluindo pausados)
+    3. Recompõe resumo a partir do estado atual
+    4. Persiste se houver mudança material
+    5. Retorna resposta formatada
+    """
     ensure_user_can_view_monitored(db=db, monitored_id=monitored_id, user=user)
 
     stored_summary = get_latest_summary(db, monitored_product_id=monitored_id)
@@ -94,7 +128,7 @@ def get_comparison_summary_for_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Produto monitorado não encontrado.",
         )
-    
+
     competitors = get_competitors_by_monitored_id(
         db,
         monitored_id,
@@ -116,35 +150,30 @@ def get_comparison_summary_for_user(
         stored_summary=stored_summary,
     )
 
-    return PriceComparisonSummaryResponse(monitored_product_id=monitored_id, **normalized_summary)
-
-def _build_material_summary_snapshot(payload: Dict[str, Any] | None) -> Dict[str, Any]:
-    """ Extrai somente campos críticos para comparar mudanças materiais no resumo.
-
-    O snapshot ignora campos de tempo para evitar persistências desnecessárias
-    quando apenas o relógio da requisição muda, mantendo a atualização idempotente.
-    """
-    if not isinstance(payload, dict):
-        return {}
-
-    critical_fields = (
-        "comparison_id",
-        "monitored_price",
-        "competitors_count",
-        "competitors_with_price_count",
-        "competitors_mean",
-        "competitors_min",
-        "competitors_max",
-        "position_rank",
-        "potential_adjustment",
-        "ignored_due_to_inactive",
-        "competitiveness_status",
-        "comparison_insights",
-        "discrepancies",
-        "reason",
+    return PriceComparisonSummaryResponse(
+        monitored_product_id=monitored_id, **normalized_summary
     )
 
-    return {field: payload.get(field) for field in critical_fields}
+
+def get_comparison_detail_for_user(
+    *,
+    db: Session,
+    comparison_id: UUID,
+    user: User,
+) -> PriceComparisonResponse:
+    """Retorna detalhes de comparação apenas quando pertence ao usuário."""
+    comparison = get_comparison_by_id(db, comparison_id)
+    if comparison is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Comparação não encontrada.",
+        )
+
+    ensure_user_can_view_monitored(
+        db=db, monitored_id=comparison.monitored_product_id, user=user
+    )
+    return comparison
+
 
 def persist_rebuilt_summary_if_needed(
     *,
@@ -153,17 +182,18 @@ def persist_rebuilt_summary_if_needed(
     normalized_summary: Dict[str, Any],
     stored_summary: PriceComparisonSummary | None,
 ) -> Dict[str, Any]:
-    """ Persiste resumo recomposto apenas quando houver mudança material.
+    """Persiste resumo recomposto apenas quando houver mudança material.
 
-    A função garante idempotência no refresh stale e preserva ``comparison_id``
-    do snapshot prévio quando o resumo recomposto não traz o campo.
+    Usa extract_material_snapshot() + snapshot_has_changed() para determinar
+    se a escrita no banco é necessária. Garante idempotência no refresh stale
+    e preserva comparison_id do snapshot prévio quando ausente no novo resumo.
     """
     comparison_raw = normalized_summary.get("comparison_id")
     if comparison_raw is None and stored_summary is not None:
         comparison_raw = stored_summary.comparison_id
 
     if comparison_raw is None:
-        #Sem comparação associada não existe chave estável para upsert.
+        #Sem comparação associada não há chave estável para upsert
         return normalized_summary
 
     comparison_id = comparison_raw
@@ -181,12 +211,18 @@ def persist_rebuilt_summary_if_needed(
     candidate_summary = dict(normalized_summary)
     candidate_summary["comparison_id"] = str(comparison_id)
 
-    current_snapshot = _build_material_summary_snapshot(
-        stored_summary.aggregates if stored_summary is not None else {},
+    previous_snapshot = extract_material_snapshot(
+        stored_summary.aggregates if stored_summary is not None else {}
     )
-    rebuilt_snapshot = _build_material_summary_snapshot(candidate_summary)
-    if current_snapshot == rebuilt_snapshot:
-        #Mantém idempotência ao evitar escrita em banco sem alteração material.
+    current_snapshot = extract_material_snapshot(candidate_summary)
+
+    if not snapshot_has_changed(current_snapshot, previous_snapshot):
+        #Dados idênticos — evita escrita desnecessária no banco
+        logger.debug(
+            "comparison_summary_unchanged",
+            monitored_id=str(monitored_id),
+            comparison_id=str(comparison_id),
+        )
         return candidate_summary
 
     persisted_summary = upsert_price_comparison_summary(
@@ -195,235 +231,54 @@ def persist_rebuilt_summary_if_needed(
         comparison_id,
         jsonable_encoder(candidate_summary),
     )
-    return _apply_summary_defaults(
+    logger.info(
+        "comparison_summary_persisted",
+        monitored_id=str(monitored_id),
+        comparison_id=str(comparison_id),
+    )
+    return apply_summary_defaults(
         persisted_summary.aggregates or {},
         timestamp=persisted_summary.timestamp,
         comparison_id=persisted_summary.comparison_id,
-        competitors_count=_extract_competitors_count(persisted_summary),
+        competitors_count=_extract_competitors_count_from_summary(persisted_summary),
     )
 
-def rebuild_summary_from_current_state(
-    *,
-    db: Session,
-    monitored: Any,
-    competitors: List[CompetitorProduct],
-    stored_summary: PriceComparisonSummary | None,
-) -> Dict[str, Any]:
-    """ Recompõe um resumo competitivo usando o estado atual de monitorado e concorrentes
 
-    A recomposição padroniza os campos usados por ``/monitored`` e
-    ``/comparisons/{id}/summary`` para evitar divergência entre endpoints.
-    O fluxo reaproveita o fallback de preço histórico dos concorrentes quando
-    ``current_price`` está ausente e preserva o motivo do snapshot anterior
-    apenas quando o monitorado não estiver em estado inativo.
-    """
-    competitors_count = len(competitors)
-    comparison_id = getattr(stored_summary, "comparison_id", None)
-    timestamp = (
-        getattr(stored_summary, "timestamp", None)
-        if stored_summary is not None
-        else None
-    )
-
-    if timestamp is None:
-        timestamp = datetime.now(timezone.utc)
-
-    inactive_reason = _resolve_monitored_inactive_reason(monitored)
-    stored_payload = (
-        stored_summary.aggregates
-        if stored_summary is not None and isinstance(stored_summary.aggregates, dict)
-        else {}
-    )
-    stored_reason = stored_payload.get("reason")
-
-    if inactive_reason:
-        payload_stub = {
-            "monitored_price": None,
-            "discrepancies": [],
-            "lowest_competitor": None,
-            "highest_competitor": None,
-            "reason": inactive_reason,
-            "ignored_due_to_inactive": True,
-        }
-        return _apply_summary_defaults(
-            _compute_summary_from_payload(
-                payload_stub,
-                timestamp=timestamp,
-                comparison_id=comparison_id,
-                competitors_count=competitors_count,
-            ),
-            timestamp=timestamp,
-            comparison_id=comparison_id,
-            competitors_count=competitors_count,
-        )
-    
-    monitored_price = to_decimal(getattr(monitored, "current_price", None))
-    filtered_competitors = _filter_competitors_for_comparison(db, competitors)
-    competitor_entries = [
-        (item.competitor, item.price)
-        for item in filtered_competitors.entries
-    ]
-    tolerance = Decimal(str(settings.PRICE_TOLERANCE))
-
-    competitor_entries.sort(key=lambda entry: entry[1])
-
-    discrepancies: list[Dict[str, Any]] = []
-    if competitor_entries:
-        min_price = competitor_entries[0][1]
-        for competitor, price in competitor_entries:
-            pct_below_monitored: Optional[Decimal] = None
-            delta_x_monitored: Optional[Decimal] = None
-            if monitored_price is not None:
-                if monitored_price > Decimal("0") and price < monitored_price:
-                    pct_below_monitored = (
-                        (monitored_price - price) / monitored_price * Decimal("100")
-                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                delta_x_monitored = (price - monitored_price).quantize(
-                    tolerance,
-                    rounding=ROUND_HALF_UP,
-                )
-
-            discrepancy = {
-                "competitor_id": str(getattr(competitor, "id", "")),
-                "name": getattr(competitor, "name_competitor", "Concorrente"),
-                "price": price,
-                "pct_below_monitored": pct_below_monitored,
-                "delta_x_min_competitor": (price - min_price).quantize(
-                    tolerance,
-                    rounding=ROUND_HALF_UP,
-                ),
-                "delta_x_monitored": delta_x_monitored,
-            }
-            discrepancies.append(discrepancy)
-
-    payload = {
-        "monitored_price": monitored_price,
-        "discrepancies": discrepancies,
-        "lowest_competitor": discrepancies[0] if discrepancies else None,
-        "highest_competitor": discrepancies[-1] if discrepancies else None,
-        "ignored_due_to_inactive": False,
-    }
-
-    if stored_reason:
-        payload["reason"] = stored_reason
-
-    return _apply_summary_defaults(
-        _compute_summary_from_payload(
-            payload,
-            timestamp=timestamp,
-            comparison_id=comparison_id,
-            competitors_count=competitors_count,
-        ),
-        timestamp=timestamp,
-        comparison_id=comparison_id,
-        competitors_count=competitors_count,
-    )
-
-def get_comparison_detail_for_user(
-    *,
-    db: Session,
-    comparison_id: UUID,
-    user: User,
-) -> PriceComparisonResponse:
-    """Retorna detalhes de comparação apenas quando pertence ao usuário."""
-    comparison = get_comparison_by_id(db, comparison_id)
-    if comparison is None:
-        #Oculta a existência do recurso quando inexistente
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Comparação não encontrada.",
-        )
-
-    ensure_user_can_view_monitored(
-        db=db, monitored_id=comparison.monitored_product_id, user=user
-    )
-
-    return comparison
-
-def _load_and_filter_competitors(
-    db: Session,
-    monitored_id: UUID,
-    monitored: Any,
-) -> tuple[list[CompetitorProduct], int]:
-    """ Carrega concorrentes do monitorado e aplica filtro canônico de comparação. """
-    competitors = get_competitors_by_monitored_id(
-        db,
-        monitored_id,
-        include_paused=True,
-        include_inactive=True,
-    )
-    filtered_competitors = _filter_competitors_for_comparison(db, competitors)
-    available = [item.competitor for item in filtered_competitors.entries]
-    total = filtered_competitors.total_competitors
-    filtered_out = total - len(available)
-    if filtered_out:
-        logger.info(
-            "comparison_filtered_competitors",
-            filtered=filtered_out,
-            total=total,
-            available=len(available),
-            reasons=filtered_competitors.filtered_reasons,
-        )
-    return available, total
-
-
-def _persist_comparison_result(
-    db: Session,
-    *,
-    monitored: Any,
-    result: Dict[str, Any],
-    total: int,
-    available: list[CompetitorProduct],
-) -> Dict[str, Any]:
-    """ Persiste comparação e devolve payload final normalizado para os consumidores. """
-    persist_raw_result = getattr(settings, "COMPARISON_STORE_RAW_RESULT", False)
-    stored_payload = (
-        result
-        if persist_raw_result
-        else {
-            "monitored_price": result.get("monitored_price"),
-            "discrepancies": result.get("discrepancies", []),
-            "lowest_competitor": result.get("lowest_competitor"),
-            "highest_competitor": result.get("highest_competitor"),
-        }
-    )
-
-    comparison = create_price_comparison(db, monitored.id, stored_payload)
-    summary_payload = _apply_summary_defaults(
-        _compute_summary_from_payload(
-            result,
-            timestamp=comparison.timestamp,
-            comparison_id=comparison.id,
-            competitors_count=total,
-        ),
-        timestamp=comparison.timestamp,
-        comparison_id=comparison.id,
-        competitors_count=total,
-    )
-    encoded_summary = jsonable_encoder(summary_payload)
-    if not available:
-        encoded_summary["reason"] = encoded_summary.get("reason") or "no_available_competitors"
-    upsert_price_comparison_summary(db, monitored.id, comparison.id, encoded_summary)
-
-    result["summary"] = encoded_summary
-    result["comparison_id"] = str(comparison.id)
-    result["monitored_id"] = str(monitored.id)
-    result["user_id"] = str(monitored.user_id)
-    return result
-
-        
 def run_price_comparison(
     db: Session,
     monitored_id: UUID,
-    tolerance: Decimal | None = None,
+    tolerance: Optional[Decimal] = None,
 ) -> Dict[str, Any]:
-    """ Executa comparação de preços e retorna resumo persistido para o monitorado. """
-    monitored = get_monitored_product_by_id(db, monitored_id)
-    if not monitored:
-        raise ValueError(f"Monitored product {monitored_id} not found")
-    
-    available_competitors, total_competitors = _load_and_filter_competitors(db, monitored_id, monitored)
-    inactive_reason = _resolve_monitored_inactive_reason(monitored)
+    """Executa comparação de preços e retorna resumo persistido para o monitorado.
+
+    Ponto de entrada único para comparação acionada por tasks ou orquestrador.
+    Não requer usuário autenticado — a autorização é responsabilidade do caller.
+
+    Fluxo:
+    1. Carrega monitorado e filtra concorrentes
+    2. Se monitorado inativo → persiste stub e retorna early
+    3. Executa compare_prices() (cálculo puro em price_comparator)
+    4. Persiste PriceComparison + PriceComparisonSummary
+    5. Retorna resultado com summary embutido
+
+    Args:
+        db: Sessão ativa do banco de dados.
+        monitored_id: UUID do produto monitorado.
+        tolerance: Tolerância decimal para cálculo de discrepâncias.
+            None usa o valor de settings.PRICE_TOLERANCE.
+
+    Returns:
+        Dict com chaves: summary, comparison_id, monitored_id, user_id,
+        lowest_competitor, highest_competitor.
+
+    Raises:
+        ValueError: Se o monitorado não for encontrado.
+    """
+    monitored, available_competitors, _, total_competitors = (
+        load_monitored_and_competitors(db, monitored_id)
+    )
+
+    inactive_reason = resolve_monitored_inactive_reason(monitored)
     if inactive_reason:
         logger.info(
             "comparison_skipped_inactive_monitored",
@@ -431,35 +286,9 @@ def run_price_comparison(
             reason=inactive_reason,
             competitors_count=total_competitors,
         )
-        payload_stub = {
-            "monitored_price": None,
-            "discrepancies": [],
-            "lowest_competitor": None,
-            "highest_competitor": None,
-            "reason": inactive_reason,
-            "ignored_due_to_inactive": True,
-        }
-        comparison = create_price_comparison(db, monitored.id, payload_stub)
-        summary_payload = _apply_summary_defaults(
-            payload_stub,
-            timestamp=comparison.timestamp,
-            comparison_id=comparison.id,
-            competitors_count=total_competitors,
+        return _persist_inactive_comparison(
+            db, monitored=monitored, reason=inactive_reason, total=total_competitors
         )
-        summary_payload["competitors_with_price_count"] = 0
-        summary_payload["competitiveness_status"] = None
-        summary_payload["comparison_insights"] = None
-        summary_payload["ignored_due_to_inactive"] = True
-        encoded_summary = jsonable_encoder(summary_payload)
-        upsert_price_comparison_summary(db, monitored.id, comparison.id, encoded_summary)
-        return {
-            "summary": encoded_summary,
-            "comparison_id": str(comparison.id),
-            "monitored_id": str(monitored.id),
-            "user_id": str(monitored.user_id),
-            "lowest_competitor": None,
-            "highest_competitor": None,
-        }
 
     logger.info(
         "comparison_started",
@@ -467,6 +296,7 @@ def run_price_comparison(
         competitors_count=total_competitors,
         competitors_with_price_count=len(available_competitors),
     )
+
     tol = tolerance if tolerance is not None else Decimal(str(settings.PRICE_TOLERANCE))
     raw_result = compare_prices(monitored, available_competitors, tol)
     encoded_result = jsonable_encoder(raw_result)
@@ -480,640 +310,112 @@ def run_price_comparison(
     logger.info("comparison_finished", monitored_id=str(monitored_id))
     return persisted_result
 
-def _deduplicate_competitors(competitors: List[CompetitorProduct]) -> List[CompetitorProduct]:
-    """Remove duplicidades simples mantendo o concorrente mais recente por ID """
 
-    if not competitors:
-        return []
+# ---------------------------------------------------------------------------
+# Funções internas de persistência
+# ---------------------------------------------------------------------------
 
-    deduped: dict[str, CompetitorProduct] = {}
-    for competitor in competitors:
-        reference = str(getattr(competitor, "id", ""))
-        if not reference:
-            deduped[str(len(deduped))] = competitor
-            continue
-
-        existing = deduped.get(reference)
-        if existing is None:
-            deduped[reference] = competitor
-            continue
-
-        existing_checked = getattr(existing, "last_checked", None)
-        current_checked = getattr(competitor, "last_checked", None)
-        if existing_checked is None or (
-            current_checked is not None and current_checked > existing_checked
-        ):
-            deduped[reference] = competitor
-
-    return list(deduped.values())
-
-def _resolve_competitor_comparison_price(
+def _persist_inactive_comparison(
     db: Session,
-    competitor: CompetitorProduct,
-) -> tuple[Decimal | None, str]:
-    """ Recupera o preço preferencial para comparação com fallback em histórico.
-
-    Quando o preço atual está vazio, buscamos o último registro de histórico
-    para reduzir falsos negativos em comparações recém-atualizados.
-    """
-    if competitor.current_price is not None:
-        return competitor.current_price, "current_price"
-    
-    latest_price = (
-        db.query(PriceHistory.price)
-        .filter(PriceHistory.competitor_product_id == competitor.id)
-        .order_by(desc(PriceHistory.checked_at), desc(PriceHistory.created_at))
-        .limit(1)
-        .scalar()
+    *,
+    monitored: Any,
+    reason: str,
+    total: int,
+) -> Dict[str, Any]:
+    """Persiste comparação stub para monitorado inativo e retorna resultado."""
+    payload_stub = {
+        "monitored_price": None,
+        "discrepancies": [],
+        "lowest_competitor": None,
+        "highest_competitor": None,
+        "reason": reason,
+        "ignored_due_to_inactive": True,
+    }
+    comparison = create_price_comparison(db, monitored.id, payload_stub)
+    summary_payload = apply_summary_defaults(
+        payload_stub,
+        timestamp=comparison.timestamp,
+        comparison_id=comparison.id,
+        competitors_count=total,
     )
-    return to_decimal(latest_price), "price_history"
-    
-def _extract_competitors_count(
+    summary_payload["competitors_with_price_count"] = 0
+    summary_payload["competitiveness_status"] = None
+    summary_payload["comparison_insights"] = None
+    summary_payload["ignored_due_to_inactive"] = True
+    encoded_summary = jsonable_encoder(summary_payload)
+    upsert_price_comparison_summary(db, monitored.id, comparison.id, encoded_summary)
+    return {
+        "summary": encoded_summary,
+        "comparison_id": str(comparison.id),
+        "monitored_id": str(monitored.id),
+        "user_id": str(monitored.user_id),
+        "lowest_competitor": None,
+        "highest_competitor": None,
+    }
+
+
+def _persist_comparison_result(
+    db: Session,
+    *,
+    monitored: Any,
+    result: Dict[str, Any],
+    total: int,
+    available: List[CompetitorProduct],
+) -> Dict[str, Any]:
+    """Persiste comparação e devolve payload final normalizado para os consumidores."""
+    persist_raw_result = getattr(settings, "COMPARISON_STORE_RAW_RESULT", False)
+    stored_payload = (
+        result
+        if persist_raw_result
+        else {
+            "monitored_price": result.get("monitored_price"),
+            "discrepancies": result.get("discrepancies", []),
+            "lowest_competitor": result.get("lowest_competitor"),
+            "highest_competitor": result.get("highest_competitor"),
+        }
+    )
+
+    comparison = create_price_comparison(db, monitored.id, stored_payload)
+    summary_payload = apply_summary_defaults(
+        compute_summary_from_payload(
+            result,
+            timestamp=comparison.timestamp,
+            comparison_id=comparison.id,
+            competitors_count=total,
+        ),
+        timestamp=comparison.timestamp,
+        comparison_id=comparison.id,
+        competitors_count=total,
+    )
+    encoded_summary = jsonable_encoder(summary_payload)
+    if not available:
+        encoded_summary["reason"] = (
+            encoded_summary.get("reason") or "no_available_competitors"
+        )
+    upsert_price_comparison_summary(db, monitored.id, comparison.id, encoded_summary)
+
+    result["summary"] = encoded_summary
+    result["comparison_id"] = str(comparison.id)
+    result["monitored_id"] = str(monitored.id)
+    result["user_id"] = str(monitored.user_id)
+    return result
+
+
+def _extract_competitors_count_from_summary(
     stored_summary: PriceComparisonSummary | None,
 ) -> int:
-    """ Obtém a contagem de concorrentes a partir dos agregados persistidos.
-
-    O campo ``competitors_count`` é armazenado no JSON ``aggregates`` e não
-    como atributo direto do modelo. A extração defensiva evita ``AttributeError``
-    quando o snapshot foi salvo sem este campo ou com tipos inesperados.
-    """
+    """Obtém a contagem de concorrentes a partir dos agregados persistidos."""
     if stored_summary is None:
         return 0
-
-    aggregates = stored_summary.aggregates if isinstance(stored_summary.aggregates, dict) else {}
-
+    aggregates = (
+        stored_summary.aggregates
+        if isinstance(stored_summary.aggregates, dict)
+        else {}
+    )
     try:
         raw_count = aggregates.get("competitors_count")
         if raw_count is None:
             raw_count = aggregates.get("competitors_with_price_count", 0)
         return int(raw_count)
     except (TypeError, ValueError):
-        #Padroniza a contagem em zero quando o valor não puder ser interpretado como inteiro
         return 0
-    
-def _should_refresh_competitors_count(
-    *,
-    db: Session,
-    monitored_id: UUID,
-    summary_timestamp: Any | None,
-) -> bool:
-    """ Indica quando a contagem de concorrentes deve ser recalculada.
-
-    A lógica verifica se existe concorrente criado após o resumo salvo.
-    Quando timestamp do resumo ou o campo de criação não está disponível,
-    assume que a contagem pode estar desatualizada para garantir coerência na UI.
-    """
-    if summary_timestamp is None:
-        #Sem timestamp confiável, evitamos reutilizar contagem possívelmente desatualizada
-        return True
-    
-    if not hasattr(CompetitorProduct, "created_at"):
-        #Fallback defensivo caso o modelo não exponha data de criação
-        return True
-    
-    latest_created_at = (
-        db.query(func.max(CompetitorProduct.created_at))
-        .filter(CompetitorProduct.monitored_product_id == monitored_id)
-        .scalar()
-    )
-    if latest_created_at is None:
-        return False
-    
-    try:
-        return latest_created_at > summary_timestamp
-    except TypeError:
-        #Evita falhas com datas naive/aware e força recálculo seguro
-        return True
-    
-def _empty_summary(competitors_count: int) -> Dict[str, Any]:
-    """ Cria estrutura base do resumo competitivo com valores padrão """
-    return {
-        "comparison_id": None,
-        "last_comparison_at": None,
-        "computed_at": None,
-        "monitored_price": None,
-        "competitors_count": competitors_count,
-        "competitors_with_price_count": 0,
-        "competitors_mean": None,
-        "competitors_min": None,
-        "competitors_max": None,
-        "position_rank": None,
-        "potential_adjustment": None,
-        "ignored_due_to_inactive": False,
-        "competitiveness_status": None,
-        "comparison_insights": None,
-        "discrepancies": [],
-        "reason": None,
-    }
-
-def _calculate_competitiveness_status(
-    monitored_price: Optional[Decimal],
-    reference_price: Optional[Decimal],
-) -> Optional[str]:
-    """ Define o status competitivo comparando o preço monitorado com o menor preço conhecido.
-
-    A lógica segue as faixas solicitadas: diferenças menores ou iguais a zero
-    são competitivas, positivas até 1% são ``nao_competitivas``, de 1% até 5%
-    entram em ``atencao`` e acima de 5% tornam-se ``urgente``. Referências
-    ausentes ou iguais a zero não são classificadas para evitar divisões
-    inválidas.
-    """
-    if (
-        monitored_price is None
-        or reference_price is None
-        or reference_price <= Decimal("0")
-    ):
-        return None
-
-    #Se o monitorado for menor ou igual ao menor concorrente, é competitivo
-    if monitored_price <= reference_price:
-        return CompetitivenessStatus.COMPETITIVE.value
-
-    #Calcula delta fractional e percentual com precisão para evitar que arredondamentos prejudiquem a classificação.
-    try:
-        delta_fraction = (monitored_price - reference_price) / reference_price
-    except (InvalidOperation, ZeroDivisionError):
-        return None
-
-    if delta_fraction <= Decimal("0"):
-        return CompetitivenessStatus.COMPETITIVE.value
-
-    #Percentual em termos de porcentagem (ex.: 1.23 = 1.23%)
-    percentage = (delta_fraction * Decimal("100")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-
-    # Aplicar faixas: >0% até 1% => atenção (anteriormente 'nao_competitivo');
-    # >1% até 5% => atenção; >5% => urgente.
-    # Observação: mantemos os mesmos limites percentuais, mas unificamos
-    # o rótulo de até 5% como 'atencao'. Retornamos explicitamente ATTENTION
-    # para garantir consistência independentemente do nome do membro enum.
-    if percentage > Decimal("0") and percentage <= COMPETITIVENESS_NON_COMPETITIVE_PCT:
-        return CompetitivenessStatus.ATTENTION.value
-    if percentage <= COMPETITIVENESS_ATTENTION_PCT:
-        return CompetitivenessStatus.ATTENTION.value
-    return CompetitivenessStatus.URGENT.value
-
-def _compute_summary_from_payload(
-    payload: Dict[str, Any] | None,
-    *,
-    timestamp: Any,
-    comparison_id: UUID | None,
-    competitors_count: int,
-) -> Dict[str, Any]:
-    """ Calcula o resumo competitivo a partir do payload cru armazenado.
-
-    O cálculo utiliza todos os preços convertidos via ``to_decimal`` e aplica:
-    - ``competitors_mean``: média aritmética dos preços dos concorrentes (2 casas decimais, ``ROUND_HALF_UP``)
-    - ``competitors_min``/``competitors_max``: menor e maior preço conhecido
-    - ``position_rank``: 1 + quantidade de concorrentes com preço menor que o monitorado
-    - ``potential_adjustment``: diferença absoluta entre o preço monitorado e o menor preço concorrente quando o monitorado está acima (2 casas decimais,``ROUND_HALF_UP``)
-
-    Requer ao menos um preço de concorrente e um preço monitorado para gerar ranking, ajuste potencial e insights textuais. 
-    Em cenários sem preços suficientes, os campos permanecem nulos para sinalizar ausência de dados.
-    """
-    summary = _empty_summary(competitors_count)
-    summary["last_comparison_at"] = timestamp
-    summary["computed_at"] = timestamp
-    if comparison_id is not None:
-        summary["comparison_id"] = str(comparison_id)
-
-    if not isinstance(payload, dict):
-        logger.warning(
-            "comparison_payload_invalid",
-            comparison_id=str(comparison_id) if comparison_id else None,
-        )
-        return summary
-
-    try:
-        discrepancies_raw = payload.get("discrepancies") or []
-        summary["discrepancies"] = (
-            discrepancies_raw if isinstance(discrepancies_raw, list) else []
-        )
-        monitored_price = to_decimal(payload.get("monitored_price"))
-
-        summary["ignored_due_to_inactive"] = bool(payload.get("ignored_due_to_inactive"))
-        reason = payload.get("reason") or summary.get("reason")
-        if reason:
-            summary["reason"] = reason
-
-        if monitored_price is not None:
-            summary["monitored_price"] = monitored_price
-        competitor_prices: list[Decimal] = []
-
-        def _append_price(value: Any) -> None:
-            price = to_decimal(value)
-            if price is not None and price not in competitor_prices:
-                competitor_prices.append(price)
-
-        for item in summary["discrepancies"]:
-            if isinstance(item, dict):
-                _append_price(item.get("price"))
-
-        lowest_raw = payload.get("lowest_competitor") or {}
-        highest_raw = payload.get("highest_competitor") or {}
-        lowest_price = to_decimal(lowest_raw.get("price"))
-        highest_price = to_decimal(highest_raw.get("price"))
-
-        _append_price(lowest_price)
-        _append_price(highest_price)
-
-        summary["competitors_with_price_count"] = len(competitor_prices)
-
-        if summary["ignored_due_to_inactive"]:
-            summary["competitiveness_status"] = None
-            summary["comparison_insights"] = None
-            return summary
-
-        if competitor_prices:
-            competitors_min = min(competitor_prices)
-            competitors_max = max(competitor_prices)
-            competitors_mean = (
-                sum(competitor_prices) / len(competitor_prices)
-            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-            summary["competitors_min"] = competitors_min
-            summary["competitors_max"] = competitors_max
-            summary["competitors_mean"] = competitors_mean
-
-        if (
-            monitored_price is not None
-            and summary.get("competitors_min") is not None
-            and monitored_price > summary.get("competitors_min")
-        ):
-            summary["potential_adjustment"] = (
-                monitored_price - summary.get("competitors_min")
-            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        if monitored_price is not None and competitor_prices:
-            cheaper_count = sum(1 for price in competitor_prices if price < monitored_price)
-            summary["position_rank"] = cheaper_count + 1
-
-        status_reference = summary.get("competitors_min")
-        status = _calculate_competitiveness_status(monitored_price, status_reference)
-        if status is not None:
-            summary["competitiveness_status"] = status
-
-        summary["comparison_insights"] = _build_comparison_insights(
-            monitored_price=monitored_price,
-            competitors_min=summary.get("competitors_min"),
-            competitors_count=competitors_count,
-            position_rank=summary.get("position_rank"),
-            potential_adjustment=summary.get("potential_adjustment"),
-            competitiveness_status=summary.get("competitiveness_status"),
-        )
-        return summary
-
-    except (AttributeError, TypeError, ValueError) as exc:
-        price_preview = None
-        try:
-            price_preview = json.dumps(payload)[:300]
-        except Exception:
-            price_preview = str(payload)[:300]
-        logger.warning(
-            "comparison_summary_failed",
-            error=str(exc),
-            comparison_id=str(comparison_id) if comparison_id else None,
-            payload_preview=price_preview,
-        )
-        return summary
-
-def _calculate_percentage_delta(
-    monitored_price: Optional[Decimal], reference_price: Optional[Decimal]
-) -> Optional[Decimal]:
-    """ Calcula variação percentual entre o preço monitorado e uma referência.
-
-    Retorna ``None`` quando algum dos valores é inexistente ou quando a
-    referência é menor ou igual a zero para evitar divisões inválidas.
-    """
-    if (
-        monitored_price is None
-        or reference_price is None
-        or reference_price <= Decimal("0")
-    ):
-        return None
-
-    percentage_delta = (
-        (monitored_price - reference_price) / reference_price
-    ) * Decimal("100")
-    return percentage_delta.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
-def _build_comparison_insights(
-    *,
-    monitored_price: Optional[Decimal],
-    competitors_min: Optional[Decimal],
-    competitors_count: int,
-    position_rank: Optional[int],
-    potential_adjustment: Optional[Decimal],
-    competitiveness_status: Optional[str],
-) -> Optional[str]:
-    """ Gera texto explicativo sobre competitividade e ajuste recomendado """
-    if monitored_price is None:
-        return "Preço do produto monitorado não disponível; recoletores em andamento."
-    if competitors_min is None or position_rank is None or competitors_count is None:
-        return None
-
-    total_itens = competitors_count + 1 if competitors_count >= 0 else 1
-    delta_vs_min = _calculate_percentage_delta(monitored_price, competitors_min)
-
-    if delta_vs_min is None:
-        return None
-
-    adjustment_value = potential_adjustment or Decimal("0.00")
-    adjustment_pct = None
-    if potential_adjustment is not None and monitored_price > Decimal("0"):
-        adjustment_pct = (
-            (potential_adjustment / monitored_price) * Decimal("100")
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    if adjustment_value <= 0:
-        return (
-            f"Preço alinhado ao menor concorrente (R${competitors_min}). "
-            f"Posição atual: #{position_rank} de {total_itens}."
-        )
-    adjustment_suffix = f" (~{adjustment_pct}%)" if adjustment_pct is not None else ""
-    status_hint = (
-        f" Status: {competitiveness_status}." if competitiveness_status else ""
-    )
-
-    return (
-        f"Você está {delta_vs_min}% acima do menor concorrente (R${competitors_min}). "
-        f"Posição atual: #{position_rank} de {total_itens}. "
-        f"Recomendação: reduzir R${adjustment_value}{adjustment_suffix} para igualar o menor preço."
-        f"{status_hint}"
-    )
-
-def _apply_summary_defaults(
-    payload: Dict[str, Any],
-    *,
-    timestamp: Any,
-    comparison_id: UUID | None,
-    competitors_count: int,
-) -> Dict[str, Any]:
-    """ Garante que o resumo persistido contenha todos os campos esperados """
-    summary = _empty_summary(competitors_count)
-    summary.update(payload or {})
-
-    #Preserva o timestamp da última comparação quando já registrado no payload
-    if summary.get("last_comparison_at") is None:
-        summary["last_comparison_at"] = timestamp
-    summary["computed_at"] = timestamp
-    summary["competitors_count"] = competitors_count
-
-    if summary.get("discrepancies") is None:
-        summary["discrepancies"] = []
-
-    if comparison_id is not None:
-        summary["comparison_id"] = summary.get("comparison_id") or str(comparison_id)
-
-    try:
-        summary["competitors_with_price_count"] = int(summary["competitors_with_price_count"])
-    except (TypeError, ValueError, KeyError):
-        summary["competitors_with_price_count"] = 0
-
-    summary["ignored_due_to_inactive"] = bool(summary.get("ignored_due_to_inactive"))
-
-    if summary["ignored_due_to_inactive"]:
-        summary["competitiveness_status"] = None
-        summary["comparison_insights"] = None
-
-    summary = _coerce_decimal_fields(summary)
-
-    if summary.get("competitiveness_status") is None:
-        monitored_price = summary.get("monitored_price")
-        status_reference = summary.get("competitors_min")
-        status = _calculate_competitiveness_status(monitored_price, status_reference)
-        if status is not None:
-            summary["competitiveness_status"] = status
-
-    #Motivo explicíto para ausência de dados competitivos exibição na UI
-    if not summary.get("reason"):
-        no_competitors_available = competitors_count == 0 or summary.get(
-            "competitors_with_price_count", 0
-        ) == 0
-        if no_competitors_available:
-            summary["reason"] = "sem_concorrentes_disponiveis"
-
-    return summary
-
-
-def _coerce_decimal_fields(summary: Dict[str, Any]) -> Dict[str, Any]:
-    """Normaliza campos monetários para Decimal para evitar strings na resposta"""
-
-    monetary_keys = [
-        "monitored_price",
-        "competitors_mean",
-        "competitors_min",
-        "competitors_max",
-        "potential_adjustment",
-    ]
-
-    for key in monetary_keys:
-        if key in summary:
-            summary[key] = to_decimal(summary.get(key))
-
-    return summary
-
-def summarize_comparison(
-    comparison: PriceComparison | None,
-    stored_summary: PriceComparisonSummary | None = None,
-    *,
-    force_recompute: bool = False,
-) -> Dict[str, Any]:
-    """ Normaliza o resumo competitivo em dois modos explícitos 
-    
-    Modo padrão (``force_recompute=False``): normaliza o snapshot persistido
-    em ``stored_summary`` quando disponível.
-    Modo recompute (``force_recompute=True``): recalcula o resumo a partir do
-    estado mais atual conhecido (payload da comparação corrente) sem usar
-    ``stored_summary.aggregates`` como fonte principal de discrepâncias,
-    mínimos, máximos e média.
-    """
-    competitors_count = _extract_competitors_count(stored_summary)
-    if competitors_count == 0 and comparison is not None:
-        payload = comparison.data or {}
-        if isinstance(payload, dict):
-            discrepancies = payload.get("discrepancies")
-            if isinstance(discrepancies, list):
-                competitors_count = len(discrepancies)
-    
-    if force_recompute:
-        return _build_recomputed_summary(
-            comparison=comparison,
-            stored_summary=stored_summary,
-            competitors_count=competitors_count,
-        )
-    
-    if stored_summary is not None:
-        stored_payload = stored_summary.aggregates or {}
-        return _apply_summary_defaults(
-            stored_payload,
-            timestamp=stored_summary.timestamp,
-            comparison_id=stored_summary.comparison_id,
-            competitors_count=competitors_count,
-        )
-
-    if comparison is None:
-        summary = _empty_summary(competitors_count)
-        if competitors_count == 0:
-            summary["reason"] = "sem_concorrentes_disponiveis"
-        return summary
-
-    payload = comparison.data or {}
-
-    if isinstance(payload, dict):
-        embedded_summary = payload.get("summary")
-        if isinstance(embedded_summary, dict):
-            #Quando a comparação já armazena um resumo, evitamos cálculos adicionais
-            return _apply_summary_defaults(
-                embedded_summary,
-                timestamp=comparison.timestamp,
-                comparison_id=comparison.id,
-                competitors_count=competitors_count,
-            )
-
-    return _compute_summary_from_payload(
-        payload,
-        timestamp=comparison.timestamp,
-        comparison_id=comparison.id,
-        competitors_count=competitors_count,
-    )
-
-def _build_recomputed_summary(
-    *,
-    comparison: PriceComparison | None,
-    stored_summary: PriceComparisonSummary | None,
-    competitors_count: int,
-) -> Dict[str, Any]:
-    """ Recalcula resumo sem carregar agregados antigos como base.
-
-    O objetivo é eliminar ambiguidade quando o snapshot está defasado: os
-    valores calculados agora devem substituir integralmente agregados antigos,
-    principalmente ``discrepancies`` e estatísticas de preço.
-    """
-    if comparison is not None:
-        payload = comparison.data or {}
-        if isinstance(payload, dict):
-            embedded_summary = payload.get("summary")
-            if isinstance(embedded_summary, dict):
-                #Usa o resumo embutido quando ele já representa o estado atual.
-                return _apply_summary_defaults(
-                    embedded_summary,
-                    timestamp=comparison.timestamp,
-                    comparison_id=comparison.id,
-                    competitors_count=competitors_count,
-                )
-
-        return _compute_summary_from_payload(
-            payload,
-            timestamp=comparison.timestamp,
-            comparison_id=comparison.id,
-            competitors_count=competitors_count,
-        )
-
-    if stored_summary is not None:
-        #Sem comparação atual disponível, normaliza o snapshot existente.
-        return _apply_summary_defaults(
-            stored_summary.aggregates or {},
-            timestamp=stored_summary.timestamp,
-            comparison_id=stored_summary.comparison_id,
-            competitors_count=competitors_count,
-        )
-
-    summary = _empty_summary(competitors_count)
-    if competitors_count == 0:
-        summary["reason"] = "sem_concorrentes_disponiveis"
-    return summary
-
-def _resolve_monitored_inactive_reason(monitored: Any) -> str | None:
-    """ Determina se o monitorado deve ser tratado como inativo na comparação """
-    unavailable_statuses = {"unavailable", "removed", "sold_out"}
-    last_status = (getattr(monitored, "last_status", None) or "").lower()
-    availability = getattr(monitored, "availability", None)
-    has_price = getattr(monitored, "current_price", None) is not None
-    monitoring_status = getattr(monitored, "status", None)
-
-    if availability is False:
-        return "monitored_unavailable"
-    if last_status in unavailable_statuses:
-        return "monitored_unavailable"
-    if monitoring_status == MonitoredStatus.inactive and not has_price:
-        return "monitored_without_price"
-    if not has_price:
-        return "monitored_without_price"
-
-    return None
-
-class FilteredCompetitorsResult:
-    """ Agrupa concorrentes elegíveis para comparação e métricas de filtragem."""
-
-    def __init__(
-        self,
-        *,
-        entries: list["ComparisonCompetitorEntry"],
-        filtered_reasons: dict[str, int],
-        total_competitors: int,
-    ) -> None:
-        self.entries = entries
-        self.filtered_reasons = filtered_reasons
-        self.total_competitors = total_competitors
-
-
-class ComparisonCompetitorEntry:
-    """Representa um concorrente válido com o preço resolvido para comparação."""
-
-    def __init__(self, *, competitor: CompetitorProduct, price: Decimal, price_source: str) -> None:
-        self.competitor = competitor
-        self.price = price
-        self.price_source = price_source
-
-
-def _filter_competitors_for_comparison(
-    db: Session,
-    competitors: List[CompetitorProduct],
-) -> FilteredCompetitorsResult:
-    """Filtra concorrentes com uma única regra canônica reutilizada no serviço.
-
-    Esta função elimina duplicação entre os fluxos de comparação e de
-    recomposição de resumo, garantindo os mesmos critérios de elegibilidade.
-    """
-    deduped_competitors = _deduplicate_competitors(competitors)
-    filtered_reasons: dict[str, int] = {}
-    entries: list[ComparisonCompetitorEntry] = []
-
-    for competitor in deduped_competitors:
-        if getattr(competitor, "is_paused", False):
-            filtered_reasons["paused"] = filtered_reasons.get("paused", 0) + 1
-            continue
-
-        status_value = getattr(competitor, "status", ProductStatus.available)
-        if status_value in {ProductStatus.unavailable, ProductStatus.removed}:
-            filtered_reasons["status_unavailable"] = filtered_reasons.get("status_unavailable", 0) + 1
-            continue
-
-        if getattr(competitor, "availability", None) is False:
-            filtered_reasons["availability_false"] = filtered_reasons.get("availability_false", 0) + 1
-            continue
-
-        resolved_price, price_source = _resolve_competitor_comparison_price(db, competitor)
-        if resolved_price is None:
-            filtered_reasons["missing_price"] = filtered_reasons.get("missing_price", 0) + 1
-            continue
-
-        if competitor.current_price is None:
-            # Mantém preço transitório somente em memória para o comparador usar fallback do histórico.
-            competitor.current_price = resolved_price
-            competitor._comparison_price_source = price_source
-
-        entries.append(
-            ComparisonCompetitorEntry(
-                competitor=competitor,
-                price=resolved_price,
-                price_source=price_source,
-            )
-        )
-
-    return FilteredCompetitorsResult(
-        entries=entries,
-        filtered_reasons=filtered_reasons,
-        total_competitors=len(deduped_competitors),
-    )

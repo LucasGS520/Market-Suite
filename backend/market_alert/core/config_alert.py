@@ -228,6 +228,20 @@ class Settings(ConfigBase):
     MAX_COMPETITORS_PER_MONITORED: int = int(
         os.getenv("MAX_COMPETITORS_PER_MONITORED", "10")
     ) #Limite padrão de concorrentes por produto monitorado
+
+    #Limiares de competitividade para classificação de preços (em porcentagem)
+    #COMPETITIVENESS_THRESHOLD_NON_COMPETITIVE_PCT: até 1% acima do menor concorrente → atenção
+    #COMPETITIVENESS_THRESHOLD_ATTENTION_PCT: até 5% acima → atenção
+    #COMPETITIVENESS_THRESHOLD_URGENT_PCT: acima de 5% → urgente
+    COMPETITIVENESS_THRESHOLD_NON_COMPETITIVE_PCT: float = float(
+        os.getenv("COMPETITIVENESS_THRESHOLD_NON_COMPETITIVE_PCT", "1")
+    ) #Limite superior da faixa de atenção baixa (não-competitivo)
+    COMPETITIVENESS_THRESHOLD_ATTENTION_PCT: float = float(
+        os.getenv("COMPETITIVENESS_THRESHOLD_ATTENTION_PCT", "5")
+    ) #Limite superior da faixa de atenção antes de urgente
+    COMPETITIVENESS_THRESHOLD_URGENT_PCT: float = float(
+        os.getenv("COMPETITIVENESS_THRESHOLD_URGENT_PCT", "20")
+    ) #Referência do limiar urgente (acima de attention_pct já é urgente)
     IDEMPOTENCY_TTL_SECONDS: int = int(
         os.getenv("IDEMPOTENCY_TTL_SECONDS", str(60 * 60))
     ) #Tempo padrão para reter chaves de idempotência (1h)

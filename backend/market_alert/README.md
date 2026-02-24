@@ -20,13 +20,15 @@ API FastAPI responsável por autenticação, gestão e monitoramento, além de c
 market_alert/
 ├── auth/                #Fluxos de autenticação, JWT e rotas de login/refresh/reset
 ├── core/                #Configuração do serviço, inicialização do Celery e carregamento de env
-├── crud/                #Operações de banco de dados (SQLAlcemy Session)
+├── crud/                #Operações de banco de dados (SQLAlchemy Session)
+├── domain/              #Lógica de negócio pura — sem I/O (ex: price_competitiveness.py)
 ├── models/              #Modelos ORM (SQLAlchemy)
+├── notifications/       #Avaliador de eventos e adaptadores de canal
 ├── routes/              #Rotas FastAPI (usuários, monitoramentos, comparações, etc.)
 ├── schemas/             #Modelos Pydantic expostos pela API
-├── services/            #Regras de negócio (scraper client, comparações)
-├── tasks/               #Conjunto de tasks Celery (scraping, monitoramento)
-└── utils/               #Auxiliares (cache, rate limiting, serialização, etc.)
+├── services/            #Regras de negócio (scraper client, comparações, orquestração)
+├── tasks/               #Conjunto de tasks Celery (scraping, monitoramento, comparação)
+└── utils/               #Auxiliares (cache, rate limiting, serialização, comparador de snapshots)
 ```
 
 ## Endpoints e Fluxos Relevantes
@@ -63,6 +65,85 @@ market_alert/
 - **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs.
 - **Codificação numérica**: valores monetários são serializados como string (`Decimal` → `"1099.90"`) em quase todos os contratos, exceto no resumo de comparação que mantém encoder numérico para compatibilidade.
 - **Execução das comparações**: as comparações são executadas automaticamente pelas tasks de monitoramento e comparação; não há endpoint para disparo manual.
+
+## Arquitetura da Comparação de Preços
+
+A responsabilidade de comparação de preços foi refatorada em camadas com separação clara de responsabilidades. Cada camada depende apenas das camadas abaixo dela.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  API / Task                                             │
+│  routes/routes_comparisons.py                           │
+│  tasks/compare_prices_task.py                           │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────┐
+│  Serviço Orquestrador                                   │
+│  services/services_comparison.py                        │
+│  · Autorização e carregamento                           │
+│  · Coordena calculadora, utils e persistência           │
+│  · Não contém lógica de cálculo                         │
+└───────┬──────────────────┬────────────────┬─────────────┘
+        │                  │                │
+┌───────▼───────┐  ┌───────▼───────┐  ┌────▼────────────┐
+│  Calculadora  │  │  Utils/Carga  │  │  Snapshot       │
+│  services/    │  │  services/    │  │  utils/         │
+│  services_    │  │  services_    │  │  snapshot_      │
+│  comparison_  │  │  comparison_  │  │  comparator.py  │
+│  calculator   │  │  utils.py     │  │  (idempotência) │
+└───────┬───────┘  └───────┬───────┘  └─────────────────┘
+        │                  │
+┌───────▼───────────────────▼───────────────────────────┐
+│  Domínio Puro (sem I/O)                               │
+│  domain/price_competitiveness.py                      │
+│  · CompetitivenessThresholds                          │
+│  · ComparisonSnapshot                                 │
+│  · calculate_competitiveness()                        │
+└───────────────────────────┬───────────────────────────┘
+                            │
+┌───────────────────────────▼───────────────────────────┐
+│  CRUD / Models                                        │
+│  crud/crud_comparison.py  crud/crud_price_history.py  │
+│  models/models_comparisons.py                         │
+└───────────────────────────────────────────────────────┘
+```
+
+### Arquivos de Comparação
+
+| Arquivo | Responsabilidade |
+|---------|-----------------|
+| `domain/price_competitiveness.py` | Lógica pura: calcula `CompetitivenessStatus` sem I/O. Testável com `pytest` puro. |
+| `utils/snapshot_comparator.py` | Utilitário de idempotência: extrai campos materiais e detecta mudança real para evitar upserts desnecessários. |
+| `utils/price_comparator.py` | Compara preço do monitorado com os concorrentes e retorna discrepâncias. |
+| `services/services_comparison_utils.py` | Carregamento, filtragem canônica de concorrentes elegíveis e staleness check. Única fonte de verdade para elegibilidade de concorrentes. |
+| `services/services_comparison_calculator.py` | Agrega resultados brutos em sumário formatado; constrói `comparison_insights`; recalcula estado de monitorados inativos. |
+| `services/services_comparison.py` | Orquestrador: autoriza, carrega, calcula e persiste. Expõe API pública para rotas e tasks. |
+| `enums/enums_comparisons.py` | `CompetitivenessStatus`: `COMPETITIVE="competitivo"`, `ATTENTION="atencao"`, `URGENT="urgente"`. |
+
+### Estados de Competitividade
+
+| Status | Valor no banco | Condição |
+|--------|---------------|----------|
+| `COMPETITIVE` | `"competitivo"` | Preço do monitorado ≤ menor concorrente |
+| `ATTENTION` | `"atencao"` | Preço entre 0% e `COMPETITIVENESS_THRESHOLD_ATTENTION_PCT` (padrão 5%) acima |
+| `URGENT` | `"urgente"` | Preço acima de `COMPETITIVENESS_THRESHOLD_ATTENTION_PCT` |
+
+Os limiares são configuráveis via variáveis de ambiente em `config_alert.py`:
+```
+COMPETITIVENESS_THRESHOLD_NON_COMPETITIVE_PCT=1
+COMPETITIVENESS_THRESHOLD_ATTENTION_PCT=5
+COMPETITIVENESS_THRESHOLD_URGENT_PCT=20
+```
+
+### Regras de Camada
+
+- `domain/` importa apenas enums e stdlib — zero dependências de infraestrutura.
+- `utils/` importa de models/enums, nunca de services ou tasks.
+- `services/services_comparison_utils.py` importa de crud, models, utils — nunca de outros services.
+- `services/services_comparison_calculator.py` importa de domain, enums, utils — nunca de CRUD.
+- `services/services_comparison.py` importa de todos os anteriores e CRUD — é o único arquivo que orquestra o fluxo completo.
+
+---
 
 ## Celery - Arquitetura de Workers e Filas
 
@@ -153,7 +234,7 @@ Observação: a implementação foi ajustada para que respostas `304 Not Modifie
 - `core/config_alert.py` – carrega variáveis de ambiente e aplica defaults.
 - `core/celery_app.py` – configura workers e rotinas de suporte.
 - `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
-- `services/comparison_service.py` – orquestra cálculos de comparação.
+- `services/services_comparison.py` – orquestra o fluxo completo de comparação (autorização, carregamento, cálculo, persistência).
 - `tasks/continuous_collector_task.py` – worker contínuo que consome a fila de prioridade e despacha coletas assíncronas para `scraping`.
 - `tasks/maintenance_tasks.py` – executa rotinas de limpeza periódicas.
 - `tasks/compare_prices_task.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.

@@ -22,6 +22,56 @@ from market_alert.crud.crud_notifications import get_last_sent_at
 
 logger = structlog.get_logger("notifications_evaluator")
 
+
+def validate_snapshot_contract(snapshot: dict[str, Any], *, label: str = "snapshot") -> bool:
+    """ Valida que o snapshot de notificação respeita o contrato mínimo esperado.
+
+    Contrato de snapshot de notificação:
+    - Deve ser um dicionário (não None, não lista, não string)
+    - Campos opcionais com tipos esperados (nunca obrigatórios — todos acessados via .get()):
+      - price: float | str | None
+      - availability: bool | None
+      - summary: dict | None
+      - price_delta_percent: float | None
+
+    Retorna False (sem lançar exceção) para evitar quebrar o fluxo de produção.
+    Loga um aviso quando detecta violação de contrato.
+
+    Args:
+        snapshot: Dicionário de snapshot a validar.
+        label: Rótulo para identificar qual snapshot está sendo validado no log.
+
+    Returns:
+        True se o contrato é respeitado, False caso contrário.
+    """
+    if not isinstance(snapshot, dict):
+        logger.warning(
+            "snapshot_contract_violation",
+            label=label,
+            reason="not_a_dict",
+            received_type=type(snapshot).__name__,
+        )
+        return False
+
+    issues = []
+    summary = snapshot.get("summary")
+    if summary is not None and not isinstance(summary, dict):
+        issues.append(f"summary esperado dict, recebido {type(summary).__name__}")
+
+    availability = snapshot.get("availability")
+    if availability is not None and not isinstance(availability, bool):
+        issues.append(f"availability esperado bool, recebido {type(availability).__name__}")
+
+    if issues:
+        logger.warning(
+            "snapshot_contract_violation",
+            label=label,
+            issues=issues,
+        )
+        return False
+
+    return True
+
 @dataclass(frozen=True)
 class NotificationCandidate:
     """ Representa uma notificação candidata pronta para persistência """
@@ -198,7 +248,11 @@ def evaluate(
     """ Avalia snapshots e retorna notificações candidatas por canal """
     if monitored.paused:
         return []
-    
+
+    validate_snapshot_contract(current_snapshot, label="current_snapshot")
+    if previous_snapshot is not None:
+        validate_snapshot_contract(previous_snapshot, label="previous_snapshot")
+
     event_types = _resolve_event_types(previous_snapshot, current_snapshot)
     if not event_types:
         return []

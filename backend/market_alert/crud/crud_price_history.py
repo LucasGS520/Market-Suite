@@ -6,8 +6,10 @@ entre coletas próximas, reduzindo ruído em comparações e relatórios.
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from market_alert.models.models_price_history import PriceHistory
@@ -45,6 +47,34 @@ def _is_duplicate_price(entry: PriceHistory | None, price: Decimal, *, currency:
     if entry is None:
         return False
     return entry.price == price and (currency is None or entry.currency == currency)
+
+def get_latest_price_for_competitor(
+    db: Session,
+    competitor_id: UUID,
+) -> Optional[Decimal]:
+    """ Retorna o preço mais recente registrado no histórico para um concorrente.
+
+    Usado como fallback quando ``competitor.current_price`` está ausente,
+    permitindo que a comparação use o último preço coletado mesmo que o
+    scraping mais recente não tenha persistido um preço novo.
+
+    Ordena por ``checked_at`` e ``created_at`` (secundário) para garantir
+    o registro mais recente mesmo quando dois registros têm o mesmo timestamp.
+
+    Args:
+        db: Sessão ativa do banco de dados.
+        competitor_id: UUID do produto concorrente.
+
+    Returns:
+        Decimal com o preço mais recente, ou None se não houver histórico.
+    """
+    return (
+        db.query(PriceHistory.price)
+        .filter(PriceHistory.competitor_product_id == competitor_id)
+        .order_by(desc(PriceHistory.checked_at), desc(PriceHistory.created_at))
+        .limit(1)
+        .scalar()
+    )
 
 def create_for_monitored(
     db: Session,
