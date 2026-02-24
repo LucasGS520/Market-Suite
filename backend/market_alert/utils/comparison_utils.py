@@ -16,6 +16,7 @@ Regras desta camada:
 - Não contém lógica de persistência de resultados
 """
 
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
@@ -40,6 +41,7 @@ logger = structlog.get_logger("comparison_utils")
 __all__ = [
     "FilteredCompetitorsResult",
     "ComparisonCompetitorEntry",
+    "LatestSnapshotResult",
     "load_monitored_and_competitors",
     "load_latest_snapshot",
     "filter_competitors_for_comparison",
@@ -70,6 +72,12 @@ class ComparisonCompetitorEntry:
         self.competitor = competitor
         self.price = price
         self.price_source = price_source
+
+@dataclass(frozen=True)
+class LatestSnapshotResult:
+    """ Representa o último snapshot de resumo com campos nomeados """
+    stored_summary: Optional[PriceComparisonSummary]
+    aggregates: Optional[Dict[str, Any]]
 
 def load_monitored_and_competitors(
     db: Session,
@@ -113,12 +121,16 @@ def load_monitored_and_competitors(
 
     filtered_out = total - len(available)
     if filtered_out:
-        logger.info(
+        discarded_ratio = (Decimal(filtered_out) / Decimal(total)) if total else Decimal("0")
+        log_method = logger.info if discarded_ratio >= Decimal("0.10") else logger.debug
+        #INFO só quando a filtragem é material para observabilidade operacional
+        log_method(
             "comparison_filtered_competitors",
             monitored_id=str(monitored_id),
             filtered=filtered_out,
             total=total,
             available=len(available),
+            discarded_ratio_pct=float((discarded_ratio * Decimal("100")).quantize(Decimal("0.01"))),
             reasons=filtered.filtered_reasons,
         )
 
@@ -127,7 +139,7 @@ def load_monitored_and_competitors(
 def load_latest_snapshot(
     db: Session,
     monitored_id: UUID,
-) -> Tuple[Optional[PriceComparisonSummary], Optional[Dict]]:
+) -> LatestSnapshotResult:
     """ Carrega o resumo mais recente e extrai seus agregados.
 
     Args:
@@ -135,19 +147,17 @@ def load_latest_snapshot(
         monitored_id: UUID do produto monitorado.
 
     Returns:
-        Tupla de 2 elementos:
-            - stored_summary: Objeto ORM PriceComparisonSummary ou None
-            - aggregates: Dicionário de agregados ou None se não existir resumo
+        LatestSnapshotResult com resumo ORM e agregados normalizados.
     """
     stored_summary = get_latest_summary(db, monitored_product_id=monitored_id)
     if stored_summary is None:
-        return None, None
+        return LatestSnapshotResult(stored_summary=None, aggregates=None)
 
     aggregates = stored_summary.aggregates
     if not isinstance(aggregates, dict):
         aggregates = None
 
-    return stored_summary, aggregates
+    return LatestSnapshotResult(stored_summary=stored_summary, aggregates=aggregates)
 
 def _resolve_competitor_price(
     db: Session,

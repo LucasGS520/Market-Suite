@@ -53,6 +53,18 @@ class CompetitivenessThresholds:
     attention_pct: Decimal
     urgent_pct: Decimal = Decimal("20")
 
+    def sanitized(self) -> "CompetitivenessThresholds":
+        """ Retorna limiares válidos e monotônicos para evitar classificação quebrada. """
+        zero = Decimal("0")
+        non_competitive = max(zero, self.non_competitive_pct, 0)
+        attention = max(self.attention_pct, non_competitive)
+        urgent = max(self.urgent_pct, attention)
+        return CompetitivenessThresholds(
+            non_competitive_pct=non_competitive,
+            attention_pct=attention,
+            urgent_pct=urgent,
+        )
+
     @classmethod
     def from_config(cls, settings: "Settings") -> "CompetitivenessThresholds":
         """ Cria instância lendo os limiares das configurações da aplicação.
@@ -73,7 +85,7 @@ class CompetitivenessThresholds:
             urgent_pct=Decimal(
                 str(settings.COMPETITIVENESS_THRESHOLD_URGENT_PCT)
             ),
-        )
+        ).sanitized()
 
     @classmethod
     def defaults(cls) -> "CompetitivenessThresholds":
@@ -215,10 +227,12 @@ def determine_competitiveness_status(
         >>> determine_competitiveness_status(Decimal("10"), thresholds)
         'urgente'
     """
+    safe_thresholds = thresholds.sanitized()
+
     if delta_percent <= Decimal("0"):
         return CompetitivenessStatus.COMPETITIVE.value
 
-    if delta_percent <= thresholds.attention_pct:
+    if delta_percent <= safe_thresholds.attention_pct:
         return CompetitivenessStatus.ATTENTION.value
 
     return CompetitivenessStatus.URGENT.value
@@ -301,8 +315,9 @@ def calculate_competitiveness(
     try:
         if min_price > Decimal("0"):
             delta_fraction = (monitored - min_price) / min_price
+            #Quantiza para 2 pacas percentuais para estabilidade de limiares
             delta_percent = (delta_fraction * Decimal("100")).quantize(
-                Decimal("0.0001"), rounding=ROUND_HALF_UP
+                Decimal("0.01"), rounding=ROUND_HALF_UP
             )
         else:
             delta_percent = Decimal("0")

@@ -184,10 +184,22 @@ def persist_rebuilt_summary_if_needed(
 ) -> Dict[str, Any]:
     """Persiste resumo recomposto apenas quando houver mudança material.
 
-    Usa extract_material_snapshot() + snapshot_has_changed() para determinar
-    se a escrita no banco é necessária. Garante idempotência no refresh stale
-    e preserva comparison_id do snapshot prévio quando ausente no novo resumo.
+    Comportamentos defensivos deste fluxo:
+    - recusa payload inválido (não-dict)
+    - valida/converte comparison_id antes do upsert
+    - evita escrita quando snapshot material não mudou
+    - registra erro com contexto e retorna payload candidato em caso de falha
+
+    Isso mantém a operação idempotente, observável e resiliente a dados parciais.
     """
+    if not isinstance(normalized_summary, dict):
+        logger.warning(
+            "comparison_summary_invalid_payload",
+            monitored_id=str(monitored_id),
+            payload_type=type(normalized_summary).__name__,
+        )
+        return {}
+    
     comparison_raw = normalized_summary.get("comparison_id")
     if comparison_raw is None and stored_summary is not None:
         comparison_raw = stored_summary.comparison_id
@@ -225,12 +237,21 @@ def persist_rebuilt_summary_if_needed(
         )
         return candidate_summary
 
-    persisted_summary = upsert_price_comparison_summary(
-        db,
-        monitored_id,
-        comparison_id,
-        jsonable_encoder(candidate_summary),
-    )
+    try:
+        persisted_summary = upsert_price_comparison_summary(
+            db,
+            monitored_id,
+            comparison_id,
+            jsonable_encoder(candidate_summary),
+        )
+    except Exception:
+        logger.exception(
+            "comparison_summary_persist_failed",
+            monitored_id=str(monitored_id),
+            comparison_id=str(comparison_id),
+        )
+        return candidate_summary
+    
     logger.info(
         "comparison_summary_persisted",
         monitored_id=str(monitored_id),
