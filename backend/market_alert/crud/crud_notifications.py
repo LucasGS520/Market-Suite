@@ -1,4 +1,8 @@
-""" Operações CRUD para eventos, alertas e notificações """
+""" Operações CRUD para eventos, alertas e notificações.
+
+Este módulo contém apenas operações de persistência e consulta no banco de dados.
+Toda lógica de deduplicação, cooldown e locks pertence ao service layer.
+"""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -7,9 +11,6 @@ from uuid import UUID
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 import structlog
-
-from shared.utils.redis_client import get_redis_client, set_key_with_ttl
-from shared.utils.redis_locks import acquire_notification_lock, release_notification_lock
 
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_notifications import (
@@ -28,10 +29,8 @@ from market_alert.models.models_notifications import (
 )
 
 
-
 logger = structlog.get_logger("crud_notifications")
 DEFAULT_MAX_ATTEMPTS = 3
-DEFAULT_DEDUPE_SENT_WINDOW_SECONDS = 60 * 10
 DEFAULT_CHANNEL_SETTINGS = {
     NotificationChannel.email: True,
     NotificationChannel.push: False,
@@ -60,7 +59,7 @@ def create_event_log(
     commit: bool = False,
 ) -> EventLog:
     """ Persiste um evento de domínio de forma imutável """
-    normalized_ocurred_at = _normalize_datetime(occurred_at)
+    normalized_occurred_at = _normalize_datetime(occurred_at)
     event = EventLog(
         event_type=event_type,
         trace_id=trace_id,
@@ -68,7 +67,7 @@ def create_event_log(
         source=source,
         monitored_product_id=monitored_product_id,
         user_id=user_id,
-        ocurred_at=normalized_ocurred_at,
+        occurred_at=normalized_occurred_at,
     )
     db.add(event)
     if commit:
@@ -127,38 +126,24 @@ def create_alert_rule(
     )
     return rule
 
-def _dedup_key(dedup_hash: str) -> str:
-    """ Monta a chave de deduplicação usada no Redis """
-    return f"notifications:dedup:{dedup_hash}"
-
-def _cooldown_key(
-    *,
-    monitored_product_id: UUID | None,
-    channel: NotificationChannel,
-    event_type: EventType,
-) -> str:
-    """ Monta a chave de cooldown por produto, canal e evento """
-    product_value = str(monitored_product_id) if monitored_product_id else "global"
-    return f"notifications:cooldown:{product_value}:{channel.value}:{event_type.value}"
-
-def _redis_has_key(key: str) -> bool:
-    """ Verifica se uma chave está ativa no Redis """
-    client = get_redis_client()
-    if client is None:
-        return False
-    try:
-        return bool(client.exists(key))
-    except Exception:
-        return False
-    
-def _has_recent_sent_notification(
+def has_recent_sent_notification(
     db: Session,
     *,
     dedup_hash: str,
+    window_seconds: int,
     now: datetime,
 ) -> bool:
-    """ Verifica se houve envio recente com o mesmo dedup_hash """
-    window_seconds = max(settings.NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS, DEFAULT_DEDUPE_SENT_WINDOW_SECONDS)
+    """ Verifica se houve envio recente com o mesmo dedup_hash dentro da janela.
+
+    Args:
+        db: Sessão do banco de dados.
+        dedup_hash: Hash de deduplicação da notificação.
+        window_seconds: Tamanho da janela de verificação em segundos.
+        now: Instante de referência para o cálculo.
+
+    Returns:
+        True se existe notificação enviada dentro da janela.
+    """
     window_start = now - timedelta(seconds=window_seconds)
     existing = (
         db.query(Notification.id)
@@ -171,15 +156,25 @@ def _has_recent_sent_notification(
         .first()
     )
     return existing is not None
-    
-def _has_dedup_in_window(
+
+def has_dedup_in_window(
     db: Session,
     *,
     dedup_hash: str,
     cooldown_seconds: int,
     now: datetime,
 ) -> bool:
-    """ Verifica duplicidade no banco dentro da janela de cooldown """
+    """ Verifica se existe notificação duplicada no banco dentro da janela de cooldown.
+
+    Args:
+        db: Sessão do banco de dados.
+        dedup_hash: Hash de deduplicação da notificação.
+        cooldown_seconds: Tamanho da janela em segundos.
+        now: Instante de referência para o cálculo.
+
+    Returns:
+        True se existe duplicata dentro da janela (pending, processing ou sent).
+    """
     if cooldown_seconds <= 0:
         return False
     window_start = now - timedelta(seconds=cooldown_seconds)
@@ -216,48 +211,16 @@ def create_notification(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     next_attempt_at: datetime | None = None,
     commit: bool = False,
-) -> Notification | None:
-    """ Persiste uma notificação pendente respeitando idempotência e cooldown """
-    now = datetime.now(timezone.utc)
-    lock_owner: str | None = None
-    cooldown_key = _cooldown_key(
-        monitored_product_id=monitored_product_id,
-        channel=channel,
-        event_type=event_type,
-    )
-    lock_acquired, lock_owner = acquire_notification_lock(dedup_hash, ttl_seconds=60)
-    if not lock_acquired:
-        return None
+) -> Notification:
+    """ Persiste uma notificação pendente no banco de dados.
 
-    if cooldown_seconds > 0 and _redis_has_key(cooldown_key):
-        release_notification_lock(dedup_hash, lock_owner)
-        return None
-    
-    if cooldown_seconds > 0 and _has_dedup_in_window(
-        db,
-        dedup_hash=dedup_hash,
-        cooldown_seconds=cooldown_seconds,
-        now=now,
-    ):
-        release_notification_lock(dedup_hash, lock_owner)
-        return None
-    
-    if _has_recent_sent_notification(db, dedup_hash=dedup_hash, now=now):
-        release_notification_lock(dedup_hash, lock_owner)
-        return None
-    
-    if cooldown_seconds > 0:
-        dedup_key = _dedup_key(dedup_hash)
-        dedup_result = set_key_with_ttl(
-            dedup_key,
-            "1",
-            cooldown_seconds,
-            only_if_absent=True,
-        )
-        if dedup_result is False:
-            release_notification_lock(dedup_hash, lock_owner)
-            return None
-    
+    Esta função apenas cria e persiste o registro. Toda a lógica de
+    deduplicação, cooldown e locks deve ser executada ANTES de chamar
+    esta função, pela service layer.
+
+    Returns:
+        Notificação criada. Lança exceção em caso de erro.
+    """
     notification = Notification(
         event_id=event_id,
         alert_id=alert_id,
@@ -289,7 +252,6 @@ def create_notification(
         channel=channel,
         recipient=recipient,
     )
-    release_notification_lock(dedup_hash, lock_owner)
     return notification
 
 def get_pending_notifications(
@@ -336,7 +298,7 @@ def acquire_notification_for_processing(
         return None
     if notification.attempts >= notification.max_attempts:
         return None
-    
+
     now = datetime.now(timezone.utc)
     notification.status = NotificationStatus.processing
     notification.attempts += 1
@@ -349,28 +311,21 @@ def mark_notification_sent(
     db: Session,
     *,
     notification: Notification,
-    event_type: EventType,
-    cooldown_seconds: int,
     commit: bool = False,
 ) -> Notification:
-    """ Marca a notificação como enviada e registra cooldown """
+    """ Marca a notificação como enviada no banco de dados.
+
+    O registro de cooldown no Redis deve ser feito pela service layer
+    após chamar esta função, usando notification_redis_repository.set_cooldown_marker().
+    """
     sent_at = datetime.now(timezone.utc)
     notification.status = NotificationStatus.sent
     notification.sent_at = sent_at
     notification.cooldown_expires_at = (
-        sent_at + timedelta(seconds=cooldown_seconds)
-        if cooldown_seconds > 0
+        sent_at + timedelta(seconds=notification.cooldown_seconds)
+        if notification.cooldown_seconds > 0
         else None
     )
-
-    if cooldown_seconds > 0:
-        cooldown_key = _cooldown_key(
-            monitored_product_id=notification.monitored_product_id,
-            channel=notification.channel,
-            event_type=event_type,
-        )
-        set_key_with_ttl(cooldown_key, "1", cooldown_seconds)
-
     if commit:
         db.commit()
         db.refresh(notification)
@@ -622,9 +577,9 @@ def get_notification_settings(
 ) -> dict[NotificationChannel, bool]:
     """ Obtém o resumo de habilitação por canal para o usuário """
     preferences = list_user_notification_preferences(db, user_id=user_id, monitored_product_id=None)
-    settings = {channel: DEFAULT_CHANNEL_SETTINGS.get(channel, False) for channel in DEFAULT_CHANNEL_SETTINGS}
+    channel_settings = {channel: DEFAULT_CHANNEL_SETTINGS.get(channel, False) for channel in DEFAULT_CHANNEL_SETTINGS}
 
-    for channel in settings:
+    for channel in channel_settings:
         channel_prefs = [pref for pref in preferences if pref.channel == channel]
         if not channel_prefs:
             continue
@@ -636,14 +591,14 @@ def get_notification_settings(
                 channel=channel.value,
                 enabled=list(enabled_values),
             )
-        settings[channel] = any(enabled_values)
+        channel_settings[channel] = any(enabled_values)
 
     logger.info(
         "notification_settings_loaded",
         user_id=str(user_id),
-        settings={channel.value: enabled for channel, enabled in settings.items()},
+        settings={channel.value: enabled for channel, enabled in channel_settings.items()},
     )
-    return settings
+    return channel_settings
 
 def update_notification_settings(
     db: Session,

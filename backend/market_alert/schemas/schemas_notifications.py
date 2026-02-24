@@ -17,7 +17,7 @@ class EventLogCreate(BaseModel):
     source: str | None = Field(None, description="Origem do evento dentro do ecossistema")
     monitored_product_id: UUID | None = Field(None, description="Monitorado associado ao evento")
     user_id: UUID | None = Field(None, description="Usuário relacionado ao evento")
-    ocurred_at: datetime | None = Field(None, description="Momento real do evento, se disponível")
+    occurred_at: datetime | None = Field(None, description="Momento real do evento, se disponível")
 
 class EventLogResponse(BaseModel):
     """ Representação serializada de um evento persistido """
@@ -30,7 +30,7 @@ class EventLogResponse(BaseModel):
     source: str | None = None
     monitored_product_id: UUID | None = None
     user_id: UUID | None = None
-    ocurred_at: datetime
+    occurred_at: datetime
     created_at: datetime
 
 class AlertRuleCreate(BaseModel):

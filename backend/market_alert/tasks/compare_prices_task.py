@@ -2,7 +2,8 @@
 
 Esta task roda de forma assíncrona via Celery. Ela carrega do banco de dados
 um produto monitorado e todos os seus concorrentes, executa a comparação de
-preços. O fluxo é roteado para a fila ``compare`` para manter o worker de monitoramento 
+preços e orquestra a geração de notificações via service layer.
+O fluxo é roteado para a fila ``compare`` para manter o worker de monitoramento
 focado no loop contínuo.
 """
 
@@ -15,18 +16,8 @@ from sqlalchemy.orm import Session
 from shared.utils.logging_utils import mask_identifier
 
 from market_alert.core.celery_app import celery_app
-from market_alert.core.config_alert import settings
-from market_alert.crud.crud_notifications import (
-    create_event_log,
-    create_notification,
-    list_alert_rules,
-    list_user_notification_preferences,
-    update_alert_rule_last_triggered,
-    update_preference_last_notified,
-)
-from market_alert.enums.enums_notifications import EventType, NotificationStatus
 from market_alert.models import MonitoredProduct, PriceHistory, User
-from market_alert.notifications.evaluator import evaluate
+from market_alert.notifications.services_notifications import evaluate_and_create_notifications
 from market_alert.services.services_comparison import run_price_comparison
 
 
@@ -68,15 +59,14 @@ def compare_prices_task(
             if monitored is None:
                 task_logger.warning("compare_prices_monitored_missing")
                 return
-            
+
             if monitored.paused:
-                #Evita cálculos de comparação quando o monitorado está pausado
                 task_logger.warning(
                     "compare_prices_skipped_paused",
                     monitored_id=mask_identifier(monitored_id),
                 )
                 return
-            
+
             result = run_price_comparison(db, UUID(monitored_id))
 
             summary = result.get("summary") or {}
@@ -91,15 +81,24 @@ def compare_prices_task(
                 summary = {"reason": "no_available_competitors", "items": []}
             result["summary"] = summary
 
-            #Log do resultado resumido para fácil consulta
             task_logger.info(
                 "compare_prices_completed",
                 lowest=result["lowest_competitor"],
                 highest=result["highest_competitor"],
             )
 
+        has_price_change = bool(price_changed)
+        has_availability_change = bool(availability_changed)
+        if not (has_price_change or has_availability_change):
+            task_logger.info(
+                "compare_prices_notifications_skipped_no_change",
+                monitored_id=mask_identifier(monitored_id),
+            )
+            return
+
         resolved_trace_id = trace_id or self.request.id or str(uuid4())
-        #Mantém uma nova sessão para evitar transação aberta da comparação
+
+        # Nova sessão para evitar transação aberta da comparação
         with SessionLocal() as db_notifications:
             monitored = (
                 db_notifications.query(MonitoredProduct)
@@ -109,46 +108,13 @@ def compare_prices_task(
             if monitored is None:
                 task_logger.warning("compare_prices_monitored_missing")
                 return
-            
+
             if monitored.paused:
-                #Evita emitir eventos de alertas quando o monitorado estiver pausado
                 task_logger.info(
                     "compare_prices_notifications_skipped_paused",
                     monitored_id=mask_identifier(monitored_id),
                 )
                 return
-            
-            has_price_change = bool(price_changed)
-            has_availability_change = bool(availability_changed)
-            if not (has_price_change or has_availability_change):
-                task_logger.info(
-                    "compare_prices_notifications_skipped_no_change",
-                    monitored_id=mask_identifier(monitored_id),
-                )
-                return
-            
-            price_previous, price_current = _fetch_recent_prices(
-                db_notifications,
-                monitored.id,
-            )
-            availability_previous = None
-            if availability_changed and monitored.availability is not None:
-                # NÃO HÁ HISTÓRICO DE DISPONIBILIDADE, ENTÃO APENAS REGISTRA O VALOR ANTERIOR
-                availability_previous = not monitored.availability
-
-            payload_base = {
-                "monitored_id": str(monitored.id),
-                "monitored_url": monitored.product_url,
-                "current_price": str(price_current) if price_current is not None else None,
-                "previous_price": str(price_previous) if price_previous is not None else None,
-                "availability": monitored.availability,
-                "availability_previous": availability_previous,
-                "summary": result.get("summary"),
-            }
-            if price_previous is not None and price_current is not None and price_previous != 0:
-                payload_base["price_delta_percent"] = float(
-                    ((price_current - price_previous) / price_previous) * 100
-                )
 
             user = (
                 db_notifications.query(User)
@@ -161,12 +127,14 @@ def compare_prices_task(
                     monitored_id=mask_identifier(monitored_id),
                 )
                 return
-            
-            event_types: list[EventType] = []
-            if has_price_change:
-                event_types.append(EventType.price_change)
-            if has_availability_change:
-                event_types.append(EventType.availability_change)
+
+            price_previous, price_current = _fetch_recent_prices(
+                db_notifications,
+                monitored.id,
+            )
+            availability_previous = None
+            if availability_changed and monitored.availability is not None:
+                availability_previous = not monitored.availability
 
             previous_snapshot = {
                 "price": price_previous,
@@ -176,106 +144,36 @@ def compare_prices_task(
                 "price": price_current,
                 "availability": monitored.availability,
                 "summary": result.get("summary"),
-                "price_delta_percent": payload_base.get("price_delta_percent"),
             }
+            if price_previous is not None and price_current is not None and price_previous != 0:
+                current_snapshot["price_delta_percent"] = float(
+                    ((price_current - price_previous) / price_previous) * 100
+                )
 
-            preferences = list_user_notification_preferences(
-                db_notifications,
-                user_id=monitored.user_id,
-                monitored_product_id=monitored.id,
-            )
-            alert_rules = list_alert_rules(
-                db_notifications,
-                user_id=monitored.user_id,
-                monitored_product_id=monitored.id,
-            )
-
-            candidates = evaluate(
+            #Service layer orquestra todo o fluxo de notificações
+            notification_ids = evaluate_and_create_notifications(
                 monitored,
                 previous_snapshot,
                 current_snapshot,
-                preferences,
-                db=db_notifications,
                 user=user,
-                alert_rules=alert_rules,
+                db=db_notifications,
+                trace_id=resolved_trace_id,
+                source="compare_prices_task",
             )
 
-            candidates_by_event: dict[EventType, list] = {}
-            for candidate in candidates:
-                candidates_by_event.setdefault(candidate.event_type, []).append(candidate)
-
-            for event_type in event_types:
-                payload = {
-                    **payload_base,
-                    "event_type": event_type.value,
-                }
-                notification_ids: list[str] = []
-                try:
-                    #Evita transação aninhada: SessionLocal já inicia uma transação implícita
-                    event = create_event_log(
-                        db_notifications,
-                        event_type=event_type,
-                        trace_id=resolved_trace_id,
-                        payload=payload,
-                        source="compare_prices_task",
-                        monitored_product_id=monitored.id,
-                        user_id=user.id,
-                        commit=False,
-                    )
-
-                    for candidate in candidates_by_event.get(event_type, []):
-                        notification = create_notification(
-                            db_notifications,
-                            event_id=event.id,
-                            user_id=monitored.user_id,
-                            channel=candidate.channel,
-                            recipient=candidate.recipient,
-                            dedup_hash=candidate.dedup_hash,
-                            event_type=event_type,
-                            alert_id=candidate.alert_rule.id if candidate.alert_rule else None,
-                            monitored_product_id=monitored.id,
-                            subject=candidate.subject,
-                            message=candidate.message,
-                            payload=candidate.payload,
-                            priority=candidate.priority,
-                            cooldown_seconds=candidate.cooldown_seconds,
-                            status=NotificationStatus.pending,
-                            max_attempts=settings.NOTIFICATION_MAX_ATTEMPTS,
-                            commit=False,
-                        )
-                        if notification is None:
-                            continue
-                        notification_ids.append(str(notification.id))
-
-                        if candidate.alert_rule:
-                            update_alert_rule_last_triggered(
-                                db_notifications,
-                                alert_rule=candidate.alert_rule,
-                                triggered_at=datetime.now(timezone.utc),
-                                commit=False,
-                            )
-                        if candidate.preference:
-                            update_preference_last_notified(
-                                db_notifications,
-                                preference=candidate.preference,
-                                notified_at=datetime.now(timezone.utc),
-                                commit=False,
-                            )
-                    db_notifications.commit()
-                except Exception:
-                    db_notifications.rollback()
-                    raise
-
-                if notification_ids:
-                    celery_app.send_task(
-                        "market_alert.tasks.notifications_enqueue_task.enqueue_notifications_task",
-                        args=[notification_ids],
-                        queue="notifications",
-                    )
+            if notification_ids:
+                celery_app.send_task(
+                    "market_alert.tasks.notifications_enqueue_task.enqueue_notifications_task",
+                    args=[notification_ids],
+                    queue="notifications",
+                )
+                task_logger.info(
+                    "compare_prices_notifications_enqueued",
+                    count=len(notification_ids),
+                )
 
     except Exception as exc:
         has_error = True
-        #Log estruturado para acompanhar falhas e motivos antes de propagar
         task_logger.exception(
             "compare_prices_failed",
             product_id=mask_identifier(monitored_id),
@@ -310,4 +208,3 @@ def _fetch_recent_prices(
     if len(history) > 1 and history[1].price is not None:
         previous = float(history[1].price)
     return previous, current
-        
