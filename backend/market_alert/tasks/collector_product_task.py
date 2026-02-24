@@ -437,7 +437,9 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     #Payloads antigos (sem version) são aceitos com version=1 como fallback.
     if payload is not None:
         try:
-            validate_collection_payload(payload)
+            validated_payload = validate_collection_payload(payload)
+            #Reutiliza o payload já validado para propagar trace_id gerado automaticamente e manter rastreabilidade consistente nos logs.
+            payload = validated_payload.model_dump(mode="json")
         except ValueError as exc:
             logger.warning(
                 "collect_product_task_invalid_payload",

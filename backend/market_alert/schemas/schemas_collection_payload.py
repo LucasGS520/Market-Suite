@@ -19,7 +19,7 @@ import logging
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class CollectionPayload(BaseModel):
         kind: tipo da coleta — 'monitored' ou 'competitor'.
         monitored_id: UUID do produto monitorado raiz.
         url: URL a ser coletada pelo scraper.
-        trace_id: identificador de rastreamento distribuído (gerado automaticamente se ausente).
+        trace_id: identificador de rastreamento distribuído (sempre presente em formato UUID canônico).
 
     Campos opcionais:
         version: versão do schema para compatibilidade futura (padrão: 1).
@@ -64,7 +64,22 @@ class CollectionPayload(BaseModel):
         if isinstance(data, dict) and not data.get("trace_id"):
             data["trace_id"] = str(uuid4())
         return data
+    
+    @field_validator("trace_id")
+    @classmethod
+    def _validate_trace_id_uuid_canonical(cls, trace_id: str) -> str:
+        """ Valida ``trace_id`` no fromato UUID canônico para manter correlação consistente """
+        normalized_trace_id = trace_id.strip()
+        try:
+            parsed_trace_id = UUID(normalized_trace_id)
+        except ValueError as exc:
+            raise ValueError("trace_id deve estar no formato UUID canônico.") from exc
 
+        #Exigimos o formato canônico textual para eliminar variantes legadas e facilitar filtros em logs
+        canonical_trace_id = str(parsed_trace_id)
+        if normalized_trace_id != canonical_trace_id:
+            raise ValueError("trace_id deve estar no formato UUID canônico.")
+        return canonical_trace_id
 
 def validate_payload(payload: dict | None) -> CollectionPayload:
     """ Valida dicionário de payload retornando CollectionPayload tipado.
