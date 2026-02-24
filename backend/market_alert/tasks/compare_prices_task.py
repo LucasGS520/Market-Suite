@@ -38,7 +38,13 @@ def compare_prices_task(
     availability_changed: bool | None = None,
     trace_id: str | None = None,
 ) -> None:
-    """ Carrega um produto monitorado e executa a comparação com fluxo enxuto """
+    """ Carrega um monitorado, compara preços e dispara a avaliação de notificações.
+
+    A task aceita flags opcionais de mudança (`price_changed` e
+    `availability_changed`). Quando essas flags não são informadas, o fluxo segue
+    mesmo assim para permitir que a camada de notificações avalie o snapshot e
+    detecte eventos por conta própria.
+    """
     queue_name = (self.request.delivery_info or {}).get("routing_key", "compare")
     task_logger = logger.bind(
         task_id=self.request.id,
@@ -87,9 +93,11 @@ def compare_prices_task(
                 highest=result["highest_competitor"],
             )
 
-        has_price_change = bool(price_changed)
-        has_availability_change = bool(availability_changed)
-        if not (has_price_change or has_availability_change):
+        has_price_change = bool(price_changed) if price_changed is not None else None
+        has_availability_change = (
+            bool(availability_changed) if availability_changed is not None else None
+        )
+        if has_price_change is False and has_availability_change is False:
             task_logger.info(
                 "compare_prices_notifications_skipped_no_change",
                 monitored_id=mask_identifier(monitored_id),
@@ -150,7 +158,7 @@ def compare_prices_task(
                     ((price_current - price_previous) / price_previous) * 100
                 )
 
-            #Service layer orquestra todo o fluxo de notificações
+            # A camada de serviço concentra as regras de domínio e evita lógica de negócio duplicada na task.
             notification_ids = evaluate_and_create_notifications(
                 monitored,
                 previous_snapshot,

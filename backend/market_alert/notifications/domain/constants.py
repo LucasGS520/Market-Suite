@@ -5,6 +5,8 @@ Centraliza valores que antes estavam espalhados entre CRUD, evaluator e service 
 
 from __future__ import annotations
 
+from market_alert.enums.enums_notifications import NotificationChannel
+
 #Número máximo de tentativas de entrega por notificação
 DEFAULT_MAX_ATTEMPTS: int = 3
 
@@ -12,9 +14,8 @@ DEFAULT_MAX_ATTEMPTS: int = 3
 DEFAULT_DEDUPE_SENT_WINDOW_SECONDS: int = 60 * 10
 
 #Canais habilitados por padrão ao criar um novo usuário
-DEFAULT_CHANNEL_ENABLED: dict[str, bool] = {
-    "email": True,
-    "push": False,
-    "sms": False,
-    "whatsapp": False,
+# A estrutura é derivada do Enum para reduzir risco de inconsistência quando novos canais forem adicionados
+DEFAULT_CHANNEL_ENABLED: dict[NotificationChannel, bool] = {
+    channel: channel == NotificationChannel.email
+    for channel in NotificationChannel
 }
