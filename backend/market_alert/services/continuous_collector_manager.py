@@ -1,7 +1,8 @@
-""" Gerenciamento do ciclo de vida do coletor contínuo.
+""" Gerenciamento do ciclo de vida e lógica de execução do coletor contínuo.
 
 Responsável por:
 - Decidir se o autostart do coletor contínuo está habilitado (via env)
+- Executar loop continuo de consumo da fila de monitorados
 - Gerenciar o lock Redis que previne múltiplas instâncias simultâneas
 - Gerenciar o cooldown pós-falha para evitar reinícios em loop
 - Disparar a task ``run_continuous_collector`` quando necessário
@@ -22,13 +23,37 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
+from billiard.exceptions import TimeLimitExceeded
+from celery.exceptions import SoftTimeLimitExceeded
+
 from shared.utils.redis_client import get_redis_client, set_key_with_ttl
+from shared.utils.redis_client import is_scraping_suspended
+from shared.utils.redis_locks import (
+    acquire_continuous_collector_lock,
+    refresh_continuous_collector_lock,
+    release_continuous_collector_lock,
+)
+
+from market_alert.core.config_alert import settings
+from market_alert.enums.enums_products import MonitoredStatus
+from market_alert.orchestrator.collection_queue import CollectionQueue
+from market_alert.utils.collector_result import _parse_collect_result
+from market_alert.utils.continuous_dispatch import (
+    CollectDispatchDecision,
+    _collect_group,
+    _handle_processing_requeue,
+    _load_monitored,
+    _requeue_monitored,
+    _should_abort,
+)
+from market_alert.utils.interval_calculator_products import _parse_next_retry_at, _utc_now
 
 if TYPE_CHECKING:
     from celery import Celery
+    from sqlalchemy.orm import Session
 
 logger = structlog.get_logger("continuous_collector_manager")
 
@@ -49,8 +74,202 @@ def set_process_start_monotonic(value: float) -> None:
 
 
 def _get_process_uptime_seconds() -> float:
+    """ Retorna o uptime do processo em segundos usando relógio monotônico. """
     return round(time.monotonic() - _process_start_monotonic, 2)
 
+def finalize_processing_requeue(
+    *,
+    db: Session,
+    collect_result: Any,
+    monitored_id: str,
+    trace_id: str | None = None,
+) -> None:
+    """ Finaliza uma coleta bem-sucedida/normal e retorna o item para a fila
+    
+    Mantém a lógica de parse e de requeue fora do módulo Celery para reduzir
+    acoplamento entre camada de transporte (task) e regra operacional.
+    """
+    normalized = _parse_collect_result(collect_result)
+    next_retry_at = _parse_next_retry_at(normalized.get("next_retry_at"))
+    _handle_processing_requeue(
+        db=db,
+        monitored_id=monitored_id,
+        collect_outcome=normalized.get("outcome"),
+        reason=normalized.get("status") or normalized.get("reason") or normalized.get("outcome") or "unknown",
+        trace_id=trace_id,
+        next_retry_at=next_retry_at,
+    )
+
+def finalize_processing_requeue_error(
+    *,
+    db: Session,
+    monitored_id: str,
+    trace_id: str | None = None,
+) -> None:
+    """Finaliza uma coleta que falhou e reabilita nova tentativa no fluxo."""
+    _handle_processing_requeue(
+        db=db,
+        monitored_id=monitored_id,
+        collect_outcome=None,
+        reason="collect_task_exception",
+        trace_id=trace_id,
+    )
+
+def run_collection_loop(*, db: "Session", task_request: Any, task_id: str | None = None) -> None:
+    """ Executa o loop contínuo de consumo da fila de monitorados.
+
+    A task Celery chama esta função para manter a lógica operacional em um
+    único serviço, evitando duplicidade de responsabilidades no módulo de task.
+    """
+    bound_logger = logger.bind(task_id=task_id)
+    started_at = time.monotonic()
+    queue = CollectionQueue()
+    batch_size = max(1, int(settings.CONTINUOUS_WORKER_BATCH_SIZE))
+    processing_ttl = int(settings.CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS)
+    poll_interval = float(settings.CONTINUOUS_WORKER_POLL_INTERVAL)
+    lock_ttl_seconds = int(settings.CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS)
+    lock_refresh_interval = max(1.0, lock_ttl_seconds / 2)
+
+    # Mantém garantia de singleton do loop mesmo com disparos concorrentes.
+    lock_acquired, lock_owner = acquire_continuous_collector_lock(
+        ttl_seconds=lock_ttl_seconds,
+    )
+    if not lock_acquired:
+        bound_logger.warning("continuous_collector_lock_denied", lock_owner=lock_owner)
+        return
+
+    last_lock_refresh = time.monotonic()
+
+    try:
+        # A sessão vem da task de entrada para obedecer a regra de sessão única.
+        while True:
+            processed_ids: list[str] = []
+            if _should_abort(task_request):
+                bound_logger.warning("continuous_worker_aborted")
+                return
+
+            if time.monotonic() - last_lock_refresh >= lock_refresh_interval:
+                if not refresh_continuous_collector_lock(
+                    owner_id=lock_owner,
+                    ttl_seconds=lock_ttl_seconds,
+                ):
+                    bound_logger.warning(
+                        "continuous_collector_lock_lost",
+                        lock_owner=lock_owner,
+                    )
+                    return
+                last_lock_refresh = time.monotonic()
+
+            try:
+                if is_scraping_suspended():
+                    bound_logger.warning("continuous_scraping_suspended")
+                    time.sleep(poll_interval)
+                    continue
+
+                if not queue.is_available():
+                    bound_logger.error("continuous_queue_unavailable")
+                    time.sleep(poll_interval)
+                    continue
+
+                queue_size = queue.size()
+                ready_total = queue.ready_count()
+                bound_logger.info(
+                    "continuous_loop_iteration",
+                    queue_size=queue_size,
+                    ready_total=ready_total,
+                    timestamp=_utc_now().isoformat(),
+                )
+
+                reclaimed = queue.reclaim_stale_items(processing_ttl)
+                if reclaimed:
+                    # Reencaminha itens presos em processamento para nova tentativa.
+                    bound_logger.warning(
+                        "continuous_processing_reclaimed",
+                        reclaimed_count=len(reclaimed),
+                    )
+
+                for _ in range(batch_size):
+                    next_id = queue.pop_next_for_collection()
+                    if not next_id:
+                        break
+
+                    monitored = _load_monitored(db, next_id)
+                    if monitored is None:
+                        bound_logger.warning("continuous_monitored_missing", monitored_id=next_id)
+                        processed_ids.append(next_id)
+                        continue
+
+                    if monitored.paused or monitored.status in {MonitoredStatus.failed}:
+                        bound_logger.info("continuous_skipped_paused", monitored_id=str(monitored.id))
+                        processed_ids.append(str(monitored.id))
+                        continue
+
+                    enqueued_at = queue.get_enqueued_at(next_id)
+                    try:
+                        decision = _collect_group(
+                            db=db,
+                            monitored=monitored,
+                            enqueued_at=enqueued_at,
+                        )
+                    except Exception:
+                        db.rollback()
+                        decision = CollectDispatchDecision(
+                            outcome="error",
+                            next_check_at=_utc_now(),
+                            should_requeue=True,
+                            retain_processing=False,
+                        )
+                        bound_logger.exception("continuous_group_failed", monitored_id=str(monitored.id))
+
+                    if not decision.retain_processing:
+                        processed_ids.append(str(monitored.id))
+
+                    if decision.should_requeue:
+                        requeue_success, _ = _requeue_monitored(
+                            monitored=monitored,
+                            next_check_at=decision.next_check_at,
+                            queue=queue,
+                        )
+                        if not requeue_success:
+                            bound_logger.warning(
+                                "requeue_failed_but_retained",
+                                monitored_id=str(monitored.id),
+                            )
+                            if processed_ids and processed_ids[-1] == str(monitored.id):
+                                processed_ids.pop()
+
+                    bound_logger.info(
+                        "continuous_item_processed",
+                        monitored_id=str(monitored.id),
+                        outcome=decision.outcome,
+                    )
+
+                if processed_ids:
+                    queue.mark_as_done(processed_ids)
+                time.sleep(poll_interval)
+
+            except TimeLimitExceeded:
+                bound_logger.warning(
+                    "limit_time_collector_exceeded",
+                    uptime_seconds=round(time.monotonic() - started_at, 2),
+                    reason="time_limit",
+                )
+                time.sleep(poll_interval)
+                continue
+            except SoftTimeLimitExceeded:
+                bound_logger.warning(
+                    "continuous_soft_time_limit_exceeded",
+                    uptime_seconds=round(time.monotonic() - started_at, 2),
+                    reason="soft_time_limit",
+                )
+                time.sleep(poll_interval)
+                continue
+            except Exception:
+                db.rollback()
+                bound_logger.exception("continuous_loop_error")
+                time.sleep(poll_interval)
+    finally:
+        release_continuous_collector_lock(owner_id=lock_owner)
 
 # ---------------------------------------------------------------------------
 # Funções de estado — verificam flags e Redis
