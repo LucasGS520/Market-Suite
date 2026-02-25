@@ -26,6 +26,7 @@ from __future__ import annotations
 import structlog
 from celery import Task
 
+from shared.infra.db import sanitize_exception_message
 
 logger = structlog.get_logger("dlq_base_task")
 
@@ -76,7 +77,7 @@ class DLQTask(Task):
                     "task_name": self.name,
                     "task_id": task_id,
                     "exception_class": type(exc).__name__,
-                    "exception_message": str(exc)[:2000],
+                    "exception_message": sanitize_exception_message(str(exc), max_length=500),
                     "retry_count": retry_count,
                     "trace_id": trace_id,
                 },

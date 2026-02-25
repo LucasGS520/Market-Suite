@@ -1,4 +1,10 @@
-""" Model de auditoria para falhas permanentes de tasks Celery (DLQ). """
+""" Model de auditoria para falhas permanentes de tasks Celery (DLQ).
+
+Campos permitidos em ``task_failures``:
+- Metadados técnicos da execução (``task_name``, ``task_id``, ``trace_id``);
+- Classe da exceção para classificação operacional;
+- Mensagem de exceção sanitizada e truncada, sem payloads sensíveis.
+"""
 
 import uuid
 from datetime import datetime, timezone
@@ -34,7 +40,7 @@ class TaskFailure(Base):
     #: Tipo da exceção (ex.: ScraperClientError, TimeoutError)
     exception_class = Column(String(255), nullable=True)
 
-    #: Mensagem da exceção (truncada em 2000 caracteres)
+    #: Mensagem sanitizada da exceção (com truncamento defensivo)
     exception_message = Column(Text, nullable=True)
 
     #: Trace ID para correlação com logs e outros eventos do mesmo ciclo

@@ -12,6 +12,7 @@ from __future__ import annotations
 import structlog
 
 from shared.infra.db import SessionLocal
+from shared.utils import sanitize_exception_message
 
 from market_alert.core.celery_app import celery_app
 from market_alert.crud.crud_task_failures import create_task_failure
@@ -49,9 +50,11 @@ def handle_dead_letter(
         retry_count=retry_count,
         trace_id=trace_id,
     )
+    sanitized_exception_message = sanitize_exception_message(exception_message or "", max_length=500)
     bound.error(
         "task_permanent_failure",
-        exception_message=exception_message,
+        #Persistimos e logamos sempre a versão sanitizada para reduzir vazamento de dados sensíveis.
+        exception_message=sanitized_exception_message,
     )
 
     try:
@@ -61,7 +64,7 @@ def handle_dead_letter(
                 task_name=task_name,
                 task_id=task_id,
                 exception_class=exception_class,
-                exception_message=exception_message,
+                exception_message=sanitized_exception_message,
                 trace_id=trace_id,
                 retry_count=retry_count,
             )

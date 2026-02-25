@@ -139,6 +139,22 @@ class Settings(ConfigBase):
         os.getenv("CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS", "45")
     ) #TTL do lock para garantir instância única do coletor contínuo
 
+    CLEANUP_CACHE_SCAN_COUNT: int = int(
+        os.getenv("CLEANUP_CACHE_SCAN_COUNT", "200")
+    ) #Quantidade de chaves lidas por iteração do SCAN
+    CLEANUP_CACHE_UNLINK_BATCH_SIZE: int = int(
+        os.getenv("CLEANUP_CACHE_UNLINK_BATCH_SIZE", "200")
+    ) #Quantidade de chaves removidas por lote de UNLINK
+    CLEANUP_CACHE_MAX_KEYS_PER_RUN: int = int(
+        os.getenv("CLEANUP_CACHE_MAX_KEYS_PER_RUN", "50000")
+    ) #Limite defensivo de chaves avaliadas por execução
+    CLEANUP_CACHE_MAX_DURATION_SECONDS: float = float(
+        os.getenv("CLEANUP_CACHE_MAX_DURATION_SECONDS", "25")
+    ) #Tempo máximo de execução para evitar monopolizar o worker
+    CLEANUP_CACHE_SLEEP_BETWEEN_BATCHES_MS: int = int(
+        os.getenv("CLEANUP_CACHE_SLEEP_BETWEEN_BATCHES_MS", "0")
+    ) #Pausa opcional entre lotes para reduzir pressão no Redis
+
     #Chaves Redis do agendamento contínuo
     PRIORITY_QUEUE_KEY: str = os.getenv(
         "PRIORITY_QUEUE_KEY",
