@@ -32,6 +32,13 @@ COLLECTION_RETRY: dict = {
 
 #: Comparação de preços. Falha rápida sem retry — o próximo ciclo de coleta
 #: aciona nova comparação automaticamente.
+#:
+#: Nota operacional:
+#: ``max_retries=0`` é intencional para evitar backlog em picos e preservar
+#: a fila de comparação como "best effort" orientada ao ciclo contínuo.
+#: Em produção, só aumente esse valor quando houver evidência de falhas
+#: transitórias frequentes que não são resolvidas no próximo ciclo de coleta;
+#: ao alterar, monitore crescimento de fila/DLQ e latência de comparação.
 COMPARISON_RETRY: dict = {
     "max_retries": 0,
     "soft_time_limit": 20,
