@@ -89,6 +89,8 @@ pdm.lock
 # Celery
 celerybeat-schedule*
 celerybeat.pid
+**/*.pid
+**/tmp/
 
 # Service caches and bytecode
 **/__pycache__/

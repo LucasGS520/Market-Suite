@@ -78,6 +78,10 @@ class ConfigBase(BaseSettings):
         os.getenv("COMPARISON_LAST_SUCCESS_TTL", str(86400))
     ) #Expiração do registro
 
+    #Configuração de logging
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO") #Nível de log do root logger
+    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "json") #Formato de saída (json ou text)
+
     #Configurações extras do Pydantic
     model_config = ConfigDict(
         env_file=ENV_FILE,

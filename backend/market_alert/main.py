@@ -1,7 +1,6 @@
 """ Aplicação principal FastAPI com configuração de rotas """
 
 import structlog
-import logging
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from market_alert.core.config_alert import settings
+from market_alert.core.logging_config import setup_api_logging
 
 #Rotas
 from market_alert.routes.routes_users import router as users_router
@@ -34,34 +34,8 @@ from market_alert.auth.routes_auth.routes_refresh import router as refresh_route
 from market_alert.auth.routes_auth.routes_logout import router as logout_router
 
 
-def configure_logging():
-    """ Configura o structlog para saida JSON estruturada """
-    structlog.configure(
-        processors=[
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer()
-        ],
-        wrapper_class=structlog.stdlib.BoundLogger,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-
-    handler = logging.StreamHandler()
-    handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processor=structlog.processors.JSONRenderer(),
-        foreign_pre_chain=[structlog.processors.TimeStamper(fmt="iso")]
-    ))
-
-    root = logging.getLogger()
-    root.handlers.clear()
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
-
-
-#Invoca antes de criar o market_alert
-configure_logging()
+#Configura logging antes de criar a app (logging_config centraliza a lógica)
+setup_api_logging()
 #Logger para startup da API
 logger = structlog.get_logger("marketalert")
 #Rate limiter configurado por IP

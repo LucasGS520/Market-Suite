@@ -15,7 +15,8 @@ Responsabilidades que devem ser refatoradas, reestruturadas, organizadas ou simp
 
 Ao sugerir ou escrever código neste projeto, evite os anti-padrões já existentes:
 
-- **Tasks Celery como mini-aplicações**: a task deve ser uma casca fina que delega para um serviço. Validação, lock Redis, lógica de retry e agendamento não pertencem dentro da função da task.
+- **Tasks Celery como mini-aplicações**: a task deve ser uma casca fina que delega para um serviço. Validar/obter payload, abrir sessão, setar trace_id, chamar service(s) passando `db: Session`, tratar erros/retries e encerrar sessão
+- **Services**: recebem `db: Session` (não chamam `SessionLocal()` internamente) e orquestram chamadas a CRUD/domain. Services podem optar por confirmar (commit) via CRUD helpers, mas não devem criar sessões.
 - **Importações locais dentro de funções**: são sintoma de dependência circular. Se precisar fazer isso, a estrutura de módulos precisa ser reorganizada, não contornada.
 - **Arquivo com 4+ responsabilidades**: consulta com autorização, reconstrução de resumo, persistência condicional e formatação de resposta não devem coexistir no mesmo arquivo.
 
