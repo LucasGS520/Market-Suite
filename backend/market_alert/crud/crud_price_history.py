@@ -120,6 +120,35 @@ def create_for_monitored(
     )
     return entry
 
+def fetch_recent_prices(
+    db: Session,
+    monitored_id: UUID,
+    limit: int = 2,
+) -> tuple[float | None, float | None]:
+    """ Retorna o penúltimo e o último preço registrado para um monitorado.
+
+    Usado para compor snapshots de notificação sem expor query direta nas tasks.
+
+    Returns:
+        Tupla ``(price_previous, price_current)``. Ambos ``None`` se não houver
+        histórico suficiente.
+    """
+    history = (
+        db.query(PriceHistory)
+        .filter(PriceHistory.monitored_product_id == monitored_id)
+        .order_by(PriceHistory.checked_at.desc())
+        .limit(limit)
+        .all()
+    )
+    if not history:
+        return None, None
+    current = float(history[0].price) if history[0].price is not None else None
+    previous: float | None = None
+    if len(history) > 1 and history[1].price is not None:
+        previous = float(history[1].price)
+    return previous, current
+
+
 def create_for_competitor(
     db: Session,
     competitor_product_id: UUID,

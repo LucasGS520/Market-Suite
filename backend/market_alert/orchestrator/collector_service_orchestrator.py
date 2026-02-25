@@ -16,14 +16,16 @@ import random
 from uuid import UUID
 
 import structlog
-from celery import current_app
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
-from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
+from market_alert.orchestrator.collection_enqueuer import CollectionEnqueuer
 from market_alert.schemas.schemas_collection_payload import CollectionPayload
 from shared.utils.url_validation import normalize_competitor_url
+
+_enqueuer = CollectionEnqueuer()
 
 
 logger = structlog.get_logger("collector_service")
@@ -83,24 +85,16 @@ def enqueue_collect(
     *,
     countdown: float | None = None,
 ) -> None:
-    """ Enfileira coleta na fila ``scraping`` mantendo única porta de entrada.
+    """ Wrapper de compatibilidade — delega ao ``CollectionEnqueuer``.
 
-    Aceita tanto ``CollectionPayload`` (novo padrão) quanto ``dict`` (legado).
-    Dicts são enviados diretamente para manter compatibilidade com payloads já
-    na fila durante a migração gradual.
+    Aceita ``CollectionPayload`` (novo padrão) ou ``dict`` (legado).
+    O enfileiramento real ocorre exclusivamente em ``CollectionEnqueuer._send()``.
     """
-    if isinstance(payload, CollectionPayload):
-        payload_dict = payload.model_dump(mode="json")
-    else:
-        #Compatibilidade com payloads legados em dict — mantém rastreio mínimo
-        payload_dict = dict(payload)
+    if isinstance(payload, dict):
+        #Converte payload legado para ``CollectionPayload`` antes de enfileirar
+        payload = CollectionPayload.model_validate(payload)
 
-    current_app.send_task(
-        "market_alert.tasks.collector_product_task.collect_product_task",
-        kwargs={"payload": payload_dict},
-        queue="scraping",
-        countdown=countdown,
-    )
+    _enqueuer._send(payload, countdown=countdown)
 
 
 def enqueue_monitored_collection(

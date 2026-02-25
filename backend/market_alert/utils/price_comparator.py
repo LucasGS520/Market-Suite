@@ -53,19 +53,10 @@ def request_comparison_recompute(monitored_id: UUID, reason: str) -> None:
             reason=reason,
         )
 
-    from market_alert.core.celery_app import celery_app
+    from market_alert.services.task_enqueuer import TaskEnqueuer
 
     try:
-        celery_app.send_task(
-            "market_alert.tasks.compare_prices_task.compare_prices_task",
-            args=[str(monitored_id)],
-            queue="compare",
-        )
-        logger.info(
-            "compare_recompute_enqueued",
-            monitored_id=str(monitored_id),
-            reason=reason,
-        )
+        TaskEnqueuer().enqueue_comparison(monitored_id, reason=reason)
     except Exception:
         logger.exception(
             "compare_recompute_enqueue_failed",

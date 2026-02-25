@@ -299,6 +299,16 @@ def run_price_comparison(
         load_monitored_and_competitors(db, monitored_id)
     )
 
+    if getattr(monitored, "paused", False):
+        logger.info(
+            "comparison_skipped_paused",
+            monitored_id=str(monitored_id),
+            competitors_count=total_competitors,
+        )
+        return _persist_inactive_comparison(
+            db, monitored=monitored, reason="paused", total=total_competitors
+        )
+
     inactive_reason = resolve_monitored_inactive_reason(monitored)
     if inactive_reason:
         logger.info(

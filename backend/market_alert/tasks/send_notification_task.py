@@ -10,9 +10,11 @@ from uuid import UUID
 import structlog
 
 from shared.infra.db import SessionLocal
+from shared.utils.trace_context import set_trace_id
 
 from market_alert.core.celery_app import celery_app
-from market_alert.core.config_alert import settings
+from market_alert.core.dlq_base_task import DLQTask
+from market_alert.core.retry_policies import NOTIFICATION_RETRY
 from market_alert.notifications.services_notifications import process_notification
 
 
@@ -20,13 +22,12 @@ logger = structlog.get_logger("notifications_send")
 
 @celery_app.task(
     bind=True,
-    max_retries=settings.NOTIFICATION_MAX_ATTEMPTS,
-    soft_time_limit=30,
-    time_limit=60,
-    acks_late=True,
+    base=DLQTask,
+    **NOTIFICATION_RETRY,
 )
 def send_notification_task(self, notification_id: str) -> None:
     """ Realiza o envio de uma notificação e delega controle de retry ao service layer """
+    set_trace_id(self.request.id or notification_id)
     task_logger = logger.bind(task_id=self.request.id, notification_id=notification_id)
 
     with SessionLocal() as db:

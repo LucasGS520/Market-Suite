@@ -22,15 +22,25 @@ from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from shared.exceptions import ScraperError
 from shared.infra.db import SessionLocal
+from shared.utils.trace_context import set_trace_id
 from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.celery_app import celery_app
 from market_alert.core.config_alert import settings
+from market_alert.core.dlq_base_task import DLQTask
+from market_alert.core.retry_policies import COLLECTION_RETRY
+from market_alert.crud.crud_monitored import (
+    activate_pending_monitored,
+    get_monitored_product_by_id,
+    mark_monitored_product_failed,
+)
+from market_alert.crud.crud_competitor import (
+    get_competitor_by_id,
+    update_competitor_pause_state,
+)
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
-from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
-from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.orchestrator.retry_policy import RetryPolicy
 from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
@@ -56,195 +66,6 @@ from market_alert.utils.rate_limiter import (
 
 logger = structlog.get_logger("collector_product_task")
 
-def _activate_pending_monitored(
-    db: Session,
-    monitored_id: UUID | None,
-    *,
-    task_logger,
-    trace_id: str | None,
-    commit: bool = True,
-) -> None:
-    """ Atualiza monitorado pendente para ativo após coleta bem-sucedida """
-    if monitored_id is None:
-        return
-    
-    monitored = (
-        db.query(MonitoredProduct)
-        .filter(MonitoredProduct.id == monitored_id)
-        .first()
-    )
-    if monitored is None:
-        return
-    
-    if monitored.status != MonitoredStatus.pending:
-        return
-    
-    monitored.status = MonitoredStatus.active
-    if commit:
-        db.commit()
-        db.refresh(monitored)
-    else:
-        #Mantém a alteração persistida na transação sem finalizar o commit externo.
-        db.flush()
-    task_logger.info(
-        "monitored_status_activated",
-        monitored_id=str(monitored_id),
-        trace_id=trace_id,
-    )
-
-def _mark_invalid_product(
-    *,
-    monitored_id: UUID | None,
-    competitor_id: UUID | None,
-    kind: str,
-    url: str | None,
-    attempts: int,
-    trace_id: str | None,
-) -> None:
-    """ Marca produto como inválido após falhas repetidas de URL """
-    if monitored_id is None and competitor_id is None:
-        return
-    with SessionLocal() as db:
-        if monitored_id is not None:
-            from market_alert.crud.crud_monitored import mark_monitored_product_failed
-            mark_monitored_product_failed(db, monitored_id)
-            logger.warning(
-                "scrape_invalid_url_blocked",
-                kind=kind,
-                monitored_id=str(monitored_id),
-                url=url,
-                attempts=attempts,
-                trace_id=trace_id,
-            )
-            return
-        if competitor_id is not None:
-            from market_alert.crud.crud_competitor import update_competitor_pause_state
-            update_competitor_pause_state(db, competitor_id, is_paused=True)
-            logger.warning(
-                "scrape_invalid_url_blocked",
-                kind=kind,
-                competitor_id=str(competitor_id),
-                url=url,
-                attempts=attempts,
-                trace_id=trace_id,
-            )
-
-def _collect_competitor(
-    session: Session,
-    *,
-    payload: Mapping[str, str | None] | None,
-    competitor_id: UUID,
-    monitored_id: UUID | None,
-    url: str,
-    user_uuid: UUID | None,
-    collected_at: datetime,
-    trace_id: str | None,
-    task_logger,
-) -> tuple[UUID | None, ScrapeResult, str | None]:
-    """ Processa branch de coleta de concorrente com validações de pausa e existência. """
-    competitor_row = (
-        session.query(CompetitorProduct)
-        .filter(CompetitorProduct.id == competitor_id)
-        .first()
-    )
-    if competitor_row is None:
-        task_logger.info(
-            "collect_skipped_missing_competitor",
-            competitor_id=str(competitor_id),
-            monitored_id=str(monitored_id) if monitored_id else None,
-            trace_id=trace_id,
-        )
-        return monitored_id, ScrapeResult(
-            status="no_result",
-            product_id=str(competitor_id),
-            http_status=404,
-            error_code="missing_target",
-        ), "missing_target"
-
-    resolved_monitored_id = monitored_id or competitor_row.monitored_product_id
-    monitored_paused = bool(competitor_row.monitored_product and competitor_row.monitored_product.paused)
-    if competitor_row.is_paused or monitored_paused:
-        task_logger.info(
-            "collector_skipped_paused",
-            competitor_id=str(competitor_id),
-            monitored_id=str(resolved_monitored_id) if resolved_monitored_id else None,
-            trace_id=trace_id,
-        )
-        return resolved_monitored_id, ScrapeResult(
-            status="no_result",
-            product_id=str(competitor_id),
-            http_status=200,
-            error_code="paused",
-        ), "paused"
-
-    payload_model = CompetitorProductCreateScraping(
-        monitored_product_id=resolved_monitored_id,
-        product_url=url,
-        name=payload.get("name") if payload else None,
-    )
-    result = scrape_competitor_product(
-        db=session,
-        user_id=user_uuid or resolved_monitored_id or competitor_id,
-        url=url,
-        payload=payload_model,
-        collected_at=collected_at,
-    )
-    return resolved_monitored_id, result, None
-
-def _collect_monitored(
-    session: Session,
-    *,
-    payload: Mapping[str, str | None] | None,
-    monitored_id: UUID | None,
-    url: str,
-    user_uuid: UUID | None,
-    collected_at: datetime,
-    trace_id: str | None,
-    task_logger,
-    commit_activation: bool,
-) -> tuple[ScrapeResult, str | None]:
-    """ Processa branch de coleta de monitorado respeitando pausa e ativação pendente. """
-    monitored_row: MonitoredProduct | None = None
-    if monitored_id is not None:
-        monitored_row = (
-            session.query(MonitoredProduct)
-            .filter(MonitoredProduct.id == monitored_id)
-            .first()
-        )
-
-    if monitored_row is not None and monitored_row.paused:
-        task_logger.info(
-            "collect_skipped_paused",
-            monitored_id=str(monitored_id),
-            trace_id=trace_id,
-        )
-        return ScrapeResult(
-            status="no_result",
-            product_id=str(monitored_id) if monitored_id else None,
-            http_status=200,
-            error_code="paused",
-        ), "paused"
-
-    payload_model = MonitoredProductCreateScraping(
-        name_identification=payload.get("name") if payload else None,
-        product_url=url,
-    )
-    result = scrape_monitored_product(
-        db=session,
-        url=url,
-        user_id=user_uuid or monitored_id,
-        payload=payload_model,
-        collected_at=collected_at,
-    )
-    if result and result.status in {"success", "not_modified"}:
-        _activate_pending_monitored(
-            session,
-            monitored_id,
-            task_logger=task_logger,
-            trace_id=trace_id,
-            commit=commit_activation,
-        )
-    return result, None
 
 def collect_product(
     payload: Mapping[str, str | None] | None,
@@ -306,33 +127,88 @@ def collect_product(
                     user_uuid = None
 
                 def _collect_with_db(session: Session, *, commit_activation: bool) -> tuple[UUID | None, ScrapeResult | None, str | None]:
-                    """ Resolve entidade-alvo e delega para branch de monitorado ou concorrente. """
-                    resolved_monitored = monitored_id
+                    """ Verifica pré-condições via CRUD e delega scraping ao service correto. """
                     if competitor_id is not None:
-                        return _collect_competitor(
-                            session,
-                            payload=payload,
-                            competitor_id=competitor_id,
-                            monitored_id=resolved_monitored,
-                            url=url,
-                            user_uuid=user_uuid,
-                            collected_at=collected_at,
-                            trace_id=trace_id,
-                            task_logger=task_logger,
-                        )
+                        competitor = get_competitor_by_id(session, competitor_id)
+                        if competitor is None:
+                            task_logger.info(
+                                "collect_skipped_missing_competitor",
+                                competitor_id=str(competitor_id),
+                                monitored_id=str(monitored_id) if monitored_id else None,
+                                trace_id=trace_id,
+                            )
+                            return monitored_id, ScrapeResult(
+                                status="no_result",
+                                product_id=str(competitor_id),
+                                http_status=404,
+                                error_code="missing_target",
+                            ), "missing_target"
 
-                    monitored_result, monitored_reason = _collect_monitored(
-                        session,
-                        payload=payload,
-                        monitored_id=resolved_monitored,
-                        url=url,
-                        user_uuid=user_uuid,
-                        collected_at=collected_at,
-                        trace_id=trace_id,
-                        task_logger=task_logger,
-                        commit_activation=commit_activation,
+                        resolved_monitored = monitored_id or competitor.monitored_product_id
+                        monitored_paused = bool(competitor.monitored_product and competitor.monitored_product.paused)
+                        if competitor.is_paused or monitored_paused:
+                            task_logger.info(
+                                "collector_skipped_paused",
+                                competitor_id=str(competitor_id),
+                                monitored_id=str(resolved_monitored) if resolved_monitored else None,
+                                trace_id=trace_id,
+                            )
+                            return resolved_monitored, ScrapeResult(
+                                status="no_result",
+                                product_id=str(competitor_id),
+                                http_status=200,
+                                error_code="paused",
+                            ), "paused"
+
+                        payload_model = CompetitorProductCreateScraping(
+                            monitored_product_id=resolved_monitored,
+                            product_url=url,
+                            name=payload.get("name") if payload else None,
+                        )
+                        result = scrape_competitor_product(
+                            db=session,
+                            user_id=user_uuid or resolved_monitored or competitor_id,
+                            url=url,
+                            payload=payload_model,
+                            collected_at=collected_at,
+                        )
+                        return resolved_monitored, result, None
+
+                    # Branch de monitorado
+                    monitored = get_monitored_product_by_id(session, monitored_id) if monitored_id else None
+                    if monitored is not None and monitored.paused:
+                        task_logger.info(
+                            "collect_skipped_paused",
+                            monitored_id=str(monitored_id),
+                            trace_id=trace_id,
+                        )
+                        return monitored_id, ScrapeResult(
+                            status="no_result",
+                            product_id=str(monitored_id) if monitored_id else None,
+                            http_status=200,
+                            error_code="paused",
+                        ), "paused"
+
+                    payload_model = MonitoredProductCreateScraping(
+                        name_identification=payload.get("name") if payload else None,
+                        product_url=url,
                     )
-                    return resolved_monitored, monitored_result, monitored_reason
+                    result = scrape_monitored_product(
+                        db=session,
+                        url=url,
+                        user_id=user_uuid or monitored_id,
+                        payload=payload_model,
+                        collected_at=collected_at,
+                    )
+                    if result and result.status in {"success", "not_modified"}:
+                        activated = activate_pending_monitored(session, monitored_id, commit=commit_activation)
+                        if activated is not None:
+                            task_logger.info(
+                                "monitored_status_activated",
+                                monitored_id=str(monitored_id),
+                                trace_id=trace_id,
+                            )
+                    return monitored_id, result, None
                 
                 if db is None:
                     with SessionLocal() as session_manager:
@@ -417,12 +293,10 @@ def collect_product(
 
 @celery_app.task(
     bind=True,
-    max_retries=RetryPolicy.LOCK_RETRY_MAX_RETRIES,
+    base=DLQTask,
     name="market_alert.tasks.collector_product_task.collect_product_task",
     queue="scraping",
-    acks_late=True,
-    soft_time_limit=90,
-    time_limit=120,
+    **COLLECTION_RETRY,
 )
 def collect_product_task(self, payload: Mapping[str, str | None] | None = None) -> dict[str, Any]:
     """ Coleta um monitorado ou concorrente aplicando lock e retornando desfecho.
@@ -447,6 +321,9 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                 task_id=getattr(self.request, "id", None),
             )
             return {"outcome": "error", "status": "error", "reason": "invalid_payload", "next_retry_at": None, "product_id": None}
+
+    _trace_id = (payload.get("trace_id") if payload else None) or getattr(self.request, "id", None) or ""
+    set_trace_id(_trace_id)
 
     outcome, result, reason = collect_product(
         payload,
@@ -506,14 +383,28 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             _reset_invalid_url_attempt(str(lock_target))
             blocked_invalid = True
             reason = "invalid_url_blocked"
-            _mark_invalid_product(
-                monitored_id=monitored_id,
-                competitor_id=competitor_id,
-                kind=kind,
-                url=payload.get("url") if payload else None,
-                attempts=invalid_attempt,
-                trace_id=trace_id,
-            )
+            _blocked_url = payload.get("url") if payload else None
+            with SessionLocal() as _db_invalid:
+                if monitored_id is not None:
+                    mark_monitored_product_failed(_db_invalid, monitored_id)
+                    logger.warning(
+                        "scrape_invalid_url_blocked",
+                        kind=kind,
+                        monitored_id=str(monitored_id),
+                        url=_blocked_url,
+                        attempts=invalid_attempt,
+                        trace_id=trace_id,
+                    )
+                elif competitor_id is not None:
+                    update_competitor_pause_state(_db_invalid, competitor_id, is_paused=True)
+                    logger.warning(
+                        "scrape_invalid_url_blocked",
+                        kind=kind,
+                        competitor_id=str(competitor_id),
+                        url=_blocked_url,
+                        attempts=invalid_attempt,
+                        trace_id=trace_id,
+                    )
         else:
             #A policy centraliza cálculo de delay e next_retry_at para manter consistência entre logs, payload de retorno e futuras mudanças.
             base_now = datetime.now(timezone.utc)

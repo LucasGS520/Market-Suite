@@ -21,13 +21,15 @@ TASK_MODULES = [
     "market_alert.tasks.verification_tasks",
     "market_alert.tasks.priority_queue_tasks",
     "market_alert.tasks.maintenance_tasks",
+    "market_alert.tasks.dlq_handler",
 ]
 
-#Exchanges separados para scraping, monitoramento e comparação
+#Exchanges separados para scraping, monitoramento, comparação e DLQ
 SCRAPING_EXCHANGE = Exchange("scraping", type="direct")
 MONITOR_EXCHANGE = Exchange("monitor", type="direct")
 COMPARE_EXCHANGE = Exchange("compare", type="direct")
 NOTIFICATIONS_EXCHANGE = Exchange("notifications", type="direct")
+DLQ_EXCHANGE = Exchange("dead_letter", type="direct")
 
 #Filas conhecidas do serviço
 TASK_QUEUES = (
@@ -35,6 +37,7 @@ TASK_QUEUES = (
     Queue("monitor", MONITOR_EXCHANGE, routing_key="monitor"),
     Queue("compare", COMPARE_EXCHANGE, routing_key="compare"),
     Queue("notifications", NOTIFICATIONS_EXCHANGE, routing_key="notifications"),
+    Queue("dead_letter", DLQ_EXCHANGE, routing_key="dead_letter"),
 )
 
 #Roteamento explícito para manter cada domínio em sua fila
@@ -66,6 +69,10 @@ TASK_ROUTES = {
     "market_alert.tasks.verification_tasks.send_phone_otp": {
         "queue": "notifications",
         "routing_key": "notifications",
+    },
+    "market_alert.tasks.dlq_handler.handle_dead_letter": {
+        "queue": "dead_letter",
+        "routing_key": "dead_letter",
     },
 }
 

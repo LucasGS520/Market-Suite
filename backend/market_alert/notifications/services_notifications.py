@@ -33,9 +33,11 @@ from sqlalchemy.orm import Session
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_notifications import (
     add_notification_attempt,
+    acquire_notification_for_processing,
     create_event_log,
     create_notification,
     get_last_sent_at,
+    get_pending_notifications,
     has_dedup_in_window,
     has_recent_sent_notification,
     list_alert_rules,
@@ -45,9 +47,9 @@ from market_alert.crud.crud_notifications import (
     mark_notification_sent,
     update_alert_rule_last_triggered,
     update_preference_last_notified,
-    acquire_notification_for_processing,
     DEFAULT_MAX_ATTEMPTS,
 )
+from shared.infra.db import SessionLocal
 from market_alert.enums.enums_notifications import DeliveryStatus, EventType, NotificationStatus
 from market_alert.notifications.domain.cooldown_resolver import is_within_cooldown, resolve_cooldown_seconds
 from market_alert.notifications.domain.deduplication import generate_dedup_hash
@@ -515,3 +517,49 @@ def _calculate_next_attempt(attempts: int, *, now: datetime) -> datetime | None:
     if delay is None:
         return None
     return now + timedelta(seconds=delay)
+
+
+def enqueue_pending_notifications(
+    notification_ids: list[str] | None = None,
+    *,
+    limit: int = 200,
+    trace_id: str | None = None,
+) -> int:
+    """ Busca notificações pendentes e enfileira cada uma para envio assíncrono.
+
+    Ponto único de enfileiramento de notificações. Encapsula a busca de
+    pendentes, normalização de IDs e dispatch para ``send_notification_task``.
+
+    O dispatch usa ``TaskEnqueuer`` para evitar
+    dependência circular entre este módulo e o módulo de tasks.
+
+    Args:
+        notification_ids: Lista de IDs específicos para enfileirar. Quando
+            ``None``, busca todas as notificações pendentes elegíveis no banco.
+        limit: Número máximo de notificações a enfileirar por chamada.
+        trace_id: ID de rastreamento para correlação de logs.
+
+    Returns:
+        Número de notificações efetivamente enfileiradas.
+    """
+    resolved_trace_id = trace_id or str(uuid4())
+    now = datetime.now(timezone.utc)
+    ids = [UUID(nid) for nid in notification_ids] if notification_ids else None
+
+    from market_alert.services.task_enqueuer import TaskEnqueuer
+    enqueuer = TaskEnqueuer()
+
+    with SessionLocal() as db:
+        pending = get_pending_notifications(db, limit=limit, now=now, notification_ids=ids)
+        count = 0
+        for notification in pending:
+            enqueuer.enqueue_notification(notification.id, trace_id=resolved_trace_id)
+            count += 1
+
+    logger.info(
+        "notifications_enqueued",
+        count=count,
+        trace_id=resolved_trace_id,
+        notification_ids=notification_ids,
+    )
+    return count

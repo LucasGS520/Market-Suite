@@ -762,10 +762,47 @@ def mark_monitored_product_failed(
     product = get_monitored_product_by_id(db, product_id)
     if product is None:
         return None
-    
+
     product.status = MonitoredStatus.failed
     # Falhas não representam dados novos — registre apenas a checagem.
     product.last_checked = touched_at or datetime.now(timezone.utc)
     db.commit()
     db.refresh(product)
+    return product
+
+def activate_pending_monitored(
+    db: Session,
+    monitored_id: UUID | None,
+    *,
+    commit: bool = True,
+) -> MonitoredProduct | None:
+    """ Transiciona monitorado de ``pending`` para ``active`` após primeira coleta bem-sucedida.
+
+    Idempotente: se o produto já estiver ``active`` (ou em qualquer outro status),
+    retorna o objeto sem modificações. Retorna ``None`` se o produto não existir.
+
+    Args:
+        db: Sessão ativa do banco de dados.
+        monitored_id: UUID do produto monitorado. ``None`` é aceito para
+            compatibilidade com callers que não conhecem o ID — retorna ``None``.
+        commit: Quando ``True`` (padrão) commita a transação aqui.
+            Passe ``False`` para integrar em uma transação externa (usa ``flush``).
+    """
+    if monitored_id is None:
+        return None
+    product = get_monitored_product_by_id(db, monitored_id)
+    if product is None:
+        return None
+    if product.status != MonitoredStatus.pending:
+        return product
+    product.status = MonitoredStatus.active
+    if commit:
+        db.commit()
+        db.refresh(product)
+    else:
+        db.flush()
+    logger.info(
+        "monitored_status_activated",
+        monitored_id=str(monitored_id),
+    )
     return product
