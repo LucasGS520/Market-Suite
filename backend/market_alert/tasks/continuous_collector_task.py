@@ -133,60 +133,61 @@ def run_continuous_collector(self) -> None:
     last_lock_refresh = time.monotonic()
 
     try:
-        while True:
-            processed_ids: list[str] = []
-            if _should_abort(getattr(self, "request", None)):
-                bound_logger.warning("continuous_worker_aborted")
-                return
-
-            if time.monotonic() - last_lock_refresh >= lock_refresh_interval:
-                if not refresh_continuous_collector_lock(
-                    owner_id=lock_owner,
-                    ttl_seconds=lock_ttl_seconds,
-                ):
-                    bound_logger.warning(
-                        "continuous_collector_lock_lost",
-                        lock_owner=lock_owner,
-                    )
+        with SessionLocal() as db:
+            #Mantém uma única sessão viva durante todo o ciclo da task.
+            while True:
+                processed_ids: list[str] = []
+                if _should_abort(getattr(self, "request", None)):
+                    bound_logger.warning("continuous_worker_aborted")
                     return
-                last_lock_refresh = time.monotonic()
 
-            try:
-                if is_scraping_suspended():
-                    bound_logger.warning("continuous_scraping_suspended")
-                    time.sleep(poll_interval)
-                    continue
+                if time.monotonic() - last_lock_refresh >= lock_refresh_interval:
+                    if not refresh_continuous_collector_lock(
+                        owner_id=lock_owner,
+                        ttl_seconds=lock_ttl_seconds,
+                    ):
+                        bound_logger.warning(
+                            "continuous_collector_lock_lost",
+                            lock_owner=lock_owner,
+                        )
+                        return
+                    last_lock_refresh = time.monotonic()
 
-                if not queue.is_available():
-                    bound_logger.error("continuous_queue_unavailable")
-                    time.sleep(poll_interval)
-                    continue
+                try:
+                    if is_scraping_suspended():
+                        bound_logger.warning("continuous_scraping_suspended")
+                        time.sleep(poll_interval)
+                        continue
 
-                queue_size = queue.size()
-                ready_total = queue.ready_count()
+                    if not queue.is_available():
+                        bound_logger.error("continuous_queue_unavailable")
+                        time.sleep(poll_interval)
+                        continue
 
-                #Mantém um log por ciclo enquanto o lock está válido
-                bound_logger.info(
-                    "continuous_loop_iteration",
-                    queue_size=queue_size,
-                    ready_total=ready_total,
-                    timestamp=_utc_now().isoformat(),
-                )
+                    queue_size = queue.size()
+                    ready_total = queue.ready_count()
 
-                reclaimed = queue.reclaim_stale_items(processing_ttl)
-                if reclaimed:
-                    #Recoloca itens travados para garantir novas tentativas no loop contínuo
-                    bound_logger.warning(
-                        "continuous_processing_reclaimed",
-                        reclaimed_count=len(reclaimed),
+                    #Mantém um log por ciclo enquanto o lock está válido
+                    bound_logger.info(
+                        "continuous_loop_iteration",
+                        queue_size=queue_size,
+                        ready_total=ready_total,
+                        timestamp=_utc_now().isoformat(),
                     )
 
-                for _ in range(batch_size):
-                    next_id = queue.pop_next_for_collection()
-                    if not next_id:
-                        break
+                    reclaimed = queue.reclaim_stale_items(processing_ttl)
+                    if reclaimed:
+                        #Recoloca itens travados para garantir novas tentativas no loop contínuo
+                        bound_logger.warning(
+                            "continuous_processing_reclaimed",
+                            reclaimed_count=len(reclaimed),
+                        )
 
-                    with SessionLocal() as db:
+                    for _ in range(batch_size):
+                        next_id = queue.pop_next_for_collection()
+                        if not next_id:
+                            break
+
                         monitored = _load_monitored(db, next_id)
                         if monitored is None:
                             bound_logger.warning("continuous_monitored_missing", monitored_id=next_id)
@@ -209,6 +210,8 @@ def run_continuous_collector(self) -> None:
                                 enqueued_at=enqueued_at,
                             )
                         except Exception:
+                            #Limpa estado transacional para continuar o loop com segurança.
+                            db.rollback()
                             decision = CollectDispatchDecision(
                                 outcome="error",
                                 next_check_at=_utc_now(),
@@ -220,59 +223,60 @@ def run_continuous_collector(self) -> None:
                                 monitored_id=str(monitored.id),
                             )
 
-                    if decision.retain_processing:
-                        #Mantém o item em processamento até a coleta terminar
-                        pass
-                    else:
-                        processed_ids.append(str(monitored.id))
+                        if decision.retain_processing:
+                            #Mantém o item em processamento até a coleta terminar
+                            pass
+                        else:
+                            processed_ids.append(str(monitored.id))
 
-                    if decision.should_requeue:
-                        requeue_success, _ = _requeue_monitored(
-                            monitored=monitored,
-                            next_check_at=decision.next_check_at,
-                            queue=queue,
-                        )
-                        if not requeue_success:
-                            #Mantém no conjunto de processamento para permitir reclaim futuro
-                            bound_logger.warning(
-                                "requeue_failed_but_retained",
-                                monitored_id=str(monitored.id),
+                        if decision.should_requeue:
+                            requeue_success, _ = _requeue_monitored(
+                                monitored=monitored,
+                                next_check_at=decision.next_check_at,
+                                queue=queue,
                             )
-                            if processed_ids and processed_ids[-1] == str(monitored.id):
-                                #Evita erro ao remover IDs quando a lista já foi drenada
-                                processed_ids.pop()
+                            if not requeue_success:
+                                #Mantém no conjunto de processamento para permitir reclaim futuro
+                                bound_logger.warning(
+                                    "requeue_failed_but_retained",
+                                    monitored_id=str(monitored.id),
+                                )
+                                if processed_ids and processed_ids[-1] == str(monitored.id):
+                                    #Evita erro ao remover IDs quando a lista já foi drenada
+                                    processed_ids.pop()
 
-                    bound_logger.info(
-                        "continuous_item_processed",
-                        monitored_id=str(monitored.id),
-                        outcome=decision.outcome,
+                        bound_logger.info(
+                            "continuous_item_processed",
+                            monitored_id=str(monitored.id),
+                            outcome=decision.outcome,
+                        )
+
+                    if processed_ids:
+                        queue.mark_as_done(processed_ids)
+                    time.sleep(poll_interval)
+
+                except TimeLimitExceeded:
+                    #Registra o limite de tempo excedido para sinalizar reinícios forçados
+                    bound_logger.warning(
+                        "limit_time_collector_exceeded",
+                        uptime_seconds=round(time.monotonic() - started_at, 2),
+                        reason="time_limit",
                     )
-
-                if processed_ids:
-                    queue.mark_as_done(processed_ids)
-                time.sleep(poll_interval)
-
-            except TimeLimitExceeded:
-                #Registra o limite de tempo excedido para sinalizar reinícios forçados
-                bound_logger.warning(
-                    "limit_time_collector_exceeded",
-                    uptime_seconds=round(time.monotonic() - started_at, 2),
-                    reason="time_limit",
-                )
-                time.sleep(poll_interval)
-                continue
-            except SoftTimeLimitExceeded:
-                #Evita encerrar a task quando o time limit suave ocorre, reiniciando o ciclo
-                bound_logger.warning(
-                    "continuous_soft_time_limit_exceeded",
-                    uptime_seconds=round(time.monotonic() - started_at, 2),
-                    reason="soft_time_limit",
-                )
-                time.sleep(poll_interval)
-                continue
-            except Exception:
-                bound_logger.exception("continuous_loop_error")
-                time.sleep(poll_interval)
+                    time.sleep(poll_interval)
+                    continue
+                except SoftTimeLimitExceeded:
+                    #Evita encerrar a task quando o time limit suave ocorre, reiniciando o ciclo
+                    bound_logger.warning(
+                        "continuous_soft_time_limit_exceeded",
+                        uptime_seconds=round(time.monotonic() - started_at, 2),
+                        reason="soft_time_limit",
+                    )
+                    time.sleep(poll_interval)
+                    continue
+                except Exception:
+                    db.rollback()
+                    bound_logger.exception("continuous_loop_error")
+                    time.sleep(poll_interval)
 
     finally:
         release_continuous_collector_lock(owner_id=lock_owner)
