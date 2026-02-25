@@ -153,9 +153,14 @@ class RetryPolicy:
         Returns:
             (deve_retry: bool, delay_seconds: float)
         """
-        if attempt > max_attempts:
+        if max_attempts <= 0:
             return False, 0.0
-        delay = RetryPolicy.compute_lock_retry_delay(attempt)
+        
+        sanitized_attempt = max(1, attempt)
+        if sanitized_attempt > max_attempts:
+            return False, 0.0
+        
+        delay = RetryPolicy.compute_lock_retry_delay(sanitized_attempt)
         return True, float(delay)
 
     @staticmethod
@@ -180,12 +185,16 @@ class RetryPolicy:
         Returns:
             (deve_retry: bool, next_check_at: datetime | None)
         """
-        if attempt > max_attempts:
+        if max_attempts <= 0:
+            return False, None
+
+        sanitized_attempt = max(1, attempt)
+        if sanitized_attempt > max_attempts:
             return False, None
 
         delay = RetryPolicy.compute_scrape_retry_delay(
             reason,
-            attempt,
+            sanitized_attempt,
             retry_after=retry_after,
             max_seconds=max_seconds,
         )
@@ -211,9 +220,13 @@ class RetryPolicy:
         max_seconds: int | None = None,
     ) -> float:
         """ Calcula delay de scrape retry baseado no motivo e tentativa. """
+        sanitized_reason = (reason or "").strip().lower()
+        # Motivos críticos de cooldown priorizam Retry-After quando disponível.
+        effective_retry_after = retry_after if RetryPolicy.is_cooldown_reason(sanitized_reason) else None
+        
         raw = _compute_scrape_retry_delay(
             attempt,
-            retry_after=retry_after,
+            retry_after=effective_retry_after,
             max_seconds=max_seconds if max_seconds is not None else SCRAPE_RETRY_WINDOW_SECONDS,
         )
         return float(raw)

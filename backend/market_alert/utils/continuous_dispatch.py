@@ -25,7 +25,7 @@ from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.orchestrator.collector_service_orchestrator import build_competitor_payload, build_monitored_payload
-from market_alert.orchestrator.collection_enqueuer import CollectionEnqueuer
+from market_alert.infra.celery.enqueuer import CollectionEnqueuer
 from market_alert.orchestrator.collection_queue import CollectionQueue
 from market_alert.utils.interval_calculator_products import (
     EVENT_RETRY,

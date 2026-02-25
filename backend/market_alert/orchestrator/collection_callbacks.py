@@ -34,7 +34,7 @@ from datetime import datetime
 from uuid import UUID
 
 from market_alert.orchestrator.collection_queue import CollectionQueue
-from market_alert.orchestrator.retry_policy import RetryPolicy
+from market_alert.infra.celery.retry_policies import RetryPolicy
 from market_alert.utils.continuous_dispatch import (
     _handle_processing_requeue,
     _should_skip_requeue,

@@ -42,7 +42,7 @@ from market_alert.crud.crud_competitor import (
 from market_alert.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.scraper.scraper_client import ScraperClientError
-from market_alert.orchestrator.retry_policy import RetryPolicy
+from market_alert.infra.celery.retry_policies import RetryPolicy
 from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
 from market_alert.utils.price_comparator import _parse_force_compare_, schedule_comparison_after_commit
 from market_alert.utils.collector_result import (

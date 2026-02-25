@@ -30,9 +30,19 @@ def load_task_modules(task_modules: list[str]) -> None:
             ``['market_alert.tasks.collector_product_task', ...]``) —
             normalmente vinda de ``celery_schedule.TASK_MODULES``.
     """
+    failed_modules: list[str] = []
     for module_path in task_modules:
         try:
             import_module(module_path)
             logger.debug("task_module_imported", module=module_path)
         except Exception:
+            failed_modules.append(module_path)
             logger.exception("task_module_import_failed", module=module_path)
+
+    if failed_modules:
+        #Interrompe startup para evitar worker/API sem tasks registradas
+        raise RuntimeError(
+            "Falha ao carregar módulos de tasks: " + ", ".join(failed_modules)
+        )
+    
+    logger.info("task_modules_loaded", total=len(task_modules))

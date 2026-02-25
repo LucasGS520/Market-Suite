@@ -21,12 +21,12 @@ from sqlalchemy.orm import Session
 from market_alert.core.config_alert import settings
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
-from market_alert.orchestrator.collection_enqueuer import CollectionEnqueuer
+from market_alert.infra.celery.enqueuer import CollectionEnqueuer
 from market_alert.schemas.schemas_collection_payload import CollectionPayload
 from shared.utils.url_validation import normalize_competitor_url
 
-_enqueuer = CollectionEnqueuer()
 
+_enqueuer = CollectionEnqueuer()
 
 logger = structlog.get_logger("collector_service")
 
@@ -54,7 +54,6 @@ def build_monitored_payload(
         enqueued_at=enqueued_at,
     )
 
-
 def build_competitor_payload(
     competitor: CompetitorProduct,
     *,
@@ -79,7 +78,6 @@ def build_competitor_payload(
         enqueued_at=enqueued_at,
     )
 
-
 def enqueue_collect(
     payload: CollectionPayload | dict,
     *,
@@ -95,7 +93,6 @@ def enqueue_collect(
         payload = CollectionPayload.model_validate(payload)
 
     _enqueuer._send(payload, countdown=countdown)
-
 
 def enqueue_monitored_collection(
     monitored: MonitoredProduct,
@@ -122,7 +119,6 @@ def enqueue_monitored_collection(
     )
     enqueue_collect(payload, countdown=settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS)
 
-
 def enqueue_competitor_collection(
     competitor: CompetitorProduct,
     *,
@@ -142,7 +138,6 @@ def enqueue_competitor_collection(
         payload,
         countdown=countdown if countdown is not None else settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS,
     )
-
 
 def enqueue_competitors_for_monitored(
     db: Session,

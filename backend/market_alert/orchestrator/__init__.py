@@ -24,7 +24,7 @@ Compatibilidade (funções e builders do módulo anterior):
 """
 
 from market_alert.orchestrator.collection_callbacks import CollectionCallbacks
-from market_alert.orchestrator.collection_enqueuer import CollectionEnqueuer
+from market_alert.infra.celery.enqueuer import CollectionEnqueuer
 from market_alert.orchestrator.collection_queue import CollectionQueue
 from market_alert.orchestrator.collection_reconciliation import reconcile_collection_queue
 from market_alert.orchestrator.collection_triggers import trigger_comparison_if_needed
@@ -36,7 +36,7 @@ from market_alert.orchestrator.collector_service_orchestrator import (
     enqueue_competitors_for_monitored,
     enqueue_monitored_collection,
 )
-from market_alert.orchestrator.retry_policy import RetryPolicy
+from market_alert.infra.celery.retry_policies import RetryPolicy
 
 __all__ = [
     #Novos componentes da refatoração

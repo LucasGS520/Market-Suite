@@ -14,6 +14,7 @@ from slowapi.util import get_remote_address
 
 from market_alert.core.config_alert import settings
 from market_alert.core.logging_config import setup_api_logging
+from market_alert.infra.startup_validation import validate_startup_dependencies
 
 #Rotas
 from market_alert.routes.routes_users import router as users_router
@@ -56,6 +57,12 @@ def create_app() -> FastAPI:
         version="1.0.0",
         debug=getattr(settings, "debug", False)
     )
+
+    @app.on_event("startup")
+    async def _validate_dependencies_on_startup() -> None:
+        """Executa validação de infraestrutura para falhar rápido no bootstrap."""
+        # Falha imediata evita aceitar tráfego com Redis/DB indisponível.
+        validate_startup_dependencies(strict=True)
 
     #Habilita CORS com base nas origens configuradas no ambiente
     app.add_middleware(

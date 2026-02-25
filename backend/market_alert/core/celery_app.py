@@ -27,6 +27,8 @@ from market_alert.infra.celery.config import (
     TASK_ROUTES,
 )
 from market_alert.infra.worker_lifecycle import register_worker_signals
+from market_alert.infra.startup_validation import validate_startup_dependencies
+
 
 logger = structlog.get_logger("celery_app")
 PROCESS_START_MONOTONIC = time.monotonic()
@@ -60,6 +62,13 @@ celery_app.conf.update(
 celery_app.conf.task_queues = TASK_QUEUES
 celery_app.conf.task_routes = TASK_ROUTES
 celery_app.conf.beat_schedule = BEAT_SCHEDULE
+
+# ---------------------------------------------------------------------------
+# Validação de infraestrutura no bootstrap do worker
+# ---------------------------------------------------------------------------
+
+#Falha rápida evita subir workers que só irão acumular erro de conexão.
+validate_startup_dependencies(strict=True)
 
 # ---------------------------------------------------------------------------
 # Registro de signals e carregamento de tasks

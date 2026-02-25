@@ -124,7 +124,7 @@ def get_redis_client() -> redis.Redis | None:
     if client is None:
         try:
             _thread_local.client = redis.Redis.from_url(
-                _settings.redis_url, decode_responses=True
+                _settings.redis_url, decode_responses=True, socket_timeout=2.0
             )
             client = _thread_local.client
         except Exception as err:

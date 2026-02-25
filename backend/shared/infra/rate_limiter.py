@@ -23,7 +23,6 @@ Uso::
 
 from __future__ import annotations
 
-import logging
 from typing import Protocol, runtime_checkable
 
 import structlog
@@ -103,12 +102,32 @@ class RedisRateLimiter:
         Returns:
             True se permitido. False se o limite foi excedido.
         """
+        if self._redis is None:
+            logger.warning("redis_rate_limiter_unavailable", operation="check", key=key)
+            return True
+
         try:
             current = int(self._redis.get(key) or 0)
-            return current < max_attempts
+            allowed = current < max_attempts
+            logger.debug(
+                "redis_rate_limiter_check",
+                key=key,
+                current=current,
+                max_attempts=max_attempts,
+                window_seconds=window_seconds,
+                allowed=allowed,
+            )
+            if not allowed:
+                logger.info(
+                    "redis_rate_limiter_blocked",
+                    key=key,
+                    attempts=current,
+                    max_attempts=max_attempts,
+                )
+            return allowed
         except Exception:
-            logger.exception("redis_check_failed", key=key)
-            # Degradação segura: permite a operação se Redis falhar
+            logger.warning("redis_rate_limiter_check_failed", key=key, exc_info=True)
+            #Degradação segura: permite a operação se Redis falhar.
             return True
 
     def increment(
@@ -125,15 +144,27 @@ class RedisRateLimiter:
         try:
             count = self._redis.incr(key)
             if count == 1:
+                #TTL é definido apenas no primeiro incremento para manter a janela
                 self._redis.expire(key, window_seconds)
-            return count
+            logger.debug(
+                "redis_rate_limiter_increment",
+                key=key,
+                count=int(count),
+                window_seconds=window_seconds,
+            )
+            return int(count)
         except Exception:
-            logger.exception("redis_increment_failed", key=key)
+            logger.warning("redis_rate_limiter_increment_failed", key=key, exc_info=True)
             return 0
 
     def reset(self, key: str) -> None:
-        """ Remove o contador do Redis. """
+        """Remove o contador do Redis."""
+        if self._redis is None:
+            logger.warning("redis_rate_limiter_unavailable", operation="reset", key=key)
+            return
+        
         try:
             self._redis.delete(key)
+            logger.debug("redis_rate_limiter_reset", key=key)
         except Exception:
-            logger.exception("redis_reset_failed", key=key)
+            logger.warning("redis_rate_limiter_reset_failed", key=key, exc_info=True)
