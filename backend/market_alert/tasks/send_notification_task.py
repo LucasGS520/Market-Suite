@@ -25,9 +25,15 @@ logger = structlog.get_logger("notifications_send")
     base=DLQTask,
     **NOTIFICATION_RETRY,
 )
-def send_notification_task(self, notification_id: str) -> None:
-    """ Realiza o envio de uma notificação e delega controle de retry ao service layer """
-    set_trace_id(self.request.id or notification_id)
+def send_notification_task(self, notification_id: str, trace_id: str | None = None) -> None:
+    """ Realiza o envio de notificação com propagação explícita de trace_id.
+
+    O ``trace_id`` pode chegar por kwargs (caminho padrão do ``TaskEnqueuer``)
+    ou por headers, mantendo compatibilidade com enfileiradores legados.
+    """
+    request_headers = getattr(self.request, "headers", None) or {}
+    resolved_trace_id = trace_id or request_headers.get("trace_id")
+    set_trace_id(resolved_trace_id or self.request.id or notification_id)
     task_logger = logger.bind(task_id=self.request.id, notification_id=notification_id)
 
     with SessionLocal() as db:

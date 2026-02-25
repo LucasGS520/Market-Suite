@@ -61,6 +61,10 @@ class DLQTask(Task):
             trace_id = args[0].get("trace_id")
         if trace_id is None:
             trace_id = kwargs.get("trace_id")
+        if trace_id is None:
+            #Fallback para tarefas que propagam trace_id somente via headers.
+            request_headers = getattr(self.request, "headers", None) or {}
+            trace_id = request_headers.get("trace_id")
 
         try:
             self.app.send_task(

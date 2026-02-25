@@ -40,6 +40,18 @@ class TaskEnqueuer:
     são propagados ao chamador para tratamento explícito.
     """
 
+    @staticmethod
+    def _build_trace_headers(trace_id: str | None) -> dict[str, str]:
+        """ Monta headers padrão para preservar rastreabilidade no worker
+        
+        O trace_id é enviado no header para facilitar correlação mesmo quando a
+        assinatura da task muda no futuro. Quando ausente, retorna dicionário
+        vazio para evitar ruído no trasnporte.
+        """
+        if not trace_id:
+            return {}
+        return {"trace_id": trace_id}
+
     def enqueue_comparison(
         self,
         monitored_id: UUID | str,
@@ -58,6 +70,9 @@ class TaskEnqueuer:
         celery_app.send_task(
             _COMPARE_TASK,
             args=[monitored_id_str],
+            kwargs={"trace_id": trace_id},
+            #Duplicamos trace_id em kwargs + headers para cobrir observabilidade e fallback em rotas que não leem parâmetros explicitamente.
+            headers=self._build_trace_headers(trace_id),
             queue=_COMPARE_QUEUE,
         )
         logger.info(
@@ -83,6 +98,9 @@ class TaskEnqueuer:
         celery_app.send_task(
             _NOTIFICATION_TASK,
             args=[notification_id_str],
+            kwargs={"trace_id": trace_id},
+            #Mantém padrão único de propagação para todos os wrappers.
+            headers=self._build_trace_headers(trace_id),
             queue=_NOTIFICATION_QUEUE,
         )
         logger.info(
