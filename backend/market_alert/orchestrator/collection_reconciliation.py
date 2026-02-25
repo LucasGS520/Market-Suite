@@ -33,7 +33,6 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from shared.infra.db import SessionLocal
 from shared.utils.redis_client import get_redis_client
 
 from market_alert.enums.enums_products import MonitoredStatus
@@ -106,6 +105,7 @@ def _release_reconciliation_flag() -> None:
         logger.warning("reconciliation_flag_release_error: %s", exc)
 
 def reconcile_collection_queue(
+    db: Session,
     collection_queue: CollectionQueue | None = None,
 ) -> dict[str, int]:
     """ Recarrega a fila de prioridade com todos os monitorados ativos.
@@ -119,6 +119,7 @@ def reconcile_collection_queue(
     reconciliação em andamento, retorna imediatamente com ``skipped=1``.
 
     Args:
+        db: Sessão ativa injetada pela task chamadora
         collection_queue: instância de ``CollectionQueue`` (cria nova se None).
 
     Returns:
@@ -126,7 +127,7 @@ def reconcile_collection_queue(
 
     Exemplo::
 
-        stats = reconcile_collection_queue()
+        stats = reconcile_collection_queue(db)
         print(stats)
         # {"total": 150, "enqueued": 3, "failed": 0, "skipped": 0}
     """
@@ -141,30 +142,29 @@ def reconcile_collection_queue(
     now = _utc_now()
 
     try:
-        with SessionLocal() as db:
-            for monitored_id, next_check_at in _iter_active_monitored(db):
-                total += 1
-                scheduled_at = _normalize_next_check(next_check_at, now)
+        for monitored_id, next_check_at in _iter_active_monitored(db):
+            total += 1
+            scheduled_at = _normalize_next_check(next_check_at, now)
 
-                status = queue.get_collection_status(monitored_id)
-                if status != "not_found":
-                    logger.debug(
-                        "reconciliation_skip_existing_item",
-                        extra={
-                            "monitored_id": str(monitored_id),
-                            "status": status,
-                        },
-                    )
-                    continue
+            status = queue.get_collection_status(monitored_id)
+            if status != "not_found":
+                logger.debug(
+                    "reconciliation_skip_existing_item",
+                    extra={
+                        "monitored_id": str(monitored_id),
+                        "status": status,
+                    },
+                )
+                continue
 
-                if queue.enqueue_for_collection(
-                    monitored_id,
-                    scheduled_at,
-                    source="reconciliation",
-                ):
-                    enqueued += 1
-                else:
-                    failed += 1
+            if queue.enqueue_for_collection(
+                monitored_id,
+                scheduled_at,
+                source="reconciliation",
+            ):
+                enqueued += 1
+            else:
+                failed += 1
 
         logger.info(
             "reconciliation_complete",

@@ -9,6 +9,8 @@ e usa flag Redis para evitar execuções simultâneas.
 
 from __future__ import annotations
 
+from shared.infra.db import SessionLocal
+
 from market_alert.core.celery_app import celery_app
 from market_alert.orchestrator.collection_reconciliation import reconcile_collection_queue
 
@@ -22,4 +24,5 @@ def reconcile_priority_queue() -> dict[str, int]:
     - Acessa a fila exclusivamente via ``CollectionQueue``.
     - Retorna estatísticas de enfileiramento para auditoria.
     """
-    return reconcile_collection_queue()
+    with SessionLocal() as db:
+        return reconcile_collection_queue(db)

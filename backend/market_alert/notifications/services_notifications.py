@@ -49,7 +49,6 @@ from market_alert.crud.crud_notifications import (
     update_preference_last_notified,
     DEFAULT_MAX_ATTEMPTS,
 )
-from shared.infra.db import SessionLocal
 from market_alert.enums.enums_notifications import DeliveryStatus, EventType, NotificationStatus
 from market_alert.notifications.domain.cooldown_resolver import is_within_cooldown, resolve_cooldown_seconds
 from market_alert.notifications.domain.deduplication import generate_dedup_hash
@@ -520,6 +519,7 @@ def _calculate_next_attempt(attempts: int, *, now: datetime) -> datetime | None:
 
 
 def enqueue_pending_notifications(
+    db: Session,
     notification_ids: list[str] | None = None,
     *,
     limit: int = 200,
@@ -534,6 +534,7 @@ def enqueue_pending_notifications(
     dependência circular entre este módulo e o módulo de tasks.
 
     Args:
+        db: Sessão ativa de banco injetada pela camada chamadora.
         notification_ids: Lista de IDs específicos para enfileirar. Quando
             ``None``, busca todas as notificações pendentes elegíveis no banco.
         limit: Número máximo de notificações a enfileirar por chamada.
@@ -549,12 +550,11 @@ def enqueue_pending_notifications(
     from market_alert.services.task_enqueuer import TaskEnqueuer
     enqueuer = TaskEnqueuer()
 
-    with SessionLocal() as db:
-        pending = get_pending_notifications(db, limit=limit, now=now, notification_ids=ids)
-        count = 0
-        for notification in pending:
-            enqueuer.enqueue_notification(notification.id, trace_id=resolved_trace_id)
-            count += 1
+    pending = get_pending_notifications(db, limit=limit, now=now, notification_ids=ids)
+    count = 0
+    for notification in pending:
+        enqueuer.enqueue_notification(notification.id, trace_id=resolved_trace_id)
+        count += 1
 
     logger.info(
         "notifications_enqueued",

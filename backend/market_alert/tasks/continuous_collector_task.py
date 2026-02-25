@@ -56,13 +56,15 @@ def finalize_processing_requeue(
     """ Reenfileira monitorado após a coleta finalizar e remove do processamento """
     normalized = _parse_collect_result(collect_result)
     next_retry_at = _parse_next_retry_at(normalized.get("next_retry_at"))
-    _handle_processing_requeue(
-        monitored_id=monitored_id,
-        collect_outcome=normalized.get("outcome"),
-        reason=normalized.get("status") or normalized.get("reason") or normalized.get("outcome") or "unknown",
-        trace_id=trace_id,
-        next_retry_at=next_retry_at,
-    )
+    with SessionLocal() as db:
+        _handle_processing_requeue(
+            db=db,
+            monitored_id=monitored_id,
+            collect_outcome=normalized.get("outcome"),
+            reason=normalized.get("status") or normalized.get("reason") or normalized.get("outcome") or "unknown",
+            trace_id=trace_id,
+            next_retry_at=next_retry_at,
+        )
 
 
 @celery_app.task(
@@ -77,12 +79,14 @@ def finalize_processing_requeue_error(
     trace_id: str | None = None,
 ) -> None:
     """Reenfileira monitorado quando a task de coleta falha inesperadamente."""
-    _handle_processing_requeue(
-        monitored_id=monitored_id,
-        collect_outcome=None,
-        reason="collect_task_exception",
-        trace_id=trace_id,
-    )
+    with SessionLocal() as db:
+        _handle_processing_requeue(
+            db=db,
+            monitored_id=monitored_id,
+            collect_outcome=None,
+            reason="collect_task_exception",
+            trace_id=trace_id,
+        )
 
 
 @celery_app.task(
@@ -197,23 +201,24 @@ def run_continuous_collector(self) -> None:
                             processed_ids.append(str(monitored.id))
                             continue
 
-                    enqueued_at = queue.get_enqueued_at(next_id)
-                    try:
-                        decision = _collect_group(
-                            monitored=monitored,
-                            enqueued_at=enqueued_at,
-                        )
-                    except Exception:
-                        decision = CollectDispatchDecision(
-                            outcome="error",
-                            next_check_at=_utc_now(),
-                            should_requeue=True,
-                            retain_processing=False,
-                        )
-                        bound_logger.exception(
-                            "continuous_group_failed",
-                            monitored_id=str(monitored.id),
-                        )
+                        enqueued_at = queue.get_enqueued_at(next_id)
+                        try:
+                            decision = _collect_group(
+                                db=db,
+                                monitored=monitored,
+                                enqueued_at=enqueued_at,
+                            )
+                        except Exception:
+                            decision = CollectDispatchDecision(
+                                outcome="error",
+                                next_check_at=_utc_now(),
+                                should_requeue=True,
+                                retain_processing=False,
+                            )
+                            bound_logger.exception(
+                                "continuous_group_failed",
+                                monitored_id=str(monitored.id),
+                            )
 
                     if decision.retain_processing:
                         #Mantém o item em processamento até a coleta terminar

@@ -19,8 +19,6 @@ import structlog
 from celery.canvas import Signature
 from sqlalchemy.orm import Session
 
-from shared.infra.db import SessionLocal
-
 from market_alert.core.celery_app import celery_app
 from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_monitored import get_monitored_product_by_id
@@ -113,29 +111,28 @@ def _dispatch_collect_task(
 
 def _collect_group(
     *,
+    db: Session,
     monitored: MonitoredProduct,
     enqueued_at: datetime | None,
 ) -> CollectDispatchDecision:
     """ Dispara coletas do monitorado e concorrentes retornando decisão de reenqueue """
-    with SessionLocal() as db:
-        refreshed = get_monitored_product_by_id(db, monitored.id)
-        if refreshed:
-            #Garante avaliação com status atual antes de iniciar a coleta do grupo
-            if refreshed.paused or refreshed.status in {MonitoredStatus.failed}:
-                logger.info(
-                    "continuous_group_skipped_paused",
-                    monitored_id=str(refreshed.id),
-                    status=refreshed.status,
-                )
-                return CollectDispatchDecision(
-                    outcome="skipped_paused",
-                    next_check_at=None,
-                    should_requeue=False,
-                    retain_processing=False,
-                )
-            #Mantém os dados atualizados para o restante do processamento
-            db.expunge(refreshed)
-            monitored = refreshed
+    refreshed = get_monitored_product_by_id(db, monitored.id)
+    if refreshed:
+        #Garante avaliação com status atual antes de iniciar a coleta do grupo
+        if refreshed.paused or refreshed.status in {MonitoredStatus.failed}:
+            logger.info(
+                "continuous_group_skipped_paused",
+                monitored_id=str(refreshed.id),
+                status=refreshed.status,
+            )
+            return CollectDispatchDecision(
+                outcome="skipped_paused",
+                next_check_at=None,
+                should_requeue=False,
+                retain_processing=False,
+            )
+        #Mantém os dados atualizados para o restante do processamento
+        monitored = refreshed
 
     trace_id = str(uuid4())
     group_started_at = _utc_now()
@@ -170,13 +167,12 @@ def _collect_group(
         trace_id=trace_id,
     )
 
-    with SessionLocal() as db:
-        competitors = get_competitors_by_monitored_id(
-            db,
-            monitored.id,
-            include_paused=False,
-            include_inactive=True, #Inclui itens indisponíveis para rechecagem
-        )
+    competitors = get_competitors_by_monitored_id(
+        db,
+        monitored.id,
+        include_paused=False,
+        include_inactive=True, #Inclui itens indisponíveis para rechecagem
+    )
 
     monitored_enqueued = _dispatch_collect_task(
         payload=monitored_payload.model_dump(mode="json"),
@@ -305,6 +301,7 @@ def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
 
 def _handle_processing_requeue(
     *,
+    db: Session,
     monitored_id: str,
     collect_outcome: str | None,
     reason: str,
@@ -326,58 +323,57 @@ def _handle_processing_requeue(
         and next_retry_at is None
     )
 
-    with SessionLocal() as db:
-        monitored = _load_monitored(db, monitored_id)
-        if monitored is None:
-            logger.warning(
-                "continuous_processing_missing",
-                monitored_id=monitored_id,
-                reason="monitored_missing",
-                trace_id=trace_id,
-            )
-            queue.mark_as_done([monitored_id])
-            return
-
-        if _should_skip_requeue(monitored, normalized_reason):
-            try:
-                queue.remove_from_collection(UUID(monitored_id), source="continuous_requeue_blocked")
-            except Exception:
-                queue.mark_as_done([monitored_id])
-            logger.warning(
-                "continuous_processing_blocked",
-                monitored_id=monitored_id,
-                reason=normalized_reason,
-                status=monitored.status,
-                trace_id=trace_id,
-            )
-            return
-
-        schedule_reason: str
-        schedule_source: str
-        if success_without_explicit_retry:
-            scheduling_next_check_at, _ = _resolve_next_check_at(monitored, monitored.next_check_at)
-            schedule_reason = "persisted_next_check_at"
-            schedule_source = "requeue_from_persisted_schedule"
-        else:
-            resolved_next_check_at, now = _resolve_next_check_at(monitored, next_retry_at)
-            scheduling = calculate_schedule(
-                monitored,
-                reference_time=now,
-                event_type=EVENT_RETRY,
-                retry_context=RetryContext(
-                    reason=normalized_reason,
-                    next_retry_at=resolved_next_check_at,
-                ),
-            )
-            scheduling_next_check_at = scheduling.next_check_at
-            schedule_reason = scheduling.reason
-            schedule_source = "requeue_from_retry_policy"
-
-        requeued, effective_next_check_at = _requeue_monitored(
-            monitored=monitored,
-            next_check_at=scheduling_next_check_at,
-            queue=queue,
+    monitored = _load_monitored(db, monitored_id)
+    if monitored is None:
+        logger.warning(
+            "continuous_processing_missing",
+            monitored_id=monitored_id,
+            reason="monitored_missing",
+            trace_id=trace_id,
         )
+        queue.mark_as_done([monitored_id])
+        return
+
+    if _should_skip_requeue(monitored, normalized_reason):
+        try:
+            queue.remove_from_collection(UUID(monitored_id), source="continuous_requeue_blocked")
+        except Exception:
+            queue.mark_as_done([monitored_id])
+        logger.warning(
+            "continuous_processing_blocked",
+            monitored_id=monitored_id,
+            reason=normalized_reason,
+            status=monitored.status,
+            trace_id=trace_id,
+        )
+        return
+
+    schedule_reason: str
+    schedule_source: str
+    if success_without_explicit_retry:
+        scheduling_next_check_at, _ = _resolve_next_check_at(monitored, monitored.next_check_at)
+        schedule_reason = "persisted_next_check_at"
+        schedule_source = "requeue_from_persisted_schedule"
+    else:
+        resolved_next_check_at, now = _resolve_next_check_at(monitored, next_retry_at)
+        scheduling = calculate_schedule(
+            monitored,
+            reference_time=now,
+            event_type=EVENT_RETRY,
+            retry_context=RetryContext(
+                reason=normalized_reason,
+                next_retry_at=resolved_next_check_at,
+            ),
+        )
+        scheduling_next_check_at = scheduling.next_check_at
+        schedule_reason = scheduling.reason
+        schedule_source = "requeue_from_retry_policy"
+
+    requeued, effective_next_check_at = _requeue_monitored(
+        monitored=monitored,
+        next_check_at=scheduling_next_check_at,
+        queue=queue,
+    )
 
     if requeued:
         queue.mark_as_done([monitored_id])

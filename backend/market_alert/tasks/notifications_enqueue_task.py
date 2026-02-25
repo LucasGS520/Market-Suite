@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import structlog
 
+from shared.infra.db import SessionLocal
 from shared.utils.trace_context import set_trace_id
 
 from market_alert.core.celery_app import celery_app
@@ -25,7 +26,9 @@ def enqueue_notifications_task(self, notification_ids: list[str] | None = None) 
     para ``services_notifications.enqueue_pending_notifications()``.
     """
     set_trace_id(self.request.id or "")
-    return enqueue_pending_notifications(
-        notification_ids,
-        trace_id=self.request.id,
-    )
+    with SessionLocal() as db:
+        return enqueue_pending_notifications(
+            db,
+            notification_ids,
+            trace_id=self.request.id,
+        )

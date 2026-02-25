@@ -139,13 +139,17 @@ def compare_prices_task(
                 trace_id=resolved_trace_id,
                 source="compare_prices_task",
             )
-
-        if notification_ids:
-            enqueue_pending_notifications(notification_ids, trace_id=resolved_trace_id)
-            task_logger.info(
-                "compare_prices_notifications_enqueued",
-                count=len(notification_ids),
-            )
+            
+            if notification_ids:
+                enqueue_pending_notifications(
+                    db,
+                    notification_ids,
+                    trace_id=resolved_trace_id,
+                )
+                task_logger.info(
+                    "compare_prices_notifications_enqueued",
+                    count=len(notification_ids),
+                )
 
     except Exception as exc:
         has_error = True
