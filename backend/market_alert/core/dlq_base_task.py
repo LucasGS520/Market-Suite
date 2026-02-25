@@ -65,6 +65,9 @@ class DLQTask(Task):
             #Fallback para tarefas que propagam trace_id somente via headers.
             request_headers = getattr(self.request, "headers", None) or {}
             trace_id = request_headers.get("trace_id")
+        if trace_id is None:
+            #Último fallback: usa o id da requisição Celery para não perder correlação.
+            trace_id = getattr(self.request, "id", None)
 
         try:
             self.app.send_task(
