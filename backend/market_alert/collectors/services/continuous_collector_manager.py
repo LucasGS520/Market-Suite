@@ -39,7 +39,7 @@ from shared.utils.redis_locks import (
 
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.orchestrator.collection_queue import CollectionQueue
+from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.utils.collector_result import _parse_collect_result
 from market_alert.utils.continuous_dispatch import (
     CollectDispatchDecision,
@@ -60,7 +60,7 @@ logger = structlog.get_logger("continuous_collector_manager")
 # Chaves Redis usadas pelo gerenciador
 _AUTOSTART_KEY = "market_alert:continuous_collector:autostart"
 _COOLDOWN_KEY = "market_alert:continuous_collector:autostart:cooldown"
-_TASK_NAME = "market_alert.tasks.continuous_collector_task.run_continuous_collector"
+_TASK_NAME = "market_alert.collectors.tasks.continuous_collector_task.run_continuous_collector"
 _MONITOR_QUEUE = "monitor"
 
 # Referência ao monotonic de início do processo, injetada por `celery_app.py`

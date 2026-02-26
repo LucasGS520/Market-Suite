@@ -17,8 +17,8 @@ from kombu import Exchange, Queue
 
 #Módulos de tasks carregados pelo worker
 TASK_MODULES = [
-    "market_alert.tasks.collector_product_task",
-    "market_alert.tasks.continuous_collector_task",
+    "market_alert.collectors.tasks.collector_product_task",
+    "market_alert.collectors.tasks.continuous_collector_task",
     "market_alert.tasks.compare_prices_task",
     "market_alert.tasks.notifications_enqueue_task",
     "market_alert.tasks.send_notification_task",
@@ -46,11 +46,11 @@ TASK_QUEUES = (
 
 #Roteamento explícito para manter cada domínio em sua fila
 TASK_ROUTES = {
-    "market_alert.tasks.collector_product_task.collect_product_task": {
+    "market_alert.collectors.tasks.collector_product_task.collect_product_task": {
         "queue": "scraping",
         "routing_key": "scraping",
     },
-    "market_alert.tasks.continuous_collector_task.run_continuous_collector": {
+    "market_alert.collectors.tasks.continuous_collector_task.run_continuous_collector": {
         "queue": "monitor",
         "routing_key": "monitor",
     },

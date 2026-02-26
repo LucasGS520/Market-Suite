@@ -14,7 +14,7 @@ import structlog
 from shared.infra.db import SessionLocal
 
 from market_alert.core.celery_app import celery_app
-from market_alert.services.continuous_collector_manager import (
+from market_alert.collectors.services.continuous_collector_manager import (
     finalize_processing_requeue as _finalize_processing_requeue,
     finalize_processing_requeue_error as _finalize_processing_requeue_error,
     run_collection_loop,
@@ -24,7 +24,7 @@ from market_alert.services.continuous_collector_manager import (
 logger = structlog.get_logger("continuous_collector_task")
 
 @celery_app.task(
-    name="market_alert.tasks.continuous_collector_task.finalize_processing_requeue",
+    name="market_alert.collectors.tasks.continuous_collector_task.finalize_processing_requeue",
     queue="monitor",
 )
 def finalize_processing_requeue(
@@ -44,7 +44,7 @@ def finalize_processing_requeue(
 
 
 @celery_app.task(
-    name="market_alert.tasks.continuous_collector_task.finalize_processing_requeue_error",
+    name="market_alert.collectors.tasks.continuous_collector_task.finalize_processing_requeue_error",
     queue="monitor",
 )
 def finalize_processing_requeue_error(
@@ -66,7 +66,7 @@ def finalize_processing_requeue_error(
 
 @celery_app.task(
     bind=True,
-    name="market_alert.tasks.continuous_collector_task.run_continuous_collector",
+    name="market_alert.collectors.tasks.continuous_collector_task.run_continuous_collector",
     queue="monitor",
     acks_late=True,
     autoretry_for=(Exception,),

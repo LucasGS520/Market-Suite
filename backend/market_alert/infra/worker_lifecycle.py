@@ -43,7 +43,7 @@ def register_worker_signals(celery_app: Celery, process_start_monotonic: float) 
         Delega inteiramente para ``continuous_collector_manager``, mantendo
         este arquivo livre de detalhes de coleta.
         """
-        from market_alert.services.continuous_collector_manager import (
+        from market_alert.collectors.services.continuous_collector_manager import (
             request_start,
             set_process_start_monotonic,
             start_revalidation_loop,

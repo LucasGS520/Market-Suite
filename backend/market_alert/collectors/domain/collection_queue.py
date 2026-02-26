@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 from uuid import UUID
 
-from market_alert.services.services_priority_queue import (
+from market_alert.collectors.services.services_priority_queue import (
     PriorityQueueService,
     enqueue_monitored_at,
     enqueue_monitored_now,

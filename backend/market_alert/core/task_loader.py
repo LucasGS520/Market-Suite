@@ -27,7 +27,7 @@ def load_task_modules(task_modules: list[str]) -> None:
 
     Args:
         task_modules: Lista de caminhos de módulo Python (ex.:
-            ``['market_alert.tasks.collector_product_task', ...]``) —
+            ``['market_alert.collectors.tasks.collector_product_task', ...]``) —
             normalmente vinda de ``celery_schedule.TASK_MODULES``.
     """
     failed_modules: list[str] = []

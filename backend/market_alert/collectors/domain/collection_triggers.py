@@ -16,7 +16,7 @@ Comentário de arquitetura:
 
 Uso em ``collect_product()``::
 
-    from market_alert.orchestrator.collection_triggers import trigger_comparison_if_needed
+    from market_alert.colectors.domain.collection_triggers import trigger_comparison_if_needed
 
     triggered = trigger_comparison_if_needed(
         monitored_id=monitored_id,

@@ -40,8 +40,8 @@ from market_alert.crud.crud_competitor import (
 from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
 from market_alert.services.services_products import build_competitor_response
 from market_alert.services.services_access import ensure_user_can_access_monitored
-from market_alert.orchestrator.collection_queue import CollectionQueue
-from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
+from market_alert.collectors.domain.collection_queue import CollectionQueue
+from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.domain.product_lifecycle import compute_next_check_at
 from market_alert.utils.interval_calculator_products import EVENT_STANDARD

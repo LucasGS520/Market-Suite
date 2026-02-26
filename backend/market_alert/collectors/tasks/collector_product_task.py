@@ -39,8 +39,8 @@ from market_alert.crud.crud_competitor import (
     get_competitor_by_id,
     update_competitor_pause_state,
 )
-from market_alert.services.services_scraper_competitor import scrape_competitor_product
-from market_alert.services.services_scraper_monitored import scrape_monitored_product
+from market_alert.collectors.services.services_scraper_competitor import scrape_competitor_product
+from market_alert.collectors.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.infra.celery.retry_policies import RetryPolicy
 from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
@@ -282,7 +282,7 @@ def collect_product(
 @celery_app.task(
     bind=True,
     base=DLQTask,
-    name="market_alert.tasks.collector_product_task.collect_product_task",
+    name="market_alert.collectors.tasks.collector_product_task.collect_product_task",
     queue="scraping",
     **COLLECTION_RETRY,
 )

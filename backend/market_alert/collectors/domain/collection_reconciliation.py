@@ -37,7 +37,7 @@ from shared.utils.redis_client import get_redis_client
 
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import MonitoredProduct
-from market_alert.orchestrator.collection_queue import CollectionQueue
+from market_alert.collectors.domain.collection_queue import CollectionQueue
 
 
 logger = logging.getLogger(__name__)

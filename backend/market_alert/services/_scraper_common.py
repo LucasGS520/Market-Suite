@@ -240,7 +240,7 @@ def handle_not_modified_response(
         if entity_type == "monitored":
             try:
                 #Import local evita acoplamento forte entre serviços durante bootstrap.
-                from market_alert.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+                from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
 
                 enqueue_competitors_for_monitored(db, monitored_id=entity.id)
             except Exception:

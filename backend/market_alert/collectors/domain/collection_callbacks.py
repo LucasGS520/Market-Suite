@@ -1,4 +1,4 @@
-"""Callbacks padronizados para o ciclo de vida de coletas.
+""" Callbacks padronizados para o ciclo de vida de coletas.
 
 ``CollectionCallbacks`` centraliza o que acontece após uma coleta terminar —
 seja com sucesso ou erro. Toda lógica de reenfileiramento pós-coleta deve
@@ -33,7 +33,7 @@ import logging
 from datetime import datetime
 from uuid import UUID
 
-from market_alert.orchestrator.collection_queue import CollectionQueue
+from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.infra.celery.retry_policies import RetryPolicy
 from market_alert.utils.continuous_dispatch import (
     _handle_processing_requeue,
