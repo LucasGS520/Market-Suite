@@ -45,16 +45,16 @@ from market_alert.schemas.schemas_comparisons import (
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
 )
-from market_alert.services.services_comparison_calculator import (
+from market_alert.comparisons.services.services_comparison_calculator import (
     apply_summary_defaults,
     compute_summary_from_payload,
     rebuild_summary_from_current_state,
     resolve_monitored_inactive_reason,
     summarize_comparison,
 )
-from market_alert.utils.comparison_utils import load_monitored_and_competitors
-from market_alert.utils.price_comparator import compare_prices
-from market_alert.utils.snapshot_comparator import extract_material_snapshot, snapshot_has_changed
+from market_alert.comparisons.utils.comparison_utils import load_monitored_and_competitors
+from market_alert.comparisons.utils.price_comparator import compare_prices
+from market_alert.comparisons.utils.snapshot_comparator import extract_material_snapshot, snapshot_has_changed
 from market_alert.core.config_alert import settings
 
 

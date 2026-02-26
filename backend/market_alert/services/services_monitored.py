@@ -34,12 +34,12 @@ from market_alert.schemas.schemas_products import (
 )
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.services.services_products import build_monitored_response
-from market_alert.services.services_comparison import (
+from market_alert.comparisons.services.services_comparison import (
     persist_rebuilt_summary_if_needed,
     rebuild_summary_from_current_state,
 )
-from market_alert.services.services_comparison_calculator import extract_competitors_count as _extract_competitors_count
-from market_alert.utils.comparison_utils import should_refresh_competitors_count as _should_refresh_competitors_count
+from market_alert.comparisons.services.services_comparison_calculator import extract_competitors_count as _extract_competitors_count
+from market_alert.comparisons.utils.comparison_utils import should_refresh_competitors_count as _should_refresh_competitors_count
 
 
 logger = structlog.get_logger("monitored_service")

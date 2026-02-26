@@ -44,7 +44,7 @@ from market_alert.collectors.services.services_scraper_monitored import scrape_m
 from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.infra.celery.retry_policies import RetryPolicy
 from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
-from market_alert.utils.price_comparator import _parse_force_compare_, schedule_comparison_after_commit
+from market_alert.comparisons.utils.price_comparator import _parse_force_compare_, schedule_comparison_after_commit
 from market_alert.utils.collector_result import (
     INVALID_URL_ERRORS_CODES,
     _extract_host,

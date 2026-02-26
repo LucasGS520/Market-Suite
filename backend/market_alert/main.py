@@ -21,7 +21,7 @@ from market_alert.routes.routes_users import router as users_router
 from market_alert.routes.routes_monitored import router as monitored_router
 from market_alert.routes.routes_competitors import router as competitor_router
 from market_alert.routes.routes_dashboard import router as dashboard_router
-from market_alert.routes.routes_comparisons import router as comparisons_router
+from market_alert.comparisons.routes.routes_comparisons import router as comparisons_router
 from market_alert.routes.routes_health import router as health_router
 from market_alert.routes.routes_notifications import router as notifications_router
 from market_alert.routes.routes_settings import router as settings_router

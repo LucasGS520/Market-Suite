@@ -19,7 +19,7 @@ from market_alert.crud.crud_competitor import (
     get_competitor_by_monitored_and_url,
 )
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.utils.price_comparator import request_comparison_recompute
+from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 from market_alert.services._scraper_common import (
     execute_scraper_fetch,

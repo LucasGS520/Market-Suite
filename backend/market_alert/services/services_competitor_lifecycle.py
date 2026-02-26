@@ -46,7 +46,7 @@ from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_
 from market_alert.domain.product_lifecycle import compute_next_check_at
 from market_alert.utils.interval_calculator_products import EVENT_STANDARD
 from market_alert.core.config_alert import settings
-from market_alert.utils.price_comparator import request_comparison_recompute
+from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
 
 from shared.utils.url_validation import normalize_and_validate_product_url
 

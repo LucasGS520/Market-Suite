@@ -27,15 +27,12 @@ import structlog
 
 from sqlalchemy.orm import Session
 
-from market_alert.domain.price_competitiveness import (
-    CompetitivenessThresholds,
-    determine_competitiveness_status,
-)
+from market_alert.comparisons.domain.price_competitiveness import CompetitivenessThresholds, determine_competitiveness_status
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.utils.comparison_utils import filter_competitors_for_comparison
+from market_alert.comparisons.utils.comparison_utils import filter_competitors_for_comparison
 from market_alert.utils.price_decimal import to_decimal
 from market_alert.core.config_alert import settings
 

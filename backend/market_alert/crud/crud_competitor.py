@@ -21,7 +21,7 @@ from market_alert.domain.product_lifecycle import update_competitor_price_change
 from market_alert.utils.name_derivation import derive_name_from_url, prepare_effective_name, should_replace_with_scraped
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 from market_alert.utils.price_decimal import to_decimal, different_price
-from market_alert.utils.price_comparator import resolve_recompute_reason
+from market_alert.comparisons.utils.price_comparator import resolve_recompute_reason
 
 
 logger = structlog.get_logger("crud_competitor")

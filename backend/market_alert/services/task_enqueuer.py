@@ -26,7 +26,7 @@ from market_alert.core.celery_app import celery_app
 
 logger = structlog.get_logger("task_enqueuer")
 
-_COMPARE_TASK = "market_alert.tasks.compare_prices_task.compare_prices_task"
+_COMPARE_TASK = "market_alert.comparisons.tasks.compare_prices_task.compare_prices_task"
 _NOTIFICATION_TASK = "market_alert.tasks.send_notification_task.send_notification_task"
 _COMPARE_QUEUE = "compare"
 _NOTIFICATION_QUEUE = "notifications"

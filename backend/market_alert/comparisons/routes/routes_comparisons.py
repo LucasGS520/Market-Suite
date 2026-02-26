@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from shared.infra.db import get_db
+
 from market_alert.models import User
 from market_alert.schemas.schemas_comparisons import (
     PaginatedPriceComparisonResponse,
@@ -13,11 +14,7 @@ from market_alert.schemas.schemas_comparisons import (
     PriceComparisonSummaryResponse,
 )
 from market_alert.core.security import get_current_user
-from market_alert.services.services_comparison import(
-    get_comparison_detail_for_user,
-    get_comparison_summary_for_user,
-    get_paginated_comparisons_for_user,
-)
+from market_alert.comparisons import services as comparison_services
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
@@ -52,7 +49,7 @@ def list_comparisons(
         per_page=per_page,
     )
 
-    response = get_paginated_comparisons_for_user(
+    response = comparison_services.get_paginated_comparisons_for_user(
         db=db,
         monitored_id=monitored_id,
         user=user,
@@ -74,7 +71,7 @@ def get_comparison_summary(request: Request, monitored_id: UUID, db: Session = D
     """ Retorna o resumo agregado da última comparação executada para o produto monitorado """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_id))
 
-    summary = get_comparison_summary_for_user(
+    summary = comparison_services.get_comparison_summary_for_user(
         db=db,
         monitored_id=monitored_id,
         user=user,
@@ -88,7 +85,7 @@ def get_comparison(request: Request, comparison_id: UUID, db: Session = Depends(
     """ Obtém os detalhes de uma comparação específica """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), comparison_id=str(comparison_id))
 
-    comparison = get_comparison_detail_for_user(
+    comparison = comparison_services.get_comparison_detail_for_user(
         db=db,
         comparison_id=comparison_id,
         user=user,

@@ -33,7 +33,7 @@ from uuid import UUID
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from market_alert.schemas.schemas_collection_payload import CollectionPayload
-from market_alert.utils.price_comparator import (
+from market_alert.comparisons.utils.price_comparator import (
     _parse_force_compare_,
     dispatch_comparison_for_scrape_result,
 )

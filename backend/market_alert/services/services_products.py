@@ -135,7 +135,7 @@ def build_monitored_response(
         else:
             #summary é um objeto ORM PriceComparisonSummary (possui .aggregates)
             #Reutiliza a normalização padrão para evitar formatos divergentes no frontend
-            from market_alert.services.services_comparison import summarize_comparison
+            from market_alert.comparisons.services.services_comparison import summarize_comparison
 
             normalized_summary = summarize_comparison(
                 None,

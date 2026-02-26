@@ -19,7 +19,7 @@ from kombu import Exchange, Queue
 TASK_MODULES = [
     "market_alert.collectors.tasks.collector_product_task",
     "market_alert.collectors.tasks.continuous_collector_task",
-    "market_alert.tasks.compare_prices_task",
+    "market_alert.comparisons.tasks.compare_prices_task",
     "market_alert.tasks.notifications_enqueue_task",
     "market_alert.tasks.send_notification_task",
     "market_alert.tasks.verification_tasks",
@@ -54,7 +54,7 @@ TASK_ROUTES = {
         "queue": "monitor",
         "routing_key": "monitor",
     },
-    "market_alert.tasks.compare_prices_task.compare_prices_task": {
+    "market_alert.comparisons.tasks.compare_prices_task.compare_prices_task": {
         "queue": "compare",
         "routing_key": "compare",
     },
