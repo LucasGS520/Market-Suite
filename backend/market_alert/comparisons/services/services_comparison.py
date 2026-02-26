@@ -38,7 +38,7 @@ from market_alert.schemas.schemas_comparisons import (
 )
 from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
-from market_alert.crud.crud_comparison import (
+from market_alert.comparisons.crud.crud_comparison import (
     create_price_comparison,
     get_comparison_by_id,
     get_latest_summary,

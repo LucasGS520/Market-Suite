@@ -48,7 +48,7 @@ from market_alert.products.crud.crud_monitored import (
     MonitoredNotFoundError,
     MonitoredOwnershipError,
 )
-from market_alert.crud.crud_comparison import get_latest_summary
+from market_alert.comparisons.crud.crud_comparison import get_latest_summary
 from market_alert.products.services.services_products import build_monitored_response
 from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
