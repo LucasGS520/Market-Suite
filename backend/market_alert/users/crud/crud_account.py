@@ -1,59 +1,50 @@
-""" Funções de acesso e manipulação de usuários """
+""" Operações de persistência para gestão de contas de usuário """
 
-import structlog
 from uuid import UUID
 from datetime import datetime, timezone
+
+import structlog
+from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
 
-from market_alert.enums.enums_users import UserStatus
 from market_alert.models.models_users import User
-from market_alert.schemas.schemas_users import UserResponse, UserCreate, UserUpdate
+from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpdate
+from market_alert.enums.enums_users import UserStatus
 
 
-logger = structlog.get_logger("crud.user")
+logger = structlog.get_logger("users.crud.account")
 
 def get_user_by_email(db: Session, email: str) -> User | None:
-    """ Busca um usuário pelo email """
+    """ Busca usuário por e-mail """
     user = db.query(User).filter(User.email == email).first()
     logger.debug("get_user_by_email", email=email, found=bool(user))
     return user
 
 def get_user_by_phone(db: Session, phone_number: str) -> User | None:
-    """ Busca um usuário pelo número de telefone """
+    """ Busca usuário por telefone """
     user = db.query(User).filter(User.phone_number == phone_number).first()
     logger.debug("get_user_by_phone", phone_number=phone_number, found=bool(user))
     return user
 
 def get_user_by_id(db: Session, user_id: UUID) -> User:
-    """ Obtém um usuário pelo ID ou dispara 404 se não encontrado """
+    """ Obtém usuário por ID ou lança 404 se não encontrado """
     user = db.get(User, user_id)
     if not user:
         logger.warning("get_user_by_id_not_found", user_id=str(user_id))
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuário não encontrado")
-    logger.debug("get_user_by_id", user_id=str(user_id))
     return user
 
-
 def create_user(db: Session, user_data: UserCreate) -> UserResponse:
-    """ Cria um usuário realizando validações básicas """
-    logger.info("create_user_called", email=user_data.email)
+    """ Cria usuário pendente com validações de unicidade """
     try:
-        #Verifica se o email já existe no banco
-        existing_user = db.query(User).filter(User.email == user_data.email).first()
-        if existing_user:
-            logger.warning("email_in_use", email=user_data.email)
-            raise HTTPException(status_code=400, detail="E-mail já cadastrado")
+        #Verifica se o email ou telefone já estão em uso antes de criar o usuário
+        if get_user_by_email(db, user_data.email):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="E-mail já cadastrado")
+        if user_data.phone_number and get_user_by_phone(db, user_data.phone_number):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Telefone já cadastrado")
 
-        #Verifica se o telefone já esta cadastrado
-        if user_data.phone_number:
-            existing_phone = db.query(User).filter(User.phone_number == user_data.phone_number).first()
-            if existing_phone:
-                logger.warning("phone_in_use", phone=user_data.phone_number)
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Telefone já cadastrado")
-
-        #Cria o usuário com senha hasheada
+        #Cria um usuário novo com senha hasheada
         new_user = User(
             name=user_data.name,
             email=user_data.email,
@@ -65,32 +56,29 @@ def create_user(db: Session, user_data: UserCreate) -> UserResponse:
             role="user",
             failed_attempts=0,
         )
-        new_user.set_password(user_data.password) #Armazena a senha corretamente
+        new_user.set_password(user_data.password)
 
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-
-        logger.info("user_created", user_id=str(new_user.id))
         return UserResponse.model_validate(new_user)
-
+    
     except HTTPException as exc:
         db.rollback()
-        #Preserva a semântica de validação para evitar mascarar erros HTTP esperados
         raise exc
 
     except IntegrityError:
-        db.rollback()  #Reverte a transação caso haja erro de integridade
+        db.rollback()
         logger.exception("integrity_error_create_user", email=user_data.email)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Erro de integridade: E-mail ou telefone já cadastrados")
-
+    
     except Exception:
         db.rollback()
         logger.exception("unexpected_error_create_user", email=user_data.email)
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro interno durante criação de usuário")
 
 def update_user(db: Session, user_id: UUID, updates: UserUpdate) -> UserResponse:
-    """ Atualiza os Dados de um usuário existente """
+    """ Atualiza dados do usuário existente """
     user = get_user_by_id(db, user_id)
     update_data = updates.model_dump(exclude_unset=True)
     logger.info("update_user_called", user_id=str(user_id), updates=update_data)
@@ -117,9 +105,9 @@ def update_user_profile(
     phone_number_verified: bool | None = None,
     updated_by: UUID | None = None,
 ) -> User:
-    """ Atualiza o perfil do usuário autenticado com auditoria de campos """
+    """ Atualiza perfil do usuário autenticado com rastreio de alterações """
     changes: dict[str, object] = {}
-
+    
     if name is not None and name != user.name:
         changes["name"] = name
         user.name = name
@@ -127,19 +115,19 @@ def update_user_profile(
     if email is not None and email != user.email:
         changes["email"] = {"from": user.email, "to": email}
         user.email = email
-
+    
     if phone_number is not None and phone_number != user.phone_number:
         changes["phone_number"] = {"from": user.phone_number, "to": phone_number}
         user.phone_number = phone_number
-
+    
     if email_verified is not None and email_verified != user.email_verified:
         changes["email_verified"] = {"from": user.email_verified, "to": email_verified}
         user.email_verified = email_verified
-
+    
     if phone_number_verified is not None and phone_number_verified != user.phone_number_verified:
         changes["phone_number_verified"] = {"from": user.phone_number_verified, "to": phone_number_verified}
         user.phone_number_verified = phone_number_verified
-
+    
     if updated_by:
         user.updated_by = updated_by
 
@@ -153,7 +141,7 @@ def update_user_profile(
     return user
 
 def toggle_user_active(db: Session, user_id: UUID, active: bool) -> UserResponse:
-    """ Ativa ou Desativa um usuário """
+    """ Ativa ou suspende um usuário """
     user = get_user_by_id(db, user_id)
     user.is_active = active
     user.status = UserStatus.active if active else UserStatus.suspended
@@ -162,7 +150,7 @@ def toggle_user_active(db: Session, user_id: UUID, active: bool) -> UserResponse
     return UserResponse.model_validate(user)
 
 def set_email_verified(db: Session, user: User) -> User:
-    """ Marca o email como verificado e atualiza timestamp """
+    """ Marca e-mail como verificado """
     user.email_verified = True
     user.email_verified_at = datetime.now(timezone.utc)
     db.commit()
@@ -171,7 +159,7 @@ def set_email_verified(db: Session, user: User) -> User:
     return user
 
 def set_phone_verified(db: Session, user: User) -> User:
-    """ Marca o telefone como verificado e atualiza timestamp """
+    """ Marca telefone como verificado """
     user.phone_number_verified = True
     user.phone_verified_at = datetime.now(timezone.utc)
     db.commit()
@@ -180,7 +168,7 @@ def set_phone_verified(db: Session, user: User) -> User:
     return user
 
 def set_status(db: Session, user: User, status: UserStatus) -> User:
-    """ Ajusta o status da conta """
+    """ Atualiza status de ciclo de vida da conta """
     user.status = status
     db.commit()
     db.refresh(user)

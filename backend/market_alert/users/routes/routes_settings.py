@@ -1,10 +1,11 @@
-""" Rotas HTTP para configurações unificadas do usuário """
+""" Rotas de preferências e configurações de usuário """
 
 import structlog
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
+
 from market_alert.core.security import get_current_user
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_settings import (
@@ -14,17 +15,17 @@ from market_alert.schemas.schemas_settings import (
     SettingsProfileUpdate,
     SettingsProfileUpdateResponse,
 )
-from market_alert.services.services_settings import (
+from market_alert.users.services import (
+    get_notification_settings,
     get_profile_settings,
     get_settings_overview,
-    get_notification_settings,
-    update_profile_settings,
     update_notification_settings,
+    update_profile_settings,
 )
 
 
 router = APIRouter(prefix="/settings", tags=["Configurações"])
-logger = structlog.get_logger("route.settings")
+logger = structlog.get_logger("users.routes.settings")
 
 @router.get("", response_model=SettingsOverviewResponse)
 def get_settings_summary(
@@ -37,6 +38,7 @@ def get_settings_summary(
     response = get_settings_overview(db, current_user)
     logger.info("route_completed", path = request.url.path, method=request.method, status="success", user_id=str(current_user.id))
     return response
+
 
 @router.get("/profile", response_model=SettingsProfileResponse)
 def get_profile(

@@ -1,4 +1,4 @@
-""" Operações de CRUD para tokens de verificação """
+""" Operações de persistência para tokens e OTPs de verificação """
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ import structlog
 from sqlalchemy.orm import Session
 
 from market_alert.core.tokens import hash_token
-from market_alert.enums.enums_users import VerificationKind
 from market_alert.models.models_verification import Verification
+from market_alert.enums.enums_users import VerificationKind
 
 
-logger = structlog.get_logger("crud.verification")
+logger = structlog.get_logger("users.crud.identity")
 
 def create_verification(
     db: Session,
@@ -25,7 +25,7 @@ def create_verification(
     attempts_remaining: int | None = None,
     metadata: dict | None = None,
 ) -> Verification:
-    """ Cria um registro de verificação com token hasheado """
+    """ Cria verificação com token hasheado para segurança em repouso """
     token_hash = hash_token(raw_token)
     verification = Verification(
         user_id=user_id,
@@ -49,7 +49,7 @@ def create_verification(
     return verification
 
 def get_active_by_user(db: Session, user_id: UUID, kind: VerificationKind) -> Verification | None:
-    """ Recupera o token ativo mais recente de um usuário """
+    """ Obtém token ativo mais recente por usuário e tipo """
     now = datetime.now(timezone.utc)
     return (
         db.query(Verification)
@@ -68,7 +68,7 @@ def consume_verification(
     raw_token: str,
     user_id: UUID | None = None,
 ) -> Verification | None:
-    """ Marca um token como consumido quando válido """
+    """ Consome token válido e impede reutilização """
     now = datetime.now(timezone.utc)
     token_hash = hash_token(raw_token)
     query = (
@@ -95,7 +95,7 @@ def consume_verification(
     return verification
 
 def increment_attempts(db: Session, verification: Verification) -> Verification:
-    """ Incrementa tentativas e reduz saldo restante para OTP """
+    """ Incrementa tentativas inválidas e reduz saldo restante do OTP """
     verification.attempts += 1
     if verification.attempts_remaining is not None:
         verification.attempts_remaining = max(verification.attempts_remaining - 1, 0)

@@ -1,57 +1,41 @@
-""" Rotas HTTP para gerenciamento de usuários com autenticação e autorização """
+""" Rotas de gestão de conta de usuários """
 
-import re
-import structlog
 from uuid import UUID
+
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
-from market_alert.schemas.schemas_users import (
-    UserCreate,
-    UserResponse,
-    UserUpdate,
-    VerificationResendRequest,
-)
-from market_alert.models.models_users import User
+
 from market_alert.core.security import get_current_user
-from market_alert.services.services_users import (
+from market_alert.models.models_users import User
+from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpdate
+from market_alert.users.services import (
     change_user_status,
+    read_my_profile,
     register_user,
-    resend_verification,
     update_user as service_update_user,
+    validate_phone_number,
 )
 
 
-router = APIRouter(prefix="/users", tags=["Usuários"]) #Cria um agrupador/organizador de rotas
-logger = structlog.get_logger("http_route")
+router = APIRouter(prefix="/users", tags=["Usuários"])
+logger = structlog.get_logger("users.routes.account")
 
 def _validate_admin_permission(current_user: User) -> None:
-    """ Garante que apenas administradores executem operações de gestão de contas """
+    """ Restringe endpoints administrativos a contas com papel admin """
     if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permissão negada: apenas administradores"
-        )
-    
-def _validate_phone_number(phone_number: str | None) -> None:
-    """ Confirma se o telefone foi informado no padrão E.164 """
-    if phone_number and not re.fullmatch(r"\+?\d{10,15}", phone_number):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Número de telefone inválido"
-        )
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Permissão negada: apenas administradores")
 
-#Valida se o email já existe, cria o usuário e retorna os dados
 @router.post("/", response_model=UserResponse)
 def add_user(
     request: Request,
     user_data: UserCreate,
     db: Session = Depends(get_db)
 ):
-    """ Endpoint público para criar um usuário """
-    # Esta rota permanece aberta para permitir o cadastro inicial de usuários antes de qualquer autenticação
-    _validate_phone_number(user_data.phone_number)
+    """ Cadastra novo usuário e inicia verificações iniciais """
+    validate_phone_number(user_data.phone_number)
     logger.info(
         "route_called",
         path=request.url.path,
@@ -68,17 +52,16 @@ def change_status(
     user_id: UUID,
     active: bool,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """ Endpoint para ativar e desativar um usuário """
+    """ Ativa ou suspende conta alvo """
     _validate_admin_permission(current_user)
     logger.info(
         "route_called",
         path=request.url.path,
         method=request.method,
         target_user=str(user_id),
-        active=active,
-        actor_id=str(current_user.id),
+
     )
     user = change_user_status(db, user_id, active)
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(user.id))
@@ -90,11 +73,11 @@ def update_user(
     user_id: UUID,
     updates: UserUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """ Endpoint para atualizar usuário """
+    """ Atualiza dados administrativos do usuário """
     _validate_admin_permission(current_user)
-    _validate_phone_number(updates.phone_number)
+    validate_phone_number(updates.phone_number)
     logger.info(
         "route_called",
         path=request.url.path,
@@ -112,16 +95,3 @@ def read_my_profile(request: Request, current_user: User = Depends(get_current_u
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(current_user.id))
     logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(current_user.id))
     return current_user
-
-@router.post("/resend-verification")
-def resend_verification_tokens(
-    request: Request,
-    payload: VerificationResendRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """ Endpoint para reenviar tokens de verificação """
-    logger.info("route_called", path=request.url.path, method=request.method, user_id=str(current_user.id))
-    resend_verification(db, current_user, payload, request)
-    logger.info("route_completed", path=request.url.path, method=request.method, status="success", user_id=str(current_user.id))
-    return {"msg": "Verificação reenviada com sucesso."}

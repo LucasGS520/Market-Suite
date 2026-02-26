@@ -1,17 +1,17 @@
 """ Serviços relacionados à autenticação e gerenciamento de tokens """
 
-import structlog
 from uuid import uuid4
 from datetime import datetime, timezone
+
+import structlog
 from fastapi import HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from market_alert.crud.crud_refresh_token import create_refresh_token, get_refresh_token, revoke_refresh_token
-from market_alert.crud.crud_user import get_user_by_email, get_user_by_phone, get_user_by_id
 from market_alert.core.bruteforce import block_ip, reset_failed_attempts, record_failed_attempt
 from market_alert.core.config_alert import settings
 from market_alert.core.jwt import create_access_token
 from market_alert.core.tokens import generate_verification_token, generate_reset_token, token_expiry
+from market_alert.models.models_users import User
 from market_alert.schemas.schemas_auth import (
     ResetPasswordRequest,
     ResetPasswordConfirmRequest,
@@ -20,8 +20,9 @@ from market_alert.schemas.schemas_auth import (
     EmailTokenRequest,
 )
 from market_alert.schemas.schemas_auth import TokenPairResponse, RefreshRequest
-from market_alert.models.models_users import User
 from market_alert.enums.enums_users import UserStatus
+from market_alert.users.crud.crud_account import get_user_by_email, get_user_by_phone, get_user_by_id
+from market_alert.crud.crud_refresh_token import create_refresh_token, get_refresh_token, revoke_refresh_token
 
 
 logger = structlog.get_logger("service.auth")

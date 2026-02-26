@@ -17,14 +17,15 @@ from market_alert.core.logging_config import setup_api_logging
 from market_alert.infra.startup_validation import validate_startup_dependencies
 
 #Rotas
-from market_alert.routes.routes_users import router as users_router
+from market_alert.users.routes.routes_account import router as account_router
+from market_alert.users.routes.routes_identity import router as identity_router
+from market_alert.users.routes.routes_settings import router as settings_router
 from market_alert.products.routes.routes_monitored import router as monitored_router
 from market_alert.products.routes.routes_competitors import router as competitor_router
 from market_alert.routes.routes_dashboard import router as dashboard_router
 from market_alert.comparisons.routes.routes_comparisons import router as comparisons_router
 from market_alert.routes.routes_health import router as health_router
 from market_alert.routes.routes_notifications import router as notifications_router
-from market_alert.routes.routes_settings import router as settings_router
 
 #Rotas de auth
 from market_alert.auth.routes_auth.routes_login import router as login_router
@@ -80,7 +81,9 @@ def create_app() -> FastAPI:
 
 # ---------- REGISTRO DE ROTAS ----------
     #Usuários e administração
-    app.include_router(users_router)
+    app.include_router(account_router)
+    app.include_router(identity_router)
+    app.include_router(settings_router) 
 
     #Autenticação
     app.include_router(login_router)

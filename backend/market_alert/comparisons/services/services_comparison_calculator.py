@@ -18,13 +18,12 @@ Regras desta camada:
 from __future__ import annotations
 
 import json
+from uuid import UUID
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
-from uuid import UUID
 
 import structlog
-
 from sqlalchemy.orm import Session
 
 from market_alert.comparisons.domain.price_competitiveness import CompetitivenessThresholds, determine_competitiveness_status

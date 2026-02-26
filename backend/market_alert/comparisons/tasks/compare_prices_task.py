@@ -5,10 +5,10 @@ service layer, avalia notificações e enfileira o envio. Opera em sessão
 única — run_price_comparison commita internamente, permitindo reuso seguro.
 """
 
-import structlog
-
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
+
+import structlog
 
 from shared.infra.db import SessionLocal
 from shared.utils.trace_context import set_trace_id
@@ -16,7 +16,7 @@ from shared.utils.logging_utils import mask_identifier
 
 from market_alert.core.celery_app import celery_app
 from market_alert.core.retry_policies import COMPARISON_RETRY
-from market_alert.crud.crud_user import get_user_by_id
+from market_alert.users.crud.crud_account import get_user_by_id
 from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud import crud_price_history
 from market_alert.comparisons.services.services_comparison import run_price_comparison
