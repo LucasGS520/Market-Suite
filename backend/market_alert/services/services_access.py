@@ -6,9 +6,9 @@ import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from market_alert.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.models import User
 from market_alert.models.models_products import MonitoredProduct
+from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
 
 
 logger = structlog.get_logger(__name__)

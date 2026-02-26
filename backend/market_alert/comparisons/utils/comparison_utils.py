@@ -22,17 +22,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 import structlog
-
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from market_alert.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.models.models_products import CompetitorProduct
+from market_alert.models.models_comparisons import PriceComparisonSummary
+from market_alert.enums.enums_products import ProductStatus
+from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_comparison import get_latest_summary
 from market_alert.crud.crud_price_history import get_latest_price_for_competitor
-from market_alert.enums.enums_products import ProductStatus
-from market_alert.models.models_comparisons import PriceComparisonSummary
-from market_alert.models.models_products import CompetitorProduct
 from market_alert.utils.price_decimal import to_decimal
 
 

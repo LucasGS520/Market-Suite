@@ -16,9 +16,9 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from market_alert.models import User
-from market_alert.crud.crud_competitor import paginate_competitors
 from market_alert.schemas.schemas_products import CompetitorsListResponse
-from market_alert.services.services_products import build_competitor_response
+from market_alert.products.crud.crud_competitor import paginate_competitors
+from market_alert.products.services.services_products import build_competitor_response
 from market_alert.services.services_access import ensure_user_can_access_monitored
 
 

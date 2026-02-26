@@ -25,10 +25,14 @@ import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
+from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
+from shared.utils.url_validation import normalize_and_validate_product_url
+
+from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.crud.crud_competitor import (
+from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
+from market_alert.products.crud.crud_competitor import (
     count_competitors_by_monitored,
     create_pending_competitor_product,
     get_competitor_by_monitored_and_url,
@@ -37,18 +41,14 @@ from market_alert.crud.crud_competitor import (
     delete_competitor,
     delete_competitors_by_monitored_id,
 )
-from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
-from market_alert.services.services_products import build_competitor_response
+from backend.market_alert.products.services.services_products import build_competitor_response
 from market_alert.services.services_access import ensure_user_can_access_monitored
 from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
-from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.domain.product_lifecycle import compute_next_check_at
+from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import EVENT_STANDARD
-from market_alert.core.config_alert import settings
 from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
-
-from shared.utils.url_validation import normalize_and_validate_product_url
 
 
 logger = structlog.get_logger(__name__)

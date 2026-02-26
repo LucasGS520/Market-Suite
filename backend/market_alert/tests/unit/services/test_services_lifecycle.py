@@ -14,8 +14,8 @@ from backend.shared.schemas.shared_schemas_products import (
     CompetitorProductCreateScraping,
     MonitoredProductCreateScraping,
 )
-from market_alert.services import services_competitor_lifecycle as competitor_service
-from market_alert.services import services_monitored_lifecycle as monitored_service
+from market_alert.products.services import services_competitor_lifecycle as competitor_service
+from market_alert.products.services import services_monitored_lifecycle as monitored_service
 
 
 def test_create_monitored_product_orquestra_camadas_com_mocks(monkeypatch, db_session, user) -> None:

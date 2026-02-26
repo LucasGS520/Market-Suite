@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from market_alert.crud.crud_competitor import create_pending_competitor_product
-from market_alert.crud.crud_monitored import create_pending_monitored_product
+from market_alert.products.crud.crud_competitor import create_pending_competitor_product
+from market_alert.products.crud.crud_monitored import create_pending_monitored_product
 
 
 def test_create_pending_monitored_product_persiste_item(db_session, user) -> None:

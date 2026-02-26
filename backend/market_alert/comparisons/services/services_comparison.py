@@ -23,20 +23,11 @@ from typing import Any, Dict, List, Optional
 from decimal import Decimal
 
 import structlog
-
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
-from market_alert.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
-from market_alert.crud.crud_comparison import (
-    create_price_comparison,
-    get_comparison_by_id,
-    get_latest_summary,
-    paginate_comparisons,
-    upsert_price_comparison_summary,
-)
+from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct
@@ -44,6 +35,15 @@ from market_alert.schemas.schemas_comparisons import (
     PaginatedPriceComparisonResponse,
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
+)
+from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
+from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.crud.crud_comparison import (
+    create_price_comparison,
+    get_comparison_by_id,
+    get_latest_summary,
+    paginate_comparisons,
+    upsert_price_comparison_summary,
 )
 from market_alert.comparisons.services.services_comparison_calculator import (
     apply_summary_defaults,
@@ -55,7 +55,6 @@ from market_alert.comparisons.services.services_comparison_calculator import (
 from market_alert.comparisons.utils.comparison_utils import load_monitored_and_competitors
 from market_alert.comparisons.utils.price_comparator import compare_prices
 from market_alert.comparisons.utils.snapshot_comparator import extract_material_snapshot, snapshot_has_changed
-from market_alert.core.config_alert import settings
 
 
 logger = structlog.get_logger("comparison_service")

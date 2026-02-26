@@ -6,23 +6,23 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from shared.infra.db import get_db
-from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
+from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
 
+from market_alert.core.security import get_current_user
 from market_alert.models import User
-from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
     MonitoredProductResponse,
     PaginatedMonitoredProductsResponse,
     MonitoredScrapeCreationResponse,
 )
-from market_alert.core.security import get_current_user
-from market_alert.services.services_monitored import (
+from market_alert.enums.enums_comparisons import CompetitivenessStatus
+from market_alert.products.services.services_monitored import (
     get_monitored_product,
     list_featured_monitored_products,
     list_monitored_products as list_monitored_products_service,
 )
-from market_alert.services.services_monitored_lifecycle import (
+from market_alert.products.services.services_monitored_lifecycle import (
     create_monitored_product,
     delete_monitored_product_entry,
     update_monitored_pause_state,

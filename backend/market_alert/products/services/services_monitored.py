@@ -12,32 +12,26 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import structlog
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-import structlog
 
-from market_alert.crud.crud_monitored import (
-    get_all_monitored_products,
-    get_featured_monitored_products,
-    get_monitored_product_by_id,
-    get_last_price_change_for_monitored,
-)
-from market_alert.crud.crud_comparison import (
-    get_latest_summaries_for_products,
-    get_latest_summary,
-)
-from market_alert.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.schemas.schemas_products import (
     MonitoredProductResponse,
     PaginatedMonitoredProductsResponse,
     PaginationMeta,
 )
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.services.services_products import build_monitored_response
-from market_alert.comparisons.services.services_comparison import (
-    persist_rebuilt_summary_if_needed,
-    rebuild_summary_from_current_state,
+from backend.market_alert.products.crud.crud_monitored import (
+    get_all_monitored_products,
+    get_featured_monitored_products,
+    get_monitored_product_by_id,
+    get_last_price_change_for_monitored,
 )
+from backend.market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
+from market_alert.crud.crud_comparison import get_latest_summaries_for_products, get_latest_summary
+from backend.market_alert.products.services.services_products import build_monitored_response
+from market_alert.comparisons.services.services_comparison import persist_rebuilt_summary_if_needed, rebuild_summary_from_current_state
 from market_alert.comparisons.services.services_comparison_calculator import extract_competitors_count as _extract_competitors_count
 from market_alert.comparisons.utils.comparison_utils import should_refresh_competitors_count as _should_refresh_competitors_count
 

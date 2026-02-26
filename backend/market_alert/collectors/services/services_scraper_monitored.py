@@ -8,20 +8,24 @@ from uuid import UUID
 import structlog
 from sqlalchemy.orm import Session
 
-from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
-from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
-
-from shared.utils import sanitize_media_url, sanitize_text, extract_scraper_metadata
+from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.utils import (
+    sanitize_media_url,
+    sanitize_text,
+    extract_scraper_metadata,
+)
 from shared.utils.url_validation import normalize_product_url
 
 from market_alert.core.config_alert import settings
-from market_alert.crud.crud_monitored import (
-    create_or_update_monitored_product_scraped,
-    get_monitored_product_by_user_and_url,
-)
+from market_alert.products.crud.crud_monitored import create_or_update_monitored_product_scraped, get_monitored_product_by_user_and_url
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
-from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError, ScraperFetchResult
 from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
+from market_alert.scraper.scraper_client import (
+    ScraperClient,
+    ScraperClientError,
+    ScraperFetchResult,
+)
 from market_alert.services._scraper_common import (
     compute_force_refresh,
     ensure_price,

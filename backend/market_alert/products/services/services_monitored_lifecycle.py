@@ -24,15 +24,18 @@ from sqlalchemy.orm import Session
 import structlog
 from uuid import UUID, uuid4
 
-from backend.shared.schemas.shared_schemas_products import (
-    MonitoredProductCreateScraping,
-    CompetitorProductCreateScraping,
-)
+from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.config_alert import settings
-from market_alert.crud.crud_monitored import (
+from market_alert.models import MonitoredProduct, User
+from market_alert.schemas.schemas_products import (
+    MonitoredPausedUpdateRequest,
+    MonitoredProductResponse,
+    MonitoredScrapeCreationResponse,
+)
+from market_alert.products.crud.crud_monitored import (
     create_pending_monitored_product,
     get_monitored_product_by_user_and_url,
     get_monitored_product_by_id,
@@ -45,17 +48,11 @@ from market_alert.crud.crud_monitored import (
     MonitoredOwnershipError,
 )
 from market_alert.crud.crud_comparison import get_latest_summary
-from market_alert.models import MonitoredProduct, User
-from market_alert.schemas.schemas_products import (
-    MonitoredPausedUpdateRequest,
-    MonitoredProductResponse,
-    MonitoredScrapeCreationResponse,
-)
-from market_alert.services.services_products import build_monitored_response
+from market_alert.products.services.services_products import build_monitored_response
 from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
-from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.domain.product_lifecycle import compute_next_check_at
+from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import EVENT_STANDARD
 
 
@@ -292,7 +289,7 @@ def create_monitored_product(
 
     competitor_warning: str | None = None
     if product_data.initial_competitor:
-        from market_alert.services.services_competitor_lifecycle import create_competitor_scrape_request
+        from backend.market_alert.products.services.services_competitor_lifecycle import create_competitor_scrape_request
 
         competitor_payload = CompetitorProductCreateScraping(
             monitored_product_id=pending.id,

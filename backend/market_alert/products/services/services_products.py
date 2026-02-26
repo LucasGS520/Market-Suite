@@ -13,14 +13,15 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 
-from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
-from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.models.models_comparisons import PriceComparisonSummary
+from shared.utils import sanitize_text
+
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
+from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryResponse
 from market_alert.schemas.schemas_products import CompetitorProductResponse, MonitoredProductResponse
+from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
+from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.utils.product_stats_formatter import get_product_stats
-from shared.utils import sanitize_text
 
 
 def _normalize_timestamp(value: datetime | None) -> datetime | None:

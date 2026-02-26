@@ -1,4 +1,4 @@
-""" Rotas para gerenciamento de produtos concorrentes monitorados """
+""" Rotas para gerenciamento de produtos concorrentes """
 
 from typing import List
 from uuid import UUID
@@ -8,20 +8,20 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
-from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
+from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
 
+from market_alert.core.security import get_current_user
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
     CompetitorScrapeCreationResponse,
     CompetitorsListResponse,
 )
-from market_alert.services.services_competitors import list_competitors_with_pagination
-from market_alert.services.services_competitor_lifecycle import (
+from market_alert.products.services.services_competitors import list_competitors_with_pagination
+from market_alert.products.services.services_competitor_lifecycle import (
     clear_competitors_from_monitored,
     create_competitor_scrape_request,
     delete_competitor_entry,
 )
-from market_alert.core.security import get_current_user
 
 
 router = APIRouter(prefix="/competitors", tags=["Concorrentes"])

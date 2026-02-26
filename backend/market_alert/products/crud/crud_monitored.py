@@ -10,27 +10,24 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
-
-from backend.shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url_for_storage
 
+from market_alert.models import User
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_price_history import PriceHistory
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.crud import crud_competitor, crud_price_history
-from market_alert.models import User
+from market_alert.products.crud import crud_competitor
+from market_alert.crud import crud_price_history
 from market_alert.domain.product_lifecycle import (
     compute_next_check_at,
     resolve_scheduling_event,
     update_price_change_tracking,
 )
-from market_alert.utils.interval_calculator_products import (
-    EVENT_RESUMED,
-    EVENT_STANDARD,
-)
+from market_alert.utils.interval_calculator_products import EVENT_RESUMED, EVENT_STANDARD
 from market_alert.utils.name_derivation import prepare_effective_name, should_replace_with_scraped
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 from market_alert.utils.price_decimal import different_price

@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from market_alert.models.models_products import MonitoredProduct
-from market_alert.routes.routes_monitored import router as monitored_router
-from market_alert.routes.routes_monitored import get_current_user
+from market_alert.products.routes.routes_monitored import router as monitored_router
+from market_alert.products.routes.routes_monitored import get_current_user
 from shared.infra.db import get_db
 from market_alert.collectors.tasks import collector_product_task
 
@@ -28,7 +28,7 @@ def test_fluxo_ponta_a_ponta_criacao_monitored_via_rota(monkeypatch, db_session,
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = lambda: user
 
-    from market_alert.services import services_monitored_lifecycle as lifecycle
+    from backend.market_alert.products.services import services_monitored_lifecycle as lifecycle
 
     monkeypatch.setattr(lifecycle, "normalize_and_validate_product_url", lambda url: (url, None))
     monkeypatch.setattr(lifecycle, "parse_rate_limit_config", lambda *_: None)

@@ -1,4 +1,5 @@
 """ Funções CRUD para manipular produtos concorrentes """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -10,7 +11,8 @@ import structlog
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from backend.shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
+
+from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_competitor_url, normalize_product_url_for_storage
 
@@ -18,7 +20,11 @@ from market_alert.models.models_products import CompetitorProduct, MonitoredProd
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
 from market_alert.domain.product_lifecycle import update_competitor_price_change_tracking
-from market_alert.utils.name_derivation import derive_name_from_url, prepare_effective_name, should_replace_with_scraped
+from market_alert.utils.name_derivation import (
+    derive_name_from_url,
+    prepare_effective_name,
+    should_replace_with_scraped,
+)
 from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
 from market_alert.utils.price_decimal import to_decimal, different_price
 from market_alert.comparisons.utils.price_comparator import resolve_recompute_reason

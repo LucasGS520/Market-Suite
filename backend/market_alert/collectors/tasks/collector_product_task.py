@@ -30,20 +30,21 @@ from market_alert.core.celery_app import celery_app
 from market_alert.core.config_alert import settings
 from market_alert.core.dlq_base_task import DLQTask
 from market_alert.core.retry_policies import COLLECTION_RETRY
-from market_alert.crud.crud_monitored import (
+from market_alert.infra.celery.retry_policies import RetryPolicy
+from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
+from market_alert.products.crud.crud_monitored import (
     activate_pending_monitored,
     get_monitored_product_by_id,
     mark_monitored_product_failed,
 )
-from market_alert.crud.crud_competitor import (
+from market_alert.products.crud.crud_competitor import (
     get_competitor_by_id,
     update_competitor_pause_state,
+    mark_competitor_product_failed,
 )
 from market_alert.collectors.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.collectors.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.scraper.scraper_client import ScraperClientError
-from market_alert.infra.celery.retry_policies import RetryPolicy
-from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
 from market_alert.comparisons.utils.price_comparator import _parse_force_compare_, schedule_comparison_after_commit
 from market_alert.utils.collector_result import (
     INVALID_URL_ERRORS_CODES,
