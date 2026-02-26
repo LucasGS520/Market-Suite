@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 from uuid import UUID
 
-from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.schemas.shared_schemas_scraper import ScrapeResult
 
 
 TEMPORARY_FAILURE_ERROR_CODES = {

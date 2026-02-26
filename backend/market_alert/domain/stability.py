@@ -8,7 +8,7 @@ Novo código deve importar daqui; código legado continua funcionando com
 o import direto de interval_calculator_products.
 """
 
-from market_alert.utils.interval_calculator_products import (
+from market_alert.products.utils.interval_calculator_products import (
     STABILITY_STABLE,
     STABILITY_UNSTABLE,
     STABILITY_VERY_STABLE,

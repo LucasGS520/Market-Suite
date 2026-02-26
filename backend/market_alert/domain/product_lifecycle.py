@@ -21,7 +21,7 @@ import structlog
 
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
-from market_alert.utils.interval_calculator_products import (
+from market_alert.products.utils.interval_calculator_products import (
     EVENT_AVAILABILITY_CHANGED,
     EVENT_PRICE_CHANGED,
     EVENT_STANDARD,
@@ -30,7 +30,7 @@ from market_alert.utils.interval_calculator_products import (
     SchedulingDecision,
     calculate_schedule,
 )
-from market_alert.utils.price_decimal import different_price
+from market_alert.products.utils.price_decimal import different_price
 
 
 logger = structlog.get_logger("domain.product_lifecycle")

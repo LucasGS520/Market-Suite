@@ -27,10 +27,10 @@ from market_alert.domain.product_lifecycle import (
     resolve_scheduling_event,
     update_price_change_tracking,
 )
-from market_alert.utils.interval_calculator_products import EVENT_RESUMED, EVENT_STANDARD
-from market_alert.utils.name_derivation import prepare_effective_name, should_replace_with_scraped
-from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
-from market_alert.utils.price_decimal import different_price
+from market_alert.products.utils.interval_calculator_products import EVENT_RESUMED, EVENT_STANDARD
+from market_alert.products.utils.name_derivation import prepare_effective_name, should_replace_with_scraped
+from market_alert.products.utils.price_utils import normalize_scraped_price, should_create_price_history
+from market_alert.products.utils.price_decimal import different_price
 
 
 logger = structlog.get_logger("crud_monitored")

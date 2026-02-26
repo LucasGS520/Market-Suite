@@ -40,8 +40,8 @@ from shared.utils.redis_locks import (
 from market_alert.core.config_alert import settings
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.collectors.domain.collection_queue import CollectionQueue
-from market_alert.utils.collector_result import _parse_collect_result
-from market_alert.utils.continuous_dispatch import (
+from market_alert.collectors.utils.collector_result import _parse_collect_result
+from market_alert.collectors.utils.continuous_dispatch import (
     CollectDispatchDecision,
     _collect_group,
     _handle_processing_requeue,
@@ -49,7 +49,7 @@ from market_alert.utils.continuous_dispatch import (
     _requeue_monitored,
     _should_abort,
 )
-from market_alert.utils.interval_calculator_products import _parse_next_retry_at, _utc_now
+from market_alert.products.utils.interval_calculator_products import _parse_next_retry_at, _utc_now
 
 if TYPE_CHECKING:
     from celery import Celery

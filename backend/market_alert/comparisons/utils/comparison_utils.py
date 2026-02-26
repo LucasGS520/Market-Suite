@@ -32,7 +32,7 @@ from market_alert.products.crud.crud_monitored import get_monitored_product_by_i
 from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.crud.crud_comparison import get_latest_summary
 from market_alert.crud.crud_price_history import get_latest_price_for_competitor
-from market_alert.utils.price_decimal import to_decimal
+from market_alert.products.utils.price_decimal import to_decimal
 
 
 logger = structlog.get_logger("comparison_utils")

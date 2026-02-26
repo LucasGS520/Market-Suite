@@ -47,7 +47,7 @@ from market_alert.services.services_access import ensure_user_can_access_monitor
 from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.domain.product_lifecycle import compute_next_check_at
-from market_alert.utils.interval_calculator_products import EVENT_STANDARD
+from market_alert.products.utils.interval_calculator_products import EVENT_STANDARD
 from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
 
 

@@ -35,11 +35,11 @@ from uuid import UUID
 
 from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.infra.celery.retry_policies import RetryPolicy
-from market_alert.utils.continuous_dispatch import (
+from market_alert.collectors.utils.continuous_dispatch import (
     _handle_processing_requeue,
     _should_skip_requeue,
 )
-from market_alert.utils.interval_calculator_products import (
+from market_alert.products.utils.interval_calculator_products import (
     EVENT_RETRY,
     RetryContext,
     _resolve_next_check_at,
@@ -73,8 +73,8 @@ class CollectionCallbacks:
             monitored_id: str UUID do monitorado que foi coletado.
             trace_id: ID de rastreamento distribuído.
         """
-        from market_alert.utils.interval_calculator_products import _parse_next_retry_at
-        from market_alert.utils.collector_result import _parse_collect_result
+        from market_alert.products.utils.interval_calculator_products import _parse_next_retry_at
+        from market_alert.collectors.utils.collector_result import _parse_collect_result
 
         normalized = _parse_collect_result(collect_result)
         next_retry_at = _parse_next_retry_at(normalized.get("next_retry_at"))

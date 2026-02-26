@@ -46,7 +46,7 @@ from market_alert.collectors.services.services_scraper_competitor import scrape_
 from market_alert.collectors.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.comparisons.utils.price_comparator import _parse_force_compare_, schedule_comparison_after_commit
-from market_alert.utils.collector_result import (
+from market_alert.collectors.utils.collector_result import (
     INVALID_URL_ERRORS_CODES,
     _extract_host,
     _is_rate_limit_error,

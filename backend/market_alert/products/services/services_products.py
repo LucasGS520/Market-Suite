@@ -21,7 +21,7 @@ from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryRespo
 from market_alert.schemas.schemas_products import CompetitorProductResponse, MonitoredProductResponse
 from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.utils.product_stats_formatter import get_product_stats
+from market_alert.products.utils.product_stats_formatter import get_product_stats
 
 
 def _normalize_timestamp(value: datetime | None) -> datetime | None:

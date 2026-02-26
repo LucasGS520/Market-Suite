@@ -32,7 +32,7 @@ from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct
 from market_alert.comparisons.utils.comparison_utils import filter_competitors_for_comparison
-from market_alert.utils.price_decimal import to_decimal
+from market_alert.products.utils.price_decimal import to_decimal
 from market_alert.core.config_alert import settings
 
 

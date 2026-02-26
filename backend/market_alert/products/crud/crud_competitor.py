@@ -20,13 +20,13 @@ from market_alert.models.models_products import CompetitorProduct, MonitoredProd
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
 from market_alert.crud import crud_price_history
 from market_alert.domain.product_lifecycle import update_competitor_price_change_tracking
-from market_alert.utils.name_derivation import (
+from market_alert.products.utils.name_derivation import (
     derive_name_from_url,
     prepare_effective_name,
     should_replace_with_scraped,
 )
-from market_alert.utils.price_utils import normalize_scraped_price, should_create_price_history
-from market_alert.utils.price_decimal import to_decimal, different_price
+from market_alert.products.utils.price_utils import normalize_scraped_price, should_create_price_history
+from market_alert.products.utils.price_decimal import to_decimal, different_price
 from market_alert.comparisons.utils.price_comparator import resolve_recompute_reason
 
 
