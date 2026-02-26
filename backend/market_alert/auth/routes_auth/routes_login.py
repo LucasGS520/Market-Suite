@@ -6,9 +6,10 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
+
 from market_alert.schemas.schemas_auth import TokenPairResponse
-from market_alert.auth.services_auth import login_user
-from market_alert.auth.cookies_auth import set_refresh_cookie
+from market_alert.auth.services.services_auth import login_user
+from market_alert.auth.utils.cookies_auth import set_refresh_cookie
 
 
 logger = structlog.get_logger("route.auth.login")

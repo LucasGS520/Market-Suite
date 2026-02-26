@@ -15,7 +15,12 @@ from market_alert.models.models_refresh_token import RefreshToken
 
 logger = structlog.get_logger("crud.refresh_tokens")
 
-def create_refresh_token(db: Session, user_id: str, ip: str, user_agent: str) -> tuple[str, RefreshToken]:
+def create_refresh_token(
+    db: Session,
+    user_id: str,
+    ip: str,
+    user_agent: str,
+) -> tuple[str, RefreshToken]:
     """ Gera e salva um novo Refresh Token para o usuário """
     #Gera o token hasheado
     raw_token = secrets.token_urlsafe(32)
@@ -35,10 +40,20 @@ def create_refresh_token(db: Session, user_id: str, ip: str, user_agent: str) ->
     db.commit()
     db.refresh(refresh)
 
-    logger.info("refresh_token_created", token_id=str(refresh.id), user_id=user_id, ip=ip, user_agent=user_agent, expires_at=refresh.expires_at.isoformat())
+    logger.info(
+        "refresh_token_created",
+        token_id=str(refresh.id),
+        user_id=user_id,
+        ip=ip,
+        user_agent=user_agent,
+        expires_at=refresh.expires_at.isoformat()
+    )
     return raw_token, refresh
 
-def get_refresh_token(db: Session, raw_token: str) -> Optional[RefreshToken]:
+def get_refresh_token(
+    db: Session,
+    raw_token: str,
+) -> Optional[RefreshToken]:
     """ Recupera um Refresh Token a partir do valor informado """
     hashed = hash_token(raw_token)
     refresh = (
@@ -56,7 +71,10 @@ def get_refresh_token(db: Session, raw_token: str) -> Optional[RefreshToken]:
         return None
     return refresh
 
-def revoke_refresh_token(db: Session, refresh: RefreshToken) -> None:
+def revoke_refresh_token(
+    db: Session,
+    refresh: RefreshToken,
+) -> None:
     """ Marca um Refresh Token específico como revogado """
     if refresh.revoked:
         logger.debug("refresh_already_revoked", token_id=str(refresh.id))
@@ -67,7 +85,10 @@ def revoke_refresh_token(db: Session, refresh: RefreshToken) -> None:
     db.commit()
     logger.info("refresh_token_revoked", token_id=str(refresh.id), user_id=str(refresh.user_id))
 
-def delete_user_refresh_tokens(db: Session, user_id: str) -> int:
+def delete_user_refresh_tokens(
+    db: Session,
+    user_id: str,
+) -> int:
     """ Revoga todos os Refresh Tokens de um usuário (logout global) """
     tokens: List[RefreshToken] = db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
@@ -81,5 +102,8 @@ def delete_user_refresh_tokens(db: Session, user_id: str) -> int:
 
     if count > 0:
         db.commit()
-    logger.info("user_refresh_tokens_revoked", user_id=user_id, count=count)
+    logger.info(
+        "user_refresh_tokens_revoked",
+        user_id=user_id, count=count,
+    )
     return count

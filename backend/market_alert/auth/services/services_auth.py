@@ -7,10 +7,18 @@ import structlog
 from fastapi import HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from market_alert.core.bruteforce import block_ip, reset_failed_attempts, record_failed_attempt
+from market_alert.core.bruteforce import (
+    block_ip,
+    reset_failed_attempts,
+    record_failed_attempt,
+)
 from market_alert.core.config_alert import settings
 from market_alert.core.jwt import create_access_token
-from market_alert.core.tokens import generate_verification_token, generate_reset_token, token_expiry
+from market_alert.core.tokens import (
+    generate_verification_token,
+    generate_reset_token,
+    token_expiry,
+)
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_auth import (
     ResetPasswordRequest,
@@ -18,16 +26,28 @@ from market_alert.schemas.schemas_auth import (
     ChangePasswordRequest,
     ChangeEmailRequest,
     EmailTokenRequest,
+    TokenPairResponse,
+    RefreshRequest,
 )
-from market_alert.schemas.schemas_auth import TokenPairResponse, RefreshRequest
 from market_alert.enums.enums_users import UserStatus
-from market_alert.users.crud.crud_account import get_user_by_email, get_user_by_phone, get_user_by_id
-from market_alert.crud.crud_refresh_token import create_refresh_token, get_refresh_token, revoke_refresh_token
+from market_alert.users.crud.crud_account import (
+    get_user_by_email,
+    get_user_by_phone,
+    get_user_by_id,
+)
+from market_alert.auth.crud.crud_refresh_token import (
+    create_refresh_token,
+    get_refresh_token,
+    revoke_refresh_token,
+)
 
 
 logger = structlog.get_logger("service.auth")
 
-def _resolve_refresh_token(payload: RefreshRequest | None, request: Request) -> str | None:
+def _resolve_refresh_token(
+    payload: RefreshRequest | None,
+    request: Request,
+) -> str | None:
     """ Obtém o refresh token via payload ou cookie HttpOnly, com fallback opcional no payload """
     cookie_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
     if cookie_token:
@@ -36,7 +56,11 @@ def _resolve_refresh_token(payload: RefreshRequest | None, request: Request) -> 
         return payload.refresh_token
     return None
 
-def authenticate_user(db: Session, identifier: str, password: str) -> User | None:
+def authenticate_user(
+    db: Session,
+    identifier: str,
+    password: str,
+) -> User | None:
     """ Verifica credenciais e retorna o usuário se forem válidas """
     user = get_user_by_email(db, identifier)
     if not user:
@@ -45,7 +69,12 @@ def authenticate_user(db: Session, identifier: str, password: str) -> User | Non
         return user
     return None
 
-def login_user(request: Request, db: Session, username: str, password: str) -> TokenPairResponse:
+def login_user(
+    request: Request,
+    db: Session,
+    username: str,
+    password: str,
+) -> TokenPairResponse:
     """ Organiza o fluxo de login: Bloqueio por IP, Autenticação, Registro de falhas ou sucesso, Geração de JWT """
     ip = request.client.host
     email = username
@@ -89,7 +118,10 @@ def login_user(request: Request, db: Session, username: str, password: str) -> T
     logger.info("refresh_token_issued_on_login", refresh_id=str(refresh.id), user_id=str(user.id))
     return TokenPairResponse(access_token=token, refresh_token=raw_refresh, token_type="bearer")
 
-def send_verification_email_service(db: Session, current_user: User) -> None:
+def send_verification_email_service(
+    db: Session,
+    current_user: User,
+) -> None:
     """ Gera um token de verificação de email sem envio automático """
     token = generate_verification_token()
     current_user.verification_token = token
@@ -97,7 +129,10 @@ def send_verification_email_service(db: Session, current_user: User) -> None:
     logger.info("verification_token_generated", user_id=str(current_user.id))
     logger.info("verification_dispatch_skipped", user_id=str(current_user.id))
 
-def confirm_email_verification_service(db: Session, request_model: EmailTokenRequest) -> None:
+def confirm_email_verification_service(
+    db: Session,
+    request_model: EmailTokenRequest,
+) -> None:
     """ Confirma verificação de email usando token """
     token = request_model.token
     user = db.query(User).filter(User.verification_token == token).first()
@@ -111,7 +146,10 @@ def confirm_email_verification_service(db: Session, request_model: EmailTokenReq
     db.commit()
     logger.info("verification_success", user_id=str(user.id))
 
-def request_password_reset_service(db: Session, request_model: ResetPasswordRequest) -> None:
+def request_password_reset_service(
+    db: Session,
+    request_model: ResetPasswordRequest,
+) -> None:
     """ Inicia o fluxo de reset de senha gerando um token sem envio automático """
     email = request_model.email
     user = get_user_by_email(db, email)
@@ -126,7 +164,10 @@ def request_password_reset_service(db: Session, request_model: ResetPasswordRequ
     logger.info("reset_token_generated", user_id=str(user.id))
     logger.info("reset_dispatch_skipped", user_id=str(user.id))
 
-def confirm_password_service(db: Session, request_model: ResetPasswordConfirmRequest) -> None:
+def confirm_password_service(
+    db: Session,
+    request_model: ResetPasswordConfirmRequest,
+) -> None:
     """ Confirma reset de senha usando token e define nova senha """
     token = request_model.token
     new_password = request_model.new_password
@@ -142,7 +183,11 @@ def confirm_password_service(db: Session, request_model: ResetPasswordConfirmReq
     db.commit()
     logger.info("reset_confirm_success", user_id=str(user.id))
 
-def change_password_service(db: Session, current_user: User, request_model: ChangePasswordRequest) -> None:
+def change_password_service(
+    db: Session,
+    current_user: User,
+    request_model: ChangePasswordRequest,
+) -> None:
     """ Altera a senha de um usuário autenticado """
     old = request_model.old_password
     new = request_model.new_password
@@ -155,7 +200,11 @@ def change_password_service(db: Session, current_user: User, request_model: Chan
     db.commit()
     logger.info("change_password_success", user_id=str(current_user.id))
 
-def change_email_service(db: Session, current_user: User, request_model: ChangeEmailRequest) -> None:
+def change_email_service(
+    db: Session,
+    current_user: User,
+    request_model: ChangeEmailRequest,
+) -> None:
     """ Altera o email de um usuário autenticado e marca como não verificado """
     new_email = request_model.new_email
     if get_user_by_email(db, new_email):
@@ -169,7 +218,11 @@ def change_email_service(db: Session, current_user: User, request_model: ChangeE
     logger.info("change_email_success", user_id=str(current_user.id), email=new_email)
 
 # ---------- REFRESH TOKENS ----------
-def refresh_token_service(db: Session, payload: RefreshRequest | None, request: Request) -> TokenPairResponse:
+def refresh_token_service(
+    db: Session,
+    payload: RefreshRequest | None,
+    request: Request,
+) -> TokenPairResponse:
     """ Troca um Refresh Token válido por um novo Access Token e novo Refresh Token (rotacionando) """
     request_id = request.headers.get("x-request-id") or request.headers.get("x-requestid")
     raw_token = _resolve_refresh_token(payload, request)
@@ -209,7 +262,11 @@ def refresh_token_service(db: Session, payload: RefreshRequest | None, request: 
     )
     return TokenPairResponse(access_token=access_token, refresh_token=new_raw, token_type="bearer")
 
-def logout_service(db: Session, payload: RefreshRequest | None, request: Request) -> None:
+def logout_service(
+    db: Session,
+    payload: RefreshRequest | None,
+    request: Request,
+) -> None:
     """ Logout de sessão: revoga apenas o Refresh Token fornecido """
     raw_token = _resolve_refresh_token(payload, request)
     if not raw_token:

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
+
 from market_alert.schemas.schemas_auth import PhoneOtpRequest
 from market_alert.users.services.services_identity import verify_email, verify_phone_otp
 

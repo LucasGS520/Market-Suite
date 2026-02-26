@@ -5,10 +5,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
-from market_alert.schemas.schemas_auth import ChangePasswordRequest, ChangeEmailRequest
-from market_alert.auth.services_auth import change_password_service, change_email_service
+
 from market_alert.core.security import get_current_user
 from market_alert.models.models_users import User
+from market_alert.schemas.schemas_auth import ChangePasswordRequest, ChangeEmailRequest
+from market_alert.auth.services.services_auth import change_password_service, change_email_service
 
 
 logger = structlog.get_logger("route.auth.profile")
