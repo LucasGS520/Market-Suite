@@ -26,7 +26,7 @@ from market_alert.scraper.scraper_client import (
     ScraperClientError,
     ScraperFetchResult,
 )
-from market_alert.services._scraper_common import (
+from market_alert.collectors.services.scraper_common import (
     compute_force_refresh,
     ensure_price,
     execute_scraper_fetch,

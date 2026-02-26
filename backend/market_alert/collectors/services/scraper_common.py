@@ -7,8 +7,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, Mapping
 from uuid import UUID
 
-from backend.shared.schemas.shared_schemas_scraper import ParserResponse
-from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.schemas.shared_schemas_scraper import ParserResponse
+from shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.utils import sanitize_text
 
 from market_alert.scraper.scraper_client import (
@@ -116,7 +116,6 @@ def to_float(value: Any) -> float | None:
     except Exception:
         return None
     
-
 def maybe_call_mocked_parse(
     client: ScraperClient,
     *,

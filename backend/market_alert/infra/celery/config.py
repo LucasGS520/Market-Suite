@@ -23,7 +23,7 @@ TASK_MODULES = [
     "market_alert.tasks.notifications_enqueue_task",
     "market_alert.tasks.send_notification_task",
     "market_alert.tasks.verification_tasks",
-    "market_alert.tasks.priority_queue_tasks",
+    "market_alert.collectors.tasks.priority_queue_reconciliation_task",
     "market_alert.tasks.maintenance_tasks",
     "market_alert.infra.celery.dlq_handler",
 ]
