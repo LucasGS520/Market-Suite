@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 
 from market_alert.models.models_products import MonitoredProduct
-from market_alert.utils.interval_calculator_products import (
+from market_alert.products.utils.interval_calculator_products import (
     STABILITY_STABLE,
     STABILITY_UNSTABLE,
     STABILITY_VERY_STABLE,

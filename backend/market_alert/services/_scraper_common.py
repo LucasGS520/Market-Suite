@@ -16,8 +16,8 @@ from market_alert.scraper.scraper_client import (
     ScraperClientError,
     ScraperFetchResult,
 )
-from market_alert.utils.interval_calculator_products import EVENT_NOT_MODIFIED, calculate_schedule
-from market_alert.utils.price_decimal import to_decimal as _shared_to_decimal
+from market_alert.products.utils.interval_calculator_products import EVENT_NOT_MODIFIED, calculate_schedule
+from market_alert.products.utils.price_decimal import to_decimal as _shared_to_decimal
 
 
 def resolve_conditional_headers(entity: Any) -> tuple[str | None, datetime | None]:

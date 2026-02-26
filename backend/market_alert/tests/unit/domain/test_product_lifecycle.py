@@ -13,7 +13,7 @@ from market_alert.domain.product_lifecycle import (
     validate_status_transition,
 )
 from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.utils.interval_calculator_products import (
+from market_alert.products.utils.interval_calculator_products import (
     EVENT_AVAILABILITY_CHANGED,
     EVENT_PRICE_CHANGED,
     EVENT_STANDARD,
