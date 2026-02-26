@@ -20,6 +20,7 @@ from celery.canvas import Signature
 from sqlalchemy.orm import Session
 
 from market_alert.core.celery_app import celery_app
+from market_alert.infra.resilience.rate_limiter import _resolve_cooldown_seconds
 from market_alert.infra.celery.enqueuer import CollectionEnqueuer
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.enums.enums_products import MonitoredStatus
@@ -34,7 +35,6 @@ from market_alert.utils.interval_calculator_products import (
     _utc_now,
     calculate_schedule,
 )
-from market_alert.utils.rate_limiter import _resolve_cooldown_seconds
 
 
 logger = structlog.get_logger("continuous_collector_utils")

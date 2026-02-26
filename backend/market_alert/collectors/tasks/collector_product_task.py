@@ -56,7 +56,7 @@ from market_alert.utils.collector_result import (
     _should_schedule_temporary_retry,
     _validate_payload,
 )
-from market_alert.utils.rate_limiter import (
+from market_alert.infra.resilience.rate_limiter import (
     _increment_invalid_url_attempt,
     _increment_temporary_failure_attempt,
     _register_scrape_cooldown,

@@ -25,7 +25,7 @@ TASK_MODULES = [
     "market_alert.tasks.verification_tasks",
     "market_alert.tasks.priority_queue_tasks",
     "market_alert.tasks.maintenance_tasks",
-    "market_alert.tasks.dlq_handler",
+    "market_alert.infra.celery.dlq_handler",
 ]
 
 #Exchanges separados para scraping, monitoramento, comparação e DLQ
@@ -74,7 +74,7 @@ TASK_ROUTES = {
         "queue": "notifications",
         "routing_key": "notifications",
     },
-    "market_alert.tasks.dlq_handler.handle_dead_letter": {
+    "market_alert.infra.celery.dlq_handler.handle_dead_letter": {
         "queue": "dead_letter",
         "routing_key": "dead_letter",
     },

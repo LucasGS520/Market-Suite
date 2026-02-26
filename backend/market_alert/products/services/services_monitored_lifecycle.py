@@ -29,6 +29,7 @@ from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.config_alert import settings
+from market_alert.infra.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import MonitoredProduct, User
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
@@ -52,7 +53,6 @@ from market_alert.products.services.services_products import build_monitored_res
 from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import build_monitored_payload, enqueue_collect
 from market_alert.domain.product_lifecycle import compute_next_check_at
-from market_alert.utils.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.utils.interval_calculator_products import EVENT_STANDARD
 
 
