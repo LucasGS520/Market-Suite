@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from market_alert.enums.enums_notifications import NotificationChannel
-from market_alert.notifications.channels.base import ChannelAdapter
-from market_alert.notifications.channels.email_adapter import EmailAdapter
-from market_alert.notifications.channels.push_adapter import PushAdapter
-from market_alert.notifications.channels.sms_adapter import SmsAdapter
-from market_alert.notifications.channels.webhook_adapter import WebhookAdapter
-from market_alert.notifications.channels.whatsapp_adapter import WhatsappAdapter
+from market_alert.notifications.infra.channels.base import ChannelAdapter
+from market_alert.notifications.infra.channels.email_adapter import EmailAdapter
+from market_alert.notifications.infra.channels.push_adapter import PushAdapter
+from market_alert.notifications.infra.channels.sms_adapter import SmsAdapter
+from market_alert.notifications.infra.channels.webhook_adapter import WebhookAdapter
+from market_alert.notifications.infra.channels.whatsapp_adapter import WhatsappAdapter
 
 
 _ADAPTERS: dict[NotificationChannel, ChannelAdapter] = {

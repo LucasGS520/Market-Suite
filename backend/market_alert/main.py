@@ -36,7 +36,7 @@ from market_alert.products.routes.routes_competitors import router as competitor
 
 #Rotas de comparações e notificações
 from market_alert.comparisons.routes.routes_comparisons import router as comparisons_router
-from market_alert.routes.routes_notifications import router as notifications_router
+from market_alert.notifications.routes.routes_notifications import router as notifications_router
 
 #Rotas de health check
 from market_alert.routes.routes_health import router as health_router

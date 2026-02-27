@@ -20,7 +20,7 @@ from market_alert.users.crud.crud_account import get_user_by_id
 from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.crud import crud_price_history
 from market_alert.comparisons.services.services_comparison import run_price_comparison
-from market_alert.notifications.services_notifications import enqueue_pending_notifications, evaluate_and_create_notifications
+from market_alert.notifications.services.services_notifications import enqueue_pending_notifications, evaluate_and_create_notifications
 
 
 logger = structlog.get_logger("compare_prices")

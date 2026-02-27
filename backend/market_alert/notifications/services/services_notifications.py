@@ -385,7 +385,7 @@ def process_notification(
     Returns:
         True se a notificação foi enviada com sucesso, False caso contrário.
     """
-    from market_alert.notifications.channels import get_channel_adapter
+    from market_alert.notifications.infra.channels import get_channel_adapter
 
     with db.begin():
         notification = acquire_notification_for_processing(

@@ -15,7 +15,7 @@ from shared.utils.trace_context import set_trace_id
 from market_alert.core.celery_app import celery_app
 from market_alert.core.dlq_base_task import DLQTask
 from market_alert.core.retry_policies import NOTIFICATION_RETRY
-from market_alert.notifications.services_notifications import process_notification
+from market_alert.notifications.services.services_notifications import process_notification
 
 
 logger = structlog.get_logger("notifications_send")
