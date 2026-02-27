@@ -31,7 +31,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
-from market_alert.crud.crud_notifications import (
+from market_alert.notifications.crud.crud_notifications import (
     add_notification_attempt,
     acquire_notification_for_processing,
     create_event_log,

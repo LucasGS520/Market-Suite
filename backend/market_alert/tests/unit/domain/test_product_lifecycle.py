@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from market_alert.domain.product_lifecycle import (
+from market_alert.products.domain.product_lifecycle import (
     compute_next_check_at,
     resolve_scheduling_event,
     update_competitor_price_change_tracking,

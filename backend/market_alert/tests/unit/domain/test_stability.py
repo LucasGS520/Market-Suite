@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from market_alert.domain.stability import (
+from market_alert.products.domain.stability import (
     STABILITY_STABLE,
     STABILITY_UNSTABLE,
     STABILITY_VERY_STABLE,

@@ -8,7 +8,7 @@ from shared.infra.db import get_db
 
 from market_alert.models import User
 from market_alert.infraestructure.security.auth_context import get_current_user
-from market_alert.crud.crud_notifications import (
+from market_alert.notifications.crud.crud_notifications import (
     list_notifications_for_user,
     list_user_notification_preferences,
     upsert_user_notification_preference,

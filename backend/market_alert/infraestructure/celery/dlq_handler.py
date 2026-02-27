@@ -15,7 +15,7 @@ from shared.infra.db import SessionLocal
 from shared.utils import sanitize_exception_message
 
 from market_alert.core.celery_app import celery_app
-from market_alert.crud.crud_task_failures import create_task_failure
+from market_alert.infraestructure.crud.crud_task_failures import create_task_failure
 
 
 logger = structlog.get_logger("dlq_handler")

@@ -18,8 +18,8 @@ from shared.utils.url_validation import normalize_competitor_url, normalize_prod
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.enums.enums_products import ProductStatus, MonitoringType
-from market_alert.crud import crud_price_history
-from market_alert.domain.product_lifecycle import update_competitor_price_change_tracking
+from market_alert.products.crud import crud_price_history
+from market_alert.products.domain.product_lifecycle import update_competitor_price_change_tracking
 from market_alert.products.utils.name_derivation import (
     derive_name_from_url,
     prepare_effective_name,
