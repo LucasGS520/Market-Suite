@@ -1,7 +1,7 @@
 """Facade pública da feature de produtos.
 
-Este módulo expõe apenas pontos de entrada estáveis (rotas e serviços)
-para reduzir o acoplamento com arquivos internos da feature.
+Mantém a API externa da feature enxuta ao expor apenas roteadores HTTP e casos
+uso estáveis, reduzindo acoplamento com a estrutura interna dos submódulos.
 """
 
 from market_alert.products.routes import (
@@ -24,9 +24,9 @@ from market_alert.products.services import (
 )
 
 __all__ = [
+    "monitored_router",
     "competitors_router",
     "dashboard_router",
-    "monitored_router",
     "create_monitored_product",
     "update_monitored_pause_state",
     "delete_monitored_product_entry",

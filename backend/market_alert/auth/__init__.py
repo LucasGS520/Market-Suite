@@ -1,6 +1,7 @@
 """Facade pública da feature de autenticação.
 
-Centraliza exports de rotas e serviços usados externamente.
+Reexporta os principais roteadores e serviços para oferecer um ponto único de
+importação e reduzir acoplamento com a estrutura interna do pacote.
 """
 
 from market_alert.auth.routes_auth import (
@@ -17,6 +18,7 @@ from market_alert.auth.services import (
     confirm_email_verification_service,
     confirm_password_service,
     login_user,
+    logout_service,
     refresh_token_service,
     request_password_reset_service,
 )
@@ -35,4 +37,5 @@ __all__ = [
     "confirm_password_service",
     "change_password_service",
     "change_email_service",
+    "logout_service",
 ]
