@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from market_alert.core.config_alert import settings
-from market_alert.core.logging_config import setup_api_logging
+from market_alert.infraestructure.logging_config import setup_api_logging
 from market_alert.infraestructure.startup_validation import validate_startup_dependencies
 
 #Rotas de usuários e administração

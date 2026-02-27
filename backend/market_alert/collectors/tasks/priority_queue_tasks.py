@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from shared.infra.db import SessionLocal
 
-from market_alert.core.celery_app import celery_app
+from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.collectors.domain.collection_reconciliation import reconcile_collection_queue
 
 

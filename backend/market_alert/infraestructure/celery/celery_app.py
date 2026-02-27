@@ -18,8 +18,8 @@ import structlog
 from celery import Celery
 
 from market_alert.core.config_alert import settings
-from market_alert.core.logging_config import setup_worker_logging
-from market_alert.core.task_loader import load_task_modules
+from market_alert.infraestructure.logging_config import setup_worker_logging
+from market_alert.infraestructure.task_loader import load_task_modules
 from market_alert.infraestructure.celery.config import (
     BEAT_SCHEDULE,
     TASK_MODULES,

@@ -22,7 +22,7 @@ from __future__ import annotations
 from uuid import UUID
 
 import structlog
-from market_alert.core.celery_app import celery_app
+from market_alert.infraestructure.celery.celery_app import celery_app
 
 logger = structlog.get_logger("task_enqueuer")
 

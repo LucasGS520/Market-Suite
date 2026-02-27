@@ -13,7 +13,7 @@ import structlog
 
 from shared.infra.db import SessionLocal
 
-from market_alert.core.celery_app import celery_app
+from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.collectors.services.continuous_collector_manager import (
     finalize_processing_requeue as _finalize_processing_requeue,
     finalize_processing_requeue_error as _finalize_processing_requeue_error,

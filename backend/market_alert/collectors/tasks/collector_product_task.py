@@ -14,22 +14,19 @@ from uuid import UUID
 
 import structlog
 from sqlalchemy.orm import Session
-from backend.shared.schemas.shared_schemas_products import (
-    CompetitorProductCreateScraping,
-    MonitoredProductCreateScraping,
-)
-from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
 
+from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, MonitoredProductCreateScraping
+from shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.exceptions import ScraperError
 from shared.infra.db import SessionLocal
 from shared.utils.trace_context import set_trace_id
 from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
-from market_alert.core.celery_app import celery_app
+from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.core.config_alert import settings
-from market_alert.core.dlq_base_task import DLQTask
-from market_alert.core.retry_policies import COLLECTION_RETRY
+from market_alert.infraestructure.celery.dlq_base_task import DLQTask
+from market_alert.infraestructure.celery.retry_policies import COLLECTION_RETRY
 from market_alert.infraestructure.celery.retry_policies import RetryPolicy
 from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
 from market_alert.products.crud.crud_monitored import (
@@ -66,7 +63,6 @@ from market_alert.infraestructure.resilience.rate_limiter import (
 
 
 logger = structlog.get_logger("collector_product_task")
-
 
 def collect_product(
     payload: Mapping[str, str | None] | None,

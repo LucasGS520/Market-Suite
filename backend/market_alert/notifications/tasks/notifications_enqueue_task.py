@@ -7,7 +7,7 @@ import structlog
 from shared.infra.db import SessionLocal
 from shared.utils.trace_context import set_trace_id
 
-from market_alert.core.celery_app import celery_app
+from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.core.retry_policies import ENQUEUE_RETRY
 from market_alert.notifications.services.services_notifications import enqueue_pending_notifications
 

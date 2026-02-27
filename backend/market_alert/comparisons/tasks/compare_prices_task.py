@@ -14,8 +14,8 @@ from shared.infra.db import SessionLocal
 from shared.utils.trace_context import set_trace_id
 from shared.utils.logging_utils import mask_identifier
 
-from market_alert.core.celery_app import celery_app
-from market_alert.core.retry_policies import COMPARISON_RETRY
+from market_alert.infraestructure.celery.celery_app import celery_app
+from market_alert.infraestructure.celery.retry_policies import COMPARISON_RETRY
 from market_alert.users.crud.crud_account import get_user_by_id
 from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.products.crud.crud_price_history import crud_price_history

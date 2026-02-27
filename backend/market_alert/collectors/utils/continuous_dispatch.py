@@ -19,7 +19,7 @@ import structlog
 from celery.canvas import Signature
 from sqlalchemy.orm import Session
 
-from market_alert.core.celery_app import celery_app
+from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.infraestructure.resilience.rate_limiter import _resolve_cooldown_seconds
 from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
 from market_alert.models.models_products import MonitoredProduct
