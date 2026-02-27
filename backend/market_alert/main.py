@@ -30,7 +30,7 @@ from market_alert.auth.routes_auth.routes_refresh import router as refresh_route
 from market_alert.auth.routes_auth.routes_logout import router as logout_router
 
 #Rotas de Dashboard e Produtos Monitorados/Concorrentes
-from market_alert.routes.routes_dashboard import router as dashboard_router
+from market_alert.products.routes.routes_dashboard import router as dashboard_router
 from market_alert.products.routes.routes_monitored import router as monitored_router
 from market_alert.products.routes.routes_competitors import router as competitor_router
 
