@@ -20,11 +20,11 @@ TASK_MODULES = [
     "market_alert.collectors.tasks.collector_product_task",
     "market_alert.collectors.tasks.continuous_collector_task",
     "market_alert.comparisons.tasks.compare_prices_task",
-    "market_alert.tasks.notifications_enqueue_task",
-    "market_alert.tasks.send_notification_task",
-    "market_alert.tasks.verification_tasks",
+    "market_alert.notifications.tasks.notifications_enqueue_task",
+    "market_alert.notifications.tasks.send_notification_task",
+    "market_alert.users.tasks.verification_tasks",
     "market_alert.collectors.tasks.priority_queue_reconciliation_task",
-    "market_alert.tasks.maintenance_tasks",
+    "market_alert.infra.tasks.maintenance_tasks",
     "market_alert.infra.celery.dlq_handler",
 ]
 
@@ -58,19 +58,19 @@ TASK_ROUTES = {
         "queue": "compare",
         "routing_key": "compare",
     },
-    "market_alert.tasks.notifications_enqueue_task.enqueue_notifications_task": {
+    "market_alert.notifications.tasks.notifications_enqueue_task.enqueue_notifications_task": {
         "queue": "notifications",
         "routing_key": "notifications",
     },
-    "market_alert.tasks.send_notification_task.send_notification_task": {
+    "market_alert.notifications.tasks.send_notification_task.send_notification_task": {
         "queue": "notifications",
         "routing_key": "notifications",
     },
-    "market_alert.tasks.verification_tasks.send_email_verification": {
+    "market_alert.users.tasks.verification_tasks.send_email_verification": {
         "queue": "notifications",
         "routing_key": "notifications",
     },
-    "market_alert.tasks.verification_tasks.send_phone_otp": {
+    "market_alert.users.tasks.verification_tasks.send_phone_otp": {
         "queue": "notifications",
         "routing_key": "notifications",
     },
@@ -100,7 +100,7 @@ def _schedule_entry(
 #Mantidos aqui para simplificar auditoria e evitar divergências
 BEAT_SCHEDULE = {
     "cleanup-cache-daily": _schedule_entry(
-        "market_alert.tasks.maintenance_tasks.cleanup_cache",
+        "market_alert.infra.tasks.maintenance_tasks.cleanup_cache",
         crontab(hour=3, minute=0),
     ),
 }

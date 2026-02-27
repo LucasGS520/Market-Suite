@@ -530,7 +530,7 @@ def enqueue_pending_notifications(
     Ponto único de enfileiramento de notificações. Encapsula a busca de
     pendentes, normalização de IDs e dispatch para ``send_notification_task``.
 
-    O dispatch usa ``TaskEnqueuer`` para evitar
+    O dispatch usa ``DomainTaskEnqueuer`` para evitar
     dependência circular entre este módulo e o módulo de tasks.
 
     Args:
@@ -547,8 +547,8 @@ def enqueue_pending_notifications(
     now = datetime.now(timezone.utc)
     ids = [UUID(nid) for nid in notification_ids] if notification_ids else None
 
-    from market_alert.services.task_enqueuer import TaskEnqueuer
-    enqueuer = TaskEnqueuer()
+    from market_alert.infra.celery.domain_task_enqueuer import DomainTaskEnqueuer
+    enqueuer = DomainTaskEnqueuer()
 
     pending = get_pending_notifications(db, limit=limit, now=now, notification_ids=ids)
     count = 0

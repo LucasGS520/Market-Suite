@@ -57,10 +57,10 @@ def request_comparison_recompute(monitored_id: UUID, reason: str) -> None:
             reason=reason,
         )
 
-    from market_alert.services.task_enqueuer import TaskEnqueuer
+    from market_alert.infra.celery.domain_task_enqueuer import DomainTaskEnqueuer
 
     try:
-        TaskEnqueuer().enqueue_comparison(monitored_id, reason=reason)
+        DomainTaskEnqueuer().enqueue_comparison(monitored_id, reason=reason)
     except Exception:
         logger.exception(
             "compare_recompute_enqueue_failed",

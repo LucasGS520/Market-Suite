@@ -39,7 +39,7 @@ from market_alert.comparisons.routes.routes_comparisons import router as compari
 from market_alert.notifications.routes.routes_notifications import router as notifications_router
 
 #Rotas de health check
-from market_alert.routes.routes_health import router as health_router
+from market_alert.infra.routes.routes_health import router as health_router
 
 
 #Configura logging antes de criar a app (logging_config centraliza a lógica)

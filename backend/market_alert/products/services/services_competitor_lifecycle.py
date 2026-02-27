@@ -42,8 +42,8 @@ from market_alert.products.crud.crud_competitor import (
     delete_competitor,
     delete_competitors_by_monitored_id,
 )
-from backend.market_alert.products.services.services_products import build_competitor_response
-from market_alert.services.services_access import ensure_user_can_access_monitored
+from market_alert.products.services.services_products import build_competitor_response
+from market_alert.products.services.services_access_control import ensure_user_can_access_monitored
 from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.domain.product_lifecycle import compute_next_check_at

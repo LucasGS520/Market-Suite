@@ -1,6 +1,6 @@
 """ Ponto único de enfileiramento para tasks de comparação e notificação.
 
-``TaskEnqueuer`` centraliza os ``send_task()`` de domínios que não são coleta.
+``DomainTaskEnqueuer`` centraliza os ``send_task()`` de domínios que não são coleta.
 Para coletas, use ``CollectionEnqueuer`` (``orchestrator/collection_enqueuer.py``).
 
 Responsabilidade única:
@@ -9,7 +9,7 @@ Responsabilidade única:
 
 Uso típico::
 
-    enqueuer = TaskEnqueuer()
+    enqueuer = DomainTaskEnqueuer()
     enqueuer.enqueue_comparison(monitored_id, reason="material_change")
     enqueuer.enqueue_notification(notification_id)
 
@@ -27,12 +27,12 @@ from market_alert.core.celery_app import celery_app
 logger = structlog.get_logger("task_enqueuer")
 
 _COMPARE_TASK = "market_alert.comparisons.tasks.compare_prices_task.compare_prices_task"
-_NOTIFICATION_TASK = "market_alert.tasks.send_notification_task.send_notification_task"
+_NOTIFICATION_TASK = "market_alert.notifications.tasks.send_notification_task.send_notification_task"
 _COMPARE_QUEUE = "compare"
 _NOTIFICATION_QUEUE = "notifications"
 
 
-class TaskEnqueuer:
+class DomainTaskEnqueuer:
     """ Enfileira tasks de comparação e notificação na fila Celery correta.
 
     Cada método constrói os argumentos, registra log de diagnóstico e
@@ -110,4 +110,4 @@ class TaskEnqueuer:
         )
 
 
-__all__ = ["TaskEnqueuer"]
+__all__ = ["DomainTaskEnqueuer"]

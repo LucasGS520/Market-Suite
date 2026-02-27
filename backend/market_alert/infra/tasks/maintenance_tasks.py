@@ -14,7 +14,7 @@ from market_alert.core.config_alert import settings
 logger = structlog.get_logger("maintenance_tasks")
 
 
-@shared_task(name="market_alert.tasks.maintenance_tasks.cleanup_cache")
+@shared_task(name="market_alert.infra.tasks.maintenance_tasks.cleanup_cache")
 def cleanup_cache() -> None:
     """ Remove chaves de cache com TTL inválido sem bloquear o Redis.
 

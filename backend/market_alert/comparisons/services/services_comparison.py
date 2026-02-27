@@ -77,7 +77,7 @@ def ensure_user_can_view_monitored(
     *, db: Session, monitored_id: UUID, user: User
 ) -> None:
     """Valida se o monitorado pertence ao usuário autenticado."""
-    from market_alert.services.services_access import ensure_user_can_access_monitored
+    from market_alert.products.services.services_access_control import ensure_user_can_access_monitored
 
     return ensure_user_can_access_monitored(
         db=db,
