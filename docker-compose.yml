@@ -23,6 +23,7 @@ services:
       context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
+      - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
@@ -100,6 +101,7 @@ services:
       context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
+      - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
@@ -136,6 +138,7 @@ services:
       context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
+      - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
@@ -177,6 +180,7 @@ services:
       context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
+      - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
@@ -219,6 +223,7 @@ services:
       context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
+      - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
@@ -259,6 +264,7 @@ services:
       context: ./backend/market_alert
       dockerfile: Dockerfile
     env_file:
+      - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
