@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
-from market_alert.core.security import get_current_user
+
+from market_alert.infraestructure.security.auth_context import get_current_user
 from market_alert.models import User
 from market_alert.products.services.services_dashboard import gather_dashboard_totals
 

@@ -7,7 +7,7 @@ import structlog
 from fastapi import HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from market_alert.core.bruteforce import (
+from market_alert.infraestructure.security.bruteforce import (
     block_ip,
     reset_failed_attempts,
     record_failed_attempt,

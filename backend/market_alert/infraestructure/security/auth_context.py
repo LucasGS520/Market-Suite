@@ -1,24 +1,28 @@
 """ Dependências e utilidades de segurança e autenticação. """
 
-import structlog
 from uuid import UUID
 
+import structlog
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
-from market_alert.core.jwt import verify_access_token
 from shared.infra.db import get_db
+
+from market_alert.core.jwt import verify_access_token
 from market_alert.models.models_users import User
 from market_alert.enums.enums_users import UserStatus
 
 
-logger = structlog.get_logger("core.security")
+logger = structlog.get_logger("infra.security.auth_context")
 
 #Extrai token do cabeçalho Authorization: Bearer <token>
 oauth2_scheme = HTTPBearer(bearerFormat="JWT")
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User:
     """ Dependência que extrai e valida JWT, busca e retorna o User ativo no banco """
     #Token extraído do cabeçalho Authorization
     token = credentials.credentials

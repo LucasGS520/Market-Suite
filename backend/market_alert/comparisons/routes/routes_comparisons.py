@@ -13,7 +13,7 @@ from market_alert.schemas.schemas_comparisons import (
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
 )
-from market_alert.core.security import get_current_user
+from market_alert.infraestructure.security.auth_context import get_current_user
 from market_alert.comparisons import services as comparison_services
 
 
