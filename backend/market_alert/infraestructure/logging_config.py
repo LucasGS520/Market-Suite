@@ -47,7 +47,6 @@ WORKER_NOISY_LOGGERS: tuple[str, ...] = (
 # Eventos conhecidos que se repetem continuamente sem valor operacional.
 _NOISY_EVENT_NAMES: frozenset[str] = frozenset({"channel_vars_missing"})
 
-
 def drop_repeated_events(
     _logger: BindableLogger,
     _method_name: str,

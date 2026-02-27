@@ -6,23 +6,23 @@ from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
 
-from market_alert.models import User
 from market_alert.infraestructure.security.auth_context import get_current_user
-from market_alert.notifications.crud.crud_notifications import (
-    list_notifications_for_user,
-    list_user_notification_preferences,
-    upsert_user_notification_preference,
-)
+from market_alert.models import User
 from market_alert.schemas.schemas_notifications import (
     PaginatedNotificationResponse,
     NotificationPaginationMeta,
     UserNotificationPreferenceCreate,
     UserNotificationPreferenceResponse,
 )
+from market_alert.notifications.crud.crud_notifications import (
+    list_notifications_for_user,
+    list_user_notification_preferences,
+    upsert_user_notification_preference,
+)
 
 
-router = APIRouter(prefix="/notifications", tags=["Notificações"])
 logger = structlog.get_logger("http_route")
+router = APIRouter(prefix="/notifications", tags=["Notificações"])
 
 @router.get("/", response_model=PaginatedNotificationResponse)
 def list_notifications(

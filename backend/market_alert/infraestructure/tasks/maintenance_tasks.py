@@ -11,8 +11,8 @@ from shared.utils.redis_client import get_redis_client
 
 from market_alert.core.config_alert import settings
 
-logger = structlog.get_logger("maintenance_tasks")
 
+logger = structlog.get_logger("maintenance_tasks")
 
 @shared_task(name="market_alert.infra.tasks.maintenance_tasks.cleanup_cache")
 def cleanup_cache() -> None:

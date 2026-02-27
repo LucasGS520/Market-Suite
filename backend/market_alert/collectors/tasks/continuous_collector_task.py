@@ -42,7 +42,6 @@ def finalize_processing_requeue(
             trace_id=trace_id,
         )
 
-
 @celery_app.task(
     name="market_alert.collectors.tasks.continuous_collector_task.finalize_processing_requeue_error",
     queue="monitor",
@@ -62,7 +61,6 @@ def finalize_processing_requeue_error(
             monitored_id=monitored_id,
             trace_id=trace_id,
         )
-
 
 @celery_app.task(
     bind=True,

@@ -7,17 +7,17 @@ import structlog
 from fastapi import HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from market_alert.infraestructure.security.bruteforce import (
-    block_ip,
-    reset_failed_attempts,
-    record_failed_attempt,
-)
 from market_alert.core.config_alert import settings
 from market_alert.core.jwt import create_access_token
 from market_alert.core.tokens import (
     generate_verification_token,
     generate_reset_token,
     token_expiry,
+)
+from market_alert.infraestructure.security.bruteforce import (
+    block_ip,
+    reset_failed_attempts,
+    record_failed_attempt,
 )
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_auth import (

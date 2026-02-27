@@ -148,7 +148,6 @@ def fetch_recent_prices(
         previous = float(history[1].price)
     return previous, current
 
-
 def create_for_competitor(
     db: Session,
     competitor_product_id: UUID,

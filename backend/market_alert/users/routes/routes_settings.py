@@ -24,8 +24,8 @@ from market_alert.users.services import (
 )
 
 
-router = APIRouter(prefix="/settings", tags=["Configurações"])
 logger = structlog.get_logger("users.routes.settings")
+router = APIRouter(prefix="/settings", tags=["Configurações"])
 
 @router.get("", response_model=SettingsOverviewResponse)
 def get_settings_summary(

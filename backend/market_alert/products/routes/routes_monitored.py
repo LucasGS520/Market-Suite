@@ -1,9 +1,10 @@
 """ Rotas para produtos monitorados pelo usuário """
 
+from uuid import UUID
+
 import structlog
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.orm import Session
-from uuid import UUID
 
 from shared.infra.db import get_db
 from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
@@ -29,8 +30,8 @@ from market_alert.products.services.services_monitored_lifecycle import (
 )
 
 
-router = APIRouter(prefix="/monitored", tags=["Monitoramento"])
 logger = structlog.get_logger("http_route")
+router = APIRouter(prefix="/monitored", tags=["Monitoramento"])
 
 #Limite de itens destacados exibidos simultaneamente no dashboard
 MAX_FEATURED_ITEMS = 3

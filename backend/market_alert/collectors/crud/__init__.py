@@ -1,1 +1,1 @@
-""" Camada de persistência da feature de coletores """
+""" Camada de persistência (CRUD) da feature de coletores """

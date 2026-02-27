@@ -14,21 +14,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from decimal import Decimal
 
 import structlog
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
-from market_alert.enums.enums_notifications import EventType, NotificationChannel
 from market_alert.models import AlertRule, MonitoredProduct, User, UserNotificationPreference
+from market_alert.enums.enums_notifications import EventType, NotificationChannel
 from market_alert.notifications.domain.channel_resolver import is_channel_confirmed, resolve_channel_destination
 from market_alert.notifications.domain.contact_validator import validate_email, validate_phone_number
 from market_alert.notifications.domain.event_detector import detect_events_from_snapshots, map_event_to_alert_type
 from market_alert.notifications.domain.price_calculator import is_delta_below_threshold
 from market_alert.notifications.domain.snapshot_validator import validate_snapshot_contract
 from market_alert.notifications.template_renderer import render_notification
-
-from decimal import Decimal
 
 
 logger = structlog.get_logger("notifications_evaluator")

@@ -47,7 +47,6 @@ class CollectDispatchDecision:
     should_requeue: bool
     retain_processing: bool
 
-
 def _should_abort(task_request) -> bool:
     """ Verifica se a task foi sinalizada para abortar """
     if task_request is None:
@@ -57,14 +56,12 @@ def _should_abort(task_request) -> bool:
         return False
     return bool(abort_fn())
 
-
 def _should_skip_requeue(monitored: MonitoredProduct, reason: str | None) -> bool:
     """ Decide se o monitorado deve ficar fora da fila após falha crítica """
     if monitored.paused or monitored.status in {MonitoredStatus.failed}:
         return True
     normalized_reason = (reason or "").strip().lower()
     return normalized_reason in {"blocked", "invalid_url_blocked"}
-
 
 def _dispatch_collect_task(
     *,
@@ -107,7 +104,6 @@ def _dispatch_collect_task(
             trace_id=trace_id,
         )
         return False
-
 
 def _collect_group(
     *,
@@ -248,7 +244,6 @@ def _collect_group(
         retain_processing=True,
     )
 
-
 def _requeue_monitored(
     *,
     monitored: MonitoredProduct,
@@ -289,7 +284,6 @@ def _requeue_monitored(
 
     return False, resolved_next_check_at
 
-
 def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
     """ Carrega monitorado por ID garantindo UUID válido """
     try:
@@ -297,7 +291,6 @@ def _load_monitored(db: Session, monitored_id: str) -> MonitoredProduct | None:
     except Exception:
         return None
     return get_monitored_product_by_id(db, parsed_id)
-
 
 def _handle_processing_requeue(
     *,

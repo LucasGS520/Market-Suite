@@ -11,7 +11,6 @@ from typing import List, Dict, Any, Optional
 from uuid import UUID
 
 import structlog
-
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
@@ -20,7 +19,6 @@ from shared.utils.redis_client import set_key_with_ttl
 
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
 from market_alert.enums.enums_products import ProductStatus
-
 
 
 logger = structlog.get_logger("price_comparator")

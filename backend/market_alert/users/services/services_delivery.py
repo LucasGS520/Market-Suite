@@ -6,8 +6,8 @@ import structlog
 from sqlalchemy.orm import Session
 
 from market_alert.users.crud import account_crud
-from market_alert.notifications.channels.email_adapter import EmailAdapter
-from market_alert.notifications.channels.sms_adapter import SmsAdapter
+from market_alert.notifications.infra.channels.email_adapter import EmailAdapter
+from market_alert.notifications.infra.channels.sms_adapter import SmsAdapter
 
 
 logger = structlog.get_logger("users.services.delivery")

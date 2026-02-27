@@ -30,7 +30,6 @@ __all__ = [
     "calculate_competitiveness",
 ]
 
-
 @dataclass(frozen=True)
 class CompetitivenessThresholds:
     """ Limiares percentuais para classificar a competitividade do monitorado.

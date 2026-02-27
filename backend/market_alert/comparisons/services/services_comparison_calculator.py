@@ -27,8 +27,8 @@ import structlog
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
-from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct
+from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 from market_alert.enums.enums_products import MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.comparisons.domain.price_competitiveness import CompetitivenessThresholds, determine_competitiveness_status
@@ -53,7 +53,6 @@ __all__ = [
 
 #Limiares de competitividade carregados das configurações no startup
 _thresholds = CompetitivenessThresholds.from_config(settings)
-
 
 def empty_summary(competitors_count: int) -> Dict[str, Any]:
     """ Cria a estrutura base do resumo competitivo com todos os campos em default."""

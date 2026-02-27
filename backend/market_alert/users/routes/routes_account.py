@@ -20,8 +20,8 @@ from market_alert.users.services import (
 )
 
 
-router = APIRouter(prefix="/users", tags=["Usuários"])
 logger = structlog.get_logger("users.routes.account")
+router = APIRouter(prefix="/users", tags=["Usuários"])
 
 def _validate_admin_permission(current_user: User) -> None:
     """ Restringe endpoints administrativos a contas com papel admin """

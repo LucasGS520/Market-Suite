@@ -24,7 +24,7 @@ from market_alert.users.crud import crud_account, crud_identity
 from market_alert.notifications.crud import crud_notifications
 from market_alert.users.domain.account_domain import normalize_email, normalize_phone
 from market_alert.users.domain.settings_domain import DEFAULT_NOTIFICATION_CHANNELS
-from backend.market_alert.users.tasks.verification_tasks import send_email_verification, send_phone_otp
+from market_alert.users.tasks.verification_tasks import send_email_verification, send_phone_otp
 
 
 logger = structlog.get_logger("users.services.settings")

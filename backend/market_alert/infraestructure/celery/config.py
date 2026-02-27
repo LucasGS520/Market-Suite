@@ -80,7 +80,6 @@ TASK_ROUTES = {
     },
 }
 
-
 def _schedule_entry(
     task: str,
     schedule,
@@ -94,7 +93,6 @@ def _schedule_entry(
         "schedule": schedule,
         "options": {"queue": queue, "routing_key": routing_key or queue},
     }
-
 
 #Agendamentos periódicos (Celery Beat)
 #Mantidos aqui para simplificar auditoria e evitar divergências

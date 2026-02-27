@@ -1,7 +1,9 @@
 """ Funções compartilhadas para derivar nomes de produtos via URL/scraping. """
 
 from __future__ import annotations
+
 from urllib.parse import unquote, urlparse
+
 from shared.utils import sanitize_text
 
 

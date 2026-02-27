@@ -3,6 +3,7 @@
 import os
 
 from fastapi import Request, Response
+
 from market_alert.core.config_alert import settings
 
 

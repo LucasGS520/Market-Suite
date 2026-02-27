@@ -12,8 +12,8 @@ from market_alert.schemas.schemas_users import VerificationResendRequest
 from market_alert.users.services import resend_verification
 
 
-router = APIRouter(prefix="/users", tags=["Usuários"])
 logger = structlog.get_logger("users.routes.identity")
+router = APIRouter(prefix="/users", tags=["Usuários"])
 
 @router.post("/resend-verification")
 def resend_verification_tokens(

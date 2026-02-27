@@ -23,12 +23,12 @@ Uso típico:
 
 from typing import Any, Dict, Optional
 
+
 __all__ = [
     "extract_material_snapshot",
     "snapshot_has_changed",
     "MATERIAL_FIELDS",
 ]
-
 
 #Campos que representam mudança real no cenário competitivo.
 #Timestamps (last_comparison_at, computed_at) são excluídos propositalmente

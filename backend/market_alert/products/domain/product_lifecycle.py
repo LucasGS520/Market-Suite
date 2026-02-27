@@ -57,7 +57,6 @@ _ALLOWED_STATUS_TRANSITIONS: dict[MonitoredStatus, set[MonitoredStatus]] = {
     },
 }
 
-
 def resolve_scheduling_event(
     *,
     price_changed: bool,

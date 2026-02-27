@@ -14,8 +14,9 @@ from uuid import UUID
 
 from redis import Redis
 
-from market_alert.core.config_alert import settings
 from shared.utils.redis_client import get_redis_client
+
+from market_alert.core.config_alert import settings
 
 
 logger = logging.getLogger(__name__)

@@ -18,9 +18,8 @@ from shared.utils import (
 from shared.utils.url_validation import normalize_competitor_url
 
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.products.crud.crud_competitor import create_or_update_competitor_product_scraped, get_competitor_by_monitored_and_url
-from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
 from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
+from market_alert.products.crud.crud_competitor import create_or_update_competitor_product_scraped, get_competitor_by_monitored_and_url
 from market_alert.collectors.services.scraper_common import (
     execute_scraper_fetch,
     ensure_name,
@@ -32,6 +31,7 @@ from market_alert.collectors.services.scraper_common import (
     to_decimal,
     to_float,
 )
+from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
 
 
 #Logger específico para o scraping de concorrentes

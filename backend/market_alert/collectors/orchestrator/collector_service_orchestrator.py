@@ -31,7 +31,6 @@ _enqueuer = CollectionEnqueuer()
 
 logger = structlog.get_logger("collector_service")
 
-
 def build_monitored_payload(
     monitored: MonitoredProduct,
     *,

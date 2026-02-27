@@ -31,6 +31,9 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
+from market_alert.notifications.infra.notification_locks import notification_lock_manager
+from market_alert.notifications.infra.redis_repository import notification_redis_repository
+from market_alert.enums.enums_notifications import DeliveryStatus, EventType, NotificationStatus
 from market_alert.notifications.crud.crud_notifications import (
     add_notification_attempt,
     acquire_notification_for_processing,
@@ -49,12 +52,9 @@ from market_alert.notifications.crud.crud_notifications import (
     update_preference_last_notified,
     DEFAULT_MAX_ATTEMPTS,
 )
-from market_alert.enums.enums_notifications import DeliveryStatus, EventType, NotificationStatus
 from market_alert.notifications.domain.cooldown_resolver import is_within_cooldown, resolve_cooldown_seconds
 from market_alert.notifications.domain.deduplication import generate_dedup_hash
 from market_alert.notifications.evaluator import NotificationCandidate, evaluate
-from market_alert.notifications.infra.notification_locks import notification_lock_manager
-from market_alert.notifications.infra.redis_repository import notification_redis_repository
 
 if TYPE_CHECKING:
     from market_alert.models import MonitoredProduct, User
@@ -62,15 +62,14 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("services_notifications")
 
-# Janela de deduplicação de envios recentes (em segundos)
+#Janela de deduplicação de envios recentes (em segundos)
 _DEDUP_SENT_WINDOW_SECONDS = max(
     getattr(settings, "NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS", 0),
     600,  # mínimo de 10 minutos
 )
 
-# Backoff de retry em segundos por número de tentativa
+#Backoff de retry em segundos por número de tentativa
 _RETRY_BACKOFF_SECONDS = {1: 60, 2: 300}
-
 
 def evaluate_and_create_notifications(
     monitored: "MonitoredProduct",
@@ -139,7 +138,7 @@ def evaluate_and_create_notifications(
         )
         return []
 
-    # Agrupa candidatos por tipo de evento para criar um event_log por evento
+    #Agrupa candidatos por tipo de evento para criar um event_log por evento
     candidates_by_event: dict[EventType, list[NotificationCandidate]] = {}
     for candidate in candidates:
         candidates_by_event.setdefault(candidate.event_type, []).append(candidate)
@@ -203,7 +202,6 @@ def evaluate_and_create_notifications(
     )
     return created_notification_ids
 
-
 def _persist_candidate(
     db: Session,
     *,
@@ -222,7 +220,7 @@ def _persist_candidate(
     Returns:
         ID da notificação criada como string, ou None se suprimida.
     """
-    # Calcula dedup_hash e cooldown_seconds nesta camada (não no evaluator)
+    #Calcula dedup_hash e cooldown_seconds nesta camada (não no evaluator)
     dedup_hash = generate_dedup_hash(
         user_id=str(user.id),
         monitored_id=str(monitored.id),
@@ -236,7 +234,7 @@ def _persist_candidate(
 
     lock_owner: str | None = None
 
-    # 1. Verifica cooldown via banco (último envio para este produto/canal)
+    #1. Verifica cooldown via banco (último envio para este produto/canal)
     last_sent_at = get_last_sent_at(
         db,
         monitored_product_id=monitored.id,
@@ -250,7 +248,7 @@ def _persist_candidate(
         )
         return None
 
-    # 2. Verifica dedup no Redis (marcador de envio recente)
+    #2. Verifica dedup no Redis (marcador de envio recente)
     if notification_redis_repository.has_dedup_marker(dedup_hash):
         logger.debug(
             "notification_suppressed_dedup_redis",
@@ -259,7 +257,7 @@ def _persist_candidate(
         )
         return None
 
-    # 3. Verifica cooldown no Redis (marcador de cooldown ativo)
+    #3. Verifica cooldown no Redis (marcador de cooldown ativo)
     if notification_redis_repository.has_cooldown_marker(
         monitored_product_id=monitored.id,
         channel=candidate.channel,
@@ -272,7 +270,7 @@ def _persist_candidate(
         )
         return None
 
-    # 4. Verifica dedup no banco (janela de envios recentes)
+    #4. Verifica dedup no banco (janela de envios recentes)
     if has_recent_sent_notification(
         db,
         dedup_hash=dedup_hash,
@@ -286,7 +284,7 @@ def _persist_candidate(
         )
         return None
 
-    # 5. Verifica duplicata na janela de cooldown no banco
+    #5. Verifica duplicata na janela de cooldown no banco
     if has_dedup_in_window(
         db,
         dedup_hash=dedup_hash,
@@ -300,7 +298,7 @@ def _persist_candidate(
         )
         return None
 
-    # 6. Adquire lock para prevenir race condition entre workers
+    #6. Adquire lock para prevenir race condition entre workers
     lock_acquired, lock_owner = notification_lock_manager.acquire(dedup_hash, ttl_seconds=60)
     if not lock_acquired:
         logger.debug(
@@ -311,7 +309,7 @@ def _persist_candidate(
         return None
 
     try:
-        # 7. Marca dedup no Redis antes de persistir (SET NX — proteção de race)
+        #7. Marca dedup no Redis antes de persistir (SET NX — proteção de race)
         if cooldown_seconds > 0:
             if not notification_redis_repository.set_dedup_marker(dedup_hash, cooldown_seconds):
                 logger.debug(
@@ -320,7 +318,7 @@ def _persist_candidate(
                 )
                 return None
 
-        # 8. Persiste a notificação
+        #8. Persiste a notificação
         notification = create_notification(
             db,
             event_id=event_id,
@@ -341,7 +339,7 @@ def _persist_candidate(
             commit=False,
         )
 
-        # 9. Atualiza carimbos de disparo em regras e preferências
+        #9. Atualiza carimbos de disparo em regras e preferências
         if candidate.alert_rule:
             update_alert_rule_last_triggered(
                 db,
@@ -361,7 +359,6 @@ def _persist_candidate(
 
     finally:
         notification_lock_manager.release(dedup_hash, lock_owner)
-
 
 def process_notification(
     db: Session,
@@ -454,7 +451,7 @@ def process_notification(
 
             if success:
                 mark_notification_sent(db, notification=notification, commit=False)
-                # Registra cooldown no Redis após marcar como enviado
+                #Registra cooldown no Redis após marcar como enviado
                 if notification.cooldown_seconds > 0:
                     notification_redis_repository.set_cooldown_marker(
                         monitored_product_id=notification.monitored_product_id,
@@ -501,7 +498,6 @@ def process_notification(
     finally:
         notification_lock_manager.release(notification.dedup_hash, lock_owner)
 
-
 def _calculate_next_attempt(attempts: int, *, now: datetime) -> datetime | None:
     """ Calcula o próximo instante de retry com base no backoff configurado.
 
@@ -516,7 +512,6 @@ def _calculate_next_attempt(attempts: int, *, now: datetime) -> datetime | None:
     if delay is None:
         return None
     return now + timedelta(seconds=delay)
-
 
 def enqueue_pending_notifications(
     db: Session,

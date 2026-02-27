@@ -19,8 +19,8 @@ import structlog
 from celery import Celery
 from celery.signals import worker_ready
 
-logger = structlog.get_logger("worker_lifecycle")
 
+logger = structlog.get_logger("worker_lifecycle")
 
 def register_worker_signals(celery_app: Celery, process_start_monotonic: float) -> None:
     """ Registra os sinais de lifecycle do worker.

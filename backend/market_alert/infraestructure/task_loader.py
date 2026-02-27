@@ -15,8 +15,8 @@ from importlib import import_module
 
 import structlog
 
-logger = structlog.get_logger("task_loader")
 
+logger = structlog.get_logger("task_loader")
 
 def load_task_modules(task_modules: list[str]) -> None:
     """ Importa explicitamente cada módulo de tasks listado.

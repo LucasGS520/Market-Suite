@@ -72,11 +72,10 @@ __all__ = [
     "summarize_comparison",
 ]
 
-
 def ensure_user_can_view_monitored(
     *, db: Session, monitored_id: UUID, user: User
 ) -> None:
-    """Valida se o monitorado pertence ao usuário autenticado."""
+    """ Valida se o monitorado pertence ao usuário autenticado """
     from market_alert.products.services.services_access_control import ensure_user_can_access_monitored
 
     return ensure_user_can_access_monitored(
@@ -86,7 +85,6 @@ def ensure_user_can_view_monitored(
         context={"monitored_id": str(monitored_id)},
     )
 
-
 def get_paginated_comparisons_for_user(
     *,
     db: Session,
@@ -95,7 +93,7 @@ def get_paginated_comparisons_for_user(
     page: int,
     per_page: int,
 ) -> PaginatedPriceComparisonResponse:
-    """Monta envelope paginado de comparações garantindo propriedade do monitorado."""
+    """ Monta envelope paginado de comparações garantindo propriedade do monitorado """
     ensure_user_can_view_monitored(db=db, monitored_id=monitored_id, user=user)
     total, comparisons = paginate_comparisons(
         db, monitored_product_id=monitored_id, page=page, per_page=per_page
@@ -105,11 +103,10 @@ def get_paginated_comparisons_for_user(
         meta={"total": total, "page": page, "per_page": per_page},
     )
 
-
 def get_comparison_summary_for_user(
     *, db: Session, monitored_id: UUID, user: User
 ) -> PriceComparisonSummaryResponse:
-    """Retorna o resumo mais recente garantindo que o produto pertença ao usuário.
+    """ Retorna o resumo mais recente garantindo que o produto pertença ao usuário.
 
     Fluxo:
     1. Valida autorização
@@ -153,14 +150,13 @@ def get_comparison_summary_for_user(
         monitored_product_id=monitored_id, **normalized_summary
     )
 
-
 def get_comparison_detail_for_user(
     *,
     db: Session,
     comparison_id: UUID,
     user: User,
 ) -> PriceComparisonResponse:
-    """Retorna detalhes de comparação apenas quando pertence ao usuário."""
+    """ Retorna detalhes de comparação apenas quando pertence ao usuário """
     comparison = get_comparison_by_id(db, comparison_id)
     if comparison is None:
         raise HTTPException(
@@ -173,7 +169,6 @@ def get_comparison_detail_for_user(
     )
     return comparison
 
-
 def persist_rebuilt_summary_if_needed(
     *,
     db: Session,
@@ -181,7 +176,7 @@ def persist_rebuilt_summary_if_needed(
     normalized_summary: Dict[str, Any],
     stored_summary: PriceComparisonSummary | None,
 ) -> Dict[str, Any]:
-    """Persiste resumo recomposto apenas quando houver mudança material.
+    """ Persiste resumo recomposto apenas quando houver mudança material.
 
     Comportamentos defensivos deste fluxo:
     - recusa payload inválido (não-dict)
@@ -263,13 +258,12 @@ def persist_rebuilt_summary_if_needed(
         competitors_count=_extract_competitors_count_from_summary(persisted_summary),
     )
 
-
 def run_price_comparison(
     db: Session,
     monitored_id: UUID,
     tolerance: Optional[Decimal] = None,
 ) -> Dict[str, Any]:
-    """Executa comparação de preços e retorna resumo persistido para o monitorado.
+    """ Executa comparação de preços e retorna resumo persistido para o monitorado.
 
     Ponto de entrada único para comparação acionada por tasks ou orquestrador.
     Não requer usuário autenticado — a autorização é responsabilidade do caller.
@@ -352,7 +346,7 @@ def _persist_inactive_comparison(
     reason: str,
     total: int,
 ) -> Dict[str, Any]:
-    """Persiste comparação stub para monitorado inativo e retorna resultado."""
+    """ Persiste comparação stub para monitorado inativo e retorna resultado """
     payload_stub = {
         "monitored_price": None,
         "discrepancies": [],
@@ -383,7 +377,6 @@ def _persist_inactive_comparison(
         "highest_competitor": None,
     }
 
-
 def _persist_comparison_result(
     db: Session,
     *,
@@ -392,7 +385,7 @@ def _persist_comparison_result(
     total: int,
     available: List[CompetitorProduct],
 ) -> Dict[str, Any]:
-    """Persiste comparação e devolve payload final normalizado para os consumidores."""
+    """ Persiste comparação e devolve payload final normalizado para os consumidores """
     persist_raw_result = getattr(settings, "COMPARISON_STORE_RAW_RESULT", False)
     stored_payload = (
         result
@@ -430,11 +423,10 @@ def _persist_comparison_result(
     result["user_id"] = str(monitored.user_id)
     return result
 
-
 def _extract_competitors_count_from_summary(
     stored_summary: PriceComparisonSummary | None,
 ) -> int:
-    """Obtém a contagem de concorrentes a partir dos agregados persistidos."""
+    """ Obtém a contagem de concorrentes a partir dos agregados persistidos """
     if stored_summary is None:
         return 0
     aggregates = (

@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from celery import Celery
     from sqlalchemy.orm import Session
 
+
 logger = structlog.get_logger("continuous_collector_manager")
 
 # Chaves Redis usadas pelo gerenciador
@@ -66,12 +67,10 @@ _MONITOR_QUEUE = "monitor"
 # Referência ao monotonic de início do processo, injetada por `celery_app.py`
 _process_start_monotonic: float = time.monotonic()
 
-
 def set_process_start_monotonic(value: float) -> None:
     """ Permite que ``celery_app.py`` injete o timestamp de início do processo. """
     global _process_start_monotonic
     _process_start_monotonic = value
-
 
 def _get_process_uptime_seconds() -> float:
     """ Retorna o uptime do processo em segundos usando relógio monotônico. """
@@ -280,7 +279,6 @@ def autostart_enabled() -> bool:
     flag = os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART", "0").strip().lower()
     return flag in {"1", "true", "yes"}
 
-
 def _in_cooldown() -> bool:
     """ Retorna True se há cooldown ativo (chave Redis presente). """
     client = get_redis_client()
@@ -292,7 +290,6 @@ def _in_cooldown() -> bool:
     except Exception:
         logger.exception("continuous_autostart_cooldown_check_failed")
         return False
-
 
 def _is_active(celery_app: "Celery") -> bool:
     """ Verifica se há execução ativa do coletor contínuo nos workers Celery. """
@@ -335,7 +332,6 @@ def _register_cooldown(*, reason: str) -> None:
         ttl_seconds=cooldown_seconds,
         detail=reason,
     )
-
 
 def _delete_lock() -> None:
     """ Remove o lock de autostart para evitar bloqueios indevidos após falha. """
@@ -451,7 +447,6 @@ def _revalidate(celery_app: "Celery") -> None:
 
     logger.warning("continuous_autostart_reactivated")
     request_start(celery_app, action="reactivated")
-
 
 def start_revalidation_loop(celery_app: "Celery") -> None:
     """ Inicia thread daemon de revalidação periódica do coletor contínuo.

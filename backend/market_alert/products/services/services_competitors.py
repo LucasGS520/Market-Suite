@@ -35,7 +35,7 @@ def list_competitors_with_pagination(
     include_paused: bool,
     context: dict[str, str] | None = None,
 ) -> CompetitorsListResponse:
-    """Coordena validação de acesso, filtros e paginação de concorrentes."""
+    """ Coordena validação de acesso, filtros e paginação de concorrentes """
     ensure_user_can_access_monitored(
         db=db,
         product_id=monitored_product_id,
@@ -58,7 +58,7 @@ def list_competitors_with_pagination(
         try:
             items.append(build_competitor_response(competitor, allow_missing_price=True))
         except HTTPException as exc:
-            # Ignora concorrentes incompletos preservando previsibilidade da listagem
+            #Ignora concorrentes incompletos preservando previsibilidade da listagem
             logger.warning(
                 "competitor_without_price",
                 competitor_id=str(competitor.id),

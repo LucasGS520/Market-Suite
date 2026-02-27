@@ -1,7 +1,6 @@
 """ Rotas responsáveis por consolidar estátisticas rápidas do dashboard """
 
 import structlog
-
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
@@ -12,8 +11,8 @@ from market_alert.models import User
 from market_alert.products.services.services_dashboard import gather_dashboard_totals
 
 
-router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 logger = structlog.get_logger("dashboard_routes")
+router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 @router.get("/stats")
 def get_dashboard_stats(

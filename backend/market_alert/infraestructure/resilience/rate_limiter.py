@@ -112,7 +112,6 @@ def parse_rate_limit_config(rate_limit: str) -> Tuple[int, int] | None:
 
     return max_requests, window_seconds
 
-
 def allow_with_leaky_bucket(
     bucket_key: str,
     *,

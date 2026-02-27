@@ -24,8 +24,8 @@ from market_alert.products.services.services_competitor_lifecycle import (
 )
 
 
-router = APIRouter(prefix="/competitors", tags=["Concorrentes"])
 logger = structlog.get_logger("http_route")
+router = APIRouter(prefix="/competitors", tags=["Concorrentes"])
 
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 100

@@ -47,7 +47,6 @@ __all__ = [
     "should_refresh_competitors_count",
 ]
 
-
 class FilteredCompetitorsResult:
     """ Agrupa concorrentes elegíveis para comparação e métricas de filtragem."""
 

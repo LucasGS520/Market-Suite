@@ -44,7 +44,6 @@ def resolve_channel_destination(
 
     return None
 
-
 def is_channel_confirmed(
     *,
     channel: NotificationChannel,

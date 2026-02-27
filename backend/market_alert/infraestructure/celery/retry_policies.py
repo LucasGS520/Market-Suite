@@ -104,7 +104,6 @@ VERIFICATION_RETRY: dict = {
     "time_limit": 60,
 }
 
-
 def _notification_retry() -> dict:
     """ Retorna política de notificação com max_retries baseado em settings. """
     from market_alert.core.config_alert import settings
@@ -114,7 +113,6 @@ def _notification_retry() -> dict:
         "time_limit": 60,
         "acks_late": True,
     }
-
 
 NOTIFICATION_RETRY: dict = _notification_retry()
 

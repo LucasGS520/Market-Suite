@@ -12,8 +12,8 @@ from shared.infra.db import get_engine
 from market_alert.core.config_alert import settings
 
 
-router = APIRouter(prefix="/health", tags=["Health"])
 logger = structlog.get_logger("health_check")
+router = APIRouter(prefix="/health", tags=["Health"])
 
 @router.get("/", tags=["Health"])
 def health_check():
@@ -41,7 +41,6 @@ def health_check():
         logger.exception("redis_unavailable")
         status["redis"] = {"status": "error", "detail": "Redis indisponível"}
         status["overall"] = "error"
-
 
     #Verificação do Beat (último sucesso)
     try:

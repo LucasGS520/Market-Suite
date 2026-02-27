@@ -19,7 +19,6 @@ from backend.market_alert.users.tasks.verification_tasks import send_email_verif
 
 logger = structlog.get_logger("users.services.account")
 
-
 def register_user(db: Session, user_data: UserCreate, request: Request) -> UserResponse:
     """ Registra usuário pendente e inicia fluxo de verificação de identidade """
     ip_address = request.client.host if request.client else "unknown"

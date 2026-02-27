@@ -22,14 +22,14 @@ from uuid import UUID
 import structlog
 from celery.canvas import Signature
 
-from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.core.config_alert import settings
+from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
+from market_alert.schemas.schemas_collection_payload import CollectionPayload
 from market_alert.collectors.orchestrator.collector_service_orchestrator import (
     build_competitor_payload,
     build_monitored_payload,
 )
-from market_alert.schemas.schemas_collection_payload import CollectionPayload
 
 
 logger = structlog.get_logger("collection_enqueuer")

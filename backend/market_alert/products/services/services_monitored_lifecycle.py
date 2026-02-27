@@ -19,10 +19,11 @@ Exemplo de uso em uma route:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+import structlog
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
-import structlog
-from uuid import UUID, uuid4
 
 from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.utils.url_validation import normalize_and_validate_product_url

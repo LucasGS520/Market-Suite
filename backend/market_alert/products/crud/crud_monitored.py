@@ -345,7 +345,6 @@ def _persist_existing_monitored(
     )
     return existing
 
-
 def _persist_new_monitored(
     db: Session,
     *,

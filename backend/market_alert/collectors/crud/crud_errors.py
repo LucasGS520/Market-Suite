@@ -2,7 +2,9 @@
 
 from uuid import UUID
 from sqlalchemy.orm import Session
+
 from shared.enums.error_codes import ScrapingErrorType
+
 from market_alert.models.models_scraping_errors import ScrapingError
 
 

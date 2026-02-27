@@ -8,24 +8,24 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
+import structlog
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
-import structlog
 
 from market_alert.core.config_alert import settings
-from market_alert.enums.enums_notifications import (
-    AlertType,
-    DeliveryStatus,
-    EventType,
-    NotificationChannel,
-    NotificationStatus,
-)
 from market_alert.models.models_notifications import (
     AlertRule,
     EventLog,
     Notification,
     NotificationAttempt,
     UserNotificationPreference,
+)
+from market_alert.enums.enums_notifications import (
+    AlertType,
+    DeliveryStatus,
+    EventType,
+    NotificationChannel,
+    NotificationStatus,
 )
 
 

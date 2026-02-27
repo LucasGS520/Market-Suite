@@ -1,1 +1,1 @@
-""" Camada de CRUD para o módulo de comparações. """
+""" Camada de persistencia (CRUD) para o módulo de comparações. """
