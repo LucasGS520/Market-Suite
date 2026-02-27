@@ -33,8 +33,8 @@ import logging
 from datetime import datetime
 from uuid import UUID
 
+from market_alert.infraestructure.celery.retry_policies import RetryPolicy
 from market_alert.collectors.domain.collection_queue import CollectionQueue
-from market_alert.infra.celery.retry_policies import RetryPolicy
 from market_alert.collectors.utils.continuous_dispatch import (
     _handle_processing_requeue,
     _should_skip_requeue,

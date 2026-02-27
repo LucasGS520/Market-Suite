@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from shared.utils.url_validation import normalize_competitor_url
 
 from market_alert.core.config_alert import settings
-from market_alert.infra.celery.enqueuer import CollectionEnqueuer
+from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.schemas.schemas_collection_payload import CollectionPayload
 from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id

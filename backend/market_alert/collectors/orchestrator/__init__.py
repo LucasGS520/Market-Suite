@@ -11,7 +11,7 @@ from market_alert.collectors.orchestrator.collector_service_orchestrator import 
     enqueue_monitored_collection,
 )
 
-from market_alert.infra.celery.enqueuer import CollectionEnqueuer
+from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
 
 __all__ = [
     "enqueue_collect",

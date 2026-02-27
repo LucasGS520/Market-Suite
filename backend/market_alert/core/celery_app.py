@@ -20,14 +20,14 @@ from celery import Celery
 from market_alert.core.config_alert import settings
 from market_alert.core.logging_config import setup_worker_logging
 from market_alert.core.task_loader import load_task_modules
-from market_alert.infra.celery.config import (
+from market_alert.infraestructure.celery.config import (
     BEAT_SCHEDULE,
     TASK_MODULES,
     TASK_QUEUES,
     TASK_ROUTES,
 )
-from market_alert.infra.worker_lifecycle import register_worker_signals
-from market_alert.infra.startup_validation import validate_startup_dependencies
+from market_alert.infraestructure.worker_lifecycle import register_worker_signals
+from market_alert.infraestructure.startup_validation import validate_startup_dependencies
 
 
 logger = structlog.get_logger("celery_app")

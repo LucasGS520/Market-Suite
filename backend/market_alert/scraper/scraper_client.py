@@ -26,8 +26,8 @@ from shared.schemas.shared_schemas_scraper import ParserRequest, ParserResponse
 from shared.utils.redis_client import get_redis_client
 
 from market_alert.core.config_alert import settings
-from market_alert.infra.resilience.circuit_breaker import CircuitBreaker
-from market_alert.infra.resilience.rate_limiter import RateLimiter
+from market_alert.infraestructure.resilience.circuit_breaker import CircuitBreaker
+from market_alert.infraestructure.resilience.rate_limiter import RateLimiter
 
 
 logger = structlog.get_logger(__name__)

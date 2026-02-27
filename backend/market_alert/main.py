@@ -14,7 +14,7 @@ from slowapi.util import get_remote_address
 
 from market_alert.core.config_alert import settings
 from market_alert.core.logging_config import setup_api_logging
-from market_alert.infra.startup_validation import validate_startup_dependencies
+from market_alert.infraestructure.startup_validation import validate_startup_dependencies
 
 #Rotas de usuários e administração
 from market_alert.users.routes.routes_account import router as account_router
@@ -39,7 +39,7 @@ from market_alert.comparisons.routes.routes_comparisons import router as compari
 from market_alert.notifications.routes.routes_notifications import router as notifications_router
 
 #Rotas de health check
-from market_alert.infra.routes.routes_health import router as health_router
+from market_alert.infraestructure.routes.routes_health import router as health_router
 
 
 #Configura logging antes de criar a app (logging_config centraliza a lógica)

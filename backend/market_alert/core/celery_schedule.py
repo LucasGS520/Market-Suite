@@ -8,7 +8,7 @@ Novo local canônico:
     from market_alert.infra.celery.config import TASK_MODULES, TASK_QUEUES, ...
 """
 
-from market_alert.infra.celery.config import (
+from market_alert.infraestructure.celery.config import (
     BEAT_SCHEDULE,
     TASK_MODULES,
     TASK_QUEUES,

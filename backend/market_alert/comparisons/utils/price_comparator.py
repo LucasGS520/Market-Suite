@@ -57,7 +57,7 @@ def request_comparison_recompute(monitored_id: UUID, reason: str) -> None:
             reason=reason,
         )
 
-    from market_alert.infra.celery.domain_task_enqueuer import DomainTaskEnqueuer
+    from market_alert.infraestructure.celery.domain_task_enqueuer import DomainTaskEnqueuer
 
     try:
         DomainTaskEnqueuer().enqueue_comparison(monitored_id, reason=reason)

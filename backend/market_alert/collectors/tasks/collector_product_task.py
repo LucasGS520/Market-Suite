@@ -30,7 +30,7 @@ from market_alert.core.celery_app import celery_app
 from market_alert.core.config_alert import settings
 from market_alert.core.dlq_base_task import DLQTask
 from market_alert.core.retry_policies import COLLECTION_RETRY
-from market_alert.infra.celery.retry_policies import RetryPolicy
+from market_alert.infraestructure.celery.retry_policies import RetryPolicy
 from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
 from market_alert.products.crud.crud_monitored import (
     activate_pending_monitored,
@@ -56,7 +56,7 @@ from market_alert.collectors.utils.collector_result import (
     _should_schedule_temporary_retry,
     _validate_payload,
 )
-from market_alert.infra.resilience.rate_limiter import (
+from market_alert.infraestructure.resilience.rate_limiter import (
     _increment_invalid_url_attempt,
     _increment_temporary_failure_attempt,
     _register_scrape_cooldown,

@@ -8,7 +8,7 @@ Novo local canônico:
     from market_alert.infra.celery.retry_policies import COLLECTION_RETRY, ...
 """
 
-from market_alert.infra.celery.retry_policies import (  # noqa: F401
+from market_alert.infraestructure.celery.retry_policies import (  # noqa: F401
     COLLECTION_RETRY,
     COMPARISON_RETRY,
     ENQUEUE_RETRY,
