@@ -26,7 +26,7 @@ from __future__ import annotations
 import structlog
 from celery import Task
 
-from shared.infra.db import sanitize_exception_message
+from shared.utils import sanitize_exception_message
 
 logger = structlog.get_logger("dlq_base_task")
 
