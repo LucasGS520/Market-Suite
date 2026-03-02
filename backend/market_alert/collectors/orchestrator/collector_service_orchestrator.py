@@ -27,7 +27,18 @@ from market_alert.collectors.orchestrator.payload_builders import build_competit
 
 
 logger = structlog.get_logger("collector_service")
-_enqueuer = CollectionEnqueuer()
+_enqueuer: CollectionEnqueuer | None = None
+
+def _get_enqueuer() -> CollectionEnqueuer:
+    """ Retorna uma instância lazy de ``CollectionEnqueuer`` para o orquestrador.
+
+    A inicialização tardia evita carregar dependências pesadas e reduz risco de
+    import circular durante o bootstrap do Celery.
+    """
+    global _enqueuer
+    if _enqueuer is None:
+        _enqueuer = CollectionEnqueuer()
+    return _enqueuer
 
 def enqueue_collect(
     payload: CollectionPayload | dict,
@@ -43,7 +54,7 @@ def enqueue_collect(
         #Converte payload legado para ``CollectionPayload`` antes de enfileirar
         payload = CollectionPayload.model_validate(payload)
 
-    _enqueuer._send(payload, countdown=countdown)
+    _get_enqueuer()._send(payload, countdown=countdown)
 
 def enqueue_monitored_collection(
     monitored: MonitoredProduct,
