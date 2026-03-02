@@ -8,7 +8,7 @@ from typing import Any, Literal, Mapping
 from uuid import UUID
 
 from shared.schemas import ParserResponse, ScrapeResult
-from shared.utils import sanitize_text
+from shared.utils import normalize_scraper_response, sanitize_text
 
 from market_alert.scraper.scraper_client import (
     ScraperClient,
@@ -151,7 +151,7 @@ def maybe_call_mocked_parse(
         return ScraperFetchResult(status_code=304, payload=None, headers={})
     
     if not isinstance(parsed, ParserResponse):
-        parsed = ParserResponse.model_validate(parsed)
+        parsed = normalize_scraper_response(parsed, source="worker")
 
     return ScraperFetchResult(status_code=200, payload=parsed, headers={})
 
