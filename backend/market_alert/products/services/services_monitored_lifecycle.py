@@ -291,7 +291,7 @@ def create_monitored_product(
 
     competitor_warning: str | None = None
     if product_data.initial_competitor:
-        from backend.market_alert.products.services.services_competitor_lifecycle import create_competitor_scrape_request
+        from market_alert.products.services.services_competitor_lifecycle import create_competitor_scrape_request
 
         competitor_payload = CompetitorProductCreateScraping(
             monitored_product_id=pending.id,

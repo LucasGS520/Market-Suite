@@ -12,7 +12,6 @@ from market_alert.models.models_users import User
 from market_alert.schemas.schemas_users import UserResponse, VerificationResendRequest
 from market_alert.enums.enums_users import UserStatus, VerificationKind
 from market_alert.users.crud import crud_account, crud_identity
-from backend.market_alert.users.tasks.verification_tasks import send_email_verification, send_phone_otp
 
 
 def verify_email(db: Session, token: str) -> UserResponse:
@@ -62,6 +61,7 @@ def verify_phone_otp(db: Session, user_id: UUID, otp: str) -> UserResponse:
 
 def resend_verification(db: Session, user: User, payload: VerificationResendRequest, request: Request) -> None:
     """ Reenvia token/OTP respeitando limites de tentativa e cooldown """
+    from market_alert.users.tasks.verification_tasks import send_email_verification, send_phone_otp
     ip_address = request.client.host if request.client else "unknown"
     enforce_rate_limit(
         key=f"verify:resend:{user.id}:{payload.channel}",

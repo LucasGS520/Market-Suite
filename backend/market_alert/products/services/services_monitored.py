@@ -22,7 +22,7 @@ from market_alert.schemas.schemas_products import (
     PaginationMeta,
 )
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from backend.market_alert.products.crud.crud_monitored import (
+from market_alert.products.crud.crud_monitored import (
     get_all_monitored_products,
     get_featured_monitored_products,
     get_monitored_product_by_id,

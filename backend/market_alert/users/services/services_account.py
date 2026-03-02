@@ -14,13 +14,14 @@ from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpd
 from market_alert.enums.enums_users import UserStatus, VerificationKind
 from market_alert.users.crud import crud_account, crud_identity
 from market_alert.users.domain.account_domain import normalize_email, normalize_phone
-from backend.market_alert.users.tasks.verification_tasks import send_email_verification, send_phone_otp
 
 
 logger = structlog.get_logger("users.services.account")
 
 def register_user(db: Session, user_data: UserCreate, request: Request) -> UserResponse:
     """ Registra usuário pendente e inicia fluxo de verificação de identidade """
+    from market_alert.users.tasks.verification_tasks import send_email_verification, send_phone_otp
+
     ip_address = request.client.host if request.client else "unknown"
     enforce_rate_limit(
         key=f"register:{ip_address}",
@@ -89,6 +90,6 @@ def read_my_profile(current_user: User) -> UserResponse:
     return UserResponse.model_validate(current_user)
 
 def validate_phone_number(phone_number: str | None) -> None:
-    """  telefone informado no endpoint de gestão de conta """
+    """ Valida e normaliza o telefone informado no endpoint de gestão de conta """
     normalize_phone(phone_number)
     
