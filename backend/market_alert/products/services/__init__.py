@@ -1,7 +1,25 @@
 """Facade estável de casos de uso da feature de produtos.
 
-A intenção é centralizar importações públicas para que consumidores externos
-não dependam da organização interna dos submódulos.
+Expõe explicitamente os submódulos de serviço usados em testes e integrações
+para manter previsibilidade nos imports após refactors.
 """
 
-__all__: list[str] = []
+from market_alert.products.services import (
+    services_access_control,
+    services_competitor_lifecycle,
+    services_competitors,
+    services_dashboard,
+    services_monitored,
+    services_monitored_lifecycle,
+    services_products,
+)
+
+__all__ = [
+    "services_access_control",
+    "services_competitor_lifecycle",
+    "services_competitors",
+    "services_dashboard",
+    "services_monitored",
+    "services_monitored_lifecycle",
+    "services_products",
+]

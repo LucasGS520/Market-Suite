@@ -1,7 +1,9 @@
 """ Camada de persistência da feature de notificações. 
 
-Este módulo expõe apenas operações CRUD consideradas estáveis para uso
-externo, evitando acoplamento direto ao arquivo de implementação.
+Centraliza o módulo CRUD estável para evitar dependência direta de caminhos
+internos e facilitar futuras reorganizações de código.
 """
 
-__all__: list[str] = []
+from market_alert.notifications.crud import crud_notifications
+
+__all__ = ["crud_notifications"]

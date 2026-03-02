@@ -1,7 +1,9 @@
 """ Facade pública da feature de comparações de preços.
 
-A feature expõe somente interfaces estáveis para rotas e casos de uso,
-evita dependência direta em submódulos internos.
+Expõe explicitamente os subpacotes estáveis usados por rotas e orquestração,
+sem obrigar consumidores a conhecer caminhos internos.
 """
 
-__all__: list[str] = []
+from market_alert.comparisons import crud, domain, routes, services, tasks, utils
+
+__all__ = ["crud", "domain", "routes", "services", "tasks", "utils"]

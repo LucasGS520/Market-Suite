@@ -1,7 +1,13 @@
 """ Pontos de entrada Celery do domínio de coletores 
 
-Expõe apenas tasks estáveis usadas por outros módulos e pela infraestrutura de
-filas assíncronas, mantendo os detalhes internos encapsulados.
+A exportação explícita evita depender da descoberta implícita de submódulos e
+mantém uma API clara para tarefas assíncronas compartilhadas.
 """
 
-__all__: list[str] = []
+from market_alert.collectors.tasks import (
+    collector_product_task,
+    continuous_collector_task,
+    priority_queue_tasks,
+)
+
+__all__ = ["collector_product_task", "continuous_collector_task", "priority_queue_tasks"]
