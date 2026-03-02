@@ -17,7 +17,7 @@ from typing import Any, Mapping
 
 import structlog
 
-from shared.schemas.shared_schemas_scraper import ParserResponse
+from shared.schemas import ParserResponse
 
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils import cache

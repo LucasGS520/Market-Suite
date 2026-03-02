@@ -15,7 +15,7 @@ from fastapi import status
 from fastapi.responses import JSONResponse
 from structlog.stdlib import BoundLogger
 
-from shared.schemas.shared_schemas_scraper import ParserResponse
+from shared.schemas import ParserResponse
 from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.url_validation import UrlIssue
 

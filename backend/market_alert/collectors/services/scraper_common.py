@@ -7,8 +7,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, Mapping
 from uuid import UUID
 
-from shared.schemas.shared_schemas_scraper import ParserResponse
-from shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.schemas import ParserResponse, ScrapeResult
 from shared.utils import sanitize_text
 
 from market_alert.scraper.scraper_client import (
