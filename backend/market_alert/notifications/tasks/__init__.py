@@ -3,3 +3,5 @@
 Centraliza os pontos de entrada do Celery para evitar importações diretas
 dos módulos internos de tasks.
 """
+
+__all__: list[str] = []

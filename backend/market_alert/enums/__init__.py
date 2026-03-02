@@ -3,3 +3,5 @@
 Este módulo evita que consumidores importem arquivos internos diretamente,
 concentrando apenas os tipos de enum mais relevantes para uso externo.
 """
+
+__all__: list[str] = []

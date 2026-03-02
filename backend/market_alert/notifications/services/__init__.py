@@ -3,3 +3,5 @@
 Consumidores externos importam apenas este módulo para manter estabilidade
 quando arquivos internos mudarem.
 """
+
+__all__: list[str] = []

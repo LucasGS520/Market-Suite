@@ -3,3 +3,5 @@
 Expõe somente contratos estáveis de enfileiramento, configuração,
 resiliência de tasks e acesso à aplicação Celery.
 """
+
+__all__: list[str] = []

@@ -3,3 +3,5 @@
 As tasks exportadas aqui representam os gatilhos assíncronos estáveis
 para envio de verificações de identidade.
 """
+
+__all__: list[str] = []

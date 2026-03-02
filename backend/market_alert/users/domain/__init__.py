@@ -3,3 +3,5 @@
 Este módulo centraliza regras e constantes reutilizadas pelos serviços,
 sem expor detalhes internos de implementação dos arquivos da pasta.
 """
+
+__all__: list[str] = []

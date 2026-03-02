@@ -2,3 +2,5 @@
 
 Mantém um ponto único para importar tasks públicas usadas pelo Celery.
 """
+
+__all__: list[str] = []

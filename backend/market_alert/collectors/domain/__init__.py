@@ -3,3 +3,5 @@
 Este módulo expõe apenas interfaces/facades estáveis para consumidores externos,
 evitar importações diretas de submódulos reduz acoplamento com detalhes internos.
 """
+
+__all__: list[str] = []

@@ -3,3 +3,5 @@
 Reexporta somente operações de escrita/leitura de erros de coleta para manter
 um contrato simples para consumidores externos.
 """
+
+__all__: list[str] = []

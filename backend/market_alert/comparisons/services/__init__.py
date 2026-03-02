@@ -3,3 +3,5 @@
 Este módulo expõe os casos de uso públicos para consumo por rotas e
 integrações internas, evitando acoplamento com arquivos concretos.
 """
+
+__all__: list[str] = []

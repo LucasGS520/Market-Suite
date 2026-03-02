@@ -25,3 +25,5 @@ def get_channel_adapter(channel: NotificationChannel) -> ChannelAdapter:
     if adapter is None:
         raise ValueError(f"Canal não suportado: {channel}")
     return adapter
+
+__all__ = ["get_channel_adapter"]

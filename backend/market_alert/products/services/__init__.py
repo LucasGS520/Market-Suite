@@ -3,3 +3,5 @@
 A intenção é centralizar importações públicas para que consumidores externos
 não dependam da organização interna dos submódulos.
 """
+
+__all__: list[str] = []

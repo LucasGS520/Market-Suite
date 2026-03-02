@@ -3,3 +3,5 @@
 Reexporta funções determinísticas (sem I/O) para facilitar importações e
 deixar explícito o contrato público de regras de negócio.
 """
+
+__all__: list[str] = []

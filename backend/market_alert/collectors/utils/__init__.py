@@ -3,3 +3,5 @@
 Mantém tipos compartilhados de despacho contínuo e evita importações diretas de
 módulos utilitários internos.
 """
+
+__all__: list[str] = []

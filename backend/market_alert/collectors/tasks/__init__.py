@@ -3,3 +3,5 @@
 Expõe apenas tasks estáveis usadas por outros módulos e pela infraestrutura de
 filas assíncronas, mantendo os detalhes internos encapsulados.
 """
+
+__all__: list[str] = []

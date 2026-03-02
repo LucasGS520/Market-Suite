@@ -3,3 +3,5 @@
 Este pacote implementa integrações com FastAPI/Redis necessárias para
 autenticação, autorização e proteção operacional.
 """
+
+__all__: list[str] = []
