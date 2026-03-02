@@ -13,17 +13,20 @@ Contrato de payload:
 from __future__ import annotations
 
 import random
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import structlog
 from sqlalchemy.orm import Session
 
 from market_alert.core.config_alert import settings
-from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.schemas.schemas_collection_payload import CollectionPayload
 from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.collectors.orchestrator.payload_builders import build_competitor_payload, build_monitored_payload
+
+if TYPE_CHECKING:
+    from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
 
 
 logger = structlog.get_logger("collector_service")
@@ -37,6 +40,9 @@ def _get_enqueuer() -> CollectionEnqueuer:
     """
     global _enqueuer
     if _enqueuer is None:
+        #Import local para quebrar ciclo entre orquestrador e enqueuer
+        from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
+
         _enqueuer = CollectionEnqueuer()
     return _enqueuer
 
