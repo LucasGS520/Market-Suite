@@ -14,7 +14,7 @@ from market_alert.models.models_users import User
 from market_alert.enums.enums_users import UserStatus
 
 
-logger = structlog.get_logger("infra.security.auth_context")
+logger = structlog.get_logger("infraestructure.security.auth_context")
 
 #Extrai token do cabeçalho Authorization: Bearer <token>
 oauth2_scheme = HTTPBearer(bearerFormat="JWT")

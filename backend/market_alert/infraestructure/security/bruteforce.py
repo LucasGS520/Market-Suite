@@ -8,7 +8,7 @@ from shared.utils.redis_client import get_redis_client
 from market_alert.core.config_alert import settings
 
 
-logger = structlog.get_logger("infra.security.bruteforce")
+logger = structlog.get_logger("infraestructure.security.bruteforce")
 
 #Cliente Redis compartilhado usado para rastrear tentativas
 redis_client = get_redis_client()

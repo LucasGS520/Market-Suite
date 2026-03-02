@@ -4,11 +4,11 @@ Responsabilidade única:
     Criar e configurar a instância ``celery_app``. Toda lógica operacional
     foi extraída para módulos dedicados:
 
-    - Configuração de filas/rotas  → ``infra.celery.config``
-    - Logging do worker            → ``core.logging_config``
-    - Hooks de lifecycle           → ``infra.worker_lifecycle``
-    - Carregamento de tasks        → ``core.task_loader``
-    - Políticas de retry           → ``infra.celery.retry_policies``
+    - Configuração de filas/rotas  → ``market_alert.infraestructure.celery.config``
+    - Logging do worker            → ``market_alert.infraestructure.logging_config``
+    - Hooks de lifecycle           → ``market_alert.infraestructure.worker_lifecycle``
+    - Carregamento de tasks        → ``market_alert.infraestructure.task_loader``
+    - Políticas de retry           → ``market_alert.infraestructure.celery.retry_policies``
 """
 
 import os
