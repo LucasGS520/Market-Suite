@@ -39,15 +39,31 @@ def build_competitor_payload(
     enqueued_at: str | None = None,
     trace_id: str | None = None,
 ) -> CollectionPayload:
-    """ Constrói payload tipado para coletas de concorrentes vinculados """
+    """ Constrói ``CollectionPayload`` de concorrente a partir de um ``CompetitorProduct``
+    
+    Mapeamento principal entre os contratos:
+    - ``kind`` recebe ``"competitor"`` para sinalizar o fluxo de coleta de concorrente.
+    - ``monitored_id`` é preenchido com ``competitor.monitored_product_id``.
+    - ``competitor_id`` recebe ``competitor.id``.
+    - ``url`` prioriza a URL normalizada por ``normalize_competitor_url``.
+    - ``name`` prioriza ``competitor.display_name`` e, em seguida,
+      ``competitor.name_competitor``; quando ambos estiverem vazios, usa um
+      fallback baseado na URL para manter o payload semanticamente válido.
+    """
     normalized_url = normalize_competitor_url(competitor.product_url)
     resolved_url = normalized_url or competitor.product_url
+    resolved_name = (
+        str(getattr(competitor, "display_name", "") or "").strip()
+        or str(getattr(competitor, "name_competitor", "") or "").strip()
+        or str(resolved_url or "").strip()
+        or "unknown_competitor"
+    )
     return CollectionPayload(
         kind="competitor",
         monitored_id=competitor.monitored_product_id,
         competitor_id=competitor.id,
         url=resolved_url,
-        name=competitor.name_identification,
+        name=resolved_name,
         trace_id=trace_id or "",
         enqueued_at=enqueued_at,
     )
