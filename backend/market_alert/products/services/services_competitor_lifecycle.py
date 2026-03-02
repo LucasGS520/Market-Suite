@@ -252,6 +252,9 @@ def create_competitor_scrape_request(
             source="competitor_create",
         )
 
+    #Flag explicita para indicar se a tentativa de coleta imediata foi enfileirada
+    initial_enqueue_ok = False
+
     try:
         #Dispara coleta inicial do concorrente para evitar longas filas de pendência
         enqueue_competitor_collection(
@@ -259,6 +262,7 @@ def create_competitor_scrape_request(
             user_id=monitored_product.user_id,
             trace_id=context.get("trace_id"),
         )
+        initial_enqueue_ok = True
     except Exception:
         #Não bloqueia o fluxo principal caso a fila de scraping esteja indisponível
         logger.exception(
@@ -268,18 +272,35 @@ def create_competitor_scrape_request(
             **context,
         )
 
-    logger.info(
-        "competitor_scrape_scheduled",
-        competitor_id=str(pending.id),
-        monitored_id=str(monitored_product.id),
-        **context,
+    if initial_enqueue_ok:
+        logger.info(
+            "competitor_scrape_scheduled",
+            competitor_id=str(pending.id),
+            monitored_id=str(monitored_product.id),
+            **context,
+        )
+    else:
+        # Evento alternativo para observabilidade do modo degradado sem mascarar sucesso da criação.
+        logger.warning(
+            "competitor_scrape_scheduling_degraded",
+            competitor_id=str(pending.id),
+            monitored_id=str(monitored_product.id),
+            reason="initial_queue_unavailable",
+            **context,
+        )
+
+    response_message = (
+        "Concorrente criado. A coleta inicial foi enfileirada com sucesso."
+        if initial_enqueue_ok
+        else "Concorrente criado, mas a coleta inicial imediata não pôde ser enfileirada. "
+        "A coleta ocorrerá no próximo ciclo de monitoramento."
     )
 
     return CompetitorScrapeCreationResponse(
         id=pending.id,
         url=pending.product_url,
         created_at=pending.created_at,
-        message="Concorrente criado. A coleta ocorrerá no próximo ciclo de monitoramento.",
+        message=response_message,
     )
 
 def delete_competitor_entry(
