@@ -9,7 +9,7 @@ Responsabilidade única:
 
 Uso::
 
-    from market_alert.infra.worker_lifecycle import register_worker_signals
+    from market_alert.infraestructure.worker_lifecycle import register_worker_signals
     register_worker_signals(celery_app, process_start_monotonic)
 """
 

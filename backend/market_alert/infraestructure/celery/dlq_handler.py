@@ -22,7 +22,7 @@ logger = structlog.get_logger("dlq_handler")
 
 @celery_app.task(
     bind=True,
-    name="market_alert.infra.celery.dlq_handler.handle_dead_letter",
+    name="market_alert.infraestructure.celery.dlq_handler.handle_dead_letter",
     queue="dead_letter",
     max_retries=0,
     acks_late=True,

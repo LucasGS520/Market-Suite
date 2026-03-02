@@ -72,7 +72,7 @@ class DLQTask(Task):
 
         try:
             self.app.send_task(
-                "market_alert.infra.celery.dlq_handler.handle_dead_letter",
+                "market_alert.infraestructure.celery.dlq_handler.handle_dead_letter",
                 kwargs={
                     "task_name": self.name,
                     "task_id": task_id,

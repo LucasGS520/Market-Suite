@@ -23,9 +23,9 @@ TASK_MODULES = [
     "market_alert.notifications.tasks.notifications_enqueue_task",
     "market_alert.notifications.tasks.send_notification_task",
     "market_alert.users.tasks.verification_tasks",
-    "market_alert.collectors.tasks.priority_queue_reconciliation_task",
-    "market_alert.infra.tasks.maintenance_tasks",
-    "market_alert.infra.celery.dlq_handler",
+    "market_alert.collectors.tasks.priority_queue_tasks",
+    "market_alert.infraestructure.tasks.maintenance_tasks",
+    "market_alert.infraestructure.celery.dlq_handler",
 ]
 
 #Exchanges separados para scraping, monitoramento, comparação e DLQ
@@ -74,7 +74,7 @@ TASK_ROUTES = {
         "queue": "notifications",
         "routing_key": "notifications",
     },
-    "market_alert.infra.celery.dlq_handler.handle_dead_letter": {
+    "market_alert.infraestructure.celery.dlq_handler.handle_dead_letter": {
         "queue": "dead_letter",
         "routing_key": "dead_letter",
     },
@@ -98,7 +98,7 @@ def _schedule_entry(
 #Mantidos aqui para simplificar auditoria e evitar divergências
 BEAT_SCHEDULE = {
     "cleanup-cache-daily": _schedule_entry(
-        "market_alert.infra.tasks.maintenance_tasks.cleanup_cache",
+        "market_alert.infraestructure.tasks.maintenance_tasks.cleanup_cache",
         crontab(hour=3, minute=0),
     ),
 }
