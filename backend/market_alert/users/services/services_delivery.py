@@ -1,11 +1,11 @@
-""" Serviços de entrega de mensagens para verificação de identidade """
+""" Serviços de envio para verificação de identidade no domínio de usuários. """
 
 from uuid import UUID
 
 import structlog
 from sqlalchemy.orm import Session
 
-from market_alert.users.crud import account_crud
+from market_alert.users.crud import crud_account
 from market_alert.notifications.infra.channels.email_adapter import EmailAdapter
 from market_alert.notifications.infra.channels.sms_adapter import SmsAdapter
 
@@ -21,8 +21,8 @@ def send_email_verification_message(
     user_id: UUID,
     token: str,
 ) -> None:
-    """ Envia mensagem de verificação por e-mail ao usuário informado """
-    user = account_crud.get_user_by_id(db, user_id)
+    """Envia o token de verificação por e-mail para o usuário informado."""
+    user = crud_account.get_user_by_id(db, user_id)
     if user is None:
         raise LookupError(f"Usuário não encontrado: {user_id}")
     
@@ -43,8 +43,8 @@ def send_phone_otp_message(
     user_id: UUID,
     otp: str,
 ) -> None:
-    """ Envia OTP por SMS, ignorando usuário sem telefone """
-    user = account_crud.get_user_by_id(db, user_id)
+    """Envia OTP por SMS e ignora envio quando o usuário não possui telefone."""
+    user = crud_account.get_user_by_id(db, user_id)
     if user is None:
         raise LookupError(f"Usuário não encontrado: {user_id}")
 

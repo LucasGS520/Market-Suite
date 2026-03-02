@@ -18,7 +18,7 @@ from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.infraestructure.celery.retry_policies import COMPARISON_RETRY
 from market_alert.users.crud.crud_account import get_user_by_id
 from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.products.crud.crud_price_history import crud_price_history
+from market_alert.products.crud.crud_price_history import fetch_recent_prices
 from market_alert.comparisons.services.services_comparison import run_price_comparison
 from market_alert.notifications.services.services_notifications import enqueue_pending_notifications, evaluate_and_create_notifications
 
@@ -104,7 +104,7 @@ def compare_prices_task(
                 )
                 return
 
-            price_previous, price_current = crud_price_history.fetch_recent_prices(
+            price_previous, price_current = fetch_recent_prices(
                 db, monitored.id
             )
             availability_previous = None
