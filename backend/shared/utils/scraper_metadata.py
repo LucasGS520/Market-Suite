@@ -1,4 +1,4 @@
-""" Funções auxiliares para interpretar metadados vindos do scraper """
+""" Funções utilitárias para interpretar metadados retornados pelo scraper. """
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from shared.utils.http_headers import normalize_headers, parse_http_datetime
 
 if TYPE_CHECKING:
     #Importar apenas em tempo de análise evita dependência circular em runtime
-    from backend.shared.schemas.shared_schemas_scraper import ParserResponse
+    from shared.schemas.shared_schemas_scraper import ParserResponse
 else:  #pragma: no cover - rótulo evita alerta de cobertura em fallback
     ParserResponse = object
 
@@ -50,8 +50,8 @@ def extract_scraper_metadata(
     payload: "ParserResponse",
     headers: Mapping[str, str],
 ) -> ScraperMetadata:
-    """ Monta ``ScraperMetadata`` a partir do payload e dos cabeçalhos """
-    from backend.shared.schemas.shared_schemas_scraper import ParserResponse
+    """ Monta ``ScraperMetadata`` a partir do payload e normalizando cabeçalhos """
+    from shared.schemas.shared_schemas_scraper import ParserResponse
 
     if not isinstance(payload, ParserResponse):
         raise TypeError("payload precisa ser ParserResponse")

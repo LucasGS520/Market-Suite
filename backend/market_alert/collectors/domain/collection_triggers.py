@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from market_alert.schemas.schemas_collection_payload import CollectionPayload
 from market_alert.comparisons.utils.price_comparator import (
