@@ -6,7 +6,7 @@ importações anteriores continuam funcionando sem apontar diretamente
 para o pacote compartilhado.
 """
 
-from backend.shared.schemas.shared_schemas_scraper import ErrorResponse, ParserRequest, ParserResponse
+from shared.schemas.shared_schemas_scraper import ErrorResponse, ParserRequest, ParserResponse
 
 __all__ = [
     "ParserRequest",

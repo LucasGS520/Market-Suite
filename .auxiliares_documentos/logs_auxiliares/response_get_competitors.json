@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "id": "81708bea-52c1-4ce0-bfca-98fd45773cd7",
+      "display_name": "string",
+      "name": "string",
+      "url": "https://mercadolivre.com.br/console-playstation-5-edicao-standard-com-2-controles/up/MLBU3691484530",
+      "current_price": "4599.00",
+      "currency": null,
+      "source": "competitor",
+      "availability": true,
+      "last_status": null,
+      "last_checked": "2026-03-02T19:06:37.913606Z",
+      "last_scraped_at": "2026-03-02T19:06:36.686614Z",
+      "monitored_product_id": "04394fe2-140f-4de7-bfed-a69925e9b1b0",
+      "is_paused": false
+    },
+    {
+      "id": "8f90d4f0-66ce-4ebf-ba2d-18d9c047bdf3",
+      "display_name": "PS5 Concorrente",
+      "name": "PS5 Concorrente",
+      "url": "https://mercadolivre.com.br/console-playstation-5-slim-fisico-2-controles-ps5-nacional-nota-fiscal/up/MLBU780840780",
+      "current_price": "5199.00",
+      "currency": null,
+      "source": "competitor",
+      "availability": true,
+      "last_status": null,
+      "last_checked": "2026-03-02T19:05:00.064938Z",
+      "last_scraped_at": "2026-03-02T19:04:55.997331Z",
+      "monitored_product_id": "04394fe2-140f-4de7-bfed-a69925e9b1b0",
+      "is_paused": false
+    }
+  ],
+  "competitors_total": 2,
+  "competitors_with_price_count": 2,
+  "excluded_due_to_inactive_count": 0,
+  "page": 1,
+  "per_page": 20
+}

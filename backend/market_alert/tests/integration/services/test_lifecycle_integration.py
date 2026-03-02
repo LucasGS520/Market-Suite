@@ -8,12 +8,13 @@ import uuid
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from backend.shared.schemas.shared_schemas_scraper import ScrapeResult
+
+from shared.infra.db import get_db
+from shared.schemas.shared_schemas_scraper import ScrapeResult
 
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.products.routes.routes_monitored import router as monitored_router
 from market_alert.products.routes.routes_monitored import get_current_user
-from shared.infra.db import get_db
 from market_alert.collectors.tasks import collector_product_task
 
 

@@ -17,9 +17,10 @@ from typing import Any, Mapping
 
 import structlog
 
+from shared.schemas.shared_schemas_scraper import ParserResponse
+
 from market_scraper.core.config_scraper import settings
 from market_scraper.utils import cache
-from backend.shared.schemas.shared_schemas_scraper import ParserResponse
 
 
 logger = structlog.get_logger("conditional_payload")

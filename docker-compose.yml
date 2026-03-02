@@ -27,7 +27,7 @@ services:
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/
+      - PYTHONPATH=/backend
     volumes:
       - ./backend/market_alert:/market_alert
       # Monta o pacote `shared` inteiro para que imports como `import shared` funcionem
@@ -105,7 +105,7 @@ services:
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/
+      - PYTHONPATH=/backend
     command:
       - uvicorn
       - "main:app"
@@ -142,7 +142,7 @@ services:
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/
+      - PYTHONPATH=/backend
     command:
       - celery
       - "-A"
@@ -184,7 +184,7 @@ services:
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/
+      - PYTHONPATH=/backend
       - CONTINUOUS_COLLECTOR_AUTOSTART=1
       - CONTINUOUS_COLLECTOR_AUTOSTART_TTL=60
     command:
@@ -227,7 +227,7 @@ services:
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/
+      - PYTHONPATH=/backend
     command:
       - celery
       - "-A"
@@ -268,7 +268,7 @@ services:
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/
+      - PYTHONPATH=/backend
     command:
       - celery
       - "-A"
@@ -310,7 +310,7 @@ services:
       - ENV_FILE=.env.market_scraper
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - PYTHONPATH=/app:/
+      - PYTHONPATH=/app
     command:
       - uvicorn
       - "market_scraper.main:app"
