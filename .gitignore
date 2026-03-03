@@ -163,3 +163,6 @@ lerna-debug.log*
 # Backups and local scripts (do not version)
 /backups/
 /scripts/
+
+# Documentos auxiliares
+.auxiliares_documentos/
