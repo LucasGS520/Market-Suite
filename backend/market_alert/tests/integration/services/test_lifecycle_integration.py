@@ -15,7 +15,7 @@ from shared.schemas.shared_schemas_scraper import ScrapeResult
 from market_alert.models.models_products import MonitoredProduct
 from market_alert.products.routes.routes_monitored import router as monitored_router
 from market_alert.products.routes.routes_monitored import get_current_user
-from market_alert.collectors.tasks import collector_product_task
+import market_alert.collectors.tasks.collector_product_task as collector_product_task
 
 
 def test_fluxo_ponta_a_ponta_criacao_monitored_via_rota(monkeypatch, db_session, user) -> None:
