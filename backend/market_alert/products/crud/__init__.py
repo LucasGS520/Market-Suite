@@ -1,9 +1,8 @@
-""" Acesso a dados de monitorados e concorrentes.
+""" Contrato do pacote CRUD de produtos monitorados e concorrentes.
 
-A composição explícita garante imports consistentes entre serviços internos e
-testes que dependem dos contratos de pacote.
+Este módulo não executa reexport com import eager para evitar ciclos durante o
+bootstrap da API e dos workers. 
+Os consumidores devem importar cada CRUD pelo caminho explícito.
 """
-
-from market_alert.products.crud import crud_competitor, crud_monitored, crud_price_history
 
 __all__ = ["crud_competitor", "crud_monitored", "crud_price_history"]

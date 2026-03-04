@@ -20,8 +20,8 @@ from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_price_history import PriceHistory
 from market_alert.enums.enums_products import MonitoringType, MonitoredStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
-from market_alert.products.crud import crud_competitor
-from market_alert.products.crud import crud_price_history
+import market_alert.products.crud.crud_competitor as crud_competitor
+import market_alert.products.crud.crud_price_history as crud_price_history
 from market_alert.products.domain.product_lifecycle import (
     compute_next_check_at,
     resolve_scheduling_event,
