@@ -90,7 +90,7 @@ def enqueue_monitored_collection(
 def enqueue_competitor_collection(
     competitor: CompetitorProduct,
     *,
-    user_id: UUID | None = None,
+    user_id: UUID,
     countdown: float | None = None,
     trace_id: str | None = None,
 ) -> None:
@@ -141,8 +141,18 @@ def enqueue_competitors_for_monitored(
                 jitter = random.uniform(-0.5, 0.5) * resolved_base_delay * 0.1
                 countdown = max(0.0, resolved_base_delay * position + jitter)
                 try:
+                    monitored_owner = competitor.monitored_product
+                    if monitored_owner is None or monitored_owner.user_id is None:
+                        logger.warning(
+                            "enqueue_competitor_skipped_missing_user",
+                            monitored_id=str(monitored_id),
+                            competitor_id=str(competitor.id),
+                        )
+                        continue
+
                     enqueue_competitor_collection(
                         competitor,
+                        user_id=monitored_owner.user_id,
                         countdown=countdown,
                     )
                 except Exception:

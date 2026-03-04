@@ -105,7 +105,7 @@ class CollectionEnqueuer:
         self,
         competitor: CompetitorProduct,
         *,
-        user_id: UUID | None = None,
+        user_id: UUID,
         trace_id: str | None = None,
         countdown: float | None = None,
         on_complete: Signature | None = None,
@@ -115,7 +115,7 @@ class CollectionEnqueuer:
 
         Args:
             competitor: instância do concorrente a coletar.
-            user_id: UUID do usuário dono (herdado do monitorado quando None).
+            user_id: UUID do usuário dono do monitorado.
             trace_id: ID de rastreamento (gerado automaticamente se None).
             countdown: atraso em segundos para início da task no Celery.
             on_complete: assinatura Celery para callback de sucesso (link=).
