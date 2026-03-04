@@ -31,7 +31,6 @@ from market_alert.products.crud.crud_monitored import (
 from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.comparisons.crud.crud_comparison import get_latest_summaries_for_products, get_latest_summary
 from market_alert.products.services.services_products import build_monitored_response
-from market_alert.comparisons.services.services_comparison import persist_rebuilt_summary_if_needed, rebuild_summary_from_current_state
 from market_alert.comparisons.services.services_comparison_calculator import extract_competitors_count as _extract_competitors_count
 from market_alert.comparisons.utils.comparison_utils import should_refresh_competitors_count as _should_refresh_competitors_count
 
@@ -44,7 +43,7 @@ def _refresh_stale_summary_if_needed(
     product_id: UUID,
     summary,
 ):
-    """ Recalcula contagem de concorrentes quando o snapshot está defasado.
+    """ Recalcula o resumo apenas em memória quando o snapshot está defasado.
 
     A função protege endpoints que reutilizam snapshots de comparação e garante
     que a contagem de concorrentes reflita cadastros criados após ``computed_at``.
@@ -71,16 +70,13 @@ def _refresh_stale_summary_if_needed(
         include_inactive=True,
     )
     refreshed_count = len(competitors)
+
+    #Import local para eliminar acoplamento de bootstrap entre camadas de serviço
+    from market_alert.comparisons.services.services_comparison import rebuild_summary_from_current_state
     normalized_summary = rebuild_summary_from_current_state(
         db=db,
         monitored=monitored,
         competitors=competitors,
-        stored_summary=summary,
-    )
-    normalized_summary = persist_rebuilt_summary_if_needed(
-        db=db,
-        monitored_id=product_id,
-        normalized_summary=normalized_summary,
         stored_summary=summary,
     )
     logger.info(
