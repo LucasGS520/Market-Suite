@@ -122,6 +122,21 @@ def collect_product(
                 except Exception:
                     user_uuid = None
 
+                def _resolve_user_id(monitored) -> UUID | None:
+                    """ Resolve o dono real com precedência: `payload.user_id` válido e, se ausente, `monitored.user_id`
+                    
+                    A regra evita fallbacks com IDs de entidades de produto (monitorado/concorrente)
+                    em campos de usuário, preservando a integridade referencial entre coleta,
+                    autorização e persistência no banco.
+                    """
+                    if user_uuid is not None:
+                        return user_uuid
+                    if monitored is not None:
+                        monitored_owner = getattr(monitored, "user_id", None)
+                        if isinstance(monitored_owner, UUID):
+                            return monitored_owner
+                    return None
+
                 def _collect_with_db(session: Session, *, commit_activation: bool) -> tuple[UUID | None, ScrapeResult | None, str | None]:
                     """ Verifica pré-condições via CRUD e delega scraping ao service correto. """
                     if competitor_id is not None:
@@ -155,6 +170,24 @@ def collect_product(
                                 http_status=200,
                                 error_code="paused",
                             ), "paused"
+                        
+                        monitored_owner = competitor.monitored_product
+                        if monitored_owner is None and resolved_monitored is not None:
+                            # Garante leitura do monitorado no banco para resolver o proprietário real.
+                            monitored_owner = get_monitored_product_by_id(session, resolved_monitored)
+                        resolved_user_id = _resolve_user_id(monitored_owner)
+                        if resolved_user_id is None:
+                            task_logger.error(
+                                "collect_missing_user_id",
+                                trace_id=trace_id,
+                                monitored_id=str(resolved_monitored) if resolved_monitored else None,
+                                competitor_id=str(competitor_id),
+                            )
+                            return resolved_monitored, ScrapeResult(
+                                status="error",
+                                product_id=str(competitor_id),
+                                error_code="missing_user_id",
+                            ), "missing_user_id"
 
                         payload_model = CompetitorProductCreateScraping(
                             monitored_product_id=resolved_monitored,
@@ -163,7 +196,7 @@ def collect_product(
                         )
                         result = scrape_competitor_product(
                             db=session,
-                            user_id=user_uuid or resolved_monitored or competitor_id,
+                            user_id=resolved_user_id,
                             url=url,
                             payload=payload_model,
                             collected_at=collected_at,
@@ -184,6 +217,20 @@ def collect_product(
                             http_status=200,
                             error_code="paused",
                         ), "paused"
+                    
+                    resolved_user_id = _resolve_user_id(monitored)
+                    if resolved_user_id is None:
+                        task_logger.error(
+                            "collect_missing_user_id",
+                            trace_id=trace_id,
+                            monitored_id=str(monitored_id) if monitored_id else None,
+                            competitor_id=str(competitor_id) if competitor_id else None,
+                        )
+                        return monitored_id, ScrapeResult(
+                            status="error",
+                            product_id=str(monitored_id) if monitored_id else None,
+                            error_code="missing_user_id",
+                        ), "missing_user_id"
 
                     payload_model = MonitoredProductCreateScraping(
                         name_identification=payload.get("name") if payload else None,
@@ -192,7 +239,7 @@ def collect_product(
                     result = scrape_monitored_product(
                         db=session,
                         url=url,
-                        user_id=user_uuid or monitored_id,
+                        user_id=resolved_user_id,
                         payload=payload_model,
                         collected_at=collected_at,
                     )
