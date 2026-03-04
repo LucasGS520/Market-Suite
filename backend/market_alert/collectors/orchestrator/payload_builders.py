@@ -27,9 +27,11 @@ def build_monitored_payload(
 ) -> CollectionPayload:
     """ Constrói payload tipado para coletas de monitorados """
     resolved_url = monitored.normalized_url or monitored.product_url
+    #O user_id precisa viajar no payload para evitar deriva de contexto e preservar a integridade de FK no worker
     return CollectionPayload(
         kind="monitored",
         monitored_id=monitored.id,
+        user_id=user_id,
         url=resolved_url,
         name=monitored.name_identification,
         trace_id=trace_id or "",
@@ -61,6 +63,12 @@ def build_competitor_payload(
     """
     normalized_url = normalize_competitor_url(competitor.product_url)
     resolved_url = normalized_url or competitor.product_url
+    resolved_user_id = user_id
+    if resolved_user_id is None:
+        monitored_product = competitor.__dict__.get("monitored_product")
+        if monitored_product is not None:
+            resolved_user_id = getattr(monitored_product, "user_id", None)
+
     raw_name_competitor = str(getattr(competitor, "name_competitor", "") or "").strip()
 
     if not raw_name_competitor:
@@ -82,6 +90,7 @@ def build_competitor_payload(
         kind="competitor",
         monitored_id=competitor.monitored_product_id,
         competitor_id=competitor.id,
+        user_id=resolved_user_id,
         url=resolved_url,
         name=resolved_name,
         trace_id=trace_id or "",
