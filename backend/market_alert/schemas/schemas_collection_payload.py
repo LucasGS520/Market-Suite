@@ -33,11 +33,11 @@ class CollectionPayload(BaseModel):
         monitored_id: UUID do produto monitorado raiz.
         url: URL a ser coletada pelo scraper.
         trace_id: identificador de rastreamento distribuído (sempre presente em formato UUID canônico).
-
+        user_id: UUID do usuário dono do monitorado.
+        
     Campos opcionais:
         version: versão do schema para compatibilidade futura (padrão: 1).
         competitor_id: UUID do concorrente quando kind='competitor'.
-        user_id: UUID do usuário dono do monitorado.
         enqueued_at: ISO timestamp de quando o item entrou na fila de prioridade.
         force_compare: flag para forçar recomputação de comparação após coleta.
         collected_at: ISO timestamp da coleta (preenchido pelo coletor após execução).
@@ -49,9 +49,9 @@ class CollectionPayload(BaseModel):
     monitored_id: UUID = Field(..., description="UUID do produto monitorado raiz")
     url: str = Field(..., description="URL a ser coletada")
     trace_id: str = Field(default="", description="ID de rastreamento distribuído")
+    user_id: UUID = Field(..., description="UUID do usuário dono do monitorado")
 
     competitor_id: UUID | None = Field(default=None, description="UUID do concorrente (apenas para kind=competitor)")
-    user_id: UUID | None = Field(default=None, description="UUID do usuário dono do monitorado")
     enqueued_at: str | None = Field(default=None, description="ISO timestamp de enfileiramento")
     force_compare: str | None = Field(default=None, description="Flag para forçar comparação ('true'/'1')")
     collected_at: str | None = Field(default=None, description="ISO timestamp da coleta")
@@ -80,6 +80,22 @@ class CollectionPayload(BaseModel):
         if normalized_trace_id != canonical_trace_id:
             raise ValueError("trace_id deve estar no formato UUID canônico.")
         return canonical_trace_id
+    
+    @model_validator(mode="after")
+    def _validate_kind_specific_fields(self) -> CollectionPayload:
+        """ Aplica regras de consistência entre ``kind`` e campos específicos
+        
+        Regras:
+            - ``kind='competitor'`` exige ``competitor_id`` preenchido.
+            - ``kind='monitored'`` não permite ``competitor_id`` para evitar ambiguidade.
+        """
+        if self.kind == "competitor" and self.competitor_id is None:
+            raise ValueError("competitor_id é obrigatório quando kind='competitor'.")
+
+        if self.kind == "monitored" and self.competitor_id is not None:
+            raise ValueError("competitor_id deve ser omitido quando kind='monitored'.")
+
+        return self
 
 def validate_payload(payload: dict | None) -> CollectionPayload:
     """ Valida dicionário de payload retornando CollectionPayload tipado.
