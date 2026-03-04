@@ -14,7 +14,11 @@ from market_alert.schemas.schemas_comparisons import (
     PriceComparisonSummaryResponse,
 )
 from market_alert.infraestructure.security.auth_context import get_current_user
-from market_alert.comparisons import services as comparison_services
+from market_alert.comparisons.services.services_comparison import (
+    get_comparison_detail_for_user,
+    get_comparison_summary_for_user,
+    get_paginated_comparisons_for_user,
+)
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
@@ -49,7 +53,7 @@ def list_comparisons(
         per_page=per_page,
     )
 
-    response = comparison_services.get_paginated_comparisons_for_user(
+    response = get_paginated_comparisons_for_user(
         db=db,
         monitored_id=monitored_id,
         user=user,
@@ -71,7 +75,7 @@ def get_comparison_summary(request: Request, monitored_id: UUID, db: Session = D
     """ Retorna o resumo agregado da última comparação executada para o produto monitorado """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_id))
 
-    summary = comparison_services.get_comparison_summary_for_user(
+    summary = get_comparison_summary_for_user(
         db=db,
         monitored_id=monitored_id,
         user=user,
@@ -81,11 +85,16 @@ def get_comparison_summary(request: Request, monitored_id: UUID, db: Session = D
     return summary
 
 @router.get("/detail/{comparison_id}", response_model=PriceComparisonResponse)
-def get_comparison(request: Request, comparison_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def get_comparison(
+    request: Request,
+    comparison_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """ Obtém os detalhes de uma comparação específica """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), comparison_id=str(comparison_id))
 
-    comparison = comparison_services.get_comparison_detail_for_user(
+    comparison = get_comparison_detail_for_user(
         db=db,
         comparison_id=comparison_id,
         user=user,
