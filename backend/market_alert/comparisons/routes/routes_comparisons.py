@@ -71,7 +71,12 @@ def list_comparisons(
     return response
 
 @router.get("/{monitored_id}/summary", response_model=PriceComparisonSummaryResponse)
-def get_comparison_summary(request: Request, monitored_id: UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def get_comparison_summary(
+    request: Request,
+    monitored_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """ Retorna o resumo agregado da última comparação executada para o produto monitorado """
     logger.info("route_called", path=request.url.path, method=request.method, user_id=str(user.id), monitored_id=str(monitored_id))
 
