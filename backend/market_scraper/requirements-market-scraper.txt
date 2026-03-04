@@ -1,0 +1,23 @@
+# Dependências específicas do módulo market_scraper
+# Mudam com mais frequência — camada separada do base
+
+# Parsing HTML
+beautifulsoup4==4.13.4
+lxml==4.9.4
+parsel==1.9.1
+selectolax==0.4.0
+
+# Extração de metadados e preços
+extruct==0.15.0
+price-parser==0.5.0
+
+# HTTP e scraping
+aiohttp==3.12.15
+Brotli==1.1.0
+brotlicffi==1.1.0.0
+cloudscraper==1.2.71
+mechanicalsoup==1.4.0
+
+# Utilitários
+PyYAML==6.0.2
+validators==0.35.0

@@ -1,58 +1,96 @@
 # CLAUDE.md — market_alert
 
-## Contexto da Fase Atual do Projeto
+## Docker — Decisões e Aprendizados
 
-O módulo `market_alert` é o core do backend. Atualmente acumula ~8 domínios de responsabilidade em um único módulo, o que gera acoplamento alto, dificuldade de teste e comportamentos surpresa. 
-O objetivo das tarefas aqui descritas é separar responsabilidades, aumentar confiança no código e reduzir complexidade.
+### Estrutura de requirements
+- `requirements-base.txt` na raiz do projeto: dependências compartilhadas entre `market_alert` e `market_scraper`
+- Cada módulo tem seu próprio `requirements-market-*.txt` com pacotes específicos
+- Dockerfiles usam `COPY --from=root` (via `additional_contexts` no docker-compose) para acessar a raiz
 
-### Principais Responsabilidades Problemáticas
-Responsabilidades que devem ser refatoradas, reestruturadas, organizadas ou simplificadas, visando melhorar totalmente o módulo `market_alert`:
-- Infraestrutura: Configuração Celery, workers, Redis, CORS, rate limiting
+### Build com BuildKit
+- Todos os Dockerfiles usam `--mount=type=cache,target=/root/.cache/pip`
+- O `docker-compose.yml` declara `additional_contexts: root: .` nos 7 serviços que precisam de `requirements-base.txt`
+- Frontend usa Dockerfile multi-stage: `builder` (dev com Vite) e `production` (serve estático)
+- O stage `builder` instala dependências no build — restart do container não reinstala pacotes
 
----
+### Scripts úteis
+- `.\scripts\docker-cleanup.ps1` — limpa volumes, imagens e cache de build (Windows)
+- `bash scripts/docker-monitor.sh` — monitora CPU/RAM dos containers em tempo real
 
-## Problemas Conhecidos — Não Repita Esses Padrões
+### O que NÃO mudar no docker-compose
+- Volumes `./frontend:/app` + `frontend-node-modules:/app/node_modules`: padrão necessário para hot-reload + node_modules do Dockerfile coexistirem
+- `additional_contexts: root: .` em todos os serviços que referenciam `requirements-base.txt`
+- `target: builder` no serviço `frontend`: garante que a etapa de produção (com `pnpm build`) não seja executada em dev
 
-Ao sugerir ou escrever código neste projeto, evite os anti-padrões já existentes:
+## Desenvolvimento Local (Recomendado para Dev)
 
-- **Tasks Celery como mini-aplicações**: a task deve ser uma casca fina que delega para um serviço. Validar/obter payload, abrir sessão, setar trace_id, chamar service(s) passando `db: Session`, tratar erros/retries e encerrar sessão
-- **Services**: recebem `db: Session` (não chamam `SessionLocal()` internamente) e orquestram chamadas a CRUD/domain. Services podem optar por confirmar (commit) via CRUD helpers, mas não devem criar sessões.
-- **Importações locais dentro de funções**: são sintoma de dependência circular. Se precisar fazer isso, a estrutura de módulos precisa ser reorganizada, não contornada.
-- **Arquivo com 4+ responsabilidades**: consulta com autorização, reconstrução de resumo, persistência condicional e formatação de resposta não devem coexistir no mesmo arquivo.
+Para máxima velocidade com hot-reload local:
 
----
+- **Docker rodando apenas infraestrutura** (PostgreSQL + Redis)
+- **API, Workers e Frontend rodando localmente** em Python/Node nativos
+- Veja [DEVELOPMENT.md](DEVELOPMENT.md) para setup completo
 
-## Arquitetura Alvo
+**Quick start:**
+```bash
+# Terminal 1: Infraestrutura
+docker-compose -f docker-compose.infra-only.yml up
 
-Adote separação clara em camadas. A direção de dependência deve ser:
+# Setup uma vez
+bash scripts/dev-setup.sh
 
+# Terminais 2-6: Componentes locais
+bash scripts/dev-migrate.sh
+bash scripts/dev-start-api.sh
+bash scripts/dev-start-workers.sh scraping
+bash scripts/dev-start-workers.sh monitor
+bash scripts/dev-start-workers.sh beat
+bash scripts/dev-start-frontend.sh
 ```
-API / Tasks (entrada)
-    ↓
-Services (orquestração e regras de negócio)
-    ↓
-Domain (lógica pura, sem I/O)
-    ↓
-CRUD (acesso a dados — burro, sem lógica)
-    ↓
-Models / ORM
-```
 
 ---
 
-## Princípios para Este Projeto
+## Docker Profiles — Ligar/Desligar Blocos
 
-- **Responsabilidade única**: cada arquivo tem um motivo para mudar
-- **Dependências explícitas**: nenhuma operação de infraestrutura acontece implicitamente ao chamar uma função de domínio
-- **Testabilidade**: qualquer serviço deve ser testável sem precisar simular Celery + Redis + banco simultaneamente
-- **Ponto de entrada único**: operações críticas (enfileiramento, lock) têm exatamente um lugar no código
-- **Módulo `market_alert`**: bem estruturado, limpo e organizado.
+O compose utiliza `profiles` para separar responsabilidades e permitir rodar subsets independentes:
 
-### Comportamento Esperado
-- Sempre explique oque vai mudar ANTES de mudar
-- Nunca altere mais de um arquivo por vez antes da minha confirmação
-- Se achar bugs, problemas ou inconsistências, descreva-os antes de corrigir
-- Use linguagem simples, para iniciantes em programação
-- Se aparecer duvidas, pergunte antes de agir
+### Perfis Disponíveis
 
-> Nota: Ao final de cada sessão produtiva, proponha atualizações para o `CLAUDE.md` e documentações do projeto `README.md` com base noque foi realizado, garantindo que os arquivos sempre reflitam o estado real do projeto.
+| Perfil | Serviços | Caso de Uso |
+|--------|----------|-----------|
+| `infra` | `db`, `redis`, `redis-init` | Database + cache (base obrigatória) |
+| `api` | `migrations`, `market_alert` | API principal + migrações |
+| `workers` | `celery-worker-{scraping,monitor,compare,notifications}` | Processamento assíncrono |
+| `scraper` | `market_scraper` | Serviço de scraping externo |
+| `ui` | `frontend` | Interface web (Vite) |
+
+### Exemplos de Uso
+
+```bash
+# Apenas infraestrutura (para setup inicial ou testes de conexão)
+docker-compose --profile infra up
+
+# API completa (infra é automático via depends_on)
+docker-compose --profile infra --profile api up
+
+# Full-stack em desenvolvimento
+docker-compose --profile infra --profile api --profile workers --profile ui up
+
+# Produção sem UI (API + workers + scraper, sem frontend)
+docker-compose --profile infra --profile api --profile workers --profile scraper up
+
+# Apenas workers (útil para escalar processamento separado)
+docker-compose --profile infra --profile workers up
+
+# Scraper isolado para testes
+docker-compose --profile infra --profile scraper up
+```
+
+### Ordem de Inicialização Garantida
+
+Mesmo com profiles, as dependências via `depends_on` com healthchecks/completion são respeitadas:
+
+1. **Infra**: `db` e `redis` iniciam em paralelo
+2. **Redis-init**: Aguarda `redis:healthy`, carrega scripts Lua, completa
+3. **API**: `migrations` espera `db:healthy`, depois `market_alert` espera `db:healthy` + `redis:healthy` + `redis-init:completed`
+4. **Workers/Scraper**: Aguardam `db:healthy` + `redis:healthy` + `redis-init:completed` (não bloqueados por API)
+5. **UI**: Aguarda `market_alert:healthy` (agora com healthcheck implementado)

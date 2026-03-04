@@ -3,12 +3,18 @@ services:
   #Banco de dados PostgreSQL utilizado pela aplicação
   db:
     image: postgres:15
+    profiles:
+      - infra
+      - api
+      - scraper
+      - workers
     env_file:
       - .env.common
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d marketalert"]
-      interval: 10s
-      retries: 5
+      interval: 30s
+      timeout: 5s
+      retries: 3
     ports:
       - "5432:5432"
     volumes:
@@ -17,11 +23,73 @@ services:
       - monitoring-net
 
 
-  #Executa migrações de banco de dados com Alembic
+  #Instância Redis utilizada para cache e filas
+  redis:
+    image: redis:7
+    profiles:
+      - infra
+      - api
+      - scraper
+      - workers
+    env_file:
+      - .env.common
+    command:
+      - sh
+      - -c
+      - |
+        exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes --save "900 1 300 10 60 10000"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - monitoring-net
+
+
+  #Carrega scripts lua no Redis na inicialização
+  redis-init:
+    image: redis:7
+    profiles:
+      - infra
+      - api
+      - scraper
+      - workers
+    env_file:
+      - .env.common
+    depends_on:
+      redis:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        export REDISCLI_AUTH="$$REDIS_PASSWORD";
+        until redis-cli -h redis ping | grep -q PONG; do sleep 1; done;
+        redis-cli -h redis SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+    volumes:
+      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+
+
+#Executa migrações de banco de dados com Alembic (perfil infra)
   migrations:
     build:
       context: ./backend/market_alert
       dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - infra
+      - api
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
@@ -44,62 +112,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    restart: "no"
     networks:
       - monitoring-net
 
 
-  #Instância Redis utilizada para cache e filas
-  redis:
-    image: redis:7
-    env_file:
-      - .env.common
-    command:
-      - sh
-      - -c
-      - |
-        exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes --save "900 1 300 10 60 10000"
-    healthcheck:
-      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    ports:
-      - "6379:6379"
-    volumes:
-      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
-      - redis-data:/data
-    restart: unless-stopped
-    networks:
-      - monitoring-net
-
-
-  #Carrega scripts lua no Redis na inicialização
-  redis-init:
-    image: redis:7
-    env_file:
-      - .env.common
-    depends_on:
-      redis:
-        condition: service_healthy
-    entrypoint:
-      - sh
-      - -c
-      - |
-        export REDISCLI_AUTH="$$REDIS_PASSWORD";
-        until redis-cli -h redis ping | grep -q PONG; do sleep 1; done;
-        redis-cli -h redis SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
-    volumes:
-      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
-    restart: on-failure
-    networks:
-      - monitoring-net
-
-
-  #API principal do MarketAlert
+#API principal do MarketAlert
   market_alert:
     build:
       context: ./backend/market_alert
       dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - api
+      - ui
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
@@ -113,6 +140,12 @@ services:
       - "0.0.0.0"
       - "--port"
       - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     ports:
       - "8000:8000"
     depends_on:
@@ -128,182 +161,28 @@ services:
       - ./backend/shared/infra:/market_alert/infra
       - ./backend/shared:/market_alert/shared:ro
       - ./backend:/backend:ro   
+    restart: unless-stopped
     networks:
       - monitoring-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
-
-  #Worker do Celery para tarefas assíncronas gerais (scraping)
-  celery-worker-scraping:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-    env_file:
-      - .env.common
-      - ./backend/market_alert/.env.market_alert
-    environment:
-      - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
-    command:
-      - celery
-      - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
-      - "worker"
-      - "--loglevel=info"
-      - "--pool=prefork"
-      - "--concurrency=4"
-      - "-Q"
-      - "celery,scraping"
-    user: 
-      "1000:1000"
-    ports:
-      - "8002:8002"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro   
-    networks:
-      - monitoring-net
-
-
-  #Worker do Celery dedicado ao coletor contínuo (fila monitor)
-  celery-worker-monitor:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-    env_file:
-      - .env.common
-      - ./backend/market_alert/.env.market_alert
-    environment:
-      - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
-      - CONTINUOUS_COLLECTOR_AUTOSTART=1
-      - CONTINUOUS_COLLECTOR_AUTOSTART_TTL=60
-    command:
-      - celery
-      - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
-      - "worker"
-      - "--loglevel=info"
-      - "--pool=prefork"
-      - "--concurrency=1"
-      - "-Q"
-      - "monitor"
-    user:
-      "1000:1000"
-    ports:
-      - "8004:8002"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro
-    networks:
-      - monitoring-net
-
-  #Worker do Celery dedicado às comparações de preço (fila compare)
-  celery-worker-compare:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-    env_file:
-      - .env.common
-      - ./backend/market_alert/.env.market_alert
-    environment:
-      - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
-    command:
-      - celery
-      - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
-      - "worker"
-      - "--loglevel=info"
-      - "--pool=prefork"
-      - "--concurrency=2"
-      - "-Q"
-      - "compare"
-    user:
-      "1000:1000"
-    ports:
-      - "8005:8002"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro
-    networks:
-      - monitoring-net
-
-  #Worker do Celery dedicado ao envio de notificações
-  celery-worker-notifications:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-    env_file:
-      - .env.common
-      - ./backend/market_alert/.env.market_alert
-    environment:
-      - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
-    command:
-      - celery
-      - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
-      - "worker"
-      - "--loglevel=info"
-      - "--pool=prefork"
-      - "--concurrency=2"
-      - "-Q"
-      - "notifications"
-    user:
-      "1000:1000"
-    ports:
-      - "8003:8002"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro
-    networks:
-      - monitoring-net
 
   #Serviço dedicado ao scraping de produtos
   market_scraper:
     build:
       context: ./backend/market_scraper
       dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - scraper
     env_file:
       - ./backend/market_scraper/.env.market_scraper
     environment:
@@ -331,24 +210,245 @@ services:
       - ./backend/market_scraper:/app/market_scraper
       - ./backend/shared:/app/shared:ro
       - ./backend:/backend:ro
+    restart: unless-stopped
     networks:
       - monitoring-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 768M
+        reservations:
+          cpus: '0.3'
+          memory: 384M
+
+
+  #Worker do Celery para tarefas assíncronas gerais (scraping)
+  celery-worker-scraping:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - workers
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+    command:
+      - celery
+      - "-A"
+      - "market_alert.infraestructure.celery.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=4"
+      - "-Q"
+      - "celery,scraping"
+    user:
+      "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro   
+    restart: on-failure
+    networks:
+      - monitoring-net
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+
+  #Worker do Celery dedicado ao coletor contínuo (fila monitor)
+  celery-worker-monitor:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - workers
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+      - CONTINUOUS_COLLECTOR_AUTOSTART=1
+      - CONTINUOUS_COLLECTOR_AUTOSTART_TTL=60
+    command:
+      - celery
+      - "-A"
+      - "market_alert.infraestructure.celery.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=1"
+      - "-Q"
+      - "monitor"
+    user:
+      "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 384M
+        reservations:
+          cpus: '0.25'
+          memory: 192M
+
+
+  #Worker do Celery dedicado às comparações de preço (fila compare)
+  celery-worker-compare:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - workers
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+    command:
+      - celery
+      - "-A"
+      - "market_alert.infraestructure.celery.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=2"
+      - "-Q"
+      - "compare"
+    user:
+      "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 512M
+        reservations:
+          cpus: '0.4'
+          memory: 256M
+
+
+  #Worker do Celery dedicado ao envio de notificações
+  celery-worker-notifications:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - workers
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+    command:
+      - celery
+      - "-A"
+      - "market_alert.infraestructure.celery.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=2"
+      - "-Q"
+      - "notifications"
+    user:
+      "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - audit-logs:/market_alert/logs/audit
+      - ./backend/shared/infra:/market_alert/infra
+      - ./backend/shared:/market_alert/shared:ro
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 384M
+        reservations:
+          cpus: '0.25'
+          memory: 192M
+
 
   #Interface web do MarketAlert executada com Vite para testes locais rápidos.
   frontend:
-    image: node:20-alpine
-    working_dir: /app
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: builder
+    profiles:
+      - ui
     environment:
       - VITE_API_URL=http://localhost:8000
       - FRONTEND_PORT=5173
-    entrypoint:
-      - sh
-      - -c
-      - |
-        corepack enable && \
-        corepack prepare pnpm@10.4.1 --activate && \
-        pnpm install --frozen-lockfile=false && \
-        pnpm exec vite --host 0.0.0.0 --port "$${FRONTEND_PORT}"
+    command: pnpm exec vite --host 0.0.0.0 --port 5173
     ports:
       - "5173:5173"
     volumes:
@@ -357,9 +457,17 @@ services:
       - frontend-pnpm-store:/root/.local/share/pnpm/store
     depends_on:
       market_alert:
-        condition: service_started
+        condition: service_healthy
     networks:
       - monitoring-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
 volumes:
   db-data:

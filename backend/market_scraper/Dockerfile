@@ -1,13 +1,17 @@
-#Dockerfile do serviço de scraping de produtos
+# Dockerfile do serviço de scraping de produtos - OTIMIZADO
 FROM python:3.12-slim
 
-#Define o diretório de trabalho da aplicação
+# Define o diretório de trabalho
 WORKDIR /app
 
-#Configura o caminho de módulos Python para toda a aplicação
-ENV PYTHONPATH=/app
+# Configura ambiente
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_INPUT=1
 
-#Instalar dependências de sistema necessárias para compilar pacotes nativos
+# ETAPA 1: Instalar dependências do sistema (necessárias para compilar pacotes)
+# Fazer isso ANTES de copiar requirements garante que mudanças em código
+# não forçam reinstalação de ferramentas do sistema
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       build-essential \
@@ -18,15 +22,16 @@ RUN apt-get update && \
       python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-#Copia e instala as dependências do projeto
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# ETAPA 2: Instalar dependências Python (cacheado)
+COPY --from=root requirements-base.txt ./
+COPY requirements-market-scraper.txt ./
 
-#Copia o código-fonte necessário seguindo regras do .dockerignore
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-base.txt -r requirements-market-scraper.txt
+
+# ETAPA 3: Copiar código (mudanças aqui não invalidam cache anterior)
 COPY . /app/market_scraper
 
-#Expôe a porta utilizada pelo serviço de scraping
 EXPOSE 8000
 
-#Comando padrão para iniciar o serviço de scraping
 CMD ["uvicorn", "market_scraper.main:app", "--host", "0.0.0.0", "--port", "8000"]
