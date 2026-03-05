@@ -36,8 +36,6 @@ from market_alert.schemas.schemas_comparisons import (
     PriceComparisonResponse,
     PriceComparisonSummaryResponse,
 )
-from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
-from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
 from market_alert.comparisons.crud.crud_comparison import (
     create_price_comparison,
     get_comparison_by_id,
@@ -45,6 +43,7 @@ from market_alert.comparisons.crud.crud_comparison import (
     paginate_comparisons,
     upsert_price_comparison_summary,
 )
+from market_alert.comparisons.services.products_access import get_competitors_for_monitored, get_monitored_by_id
 from market_alert.comparisons.services.services_comparison_calculator import (
     apply_summary_defaults,
     compute_summary_from_payload,
@@ -118,14 +117,14 @@ def get_comparison_summary_for_user(
     ensure_user_can_view_monitored(db=db, monitored_id=monitored_id, user=user)
 
     stored_summary = get_latest_summary(db, monitored_product_id=monitored_id)
-    monitored = get_monitored_product_by_id(db, monitored_id)
+    monitored = get_monitored_by_id(db, monitored_id)
     if monitored is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Produto monitorado não encontrado.",
         )
 
-    competitors = get_competitors_by_monitored_id(
+    competitors = get_competitors_for_monitored(
         db,
         monitored_id,
         include_paused=True,
