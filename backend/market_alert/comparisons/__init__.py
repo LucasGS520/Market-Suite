@@ -1,9 +1,7 @@
-""" Facade pública da feature de comparações de preços.
+""" Facade do pacote de comparações sem import eager.
 
-Expõe explicitamente os subpacotes estáveis usados por rotas e orquestração,
-sem obrigar consumidores a conhecer caminhos internos.
+Evita carregar submódulos no import do pacote para prevenir dependências
+circulares durante o bootstrap da aplicação.
 """
-
-from market_alert.comparisons import crud, domain, routes, services, tasks, utils
 
 __all__ = ["crud", "domain", "routes", "services", "tasks", "utils"]
