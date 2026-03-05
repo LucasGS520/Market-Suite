@@ -1,173 +1,322 @@
 # Market Alert
-API FastAPI responsável por autenticação, gestão e monitoramento, além de comparação de preços. Opera com PostgreSQL, Redis, Celery (workers dedicados) e integra o `market_scraper` para coleta de dados.
+Servico FastAPI responsável por orquestrar monitoramento de precos, persistir usuarios/produtos/comparacoes/notificacoes e executar workflows assincronos de coleta e entrega. O modulo expoe API REST para operacoes sincronas e utiliza Celery + Redis para filas, retries, locks e tarefas de longa duracao. O `market_scraper` e consumido via HTTP para parsing de URLs; o `market_alert` concentra estado, regras de negocio e distribuicao de alertas.
 
-## Relações e Referências
-- Visão geral da suíte e topologia: [`../README.md`](../README.md)
-- Detalhes do serviço de scraping: [`../market_scraper/README.md`](../market_scraper/README.md)
+## Relacoes e Referências
+- Visao arquitetural da suite: [`../README.md`](../README.md)
+- Servico de scraping consumido pela API: [`../market_scraper/README.md`](../market_scraper/README.md)
 - Guia operacional para agentes: [`../AGENTS.md`](../AGENTS.md)
 
 ## Principais Responsabilidades
-- **Expor rotas REST** para gerenciamento de usuários, autenticação, produtos monitorados e concorrentes, comparações.
-- **Agendar tarefas Celery** (`scraping`, `monitor`, `compare`, `notifications`) para coleta de dados contínua e comparação.
-- **Persistir dados** em PostgreSQL utilizando SQLAlchemy (módulos `models/` e `crud/`).
-- **Registrar logs estruturados** para auditoria operacional.
-- **Integrar com o `market_scraper`** usando `ScraperClient` (`services/scraper_client.py`).
-- **Regras de comparação**: comparações permanecem automáticas após coletas, priorizando mudanças de preço e disponibilidade sem thresholds dinâmicos ou idempotência distribuída. Fluxos manuais apenas disparam tasks já idempotentes (ex.: `compare_prices_task`).
-- **Notificações e alertas**: eventos de domínio alimentam regras configuráveis e geram notificações persistidas com idempotência e auditoria.
+- **Expor a API principal do sistema** com CORS, rate limiting, autenticacao JWT e health checks.
+- **Persistir estado de negocio em PostgreSQL** (usuarios, produtos, historico de precos, comparacoes, tokens, notificacoes e erros de tarefa).
+- **Orquestrar tarefas** assincronas com Celery, filas dedicadas por dominio e agendamentos periodicos.
+- **Integração com o `market_scraper`** para transformar URLs monitoradas em snapshots normalizados de mercado.
 
 ## Estrutura do Diretório
 ```text
 market_alert/
-├── auth/                #Fluxos de autenticação, JWT e rotas de login/refresh/reset
-├── core/                #Configuração do serviço, inicialização do Celery e carregamento de env
-├── crud/                #Operações de banco de dados (SQLAlcemy Session)
-├── models/              #Modelos ORM (SQLAlchemy)
-├── routes/              #Rotas FastAPI (usuários, monitoramentos, comparações, etc.)
-├── schemas/             #Modelos Pydantic expostos pela API
-├── services/            #Regras de negócio (scraper client, comparações)
-├── tasks/               #Conjunto de tasks Celery (scraping, monitoramento)
-└── utils/               #Auxiliares (cache, rate limiting, serialização, etc.)
+|-- auth/                      # Autenticacao, refresh token, logout, perfil e reset de senha
+|-- users/                     # Contas, identidade, configuracoes e verificacoes
+|-- products/                  # Produtos monitorados, concorrentes, dashboard e lifecycle
+|-- collectors/                # Orquestracao de coleta, filas, locks e integracao com scraper
+|-- comparisons/               # Calculo e consulta de comparacoes de preco
+|-- notifications/             # Avaliacao, renderizacao e entrega de notificacoes
+|-- core/                      # Configuracao do servico e utilitarios centrais de seguranca
+|-- infraestructure/           # Logging, health, Celery, resilience e bootstrap operacional
+|-- models/                    # Modelos ORM persistidos no PostgreSQL
+|-- schemas/                   # Contratos Pydantic de request/response
+|-- enums/                     # Enumeracoes de dominio
+|-- scraper/                   # Cliente HTTP oficial do market_scraper
+|-- alembic/                   # Migracoes de banco de dados
+|-- tests/                     # Suite de testes unitarios e de integracao
+└── main.py                    # Entry point da aplicacao FastAPI
 ```
 
-## Endpoints e Fluxos Relevantes
-| Método | Rota / Fluxo | Descrição |
-|--------|--------------|-----------|
-| `POST` | `/auth/login` | Autenticação via formulário e emissão de JWT. |
-| `POST` | `/auth/refresh` | Renova token de acesso ativo. |
-| `POST` | `/auth/verify-email` | Confirma verificação de email via token. |
-| `POST` | `/auth/verify-phone` | Confirma OTP de telefone. |
-| `POST` | `/auth/logout` | Revoga o refresh token informado. |
-| `POST` | `/users` | Cadastro de usuário pendente com verificação. |
-| `POST` | `/users/resend-verification` | Reenvia verificação de email ou telefone. |
-| `GET` | `/monitored` | Lista monitorados usando envelope `{ items, meta }` com filtros `page`, `per_page`, `query` e `status`. O parâmetro `per_page` é opcional e, quando omitido, retorna todos os itens dentro do limite defensivo aplicado pela API.  |
-| `GET` | `/monitored/{id}` | Retorna detalhes do monitorado com `owner_id`, `thumbnail`, `current_price` (`Decimal` serializado) e datas derivadas (`created_at`, `last_price_change_at`). |
-| `GET` | `/monitored/featured` | Retorna até 3 monitorados em destaque respeitando `is_featured` e ordenação configurada. |
-| `POST` | `/monitored/scrape` | Valida duplicidade por usuário + URL, cria recurso mínimo (`id`, `url`, `created_at`, `next_check_at`), dispara coleta imediata na fila `scraping` e agenda o monitorado na fila contínua de prioridade para rechecagens. |
-| `POST` | `/monitored` | Cria produto monitorado associado ao usuário autenticado (fluxo alternativo ao scrape imediato). |
-| `GET` | `/comparisons/{monitored_id}` | Lista comparações paginadas (`items` + `meta`) para o monitorado informado. |
-| `GET` | `/comparisons/{monitored_id}/summary` | Consolida resumo de comparação; `Decimal` enviado como número apenas no resumo (encoder existente). |
-| `GET` | `/competitors` | Lista todos os concorrentes vinculados (incluindo pausados e indisponíveis por padrão), aceita `include_inactive`/`include_paused` e retorna contadores `competitors_total`, `competitors_with_price_count` e `excluded_due_to_inactive_count`. |
-| `POST` | `/competitors/scrape` | Valida duplicidade por `monitored_id` + URL, cria recurso mínimo, dispara coleta imediata na fila `scraping` e garante o monitorado na fila contínua de prioridade para rechecagens. |
-| `GET` | `/notifications` | Lista histórico de notificações do usuário com paginação padrão. |
-| `GET` | `/notifications/preferences` | Retorna preferências de notificação do usuário. |
-| `POST` | `/notifications/preferences` | Cria ou atualiza preferência para canal e tipo de alerta. |
-| `Celery` | `tasks.collector_product_task.collect_product_task` | Consome fila `scraping` e processa uma URL por vez (monitorado ou concorrente), respeitando lock Redis e retornando `ScrapeResult` padronizado; quando o lock não é adquirido retorna `no_result`. |
-| `Celery` | `tasks.continuous_collector_task.run_continuous_collector` | Worker contínuo que consome a fila de prioridade em Redis, dispara coletas assíncronas de monitorados + concorrentes e mantém o reenqueue pendente até o término da coleta. |
-| `Celery` | `tasks.compare_prices_task.compare_prices_task` | Idempotente e leve; recalcula comparação e `competitiveness_status` quando acionado. |
-| `Celery` | `tasks.notifications_enqueue_task.enqueue_notifications_task` | Normaliza notificações pendentes e calcula backoff exponencial antes de novos disparos. |
+---
 
-### Integração com o `market_scraper`
-- **Cliente dedicado**: `scraper/scraper_client.ScraperClient` envia `ParserRequest` e valida `ParserResponse`, tratando `304 Not Modified` como ausência de mudanças e preservando `last_checked`.
-- **Force refresh**: quando `force_refresh=True`, o cliente ignora `ETag`/`If-Modified-Since`, envia `metadata.force_refresh` e força download novo no `market_scraper`.
-- **`shared/`**: reutiliza abstrações de configuração, segurança e utilidades comuns.
-- **Infraestrutura comum**: compartilha Redis (fila Celery/cache) e Postgres definidos no `docker-compose.yml`, além do `.env.common` para logs.
-- **Codificação numérica**: valores monetários são serializados como string (`Decimal` → `"1099.90"`) em quase todos os contratos, exceto no resumo de comparação que mantém encoder numérico para compatibilidade.
-- **Execução das comparações**: as comparações são executadas automaticamente pelas tasks de monitoramento e comparação; não há endpoint para disparo manual.
+## Endpoints e Fluxos HTTP
+As rotas publicas sao registradas em [`main.py`](main.py) e divididas por dominio. Abaixo estao os endpoints atualmente expostos pela API, com foco no contrato HTTP e na responsabilidade principal de cada entrada.
 
-## Celery - Arquitetura de Workers e Filas
+### Fluxos HTTP mais relevantes
+- Cadastro e onboarding: `POST /users/` cria a conta em estado pendente e dispara verificacoes de email/telefone na fila `notifications`.
+- Sessao autenticada: `POST /auth/login` emite JWT para o header `Authorization` e refresh token para cookie HttpOnly (ou payload compativel).
+- Configuracao do usuario: `/settings` e `/notifications/preferences` separam preferencias globais de canal das preferencias especificas por tipo de alerta.
+- Monitoramento: `POST /monitored/scrape` e `POST /competitors/scrape` devolvem `202 Accepted`, pois a coleta real e assincrona e prossegue via Celery.
+- Consulta operacional: `/monitored`, `/competitors`, `/comparisons/*` e `/notifications/` expoem o estado persistido e os agregados consumidos pelo frontend.
 
-### Organização por Workers Dedicados
-O sistema utiliza **quatro workers Celery separados**, cada um consumindo uma fila específica e executando em containers ou processos independentes:
+## Dominios e Componentes Chave
 
-| Worker | Fila(s) | Concorrência | Responsabilidades |
-|--------|---------|--------------|-------------------|
-| **celery-worker-scraping** | `celery,scraping` | 4 | Executa `collect_product_task` (scraping de um monitorado/concorrente por vez) |
-| **celery-worker-monitor** | `monitor` | 4 | Executa o loop contínuo `run_continuous_collector` |
-| **celery-worker-compare** | `compare` | 2 | Executa `compare_prices_task` para comparação assíncrona |
-| **celery-worker-notifications** | `notifications` | 2 | Executa `send_notification_task` + `verification_tasks` |
+### Auth
+- O pacote [`auth/`](auth/) concentra autenticacao de sessao, rotacao de refresh token, logout e fluxos de verificacao/reset de credenciais.
+- [`auth/services/services_auth.py`](auth/services/services_auth.py) organiza login, emissao de JWT, refresh token, logout, troca de email/senha e confirmacao de tokens de verificacao.
+- O login aplica bloqueio por IP e contagem de falhas via [`infraestructure/security/bruteforce.py`](infraestructure/security/bruteforce.py), reduzindo risco de brute force.
+- O refresh token pode ser recebido por payload ou cookie HttpOnly; [`auth/utils/cookies_auth.py`](auth/utils/cookies_auth.py) centraliza `Secure`, `SameSite`, `Path` e limpeza do cookie.
+- O conjunto de rotas em `auth/routes_auth/` esta separado por caso de uso: `login`, `refresh`, `logout`, `profile`, `reset_password` e `verify`.
 
-### Arquivo principal
-- **`core/celery_app.py`**: instancia e configura o app Celery, inicializa conectores.
-- **`core/celery_schedule.py`**: centraliza declarações de filas, rotas e agendamentos Beat.
+#### Endpoints - Autenticacao e Perfil
+| Metodo | Rota | Contrato principal | Responsabilidade |
+|--------|------|--------------------|------------------|
+| `POST` | `/auth/login` | `OAuth2PasswordRequestForm` -> `TokenPairResponse` | Autentica o usuario, aplica protecao contra brute force e retorna `access_token` + `refresh_token`. |
+| `POST` | `/auth/refresh` | `RefreshRequest` opcional -> `TokenPairResponse` | Rotaciona refresh token via payload ou cookie HttpOnly e emite novo par de tokens. |
+| `POST` | `/auth/logout` | `RefreshRequest` opcional -> `204 No Content` | Revoga o refresh token atual e remove o cookie de sessao. |
+| `POST` | `/auth/verify-email` | `token` via query -> mensagem simples | Consome token de verificacao de email e confirma o fator. |
+| `POST` | `/auth/verify-phone` | `PhoneOtpRequest` -> mensagem simples | Valida OTP de telefone e conclui verificacao do numero. |
+| `POST` | `/auth/reset_password/request` | `ResetPasswordRequest` -> mensagem simples | Inicia o fluxo de reset de senha gerando token de recuperacao. |
+| `POST` | `/auth/reset_password/confirm` | `ResetPasswordConfirmRequest` -> mensagem simples | Confirma token de reset e atualiza a senha do usuario. |
+| `POST` | `/auth/change-password` | `ChangePasswordRequest` -> mensagem simples | Permite troca de senha para usuario autenticado. |
+| `POST` | `/auth/change-email` | `ChangeEmailRequest` -> mensagem simples | Altera email e invalida a verificacao anterior do endereco. |
 
-### Impacto da concorrência Workers
-Reduzir a concorrência do `celery-worker-*` diminui picos de requisições simultâneas contra o `market_scraper` e hosts externos, ajudando a mitigar `429` e falhas por excesso de requisições. Em contrapartida, o tempo total para processar filas de scraping pode aumentar em momentos de alta demanda.
+### Users
+- O pacote [`users/`](users/) cobre cadastro, administracao de contas, verificacao de identidade e configuracoes do usuario.
+- [`users/services/services_account.py`](users/services/services_account.py) registra usuarios pendentes, aplica rate limit por IP de cadastro e dispara tarefas de verificacao de email/telefone.
+- [`users/services/services_identity.py`](users/services/services_identity.py) consome tokens/OTPs, reenvia verificacoes com cooldown e promove contas `pending` para `active` quando os fatores exigidos foram confirmados.
+- [`users/services/services_settings.py`](users/services/services_settings.py) consolida perfil e preferencias de notificacao, invalida verificacoes ao trocar email/telefone e dispara novas confirmacoes quando necessario.
+- [`users/tasks/verification_tasks.py`](users/tasks/verification_tasks.py) envia email de verificacao e OTP por SMS na fila `notifications`, mantendo o fluxo assincrono fora da request HTTP.
 
-### Tasks de destaque
-- **`tasks.collector_product_task.collect_product_task`** (fila `scraping`): coleta um monitorado ou concorrente por vez com lock Redis.
-- **`tasks.continuous_collector_task.run_continuous_collector`** (fila `monitor`): **task que roda indefinidamente**, consome fila de prioridade Redis, despacha monitorado+concorrentes para a fila `scraping` e só reenfileira quando o processamento expira/é reconciliado.
-- **`tasks.compare_prices_task.compare_prices_task`** (fila `compare`): dispara automaticamente após coletas com mudanças.
-- **`tasks.send_notification_task.send_notification_task`** (fila `notifications`): entrega alertas com retry.
-- **`tasks.maintenance_tasks.cleanup_cache`** (agendada via Beat): limpa cache expirado.
+#### Endpoints - Usuarios e Configuracões
+| Metodo | Rota | Contrato principal | Responsabilidade |
+|--------|------|--------------------|------------------|
+| `POST` | `/users/` | `UserCreate` -> `UserResponse` | Cadastra usuario, normaliza contatos e dispara verificacoes iniciais. |
+| `PUT` | `/users/{user_id}/status` | query `active: bool` -> `UserResponse` | Ativa ou suspende conta alvo; rota restrita a administradores. |
+| `PUT` | `/users/{user_id}` | `UserUpdate` -> `UserResponse` | Atualiza dados administrativos do usuario; rota restrita a administradores. |
+| `GET` | `/users/me` | autenticado -> `UserResponse` | Retorna o perfil bruto do usuario autenticado. |
+| `POST` | `/users/resend-verification` | `VerificationResendRequest` -> mensagem simples | Reenvia token/OTP de verificacao com rate limit e cooldown. |
+| `GET` | `/settings` | autenticado -> `SettingsOverviewResponse` | Retorna resumo agregado de perfil + preferencias para a tela de configuracoes. |
+| `GET` | `/settings/profile` | autenticado -> `SettingsProfileResponse` | Retorna os dados de perfil usados na tela de configuracoes. |
+| `PATCH` | `/settings/profile` | `SettingsProfileUpdate` -> `SettingsProfileUpdateResponse` | Atualiza perfil e sinaliza se novas verificacoes de email/telefone foram exigidas. |
+| `GET` | `/settings/notifications` | autenticado -> `NotificationSettings` | Retorna preferencias globais de canais de notificacao. |
+| `PATCH` | `/settings/notifications` | `NotificationSettings` -> `NotificationSettings` | Atualiza preferencias globais de email/push/sms/whatsapp. |
 
-### Autostart do Coletor Contínuo
-O worker `celery-worker-monitor` define a variável de ambiente `CONTINUOUS_COLLECTOR_AUTOSTART=1`, que faz com que a task `run_continuous_collector` seja iniciada automaticamente quando o worker inicia. Em falhas, a task é reexecutada pelo mecanismo de retry configurado no Celery. Mantenha **apenas uma instância ativa** do loop contínuo por ambiente; o lock distribuído do coletor garante exclusividade e evita múltiplos `continuous_loop_iteration` no mesmo intervalo.
+### Products
+- O pacote [`products/`](products/) gerencia o ciclo de vida de produtos monitorados e concorrentes, alem das consultas usadas pelo dashboard.
+- [`products/services/services_monitored.py`](products/services/services_monitored.py) e [`products/services/services_competitors.py`](products/services/services_competitors.py) sao camadas read-only para listagem, paginacao e montagem dos DTOs retornados pela API.
+- [`products/services/services_monitored_lifecycle.py`](products/services/services_monitored_lifecycle.py) cria, pausa, retoma e remove monitorados, validando URL, duplicidade, rate limit, lock Redis e sincronizacao com a fila de coleta continua.
+- [`products/services/services_competitor_lifecycle.py`](products/services/services_competitor_lifecycle.py) cria e remove concorrentes, impede auto-referencia, respeita limite maximo por monitorado e agenda recaptura/comparacao apos mudancas.
+- [`products/services/services_access_control.py`](products/services/services_access_control.py) garante ownership por usuario antes de expor ou alterar um monitorado.
+- [`products/domain/product_lifecycle.py`](products/domain/product_lifecycle.py) concentra regras puras de transicao de status, rastreio de mudanca de preco e calculo do proximo `next_check_at`.
+- [`products/domain/stability.py`](products/domain/stability.py) reexporta a politica de estabilidade usada para acelerar ou desacelerar o monitoramento continuo conforme variacao observada.
 
-### Separação de carga entre monitoramento e comparação
-As comparações foram movidas para a fila `compare`, garantindo que o worker de monitoramento permaneça dedicado ao loop contínuo e evitando saturação quando há muitas mudanças simultâneas.
+### Collectors
+- O pacote [`collectors/`](collectors/) e a camada de orquestracao de coleta: recebe pedidos de scraping, monta payloads, aplica locks e gerencia a fila continua.
+- [`collectors/orchestrator/collector_service_orchestrator.py`](collectors/orchestrator/collector_service_orchestrator.py) encapsula o enfileiramento de monitorados e concorrentes na `collect_product_task`, incluindo batching e jitter para concorrentes.
+- [`collectors/tasks/collector_product_task.py`](collectors/tasks/collector_product_task.py) e a task unitaria de scraping: valida payload, aplica lock Redis por produto, delega para o service correto e agenda recomputacao de comparacoes apos commit.
+- [`collectors/domain/collection_queue.py`](collectors/domain/collection_queue.py) abstrai a fila de prioridade Redis (`queue` + `processing`) com operacoes de enqueue, pop, reclaim e remocao.
+- [`collectors/services/continuous_collector_manager.py`](collectors/services/continuous_collector_manager.py) executa o loop continuo, garante singleton via lock Redis, revalida autostart e reencaminha itens presos em processamento.
+- [`collectors/domain/collection_reconciliation.py`](collectors/domain/collection_reconciliation.py) reconcilia a fila Redis com os monitorados ativos persistidos no banco, reduzindo perdas apos restart ou falhas.
 
-### Scraping e Coleta Contínua
-- **Cliente síncrono:** `services/scraper_client.py` usa `httpx.Client` de vida curta e fluxo linear. Evite helpers assíncronos ou `asyncio.run` dentro das tasks para impedir erros de loop fechado.
-- **Proteções:** rate limiter e circuit breaker recebem `get_redis_client` como fábrica e só tentam abrir conexão quando invocados, tolerando Redis indisponível durante o bootstrap do worker.
-- **Pool do worker:** mantenha o pool `prefork` (padrão) para que `time.sleep` usado nos backoffs não bloqueie outros workers em pools baseados em threads/eventlet. Se migrar para pools cooperativos, troque os backoffs bloqueantes por `countdown` do Celery ou sleeps compatíveis com o worker escolhido.
-- **Retries e erros:** tarefas de scraping aplicam `self.retry` progressivo (incluindo `429 Retry-After`) antes de marcar monitorados como `failed`. Cada falha registra `scraping_errors` com o motivo retornado pelo cliente.
-- **Locks Redis:** apenas o `collect_product_task` aplica `acquire_product_lock` com TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`, evitando race conditions entre workers sem usar flags no banco.
-- **Fila de Prioridade:** o `run_continuous_collector` consome um Redis Sorted Set (`PRIORITY_QUEUE_KEY`) ordenado por timestamp. Monitorados ficam em processamento enquanto as coletas assíncronas rodam; o reenqueue ocorre quando a coleta termina e a fila reavalia o `next_check_at`.
+#### Endpoints - Produtos, Dashboard e Concorrentes
+| Metodo | Rota | Contrato principal | Responsabilidade |
+|--------|------|--------------------|------------------|
+| `GET` | `/dashboard/stats` | autenticado -> `dict[str, int]` | Retorna totais exibidos no dashboard (`total_monitored`, `total_competitors`, `ok_prices`). |
+| `POST` | `/monitored/scrape` | `MonitoredProductCreateScraping` -> `MonitoredScrapeCreationResponse` (`202`) | Cria monitorado pendente, valida URL e enfileira coleta inicial. |
+| `GET` | `/monitored` | query `page`, `per_page`, `query`, `status` -> `PaginatedMonitoredProductsResponse` | Lista monitorados com filtros textuais e de competitividade. |
+| `GET` | `/monitored/featured` | autenticado -> `list[MonitoredProductResponse]` | Retorna monitorados destacados para cards do dashboard. |
+| `GET` | `/monitored/{product_id}` | autenticado -> `MonitoredProductResponse` | Retorna detalhe consolidado de um monitorado. |
+| `PUT` | `/monitored/{product_id}/paused` | query `paused: bool` -> `MonitoredProductResponse` | Pausa ou retoma o monitoramento, sincronizando a fila continua. |
+| `DELETE` | `/monitored/{product_id}` | autenticado -> `{success, product_id}` | Remove monitorado, limpa locks e fila de prioridade. |
+| `POST` | `/competitors/scrape` | `CompetitorProductCreateScraping` -> `CompetitorScrapeCreationResponse` (`202`) | Cria concorrente pendente e agenda coleta inicial. |
+| `GET` | `/competitors` | query `monitored_id`, `page`, `per_page`, `include_inactive`, `include_paused` -> `CompetitorsListResponse` | Lista concorrentes de um monitorado com contadores e paginacao. |
+| `DELETE` | `/competitors/{competitor_id}` | autenticado -> `{success, competitor_id}` | Remove concorrente e dispara recomputacao de comparacao do monitorado. |
+
+### Comparisons
+- O pacote [`comparisons/`](comparisons/) transforma snapshots de monitorado e concorrentes em comparacoes persistidas e resumos competitivos reutilizaveis pelo frontend.
+- [`comparisons/services/services_comparison.py`](comparisons/services/services_comparison.py) e o ponto de entrada da orquestracao: carrega dados, valida ownership para consultas HTTP, executa comparacao e persiste `PriceComparison` + `PriceComparisonSummary`.
+- [`comparisons/services/services_comparison_calculator.py`](comparisons/services/services_comparison_calculator.py) concentra calculos puros e recomposicao de resumo: ranking, media, menor/maior preco, `potential_adjustment`, status competitivo e texto de insight.
+- [`comparisons/domain/price_competitiveness.py`](comparisons/domain/price_competitiveness.py) define os limiares configuraveis de competitividade e a classificacao `competitive` / `attention` / `urgent`.
+- [`comparisons/utils/price_comparator.py`](comparisons/utils/price_comparator.py) calcula discrepancias por concorrente e tambem centraliza o debounce de reprocessamento assinado por Redis.
+- [`comparisons/tasks/compare_prices_task.py`](comparisons/tasks/compare_prices_task.py) roda na fila `compare`, persiste o resumo e aciona a avaliacao de notificacoes apenas quando faz sentido operacionalmente.
+
+### Notifications
+- O pacote [`notifications/`](notifications/) avalia eventos, renderiza mensagens, persiste historico de entregas e envia alertas por multiplos canais.
+- [`notifications/evaluator.py`](notifications/evaluator.py) e um avaliador stateless: detecta eventos a partir de snapshots, cruza preferencias/regras, resolve canal/destinatario e produz `NotificationCandidate`.
+- [`notifications/services/services_notifications.py`](notifications/services/services_notifications.py) e o orchestrator principal: aplica deduplicacao, cooldown, locks, cria `event_log` e `notification`, enfileira pendentes e processa envios com retry/dead-letter.
+- [`notifications/template_renderer.py`](notifications/template_renderer.py) renderiza templates Jinja2 por canal (`email`, `sms`, `whatsapp`, `push`, `webhook`) com fallback para templates genericos.
+- O subpacote [`notifications/domain/`](notifications/domain/) contem regras puras como deteccao de eventos, resolucao de prioridade/cooldown, validacao de snapshot e resolucao de canais confirmados.
+- O subpacote [`notifications/infra/channels/`](notifications/infra/channels/) isola adapters de entrega, permitindo trocar providers sem contaminar a camada de dominio.
+- [`notifications/tasks/notifications_enqueue_task.py`](notifications/tasks/notifications_enqueue_task.py) e [`notifications/tasks/send_notification_task.py`](notifications/tasks/send_notification_task.py) separam descoberta de pendencias e envio efetivo por canal.
+
+#### Endpoints - Comparacoes e Notificacoes
+| Metodo | Rota | Contrato principal | Responsabilidade |
+|--------|------|--------------------|------------------|
+| `GET` | `/comparisons/{monitored_id}/summary` | autenticado -> `PriceComparisonSummaryResponse` | Fonte unica de verdade para comparacoes. Retorna resumo estatistico completo (media, ranking, `potential_adjustment`, status competitivo), recomposto a partir do estado atual se necessario. |
+| `GET` | `/comparisons/detail/{comparison_id}` | autenticado -> `PriceComparisonResponse` | Retorna o registro detalhado de uma comparacao especifica. |
+| `GET` | `/notifications/` | query `page`, `per_page` -> `PaginatedNotificationResponse` | Lista notificacoes persistidas para o usuario autenticado. |
+| `GET` | `/notifications/preferences` | autenticado -> `list[UserNotificationPreferenceResponse]` | Retorna preferencias de notificacao por canal e tipo de alerta. |
+| `POST` | `/notifications/preferences` | `UserNotificationPreferenceCreate` -> `UserNotificationPreferenceResponse` (`201`) | Cria ou atualiza uma preferencia especifica de notificacao. |
+
+### Seguranca Compartilhada
+- [`infraestructure/security/auth_context.py`](infraestructure/security/auth_context.py) valida JWT bearer, resolve o usuario corrente e restringe rotas administrativas.
+- [`core/jwt.py`](core/jwt.py) cria e valida access tokens assinados com `SECRET_KEY` e `ALGORITHM`, incluindo `sub`, `jti`, claims de verificacao e exp.
+- [`core/password.py`](core/password.py) centraliza hashing/verificacao com `bcrypt`.
+- [`core/tokens.py`](core/tokens.py) gera tokens de verificacao, tokens de reset, OTP telefonico, hash de token e calculo de expiracao.
+
+### Contratos e Enumeracoes
+- O pacote [`schemas/`](schemas/) define os contratos Pydantic de entrada/saida por dominio: autenticacao (`schemas_auth.py`), usuarios (`schemas_users.py`), configuracoes (`schemas_settings.py`), produtos (`schemas_products.py`), comparacoes (`schemas_comparisons.py`), notificacoes (`schemas_notifications.py`) e payload de coleta (`schemas_collection_payload.py`).
+- O pacote [`enums/`](enums/) concentra estados e classificacoes compartilhadas: status de usuario e verificacao, estados de produto, status de competitividade, tipos de evento/alerta, canais de notificacao e estados de entrega.
+- Esses contratos estabilizam a fronteira entre API, tasks Celery e regras internas, reduzindo divergencia entre payload HTTP, persistencia e fila.
+
+### Integracao com o market_scraper
+- O `market_alert` nao expoe um endpoint publico para parsing; a integracao acontece internamente via [`scraper/scraper_client.py`](scraper/scraper_client.py).
+- O cliente envia `POST /scraper/parse` para o `market_scraper`, serializando `ParserRequest` com `url`, `product_type`, `user_id` e `metadata` opcional.
+- Headers condicionais `If-None-Match` e `If-Modified-Since` sao suportados para aproveitar `304 Not Modified` e reduzir coleta desnecessaria.
+- O cliente aplica rate limit por host, circuit breaker, retries com backoff e suporte a `Retry-After` antes de devolver `ParserResponse` normalizado para a camada de coleta.
+- Respostas `422`, `400` e `403` com `error_code` sao preservadas como sinal operacional para bloquear URLs invalidas, respeitar robots ou tratar payloads incorretos.
+
+---
+
+## Workers e Tasks
+
+### Workers Celery
+- [`infraestructure/celery/celery_app.py`](infraestructure/celery/celery_app.py) cria a instancia `celery_app` usando `settings.redis_url` como broker e backend.
+- A configuracao operacional fixa serializacao JSON, timezone `America/Sao_Paulo`, `worker_prefetch_multiplier`, `worker_concurrency` e prioridade maxima por fila.
+- O catalogo de filas e rotas vive em [`infraestructure/celery/config.py`](infraestructure/celery/config.py), com separacao explicita entre `scraping`, `monitor`, `compare`, `notifications` e `dead_letter`.
+- O bootstrap do worker repete a validacao de infraestrutura, registra signals de lifecycle e carrega os modulos de tasks explicitamente para evitar workers "saudaveis" sem tasks registradas.
+- O signal `worker_ready` delega para `continuous_collector_manager`, iniciando o coletor continuo e o loop de revalidacao assim que o processo fica pronto.
+- O agendamento periodico registrado nesta fase e `cleanup-cache-daily`, executado pelo Celery Beat diariamente as `03:00`.
+
+### Filas e Topologia Celery
+- [`infraestructure/celery/config.py`](infraestructure/celery/config.py) define cinco filas logicas: `scraping`, `monitor`, `compare`, `notifications` e `dead_letter`.
+- Cada fila usa sua propria `Exchange` direta (`scraping`, `monitor`, `compare`, `notifications`, `dead_letter`) para manter separacao operacional entre coleta, monitoramento continuo, comparacoes, entregas e falhas permanentes.
+- [`infraestructure/celery/celery_app.py`](infraestructure/celery/celery_app.py) instancia o worker com broker/backend Redis, serializacao JSON, `task_queue_max_priority=10` e timezone `America/Sao_Paulo`.
+- No `docker-compose.yml`, o modulo sobe workers dedicados por papel: `celery-worker-scraping`, `celery-worker-monitor`, `celery-worker-compare` e `celery-worker-notifications`.
+- O worker de scraping escuta `celery,scraping`; isso permite processar tasks sem roteamento explicito que caiam na fila padrao `celery`.
+- O `worker_ready` chama [`infraestructure/worker_lifecycle.py`](infraestructure/worker_lifecycle.py), que delega para o coletor continuo iniciar o autostart e o loop de revalidacao.
+
+### Mapa de Tasks por Fila
+| Fila | Task principal | Papel no fluxo |
+|------|----------------|----------------|
+| `scraping` | `collect_product_task` | Coleta um monitorado ou concorrente, aplica lock Redis e persiste o resultado do scraping. |
+| `monitor` | `run_continuous_collector` | Mantem o loop continuo de consumo da fila de prioridade de monitorados. |
+| `monitor` | `finalize_processing_requeue` / `finalize_processing_requeue_error` | Callbacks de sucesso/erro que retornam o monitorado para a fila pronta com novo agendamento. |
+| `compare` | `compare_prices_task` | Persiste comparacoes e, quando ha mudanca material, dispara avaliacao de notificacoes. |
+| `notifications` | `enqueue_notifications_task` | Busca notificacoes pendentes e despacha cada uma para envio individual. |
+| `notifications` | `send_notification_task` | Envia uma notificacao por canal, registra tentativa e aplica retry/dead-letter. |
+| `notifications` | `send_email_verification` / `send_phone_otp` | Entregam mensagens de verificacao de cadastro (email e OTP). |
+| `dead_letter` | `handle_dead_letter` | Persiste falhas permanentes de tasks em `task_failures` para auditoria. |
+| `celery` ou fila informada manualmente | `reconcile_priority_queue` | Task operacional de reconciliacao da fila Redis com os monitorados ativos. |
+| `monitor` via Beat | `cleanup_cache` | Limpa chaves de cache Redis com TTL invalido usando `SCAN` + `UNLINK` em lotes. |
+
+---
+
+## Fluxo de Trabalho 
+
+### Fluxo Assincrono de Coleta Continua
+1. O monitorado entra na fila Redis de prioridade via [`collectors/domain/collection_queue.py`](collectors/domain/collection_queue.py), normalmente a partir do lifecycle de produtos.
+2. [`collectors/services/continuous_collector_manager.py`](collectors/services/continuous_collector_manager.py) executa `run_collection_loop`, garantindo singleton com lock Redis de coletor continuo.
+3. O loop retira o proximo item pronto, move o ID para o conjunto `processing`, revalida estado do monitorado e despacha o grupo de coleta.
+4. [`collectors/utils/continuous_dispatch.py`](collectors/utils/continuous_dispatch.py) envia a coleta do monitorado e de seus concorrentes usando [`infraestructure/celery/enqueuer.py`](infraestructure/celery/enqueuer.py).
+5. A coleta do monitorado e enviada com `link` e `link_error` para os callbacks `finalize_processing_requeue` e `finalize_processing_requeue_error`, ambos executados na fila `monitor`.
+6. O callback decide o novo `next_check_at`, aplica backoff quando necessario e devolve o monitorado para a fila pronta, ou o remove em cenarios bloqueantes (`paused`, `failed`, `invalid_url_blocked`).
+
+### Fluxo Assincrono de Comparacao e Notificacao
+1. [`collectors/tasks/collector_product_task.py`](collectors/tasks/collector_product_task.py) agenda comparacao apos commit quando ha mudanca material (ou quando o fluxo exige `force_compare`).
+2. [`comparisons/utils/price_comparator.py`](comparisons/utils/price_comparator.py) aplica debounce Redis por monitorado antes de chamar [`infraestructure/celery/domain_task_enqueuer.py`](infraestructure/celery/domain_task_enqueuer.py).
+3. `compare_prices_task` executa `run_price_comparison`, persiste `PriceComparison` e `PriceComparisonSummary` e avalia se deve gerar notificacoes.
+4. Quando ha candidatos, [`notifications/services/services_notifications.py`](notifications/services/services_notifications.py) cria `event_log`, persiste notificacoes com deduplicacao/cooldown e chama `enqueue_pending_notifications`.
+5. `enqueue_pending_notifications` despacha `send_notification_task` para cada item pendente na fila `notifications`.
+6. `send_notification_task` chama `process_notification`, que seleciona o adapter do canal, registra tentativas, marca envio, reagenda retry ou envia para dead-letter quando o limite e atingido.
+
+### Agendamentos e Scheduling
+- O catalogo atual de Beat em [`infraestructure/celery/config.py`](infraestructure/celery/config.py) possui uma entrada explicita: `cleanup-cache-daily`, executada diariamente as `03:00` na fila `monitor`.
+- [`infraestructure/tasks/maintenance_tasks.py`](infraestructure/tasks/maintenance_tasks.py) implementa essa limpeza de forma incremental, com limites de tempo, volume e tamanho de lote para nao monopolizar o Redis.
+- [`collectors/tasks/priority_queue_tasks.py`](collectors/tasks/priority_queue_tasks.py) disponibiliza `reconcile_priority_queue` para recarregar a fila de prioridade, mas essa task nao esta no `BEAT_SCHEDULE` atual; hoje ela serve como rotina manual/emergencial.
+- Na configuracao atual do repositorio, o `docker-compose.yml` nao declara um servico dedicado de `celery beat`, embora o codigo esteja pronto para receber esse scheduler.
+- O endpoint `/health/` consulta `beat:last_success`, mas nao ha um produtor desse heartbeat dentro dos modulos carregados atualmente; se o scheduler for operado externamente, ele precisa atualizar essa chave para que o health reflita o estado real do Beat.
+
+### Retry, Rate Limit e Resiliencia
+- [`infraestructure/celery/retry_policies.py`](infraestructure/celery/retry_policies.py) centraliza os limites de retry por dominio: coleta, comparacao, enfileiramento de notificacoes, verificacoes e envio de notificacoes.
+- `collect_product_task` usa `COLLECTION_RETRY` para lock contention e, adicionalmente, gerencia retries de scraping por politica propria (`RetryPolicy`) com backoff, `Retry-After`, cooldown e contadores Redis.
+- [`infraestructure/resilience/rate_limiter.py`](infraestructure/resilience/rate_limiter.py) oferece dois niveis de controle: `token bucket` por host para o `ScraperClient` e `leaky bucket` para limitar onboarding de monitorados/concorrentes.
+- O mesmo modulo controla contadores Redis para URLs invalidas, falhas temporarias e cooldown de scraping, evitando loops agressivos sobre alvos problematicos.
+- [`infraestructure/resilience/circuit_breaker.py`](infraestructure/resilience/circuit_breaker.py) abre circuito por host quando falhas consecutivas ultrapassam o limiar configurado, reduzindo pressao sobre integracoes externas instaveis.
+- O coletor continuo tambem reexecuta itens presos usando `reclaim_stale_processing`, recuperando IDs que ficaram no conjunto `processing` apos queda de worker ou perda de callback.
+
+### Dead Letter e Auditoria
+- Tasks que herdam [`infraestructure/celery/dlq_base_task.py`](infraestructure/celery/dlq_base_task.py) enviam falhas permanentes para a fila `dead_letter` quando os retries se esgotam.
+- Hoje isso cobre principalmente `collect_product_task` e `send_notification_task`, que sao as rotinas com retry e risco operacional mais alto.
+- [`infraestructure/celery/dlq_handler.py`](infraestructure/celery/dlq_handler.py) consome a DLQ, sanitiza mensagens de excecao e persiste o registro em `task_failures`.
+- Esse fluxo evita perder contexto de falhas definitivas e cria uma trilha auditavel para diagnostico pos-incidente.
+
+---
+
+## Fluxos de Negocio End-to-End
+
+### 1. Fluxo de Autenticacao (login, refresh e logout)
+1. O cliente envia `POST /auth/login` com `OAuth2PasswordRequestForm`.
+2. `login_user()` aplica bloqueio por IP (`block_ip`), valida credenciais e recusa contas inativas/suspensas.
+3. Em sucesso, a API atualiza `last_login`, gera `access_token` (JWT) e cria `refresh_token` persistido.
+4. A rota grava o refresh token em cookie HttpOnly (`set_refresh_cookie`) e retorna o par de tokens.
+5. Quando o access expira, `POST /auth/refresh` resolve o refresh por cookie ou payload, revoga o token antigo e rotaciona para um novo par.
+6. No encerramento de sessao, `POST /auth/logout` revoga o refresh corrente e limpa o cookie (`clear_refresh_cookie`).
+
+### 2. Fluxo de Criacao de Produto Monitorado
+1. Usuario autenticado chama `POST /monitored/scrape` com `MonitoredProductCreateScraping`.
+2. O service valida e normaliza URL, verifica duplicidade por usuario e aplica rate limit de scraping.
+3. O monitorado e criado em estado pendente (`create_pending_monitored_product`) e recebe `next_check_at` inicial calculado por estabilidade.
+4. A API dispara coleta imediata (`enqueue_collect`) e registra o item na fila continua de prioridade (`CollectionQueue.enqueue_now`).
+5. Se `initial_competitor` vier no payload, o fluxo tenta criar concorrente inicial em seguida; falha de concorrente nao desfaz o monitorado.
+6. A resposta HTTP retorna `202 Accepted` com `id`, `url`, `created_at` e `next_check_at`.
+
+### 3. Fluxo de Coleta de Precos (API -> Celery -> scraper -> persistencia)
+1. O item pode chegar a coleta por onboarding imediato ou pelo loop continuo (`run_continuous_collector`).
+2. `collect_product_task` valida payload, resolve alvo (`monitored` ou `competitor`) e aplica lock Redis por produto.
+3. O service de scraping chama `ScraperClient.fetch()` para `POST /scraper/parse`, reaproveitando `ETag` e `Last-Modified` quando disponiveis.
+4. Em `200`, os dados normalizados sao persistidos (preco, disponibilidade, metadados e timestamps); em `304`, apenas `last_checked` e agenda sao atualizados.
+5. O resultado gera `outcome` (`success`, `not_modified`, `no_result`, `error`) e pode acionar retries com backoff/cooldown para falhas temporarias.
+6. Os callbacks `finalize_processing_requeue` e `finalize_processing_requeue_error` devolvem o monitorado para a fila de prioridade com novo agendamento.
+
+### 4. Fluxo de Comparacao de Precos
+1. A comparacao e agendada apos coleta material (`schedule_comparison_after_commit`) ou por recomputacao explicitamente solicitada.
+2. `compare_prices_task` chama `run_price_comparison()` para o `monitored_id`.
+3. O service carrega monitorado + concorrentes e, se o monitorado estiver pausado/inativo, persiste um resumo stub com motivo (`ignored_due_to_inactive`).
+4. Em monitorado ativo, `compare_prices()` calcula discrepancias, menor/maior concorrente, media e ranking.
+5. O resultado e persistido em `PriceComparison` e agregado em `PriceComparisonSummary`.
+6. A task so continua para notificacao quando ha contexto valido (usuario encontrado e mudanca relevante).
+
+### 5. Fluxo de Notificacao
+1. `evaluate_and_create_notifications()` recebe snapshots anterior/atual e busca preferencias + regras do usuario.
+2. O evaluator detecta eventos (`price_change`, `availability_change`, etc.), resolve canais elegiveis e renderiza mensagens por template.
+3. Para cada candidato, o service aplica deduplicacao e cooldown em Redis + banco, adquire lock e persiste `event_log` e `notification`.
+4. `enqueue_pending_notifications()` despacha IDs pendentes para `send_notification_task` na fila `notifications`.
+5. `process_notification()` seleciona adapter de canal, registra tentativa e marca `sent` ou `failed`.
+6. Em sucesso, registra cooldown; em falha, reagenda por backoff ate `max_attempts`; ao esgotar, marca dead-letter.
+
+### 6. Fluxo de Usuario Consultando Alertas e Estado
+1. O frontend autenticado consulta `GET /notifications/` para listar alertas persistidos com paginacao.
+2. Para contextualizar impacto comercial, consulta `GET /comparisons/{monitored_id}/summary` (unico endpoint de comparacoes: media, ranking, ajuste potencial, status competitivo).
+3. Ajustes de preferencia sao feitos por `GET/POST /notifications/preferences` e `GET/PATCH /settings/notifications`.
+4. O painel de estado operacional combina `GET /monitored`, `GET /competitors` e `GET /dashboard/stats`.
+5. Com isso, o usuario fecha o ciclo completo: monitora produtos, recebe alertas, revisa comparacoes e ajusta canais de entrega.
+
+---
 
 ## Configuração
-Variáveis padrão residem em [`core/config_alert.py`](core/config_alert.py) e podem ser sobrescritas via `market_alert/.env.market_alert`.
+As configuracoes combinam a base compartilhada em `shared/core/config_base.py` com overrides especificos de [`core/config_alert.py`](core/config_alert.py).
 
-### Persistência do Redis
-O Redis do `docker-compose.yml` utiliza AOF com snapshots para manter filas Celery e dados de cache entre reinícios. O volume `redis-data` armazena o diretório `/data`, garantindo retenção em restarts comuns. Remover volumes com `docker compose down -v` apaga o estado persistido, e uso intenso pode aumentar I/O e exigir monitoramento de disco para evitar degradação ou indisponibilidade por falta de espaço.
+### Ordem de carregamento de ambiente
+1. `.env.common` fornece parametros compartilhados da suite.
+2. O arquivo indicado por `ENV_FILE` sobrescreve os defaults compartilhados.
+3. No `docker-compose.yml`, o `market_alert` monta `./backend/market_alert/.env.market_alert` e define `ENV_FILE=.env.market_alert`, de modo que o modulo resolve seu arquivo local de servico dentro do container.
+4. Variaveis de ambiente exportadas diretamente continuam tendo precedencia no processo.
 
-### Cookies de refresh em ambiente local
-- Para frontend rodando em outro host/porta HTTP, defina `REFRESH_TOKEN_COOKIE_SECURE=0` e `REFRESH_TOKEN_COOKIE_SAMESITE=none`.
-- Ajuste `REFRESH_TOKEN_COOKIE_NAME` e `REFRESH_TOKEN_COOKIE_PATH` apenas se houver necessidade de múltiplos ambientes ou rotas específicas.
-- Configure `FRONTEND_ORIGINS` com as origens permitidas para CORS (lista separada por vírgula).
-
-| Categoria | Variáveis relevantes |
+### Categorias de variaveis
+| Categoria | Variaveis relevantes |
 |-----------|----------------------|
-| Banco de dados | `DATABASE_URL` |
-| Autenticação | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `REFRESH_TOKEN_COOKIE_NAME`, `REFRESH_TOKEN_COOKIE_PATH`, `REFRESH_TOKEN_COOKIE_SECURE`, `REFRESH_TOKEN_COOKIE_SAMESITE`, `FRONTEND_ORIGINS` |
-| Verificação | `EMAIL_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_MAX_ATTEMPTS`, `VERIFICATION_RESEND_INTERVAL_SECONDS`, `VERIFICATION_RESEND_MAX_PER_HOUR`, `REGISTRATION_MAX_PER_HOUR` |
-| Celery | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `CELERY_TASK_ROUTES`, `CELERY_TIMEZONE`, `CELERY_BEAT_SCHEDULE_FILE` |
-| Locks de produto | `PRODUCT_LOCK_TTL_SECONDS` |
-| Agendamento contínuo | `CONTINUOUS_COLLECTOR_AUTOSTART`, `CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS`, `COLLECT_INTERVAL_UNSTABLE_MIN`, `COLLECT_INTERVAL_UNSTABLE_MAX`, `COLLECT_INTERVAL_STABLE_MIN`, `COLLECT_INTERVAL_STABLE_MAX`, `COLLECT_INTERVAL_VERY_STABLE_MIN`, `COLLECT_INTERVAL_VERY_STABLE_MAX`, `STABILITY_DAYS_UNSTABLE`, `STABILITY_DAYS_STABLE`, `STABILITY_DAYS_VERY_STABLE`, `CONTINUOUS_WORKER_POLL_INTERVAL`, `CONTINUOUS_WORKER_BATCH_SIZE`, `CONTINUOUS_WORKER_IDLE_SLEEP`, `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`, `PRIORITY_QUEUE_KEY`, `PRIORITY_QUEUE_PROCESSING_KEY` |
-| Scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_CONNECT_TIMEOUT`, `SCRAPER_READ_TIMEOUT`, `SCRAPER_TOTAL_TIMEOUT`, `SCRAPER_SERVICE_AUTH_HEADER`, `SCRAPER_SERVICE_AUTH_TOKEN`, `SCRAPER_RETRY_ATTEMPTS`, `SCRAPER_RETRY_BACKOFF_MIN`, `SCRAPER_RETRY_BACKOFF_MAX`, `SCRAPER_HOST_RATE_LIMIT`, `SCRAPER_HOST_RATE_WINDOW_SECONDS`, `SCRAPER_HOST_RETRY_MAX_ATTEMPTS`, `SCRAPER_HOST_RETRY_WINDOW_SECONDS`, `SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS`, `SCRAPER_INVALID_URL_MAX_ATTEMPTS`, `SCRAPER_INVALID_URL_TTL_SECONDS` |
-| Notificações | `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_MAX_ATTEMPTS`, `NOTIFICATION_BACKOFF_BASE_SECONDS`, `NOTIFICATION_BACKOFF_MULTIPLIER`, `NOTIFICATION_DEDUPE_SENT_WINDOW_SECONDS`, `NOTIFICATION_EMAIL_PROVIDER`, `NOTIFICATION_SMS_PROVIDER`, `NOTIFICATION_WHATSAPP_PROVIDER`, `NOTIFICATION_PUSH_PROVIDER`, `NOTIFICATION_WEBHOOK_TIMEOUT_SECONDS` |
+| Infra base | `DATABASE_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`, `LOG_LEVEL`, `LOG_FORMAT` |
+| API e frontend | `FRONTEND_ORIGINS` |
+| Autenticacao | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `REFRESH_TOKEN_COOKIE_*` |
+| Protecao operacional | `BRUTE_FORCE_MAX_ATTEMPTS`, `BRUTE_FORCE_BLOCK_DURATION`, `REGISTRATION_MAX_PER_HOUR` |
+| Coleta continua | `PRODUCT_LOCK_TTL_SECONDS`, `PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS`, `COLLECT_INTERVAL_*`, `STABILITY_DAYS_*`, `CONTINUOUS_WORKER_*`, `CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS`, `PRIORITY_QUEUE_*` |
+| Integracao com scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_*TIMEOUT*`, `SCRAPER_RETRY_*`, `SCRAPER_HOST_*`, `SCRAPER_CIRCUIT_*`, `SCRAPER_FORCE_REFRESH_TTL_SECONDS`, `SCRAPER_NO_RESULT_RETRY_SECONDS`, `MAX_COMPETITORS_PER_MONITORED` |
+| Comparacao | `PRICE_TOLERANCE`, `PRICE_CHANGE_THRESHOLD`, `COMPARE_RATE_LIMIT`, `COMPETITIVENESS_THRESHOLD_*`, `COMPARISON_IDEMPOTENCY_TTL_SECONDS`, `COMPARISON_STORE_RAW_RESULT` |
+| Notificacoes | `SMTP_*`, `TWILIO_*`, `FCM_SERVER_KEY`, `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_*` |
+| Verificacao de cadastro | `EMAIL_VERIFICATION_EXPIRE_MINUTES`, `PHONE_VERIFICATION_*`, `VERIFICATION_RESEND_*` |
+| Circuit breaker compartilhado | `CIRCUIT_*` |
 
-### Padrões de contratos
-- **Paginação**: todas as rotas de listagem utilizam envelope `{ items: [], meta: { total, page, per_page } }` com paginação base 1. Quando `per_page` não é enviado em `/monitored`, a API retorna todos os registros disponíveis preservando um teto de segurança.
-- **Campos monetários**: valores `Decimal` são serializados como string (`"1099.90"`) por padrão. O resumo de comparação mantém encoder que envia números (`1099.9`) e deve ser tratado pelo frontend.
-- **Criar via scraping**: o endpoint `/monitored/scrape` retorna 202 com representação mínima do recurso (`id`, `url`, `created_at`, `next_check_at`), dispara coleta imediata na fila `scraping` e agenda o monitorado na fila contínua para rechecagens. O endpoint `/competitors/scrape` retorna 202 com o payload mínimo e enfileira coleta na fila `scraping`.
-- **Destaques**: `/monitored/featured` devolve até 3 monitorados com `is_featured=true`, ordenados pelo critério definido em `routes_monitored`.
-
-**Semântica de timestamps de scraping**
-- **`last_checked`**: registra quando o sistema tentou/processou uma checagem do produto (qualquer tentativa, sucesso ou não). Usado pelo worker contínuo e para decisões operacionais como `SCRAPER_FORCE_REFRESH_TTL_SECONDS`.
-- **`last_scraped_at`**: registra o momento em que dados novos/atualizados foram efetivamente obtidos do `market_scraper` (ou seja, quando um fetch retornou payload que representa conteúdo atualizado). Não deve ser atualizado em retornos `304 Not Modified`.
-- **`collected_at`**: marca o instante real em que a extração foi concluída para monitorado/concorrente, servindo de base para filas contínuas.
-- **`enqueued_at`**: horário em que o monitorado foi colocado na fila de prioridade, usado para latência de consumo (registrado via Redis e logs).
-- **`persisted_at`**: horário em que o resultado do scraping foi confirmado no banco (registrado em logs estruturados).
-- **`checked_at`** (em `PriceHistory`): carimbo de tempo da observação/medição de preço — usado para séries históricas e determinação do instante da mudança de preço.
-
-Observação: a implementação foi ajustada para que respostas `304 Not Modified` atualizem apenas `last_checked` (indicador de atividade), preservando `last_scraped_at` como sinal de frescor dos dados brutos.
-
-## Principais Componentes do Serviço
-- `main.py` – instancia a aplicação FastAPI, middlewares, limiter e rotas.
-- `core/config_alert.py` – carrega variáveis de ambiente e aplica defaults.
-- `core/celery_app.py` – configura workers e rotinas de suporte.
-- `services/scraper_client.py` – encapsula chamadas HTTP ao `market_scraper` com autenticação.
-- `services/comparison_service.py` – orquestra cálculos de comparação.
-- `tasks/continuous_collector_task.py` – worker contínuo que consome a fila de prioridade e despacha coletas assíncronas para `scraping`.
-- `tasks/maintenance_tasks.py` – executa rotinas de limpeza periódicas.
-- `tasks/compare_prices_task.py` – recalcula históricos de comparação e atualiza `competitiveness_status` após scraping.
+Falhas de configuracao consideradas obrigatorias interrompem o processo cedo: `DATABASE_URL` e `SECRET_KEY` sao validados na criacao de `settings`.
 
 Exemplo mínimo de `.env.market_alert`:
 ```env
-DATABASE_URL=postgresql+asyncpg://market:market@db:5432/market
-
-REDIS_URL=redis://:senha@redis:6379/0
-REDIS_PASSWORD=senha
-CELERY_BROKER_URL=redis://redis:6379/0
-CELERY_RESULT_BACKEND=redis://redis:6379/1
-CELERY_TASK_ROUTES={"tasks.continuous_collector_task.*": {"queue": "monitor"}}
-
-SCRAPER_SERVICE_URL=http://market_scraper:8010
-SCRAPER_CONNECT_TIMEOUT=5.0
-SCRAPER_READ_TIMEOUT=25.0
-SCRAPER_TOTAL_TIMEOUT=8.0
-SCRAPER_SERVICE_AUTH_HEADER=X-Internal-Token
-SCRAPER_SERVICE_AUTH_TOKEN=token-exemplo
 SCRAPER_HOST_RATE_LIMIT=20
 SCRAPER_HOST_RATE_WINDOW_SECONDS=60
 SCRAPER_HOST_RETRY_MAX_ATTEMPTS=4
@@ -176,199 +325,58 @@ SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS=600
 SCRAPER_INVALID_URL_MAX_ATTEMPTS=3
 SCRAPER_INVALID_URL_TTL_SECONDS=86400
 
-SMTP_HOST=smtp.mailtrap.io
-SMTP_PORT=587
-SMTP_USERNAME=usuario
-SMTP_PASSWORD=senha
-SMTP_TLS=1
-SMTP_FROM=alerts@empresa.dev
-
-TWILIO_ACCOUNT_SID=id_conta_twilio
-TWILIO_AUTH_TOKEN=token_autenticacao_twilio
-TWILIO_SMS_FROM=numeor_sms_twilio
-TWILIO_WHATSAPP_FROM=whats_twilio
-
-FCM_SERVER_KEY=chave_fcm
-SLACK_WEBHOOK_URL=url_slack
-SECRET_KEY=chave_secreta_jwt
-
 REFRESH_TOKEN_COOKIE_NAME=refresh_token
 REFRESH_TOKEN_COOKIE_PATH=/
 REFRESH_TOKEN_COOKIE_SECURE=0
-REFRESH_TOKEN_COOKIE_SAMESITE=none
-FRONTEND_ORIGINS=http://localhost:5173
+REFRESH_TOKEN_COOKIE_SAMESITE=lax
+FRONTEND_ORIGINS='["http://localhost:5173"]'
 
-COLLECT_INTERVAL_UNSTABLE_MIN=120
-COLLECT_INTERVAL_UNSTABLE_MAX=300
-COLLECT_INTERVAL_STABLE_MIN=300
-COLLECT_INTERVAL_STABLE_MAX=900
-COLLECT_INTERVAL_VERY_STABLE_MIN=600
+COLLECT_INTERVAL_UNSTABLE_MIN=300
+COLLECT_INTERVAL_UNSTABLE_MAX=600
+COLLECT_INTERVAL_STABLE_MIN=600
+COLLECT_INTERVAL_STABLE_MAX=1200
+COLLECT_INTERVAL_VERY_STABLE_MIN=1200
 COLLECT_INTERVAL_VERY_STABLE_MAX=1800
 
 STABILITY_DAYS_UNSTABLE=1
 STABILITY_DAYS_STABLE=3
 STABILITY_DAYS_VERY_STABLE=7
 
+COLLECT_PRODUCT_TIMEOUT=60
+COMPARE_PRICES_TIMEOUT=30
+CONTINUOUS_LOOP_SLEEP_MIN=5
+CONTINUOUS_LOOP_SLEEP_MAX=15
+
 CONTINUOUS_WORKER_POLL_INTERVAL=1.0
 CONTINUOUS_WORKER_BATCH_SIZE=20
 CONTINUOUS_WORKER_IDLE_SLEEP=2.0
 CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS=900
+CONTINUOUS_WORKER_STOP_REDIS_KEY=market_alert:continuous_worker:stop
+CONTINUOUS_WORKER_STOP_FILE=/tmp/market_alert_continuous_worker.stop
 
 CONTINUOUS_COLLECTOR_AUTOSTART=1
 CONTINUOUS_COLLECTOR_AUTOSTART_TTL=60
-CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS=45
 
 PRIORITY_QUEUE_KEY=market_alert:priority_queue
 PRIORITY_QUEUE_PROCESSING_KEY=market_alert:priority_queue:processing
 
-DEFAULT_COOLDOWN_SECONDS=1800
-MIN_PRICE_DELTA_PERCENT=1.0
-NOTIFICATION_MAX_ATTEMPTS=3
-NOTIFICATION_BACKOFF_BASE_SECONDS=60
-NOTIFICATION_BACKOFF_MULTIPLIER=2
-
+SCRAPER_SERVICE_URL=http://market_scraper:8000
 ```
 
-## Orquestração de coletas e rechecagens
-- **Collector único:** `services/collector_service.py` monta payloads mínimos e envia sempre para a fila `scraping`, consumida pela task `market_alert.tasks.collector_product_task.collect_product_task`. A task aplica um lock Redis por produto (TTL configurável via `PRODUCT_LOCK_TTL_SECONDS`), retorna `ScrapeResult` (`success`, `not_modified`, `no_result`, `error`) e dispara `compare_prices_task` apenas quando houver mudança relevante; lock não adquirido resulta em `no_result`.
-- **Fila contínua:** `market_alert.tasks.continuous_collector_task.run_continuous_collector` consome o Redis Sorted Set em loop, despacha monitorado + concorrentes para a fila `scraping` e deixa o reenqueue para o pós-coleta.
-- **Persistência de histórico sem duplicidade:** retornos `not_modified` apenas atualizam timestamps e status de disponibilidade; criação de `PriceHistory` usa checagem idempotente para impedir duplicatas quando não há mudança.
+---
 
-## Troubleshooting do coletor contínuo
-- **Worker monitor parado**: confirme o processo/container `celery-worker-monitor` ativo e o `CONTINUOUS_COLLECTOR_AUTOSTART=1` configurado.
-- **Fila sem itens prontos**: verifique `PRIORITY_QUEUE_KEY` e se `next_check_at` está no passado.
-- **Redis indisponível**: logs com `continuous_queue_unavailable` indicam falha de conexão ou credenciais.
-- **Itens presos em processamento**: o loop reaproveita itens expirados usando `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS`; revise logs `continuous_processing_reclaimed`.
-- **Reenqueue pendente pós-coleta**: logs de reenqueue ajudam a identificar itens mantidos em processamento enquanto as coletas assíncronas rodam.
-- **Reinícios por limites de tempo**: confirme nos logs se o coletor foi reiniciado por limites de execução. O coletor contínuo usa `soft_time_limit=None` e `time_limit=None` por ser um loop infinito; ajustes de timeout devem ser feitos explicitamente na task quando necessário.
-- **Autostart com throttling**: logs de autostart indicam bloqueio por cooldown; valide o TTL de autostart e a estabilidade do Redis.
-- **Monitorados pausados**: itens pausados não retornam à fila; retome manualmente para reativar a coleta.
-
-## Segurança e Observabilidade
+## Seguranca e Observabilidade
 - **Segurança:**
-  - JWT curto com refresh token
-  - Filtragem de payloads e segregação de permissões por usuário
-  - Segredos permanecem em arquivos `.env` ignorados pelo Git.
-
-- **Política de logs e proteção de dados:**
-  - Nunca registre tokens de acesso/refresh, cabeçalhos `Authorization`, códigos de verificação ou senhas; utilize apenas flags booleanas para indicar presença.
-  - Não serialize ou propague variáveis de ambiente sensíveis (`SMTP_*`, `TWILIO_*`, `FCM_SERVER_KEY`, `SCRAPER_SERVICE_AUTH_TOKEN`) em mensagens de log ou respostas de API.
-  - Logs devem priorizar contexto seguro (IP, status da operação, identificadores internos) e adotar `structlog` para manter rastreabilidade sem expor credenciais.
-  - Em fluxos de auditoria, prefira `token_id` ou `user_id` em vez do valor cru de chaves ou tokens.
+  - Autenticacao: JWT bearer para acesso a API (`core/jwt.py`) e refresh token rotativo com cookie HttpOnly (`auth/utils/cookies_auth.py`).
+  - Autorizacao (RBAC): rotas administrativas exigem role `admin` e ownership e validado nos services de acesso (`services_access_control.py`, `auth_context.py`).
+  - Validacao de entrada: contratos Pydantic em `schemas/`, validacao de URLs com normalizacao canonica e validacao de contatos (email/telefone) antes de persistir ou notificar.
+  - Rate limiting: `slowapi` por IP na API, protecao anti-bruteforce em Redis no login e limitadores `leaky bucket`/`token bucket` para scraping e onboarding.
 
 - **Observabilidade:**
-  - Logs estruturados via `structlog`
+  - Auditoria e rastreabilidade: logs estruturados com `trace_id`, registro de falhas permanentes em `task_failures` via DLQ e volume dedicado `audit-logs` no compose.
+  - Health checks: `/health/` e `/health/readiness` monitoram disponibilidade de PostgreSQL/Redis e estado operacional do scheduler.
+  - Observabilidade de workers: logging dedicado em `logging_config.py`, supressao de ruido em bibliotecas de infraestrutura e alertas para configuracoes de lock inseguras.
 
-## Fluxo de Orquestração Completo
+---
 
-### 1. Criação de Monitorado
-```
-POST /monitored/scrape
-  ↓
-Valida duplicidade por usuário + URL
-  ↓
-Cria recurso mínimo (id, url, created_at, next_check_at)
-  ↓
-Dispara collect_product_task na fila "scraping"
-  ↓
-Agenda monitorado na fila de prioridade Redis para rechecagens contínuas
-  ↓
-Responde 202 com id e dados mínimos
-```
-
-### 2. Coleta Imediata (na fila scraping)
-```
-collect_product_task (worker: celery-worker-scraping)
-  ↓
-Valida payload (tipo, IDs, URL)
-  ↓
-Tenta adquirir lock Redis (product_lock)
-  ├─ Lock adquirido: continua
-  └─ Lock não adquirido: retorna "no_result"
-  ↓
-Chama scraper_client.scrape() → market_scraper
-  ↓
-Recebe ScrapeResult (success/not_modified/no_result/error)
-  ↓
-Persiste em PriceHistory se houver nova informação
-  ↓
-Retorna ao banco com resultado
-```
-
-### 3. Loop Contínuo (na fila monitor)
-```
-run_continuous_collector (worker: celery-worker-monitor - LOOP INFINITO)
-  ↓
-Enquanto não atingir soft_time_limit (≈3600s):
-  ├─ Consome fila de prioridade Redis (Sorted Set)
-  ├─ Pop item com timestamp <= agora
-  ├─ Se nenhum item pronto: sleep adaptativo, seguindo a configuração do worker
-  │
-  └─ Se item encontrado:
-      ├─ Carrega monitorado do DB
-      ├─ Coleta_product (com lock) → ScrapeResult
-      ├─ Carrega concorrentes do DB
-      ├─ Para cada concorrente:
-      │   └─ Coleta_product (com lock) → ScrapeResult
-      ├─ Recalcula stability_score baseado em histórico de mudanças
-      ├─ Calcula next_check_at (mais estável = menos frequente)
-      ├─ Se houver mudanças: dispara compare_prices_task
-      ├─ Persiste em DB
-      └─ Reenfileira para próxima coleta com next_check_at
-  ↓
-Graceful shutdown: drain fila de processamento
-```
-
-### 4. Comparação e Notificações
-```
-compare_prices_task (fila compare, disparada automaticamente)
-  ↓
-Recalcula competitividade do monitorado vs concorrentes
-  ↓
-Atualiza competitiveness_status (Competitivo/Atenção/Urgente/Sem concorrentes)
-  ↓
-Gera eventos de domínio (PriceDropped, PriceIncreased, etc.)
-  ↓
-Notificações são enfileiradas em fila "notifications"
-  ↓
-send_notification_task (worker: celery-worker-notifications)
-  ├─ Resolve canal preferido do usuário
-  ├─ Tenta envio (email/SMS/webhook/push)
-  ├─ Se falha: retry com backoff exponencial
-  └─ Registra em notification_attempt
-```
-
-## Execução Local
-- **Docker Compose** (recomendado):
-  ```bash
-  docker compose up -d db redis redis-init
-  docker compose up -d migrations
-  docker compose up -d api market_scraper celery-worker-scraping celery-worker-monitor celery-worker-notifications
-  ```
-
-- **Sem Docker:**
-  1. Pré-requisitos: Python 3.11, Postgres e Redis acessíveis; instale deps com `pip install -r ../requirements.txt`.
-  2. Configure `.env.common` e `.env.market_alert` com valores locais.
-  3. Execute migrações: `alembic upgrade head`.
-  4. Inicie API: `uvicorn market_alert.main:app --reload --port 8000`.
-  5. Inicie Scraper: `uvicorn market_scraper.main:app --reload --port 8010`.
-  6. Inicie worker scraping: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork -Q celery,scraping`.
-  7. Inicie worker monitor: `CONTINUOUS_COLLECTOR_AUTOSTART=1 celery -A market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork -Q monitor`.
-  8. Inicie worker notificações: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info --pool=prefork -Q notifications`.
-  6. Suba worker do coletor contínuo: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q monitor`.
-  7. Suba worker de notificações: `celery -A market_alert.core.celery_app:celery_app worker --loglevel=info -Q notifications`.
-
-## Testes
-```bash
-pytest market_alert -q
-```
-As suítes cobrem rotas, tasks e integrações simuladas com o scraper; utilize `-k` ou `-m` para isolar cenários específicos.
-
-## Troubleshooting Rápido
-- **Falhas ao contatar o scraper:** verifique `SCRAPER_SERVICE_URL` e tokens de serviço.
-- **Fila Celery acumulada:** confira o estado do Redis e monitore `CELERY_TASKS_TOTAL` por fila; ajuste `concurrency` do worker conforme necessário.
-- **Rate limit excedido:** erros 429 indicam configuração do `Limiter`; ajuste limites ou whitelists em `main.py`.
-- **Problemas de banco:** revise parâmetros de pool no `.env`.
-- **Métricas ausentes**: confirme porta exposta pelos workers e se os processos estão ativos.
-
-Atualize este documento sempre que rotas, tasks, filas ou dependências forem alteradas.
+> Nota Final: o README do `market_alert` deve sempre estar atualizado e coerente com o estado atual do sistema, orquestração, tratamendo dos dados e regras de negócio, para evitar informações falsas e desatualizadas.

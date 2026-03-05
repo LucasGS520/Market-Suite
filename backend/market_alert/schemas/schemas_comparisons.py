@@ -84,11 +84,3 @@ class PaginationMeta(BaseModel):
     per_page: int = Field(..., ge=1, description="Quantidade de itens por página")
 
 
-class PaginatedPriceComparisonResponse(BaseModel):
-    """ Envelope paginado para histórico de comparações de preço """
-
-    items: List[PriceComparisonResponse] = Field(
-        default_factory=list,
-        description="Lista ordenada de comparações para o produto monitorado",
-    )
-    meta: PaginationMeta

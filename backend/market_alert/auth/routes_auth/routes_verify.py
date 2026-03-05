@@ -1,13 +1,15 @@
 """ Rotas para verificação de email e telefone """
 
-import structlog
 from uuid import UUID
+
+import structlog
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
+
 from market_alert.schemas.schemas_auth import PhoneOtpRequest
-from market_alert.services.services_users import verify_email, verify_phone_otp
+from market_alert.users.services.services_identity import verify_email, verify_phone_otp
 
 
 logger = structlog.get_logger("route.auth.verify")

@@ -93,19 +93,19 @@ class Settings(ConfigBase):
 
     #Intervalos do agendamento contínuo (em segundos)
     COLLECT_INTERVAL_UNSTABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_UNSTABLE_MIN", str(2 * 60))
+        os.getenv("COLLECT_INTERVAL_UNSTABLE_MIN", str(5 * 60))
     ) #Intervalo mínimo para produtos instáveis
     COLLECT_INTERVAL_UNSTABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_UNSTABLE_MAX", str(5 * 60))
+        os.getenv("COLLECT_INTERVAL_UNSTABLE_MAX", str(10 * 60))
     ) #Intervalo máximo para produtos instáveis
     COLLECT_INTERVAL_STABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_STABLE_MIN", str(5 * 60))
+        os.getenv("COLLECT_INTERVAL_STABLE_MIN", str(10 * 60))
     ) #Intervalo mínimo para produtos estáveis
     COLLECT_INTERVAL_STABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_STABLE_MAX", str(15 * 60))
+        os.getenv("COLLECT_INTERVAL_STABLE_MAX", str(20 * 60))
     ) #Intervalo máximo para produtos estáveis
     COLLECT_INTERVAL_VERY_STABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MIN", str(10 * 60))
+        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MIN", str(20 * 60))
     ) #Intervalo mínimo para produtos muito estáveis
     COLLECT_INTERVAL_VERY_STABLE_MAX: int = int(
         os.getenv("COLLECT_INTERVAL_VERY_STABLE_MAX", str(30 * 60))
@@ -138,6 +138,22 @@ class Settings(ConfigBase):
     CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS: int = int(
         os.getenv("CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS", "45")
     ) #TTL do lock para garantir instância única do coletor contínuo
+
+    CLEANUP_CACHE_SCAN_COUNT: int = int(
+        os.getenv("CLEANUP_CACHE_SCAN_COUNT", "200")
+    ) #Quantidade de chaves lidas por iteração do SCAN
+    CLEANUP_CACHE_UNLINK_BATCH_SIZE: int = int(
+        os.getenv("CLEANUP_CACHE_UNLINK_BATCH_SIZE", "200")
+    ) #Quantidade de chaves removidas por lote de UNLINK
+    CLEANUP_CACHE_MAX_KEYS_PER_RUN: int = int(
+        os.getenv("CLEANUP_CACHE_MAX_KEYS_PER_RUN", "50000")
+    ) #Limite defensivo de chaves avaliadas por execução
+    CLEANUP_CACHE_MAX_DURATION_SECONDS: float = float(
+        os.getenv("CLEANUP_CACHE_MAX_DURATION_SECONDS", "25")
+    ) #Tempo máximo de execução para evitar monopolizar o worker
+    CLEANUP_CACHE_SLEEP_BETWEEN_BATCHES_MS: int = int(
+        os.getenv("CLEANUP_CACHE_SLEEP_BETWEEN_BATCHES_MS", "0")
+    ) #Pausa opcional entre lotes para reduzir pressão no Redis
 
     #Chaves Redis do agendamento contínuo
     PRIORITY_QUEUE_KEY: str = os.getenv(
@@ -228,6 +244,20 @@ class Settings(ConfigBase):
     MAX_COMPETITORS_PER_MONITORED: int = int(
         os.getenv("MAX_COMPETITORS_PER_MONITORED", "10")
     ) #Limite padrão de concorrentes por produto monitorado
+
+    #Limiares de competitividade para classificação de preços (em porcentagem)
+    #COMPETITIVENESS_THRESHOLD_NON_COMPETITIVE_PCT: até 1% acima do menor concorrente → atenção
+    #COMPETITIVENESS_THRESHOLD_ATTENTION_PCT: até 5% acima → atenção
+    #COMPETITIVENESS_THRESHOLD_URGENT_PCT: acima de 5% → urgente
+    COMPETITIVENESS_THRESHOLD_NON_COMPETITIVE_PCT: float = float(
+        os.getenv("COMPETITIVENESS_THRESHOLD_NON_COMPETITIVE_PCT", "1")
+    ) #Limite superior da faixa de atenção baixa (não-competitivo)
+    COMPETITIVENESS_THRESHOLD_ATTENTION_PCT: float = float(
+        os.getenv("COMPETITIVENESS_THRESHOLD_ATTENTION_PCT", "5")
+    ) #Limite superior da faixa de atenção antes de urgente
+    COMPETITIVENESS_THRESHOLD_URGENT_PCT: float = float(
+        os.getenv("COMPETITIVENESS_THRESHOLD_URGENT_PCT", "20")
+    ) #Referência do limiar urgente (acima de attention_pct já é urgente)
     IDEMPOTENCY_TTL_SECONDS: int = int(
         os.getenv("IDEMPOTENCY_TTL_SECONDS", str(60 * 60))
     ) #Tempo padrão para reter chaves de idempotência (1h)

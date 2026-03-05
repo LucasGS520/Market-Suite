@@ -5,9 +5,9 @@
  * adicionar produtos monitorados pelo usuário.
  */
 
-import React, { useEffect, useMemo, useState, startTransition } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useEffect, useMemo, useRef, useState, startTransition } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   Typography,
@@ -68,6 +68,28 @@ const getApiErrorDetail = (error: unknown): string | undefined => {
 };
 
 /**
+ * Normaliza o modo de visualização para evitar estados inválidos vindos da URL.
+ */
+const sanitizeViewMode = (value: string | null): 'list' | 'table' => {
+  return value === 'table' ? 'table' : 'list';
+};
+
+/**
+ * Normaliza o número de página garantindo inteiro positivo e fallback em 1.
+ */
+const sanitizePageParam = (value: string | null): number => {
+  const parsedPage = Number.parseInt(value ?? '1', 10);
+  return Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+};
+
+/**
+ * Normaliza texto vindo da URL para evitar `null` nos estados controlados
+ */
+const sanitizeTextParam = (value: string | null): string => {
+  return value ?? '';
+}
+
+/**
  * Componente principal da página de Produtos Monitorados.
  * - Buscar produtos monitorados com paginação, busca e filtro de status.
  * - Permitir alternância de visualização (lista / tabela).
@@ -77,18 +99,23 @@ const getApiErrorDetail = (error: unknown): string | undefined => {
  */
 const Products: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { showToast, dismissToast } = useToast();
 
   // Estado da UI
-  const [viewMode, setViewMode] = useState<'list' | 'table'>('list'); // modo de exibição
-  const [searchQuery, setSearchQuery] = useState(''); // texto de busca
-  const [statusFilter, setStatusFilter] = useState(''); // filtro por status de competitividade
-  const [page, setPage] = useState(1); // página atual para paginação em modo lista
+  // A URL é a fonte de verdade para preservar contexto ao navegar entre lista e detalhes.
+  const [viewMode, setViewMode] = useState<'list' | 'table'>(() => sanitizeViewMode(searchParams.get('view')));
+  const [searchQuery, setSearchQuery] = useState(() => sanitizeTextParam(searchParams.get('q'))); // texto de busca
+  const [statusFilter, setStatusFilter] = useState(() => sanitizeTextParam(searchParams.get('status'))); // filtro por status de competitividade
+  const [page, setPage] = useState<number>(() => sanitizePageParam(searchParams.get('page'))); // página atual para paginação em modo lista
+  const listPageSize = 5; // quantidade de itens por página solicitada ao backend
   const [openAddDialog, setOpenAddDialog] = useState(false); // controla diálogo de adicionar produto
   const [newProductUrl, setNewProductUrl] = useState(''); // URL do novo produto
   const [newProductName, setNewProductName] = useState(''); // nome opcional do novo produto
   const [newCompetitorUrl, setNewCompetitorUrl] = useState(''); // URL opcional do concorrente inicial
+  const previousFiltersRef = useRef<{ searchQuery: string; statusFilter: string } | null>(null); // Ref para comparar filtros anteriores e evitar reset de página desnecessário
+  const currentPageRef = useRef(page); // Ref para manter a página atual durante mudanças de filtro
 
   /**
    * Busca quantidade total de produtos monitorados do usuário para personalizar mensagens de vazio.
@@ -104,15 +131,63 @@ const Products: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Query para buscar produtos monitorados. A chave depende de pagina, busca e filtro.
+  /**
+   * Consulta principal de produtos monitorados
+   * 
+   * No modo lista, envia `page` e `per_page` para manter a paginação server-side.
+   * No modo tabela, envia apenas filtros para receber o conjunto completo do backend.
+   * 
+   * `keepPreviousData` evita piscar a tabela/lista durante troca de página,
+   * enquanto `staleTime` reduz refetch agressivo em navegação paginada rápida.
+   */
+  const monitoredProductsParams = useMemo(() => {
+    const baseFilters = {
+      query: searchQuery || undefined,
+      status: statusFilter || undefined,
+    };
+
+    if (viewMode === 'list') {
+      return {
+        ...baseFilters,
+        page,
+        per_page: listPageSize,
+      };
+    }
+
+    return baseFilters;
+  }, [listPageSize, page, searchQuery, statusFilter, viewMode]);
+
+  /**
+   * Discriminador de cache da consulta principal.
+   *
+   * Incluímos explicitamente modo e estratégia de paginação para evitar colisão de cache
+   * entre payloads distintos (ex.: tabela sem paginação vs lista paginada).
+   */
+  const monitoredProductsQueryKey = useMemo(() => {
+    const paginationStrategy = viewMode === 'list' ? 'paged' : 'full';
+
+    return [
+      'monitoredProducts',
+      {
+        viewMode,
+        paginationStrategy,
+        query: searchQuery,
+        status: statusFilter,
+        page: viewMode === 'list' ? page : undefined,
+      },
+    ] as const;
+  }, [page, searchQuery, statusFilter, viewMode]);
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['monitoredProducts', searchQuery, statusFilter],
-    queryFn: () =>
-      productsService.getMonitoredProducts({
-        query: searchQuery || undefined,
-        status: statusFilter || undefined,
-      }),
+    queryKey: monitoredProductsQueryKey,
+    queryFn: () => productsService.getMonitoredProducts(monitoredProductsParams),
+    placeholderData: viewMode === 'list' ? keepPreviousData : undefined,
+    staleTime: 8 * 1000,
   });
+
+  useEffect(() => {
+    currentPageRef.current = page;
+  }, [page]);
 
   useEffect(() => {
     if (error) {
@@ -128,14 +203,81 @@ const Products: React.FC = () => {
     }
   }, [dismissToast, error, showToast]);
 
-  // Ajusta paginação client-side quando filtros ou modo de visualização mudam
+  // Ao alterar busca/filtro, reinicia paginação para manter resultado consistente.
   useEffect(() => {
-    if (page !== 1) {
+    const previousFilters = previousFiltersRef.current;
+    previousFiltersRef.current = { searchQuery, statusFilter };
+
+    // Evita reset em montagem inicial; só paginamos para 1 quando houve mudança real dos filtros.
+    if (!previousFilters) {
+      return;
+    }
+
+    if (currentPageRef.current !== 1) {
       startTransition(() => setPage(1));
     }
-  }, [searchQuery, statusFilter, viewMode, page]);
+  }, [searchQuery, statusFilter]);
 
-  const listPageSize = 5;
+  // Mantém `view` na URL para evitar perda de contexto ao trocar rota.
+  useEffect(() => {
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+
+      if (viewMode === 'list') {
+        nextParams.delete('view');
+      } else {
+        nextParams.set('view', viewMode);
+      }
+
+      return nextParams;
+    }, { replace: true });
+  }, [setSearchParams, viewMode]);
+
+  // Mantém `page` na URL para refletir paginação atual e facilitar compartilhamento.
+  useEffect(() => {
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+
+      if (page <= 1) {
+        nextParams.delete('page');
+      } else {
+        nextParams.set('page', String(page));
+      }
+
+      return nextParams;
+    }, { replace: true });
+  }, [page, setSearchParams]);
+
+  // Mantém `q` na URL para preservar o termo de busca ao navegar para detalhes e voltar.
+  useEffect(() => {
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+
+      if (!searchQuery) {
+        nextParams.delete('q');
+      } else {
+        nextParams.set('q', searchQuery);
+      }
+
+      return nextParams;
+    }, { replace: true });
+  }, [searchQuery, setSearchParams]);
+
+  // Mantém `status` sincronizado na URL, sem apagar outras chaves existentes.
+  useEffect(() => {
+    setSearchParams((previousParams) => {
+      const nextParams = new URLSearchParams(previousParams);
+
+      if (!statusFilter) {
+        nextParams.delete('status');
+      } else {
+        nextParams.set('status', statusFilter);
+      }
+
+      return nextParams;
+    }, { replace: true });
+  }, [setSearchParams, statusFilter]);
+
   /**
    * Normaliza valores para comparação numérica evitando zeros como preços válidos
    */
@@ -143,7 +285,10 @@ const Products: React.FC = () => {
     return normalizePriceInput(value);
   };
   /**
-   * Ajusta lista de itens visíveis respeitando coleta inicial e paginação
+   * Itens visíveis na UI para ambos os modos.
+   *
+   * Em lista: backend já retorna o recorte paginado.
+   * Em tabela: backend retorna todos os itens filtrados.
    */
   const visibleItems = useMemo(() => {
     if (!data?.items) return [] as MonitoredProduct[];
@@ -151,26 +296,43 @@ const Products: React.FC = () => {
     return data.items;
   }, [data]);
 
-  const paginatedItems = useMemo(() => {
-    if (!visibleItems || viewMode !== 'list') return visibleItems ?? [];
-    const offset = (page - 1) * listPageSize;
-    return visibleItems.slice(offset, offset + listPageSize);
-  }, [visibleItems, page, viewMode]);
-
   const totalPages = useMemo(() => {
-    if (!visibleItems || viewMode !== 'list') return 1;
-    return Math.max(1, Math.ceil(visibleItems.length / listPageSize));
-  }, [visibleItems, viewMode]);
+    if (viewMode !== 'list') return 1;
+
+    const totalItems = data?.meta?.total ?? 0;
+    return Math.max(1, Math.ceil(totalItems / listPageSize));
+  }, [data?.meta?.total, listPageSize, viewMode]);
 
   useEffect(() => {
+    if (viewMode !== 'list') return;
+
     if (page > totalPages) {
       startTransition(() => setPage(totalPages));
     }
-  }, [page, totalPages]);
+  }, [page, totalPages, viewMode]);
 
   const handlePageSelect = (newPage: number) => {
     const boundedPage = Math.min(Math.max(newPage, 1), totalPages);
     setPage(boundedPage);
+  };
+
+  /**
+   * Troca o modo de visualização mantendo o estado refletido na URL.
+   */
+  const handleViewModeChange = (_: React.MouseEvent<HTMLElement>, newMode: 'list' | 'table' | null) => {
+    if (!newMode) return;
+    setViewMode(newMode);
+  };
+
+  /**
+   * Navega para detalhes preservando os filtros/página atuais via query string.
+   */
+  const navigateToProductDetail = (productId: string) => {
+    const currentSearch = searchParams.toString();
+    navigate({
+      pathname: `/product/${productId}`,
+      search: currentSearch ? `?${currentSearch}` : '',
+    });
   };
 
   // Mutation para criação de produto monitorado.
@@ -272,16 +434,28 @@ const Products: React.FC = () => {
     return `Ranking #${positionRank} de ${totalSellers}`;
   };
 
+  /**
+   * Prioriza o total filtrado retornado em `data.meta.total` para que as
+   * mensagens de empty state reflitam primeiro o universo filtrado atual.
+   */
   const totalCount = useMemo(() => {
     const filteredTotal = data?.meta?.total;
     const globalTotal = totalMonitored?.meta?.total;
 
-    if (!searchQuery && !statusFilter) {
-      return filteredTotal ?? globalTotal ?? 0;
+    const hasActiveFilters = Boolean(searchQuery || statusFilter);
+
+    if (hasActiveFilters) {
+      return filteredTotal ?? visibleItems.length;
     }
 
-    return globalTotal ?? filteredTotal ?? 0;
-  }, [data?.meta?.total, totalMonitored?.meta?.total, searchQuery, statusFilter]);
+    return filteredTotal ?? globalTotal ?? visibleItems.length;
+  }, [
+    data?.meta?.total,
+    totalMonitored?.meta?.total,
+    searchQuery,
+    statusFilter,
+    visibleItems.length,
+  ]);
 
   /**
    * Define cor do destaque visual com base no badge centralizado.
@@ -365,7 +539,7 @@ const Products: React.FC = () => {
         <ToggleButtonGroup
           value={viewMode}
           exclusive
-          onChange={(_, newMode) => newMode && setViewMode(newMode)}
+          onChange={handleViewModeChange}
           size="small"
         >
           <ToggleButton value="list">
@@ -390,7 +564,7 @@ const Products: React.FC = () => {
         viewMode === 'list' ? (
           // Modo Lista - exibe cartões por produto
           <Grid container spacing={3}>
-            {paginatedItems.map((product) => {
+            {visibleItems.map((product) => {
               const competitorsWithPrice = product.comparison_summary?.competitors_with_price_count ?? 0;
               const lowestCompetitorLabel =
                 competitorsWithPrice > 0
@@ -531,7 +705,7 @@ const Products: React.FC = () => {
                               <Button
                                 variant="contained"
                                 size="small"
-                                onClick={() => navigate(`/product/${product.id}`)}
+                                onClick={() => navigateToProductDetail(product.id)}
                               >
                                 Ver Detalhes
                               </Button>
@@ -544,7 +718,7 @@ const Products: React.FC = () => {
                 </Grid>
               );
             })}
-            {visibleItems.length > listPageSize && (
+            {totalPages > 1 && (
               <Grid item xs={12}>
                 <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
                   <Button
@@ -700,7 +874,7 @@ const Products: React.FC = () => {
                           <Button
                             variant="contained"
                             size="small"
-                            onClick={() => navigate(`/product/${product.id}`)}
+                            onClick={() => navigateToProductDetail(product.id)}
                           >
                             Ver Detalhes
                           </Button>

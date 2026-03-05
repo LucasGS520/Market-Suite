@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
@@ -68,8 +68,12 @@ const ProductDetail: React.FC = () => {
   // Parâmetros da rota (id do produto monitorado)
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { search } = useLocation();
   const queryClient = useQueryClient();
   const { showToast, dismissToast } = useToast();
+
+  //Mantém query params de origem para que a URL continue como fonte de verdade no retorno
+  const productsSearch = search || '';
 
   // Estado local para controlar diálogo de adição de concorrente e campos do formulário
   const [openAddCompetitorDialog, setOpenAddCompetitorDialog] = useState(false);
@@ -287,7 +291,7 @@ const ProductDetail: React.FC = () => {
         severity: 'success',
         replace: true,
       });
-      navigate('/products');
+      navigate({ pathname: '/products', search: productsSearch });
     },
     onError: () => {
       // Mantém o modal aberto para permitir nova tentativa e indica falha de forma visível.
@@ -559,7 +563,7 @@ const ProductDetail: React.FC = () => {
       <Box sx={{ mb: 4 }}>
         <Button
           startIcon={<ArrowBackIcon />}
-          onClick={() => navigate('/products')}
+          onClick={() => navigate({ pathname: '/products', search: productsSearch })}
           sx={{ mb: 2 }}
           color="secondary"
         >

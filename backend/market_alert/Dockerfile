@@ -1,21 +1,26 @@
-#Dockerfile da API principal do MarketAlert
+# Dockerfile da API principal do MarketAlert - OTIMIZADO
 FROM python:3.11-slim
 
-#Define diretório de trabalho dentro do container
+# Define diretório de trabalho
 WORKDIR /market_alert
 
-# Garante que o diretório da aplicação esteja no PYTHONPATH para imports relativos
-ENV PYTHONPATH=/market_alert
+# PYTHONPATH para imports relativos
+ENV PYTHONPATH=/market_alert \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_INPUT=1
 
-#Copia apenas as dependencias e instala
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# ETAPA 1: Instalar dependências (este layer é cacheado)
+# Mudanças em código não invalidam este cache
+COPY --from=root requirements-base.txt ./
+COPY requirements-market-alert.txt ./
 
-#Copia o código fonte necessário conforme regras do .dockerignore
+# Usar BuildKit cache para pip (evita redownload)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-base.txt -r requirements-market-alert.txt
+
+# ETAPA 2: Copiar código (mudanças aqui não afetam layer anterior)
 COPY . .
 
-#Exponha a porta utilizada pelo serviço
 EXPOSE 8000
 
-#Comando padrão para inciar a API FastAPI
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

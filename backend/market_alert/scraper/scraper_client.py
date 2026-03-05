@@ -22,12 +22,13 @@ import structlog
 
 from pydantic import ValidationError
 
-from backend.shared.schemas.shared_schemas_scraper import ParserRequest, ParserResponse
+from shared.schemas import ParserRequest, ParserResponse
+from shared.utils import normalize_scraper_response
 from shared.utils.redis_client import get_redis_client
 
 from market_alert.core.config_alert import settings
-from market_alert.utils.circuit_breaker import CircuitBreaker
-from market_alert.utils.rate_limiter import RateLimiter
+from market_alert.infraestructure.resilience.circuit_breaker import CircuitBreaker
+from market_alert.infraestructure.resilience.rate_limiter import RateLimiter
 
 
 logger = structlog.get_logger(__name__)
@@ -261,7 +262,12 @@ class ScraperClient:
                     ) from exc
 
                 try:
-                    parsed_payload = ParserResponse.model_validate(raw_body)
+                    parsed_payload = normalize_scraper_response(
+                        raw_body,
+                        source="client",
+                        request_id=(extra_metadata.get("request_id") if extra_metadata else None),
+                        correlation_id=(extra_metadata.get("correlation_id") if extra_metadata else None),
+                    )
                     parsed_payload = _sanitize_parser_response(parsed_payload)
                 except ValidationError as exc:
                     circuit_breaker.record_failure(host)

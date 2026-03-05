@@ -1,7 +1,6 @@
 """ Aplicação principal FastAPI com configuração de rotas """
 
 import structlog
-import logging
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,16 +13,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from market_alert.core.config_alert import settings
+from market_alert.infraestructure.logging_config import setup_api_logging
+from market_alert.infraestructure.startup_validation import validate_startup_dependencies
 
-#Rotas
-from market_alert.routes.routes_users import router as users_router
-from market_alert.routes.routes_monitored import router as monitored_router
-from market_alert.routes.routes_competitors import router as competitor_router
-from market_alert.routes.routes_dashboard import router as dashboard_router
-from market_alert.routes.routes_comparisons import router as comparisons_router
-from market_alert.routes.routes_health import router as health_router
-from market_alert.routes.routes_notifications import router as notifications_router
-from market_alert.routes.routes_settings import router as settings_router
+#Rotas de usuários e administração
+from market_alert.users.routes.routes_account import router as account_router
+from market_alert.users.routes.routes_identity import router as identity_router
+from market_alert.users.routes.routes_settings import router as settings_router
 
 #Rotas de auth
 from market_alert.auth.routes_auth.routes_login import router as login_router
@@ -33,35 +29,21 @@ from market_alert.auth.routes_auth.routes_profile import router as profile_route
 from market_alert.auth.routes_auth.routes_refresh import router as refresh_router
 from market_alert.auth.routes_auth.routes_logout import router as logout_router
 
+#Rotas de Dashboard e Produtos Monitorados/Concorrentes
+from market_alert.products.routes.routes_dashboard import router as dashboard_router
+from market_alert.products.routes.routes_monitored import router as monitored_router
+from market_alert.products.routes.routes_competitors import router as competitor_router
 
-def configure_logging():
-    """ Configura o structlog para saida JSON estruturada """
-    structlog.configure(
-        processors=[
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer()
-        ],
-        wrapper_class=structlog.stdlib.BoundLogger,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
+#Rotas de comparações e notificações
+from market_alert.comparisons.routes.routes_comparisons import router as comparisons_router
+from market_alert.notifications.routes.routes_notifications import router as notifications_router
 
-    handler = logging.StreamHandler()
-    handler.setFormatter(structlog.stdlib.ProcessorFormatter(
-        processor=structlog.processors.JSONRenderer(),
-        foreign_pre_chain=[structlog.processors.TimeStamper(fmt="iso")]
-    ))
-
-    root = logging.getLogger()
-    root.handlers.clear()
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
+#Rotas de health check
+from market_alert.infraestructure.routes.routes_health import router as health_router
 
 
-#Invoca antes de criar o market_alert
-configure_logging()
+#Configura logging antes de criar a app (logging_config centraliza a lógica)
+setup_api_logging()
 #Logger para startup da API
 logger = structlog.get_logger("marketalert")
 #Rate limiter configurado por IP
@@ -83,6 +65,12 @@ def create_app() -> FastAPI:
         debug=getattr(settings, "debug", False)
     )
 
+    @app.on_event("startup")
+    async def _validate_dependencies_on_startup() -> None:
+        """Executa validação de infraestrutura para falhar rápido no bootstrap."""
+        # Falha imediata evita aceitar tráfego com Redis/DB indisponível.
+        validate_startup_dependencies(strict=True)
+
     #Habilita CORS com base nas origens configuradas no ambiente
     app.add_middleware(
         CORSMiddleware,
@@ -99,7 +87,9 @@ def create_app() -> FastAPI:
 
 # ---------- REGISTRO DE ROTAS ----------
     #Usuários e administração
-    app.include_router(users_router)
+    app.include_router(account_router)
+    app.include_router(identity_router)
+    app.include_router(settings_router) 
 
     #Autenticação
     app.include_router(login_router)
@@ -109,13 +99,12 @@ def create_app() -> FastAPI:
     app.include_router(refresh_router)
     app.include_router(logout_router)
 
-    #Monitoramento de produtos
+    #Dashboard, monitorados, concorrentes, comparações e notificações
+    app.include_router(dashboard_router)
     app.include_router(monitored_router)
     app.include_router(competitor_router)
     app.include_router(comparisons_router)
-    app.include_router(dashboard_router)
     app.include_router(notifications_router)
-    app.include_router(settings_router)
 
     #Health check
     app.include_router(health_router)

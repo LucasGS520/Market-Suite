@@ -1,0 +1,54 @@
+{
+  "items": [
+    {
+      "id": "d7b7fd8b-d304-4e3c-8ce3-ab636c7b4476",
+      "display_name": "Liquidifcador Concorrente C",
+      "name": "Liquidifcador Concorrente C",
+      "url": "https://mercadolivre.com.br/liquidificador-philips-walita-ri2244-inox-1400w/up/MLBU3799958124",
+      "current_price": "329.90",
+      "currency": null,
+      "source": "competitor",
+      "availability": true,
+      "last_status": null,
+      "last_checked": "2026-03-05T12:05:29.582413Z",
+      "last_scraped_at": "2026-03-05T12:05:28.141339Z",
+      "monitored_product_id": "bcd98ac3-adf9-45f5-a7f7-dc2e8980bb0f",
+      "is_paused": false
+    },
+    {
+      "id": "62f3398c-77ee-415e-b83b-bdb6ccb561e4",
+      "display_name": "Liquidifcador Concorrente B",
+      "name": "Liquidifcador Concorrente B",
+      "url": "https://mercadolivre.com.br/liquidificador-robust-liq400-33-litros-1000w-preto-cadence/p/MLB10421438",
+      "current_price": "234.82",
+      "currency": null,
+      "source": "competitor",
+      "availability": true,
+      "last_status": null,
+      "last_checked": "2026-03-05T12:05:04.879117Z",
+      "last_scraped_at": "2026-03-05T12:05:03.881496Z",
+      "monitored_product_id": "bcd98ac3-adf9-45f5-a7f7-dc2e8980bb0f",
+      "is_paused": false
+    },
+    {
+      "id": "38dfafa0-323a-4f99-88d3-736b9621ea49",
+      "display_name": "Liquidificador Concorrente Teste",
+      "name": "Liquidificador Concorrente Teste",
+      "url": "https://produto.mercadolivre.com.br/MLB-2192286432-liquidificador-oster-com-15-velocidades-de-1400w-potente-_JM",
+      "current_price": "279.90",
+      "currency": null,
+      "source": "competitor",
+      "availability": true,
+      "last_status": null,
+      "last_checked": "2026-03-05T12:03:41.838406Z",
+      "last_scraped_at": "2026-03-05T12:03:39.973422Z",
+      "monitored_product_id": "bcd98ac3-adf9-45f5-a7f7-dc2e8980bb0f",
+      "is_paused": false
+    }
+  ],
+  "competitors_total": 3,
+  "competitors_with_price_count": 3,
+  "excluded_due_to_inactive_count": 0,
+  "page": 1,
+  "per_page": 20
+}

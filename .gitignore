@@ -86,9 +86,13 @@ ipython_config.py
 Pipfile.lock
 pdm.lock
 
-# Celery
-celerybeat-schedule*
+# Celery — Local development
+celerybeat-schedule
+celerybeat-schedule.*
 celerybeat.pid
+**/*.pid
+**/tmp/
+dump.rdb
 
 # Service caches and bytecode
 **/__pycache__/
@@ -96,16 +100,23 @@ celerybeat.pid
 # SageMath
 *.sage.py
 
-# Environments - ignore real env files but keep examples
-.env
-*.env
-.env.*
-!.env.*.example
+# Virtual Environments
 .venv/
+.venv
 venv/
 ENV/
+env/
 env.bak/
 venv.bak/
+
+# Environment variables — ignore real env files
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.*.example
+!.env.common  # Keep shared config
+!.env.common.example
 
 # Diagnostics
 diagnostics_output/
@@ -161,3 +172,6 @@ lerna-debug.log*
 # Backups and local scripts (do not version)
 /backups/
 /scripts/
+
+# Documentos auxiliares
+.auxiliares_documentos/

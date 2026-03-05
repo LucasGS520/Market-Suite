@@ -5,10 +5,11 @@ from fastapi import APIRouter, Depends, status, Request, Response
 from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
-from market_alert.schemas.schemas_auth import RefreshRequest
-from market_alert.auth.services_auth import logout_service
-from market_alert.auth.cookies_auth import clear_refresh_cookie
+
 from market_alert.core.config_alert import settings
+from market_alert.schemas.schemas_auth import RefreshRequest
+from market_alert.auth.services.services_auth import logout_service
+from market_alert.auth.utils.cookies_auth import clear_refresh_cookie
 
 
 logger = structlog.get_logger("route.auth.logout")

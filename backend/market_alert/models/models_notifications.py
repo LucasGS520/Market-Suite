@@ -52,7 +52,7 @@ class EventLog(Base):
         nullable=True,
         index=True,
     )
-    ocurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     notifications = relationship("Notification", back_populates="event_log", cascade="all, delete-orphan")

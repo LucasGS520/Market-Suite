@@ -2,11 +2,10 @@
 
 import structlog
 from datetime import datetime, timedelta, timezone
+from fastapi import HTTPException, status
 
 from jose import JWTError, jwt
 from jose.exceptions import ExpiredSignatureError
-
-from fastapi import HTTPException, status
 
 from market_alert.core.config_alert import settings
 
