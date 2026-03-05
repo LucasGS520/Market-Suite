@@ -138,8 +138,7 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 #### Endpoints - Comparacoes e Notificacoes
 | Metodo | Rota | Contrato principal | Responsabilidade |
 |--------|------|--------------------|------------------|
-| `GET` | `/comparisons/{monitored_id}` | autenticado -> `PriceComparisonSnapshotResponse` | Retorna snapshot enxuto da comparacao mais recente: `status`, contagens de concorrentes, preco monitorado e timestamps. Nao inclui calculos estatisticos. |
-| `GET` | `/comparisons/{monitored_id}/summary` | autenticado -> `PriceComparisonSummaryResponse` | Retorna resumo estatistico completo (media, ranking, `potential_adjustment`, status competitivo), recomposto se o snapshot estiver defasado. Use quando precisar de metricas analiticas. |
+| `GET` | `/comparisons/{monitored_id}/summary` | autenticado -> `PriceComparisonSummaryResponse` | Fonte unica de verdade para comparacoes. Retorna resumo estatistico completo (media, ranking, `potential_adjustment`, status competitivo), recomposto a partir do estado atual se necessario. |
 | `GET` | `/comparisons/detail/{comparison_id}` | autenticado -> `PriceComparisonResponse` | Retorna o registro detalhado de uma comparacao especifica. |
 | `GET` | `/notifications/` | query `page`, `per_page` -> `PaginatedNotificationResponse` | Lista notificacoes persistidas para o usuario autenticado. |
 | `GET` | `/notifications/preferences` | autenticado -> `list[UserNotificationPreferenceResponse]` | Retorna preferencias de notificacao por canal e tipo de alerta. |
@@ -284,7 +283,7 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 
 ### 6. Fluxo de Usuario Consultando Alertas e Estado
 1. O frontend autenticado consulta `GET /notifications/` para listar alertas persistidos com paginacao.
-2. Para contextualizar impacto comercial, consulta `GET /comparisons/{monitored_id}` (snapshot enxuto: status + contagens + preco) e `GET /comparisons/{monitored_id}/summary` (metricas completas: media, ranking, ajuste potencial).
+2. Para contextualizar impacto comercial, consulta `GET /comparisons/{monitored_id}/summary` (unico endpoint de comparacoes: media, ranking, ajuste potencial, status competitivo).
 3. Ajustes de preferencia sao feitos por `GET/POST /notifications/preferences` e `GET/PATCH /settings/notifications`.
 4. O painel de estado operacional combina `GET /monitored`, `GET /competitors` e `GET /dashboard/stats`.
 5. Com isso, o usuario fecha o ciclo completo: monitora produtos, recebe alertas, revisa comparacoes e ajusta canais de entrega.

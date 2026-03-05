@@ -1,7 +1,7 @@
 """ Operações de persistência para resultados de comparação de preços """
 
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, Dict
 from uuid import UUID
 
 from sqlalchemy import func
@@ -15,9 +15,6 @@ def create_price_comparison(
     monitored_product_id: UUID,
     data: dict,
     *,
-    status: Optional[str] = None,
-    is_complete: bool = False,
-    included_competitors_count: Optional[int] = None,
     competitors_with_price_count: Optional[int] = None,
     completed_at: Optional[datetime] = None,
 ) -> PriceComparison:
@@ -25,9 +22,6 @@ def create_price_comparison(
     comparison = PriceComparison(
         monitored_product_id=monitored_product_id,
         data=data,
-        status=status,
-        is_complete=is_complete,
-        included_competitors_count=included_competitors_count,
         competitors_with_price_count=competitors_with_price_count,
         completed_at=completed_at,
     )
@@ -82,45 +76,6 @@ def upsert_price_comparison_summary(
     db.commit()
     db.refresh(summary)
     return summary
-
-def get_latest_comparisons(db: Session, monitored_product_id: UUID, limit: int = 10) -> List[PriceComparison]:
-    """ Recupera os registros de comparação mais recentes para um produto """
-    return (
-        db.query(PriceComparison)
-        .filter(PriceComparison.monitored_product_id == monitored_product_id)
-        .order_by(PriceComparison.timestamp.desc())
-        .limit(limit)
-        .all()
-    )
-
-def paginate_comparisons(
-    db: Session,
-    monitored_product_id: UUID,
-    *,
-    page: int,
-    per_page: int,
-) -> Tuple[int, List[PriceComparison]]:
-    """ Recupera comparações de forma paginada para um produto monitorado """
-    base_query = db.query(PriceComparison).filter(
-        PriceComparison.monitored_product_id == monitored_product_id
-    )
-    total = base_query.count()
-    comparisons = (
-        base_query.order_by(PriceComparison.timestamp.desc())
-        .offset((page - 1) * per_page)
-        .limit(per_page)
-        .all()
-    )
-    return total, comparisons
-
-def get_latest_comparison(db: Session, monitored_product_id: UUID) -> Optional[PriceComparison]:
-    """ Retorna a comparação mais recente para o produto monitorado """
-    return (
-        db.query(PriceComparison)
-        .filter(PriceComparison.monitored_product_id == monitored_product_id)
-        .order_by(PriceComparison.timestamp.desc())
-        .first()
-    )
 
 def get_comparison_by_id(db: Session, comparison_id: UUID) -> Optional[PriceComparison]:
     """ Obtém um registro de comparação específico pelo ID """

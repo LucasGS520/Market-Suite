@@ -10,55 +10,17 @@ from shared.infra.db import get_db
 from market_alert.models import User
 from market_alert.schemas.schemas_comparisons import (
     PriceComparisonResponse,
-    PriceComparisonSnapshotResponse,
     PriceComparisonSummaryResponse,
 )
 from market_alert.infraestructure.security.auth_context import get_current_user
 from market_alert.comparisons.services.services_comparison import (
     get_comparison_detail_for_user,
-    get_comparison_snapshot_for_user,
     get_comparison_summary_for_user,
 )
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
 logger = structlog.get_logger("http_route")
-
-@router.get("/{monitored_id}", response_model=PriceComparisonSnapshotResponse)
-def get_comparison_snapshot(
-    request: Request,
-    monitored_id: UUID,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """ Retorna snapshot enxuto da comparação mais recente do produto monitorado.
-
-    Inclui: status, contagens de concorrentes, preço monitorado e timestamps.
-    Para estatísticas completas (médias, ranking, ajustes) use /{monitored_id}/summary.
-    """
-    logger.info(
-        "route_called",
-        path=request.url.path,
-        method=request.method,
-        user_id=str(user.id),
-        monitored_id=str(monitored_id),
-    )
-
-    snapshot = get_comparison_snapshot_for_user(
-        db=db,
-        monitored_id=monitored_id,
-        user=user,
-    )
-
-    logger.info(
-        "route_completed",
-        path=request.url.path,
-        method=request.method,
-        status="success",
-        monitored_id=str(monitored_id),
-        comparison_status=snapshot.status,
-    )
-    return snapshot
 
 @router.get("/{monitored_id}/summary", response_model=PriceComparisonSummaryResponse)
 def get_comparison_summary(
