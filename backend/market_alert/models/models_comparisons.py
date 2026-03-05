@@ -4,10 +4,13 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     Column,
     ForeignKey,
     DateTime,
+    Integer,
     JSON,
+    String,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
@@ -24,6 +27,13 @@ class PriceComparison(Base):
 
     timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     data = Column(JSON, nullable=False)
+
+    # Metadados de snapshot — preenchidos pelo worker ao criar/finalizar a comparação
+    status = Column(String(32), nullable=True)
+    is_complete = Column(Boolean, nullable=False, default=False, server_default="false")
+    included_competitors_count = Column(Integer, nullable=True)
+    competitors_with_price_count = Column(Integer, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (

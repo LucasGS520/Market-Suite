@@ -1,7 +1,7 @@
 """ Rotas para consulta de comparações de preços """
 
 import structlog
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -9,66 +9,56 @@ from shared.infra.db import get_db
 
 from market_alert.models import User
 from market_alert.schemas.schemas_comparisons import (
-    PaginatedPriceComparisonResponse,
     PriceComparisonResponse,
+    PriceComparisonSnapshotResponse,
     PriceComparisonSummaryResponse,
 )
 from market_alert.infraestructure.security.auth_context import get_current_user
 from market_alert.comparisons.services.services_comparison import (
     get_comparison_detail_for_user,
+    get_comparison_snapshot_for_user,
     get_comparison_summary_for_user,
-    get_paginated_comparisons_for_user,
 )
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])
 logger = structlog.get_logger("http_route")
 
-@router.get("/{monitored_id}", response_model=PaginatedPriceComparisonResponse)
-def list_comparisons(
+@router.get("/{monitored_id}", response_model=PriceComparisonSnapshotResponse)
+def get_comparison_snapshot(
     request: Request,
     monitored_id: UUID,
-    page: int = Query(
-        1,
-        ge=1,
-        description="Página atual do histórico de comparações (base 1)",
-    ),
-    per_page: int = Query(
-        20,
-        ge=1,
-        le=100,
-        description="Quantidade de registros retornados por página",
-    ),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """ Lista histórico de comparações aplicando envelope de paginação estável """
+    """ Retorna snapshot enxuto da comparação mais recente do produto monitorado.
+
+    Inclui: status, contagens de concorrentes, preço monitorado e timestamps.
+    Para estatísticas completas (médias, ranking, ajustes) use /{monitored_id}/summary.
+    """
     logger.info(
         "route_called",
         path=request.url.path,
         method=request.method,
         user_id=str(user.id),
         monitored_id=str(monitored_id),
-        page=page,
-        per_page=per_page,
     )
 
-    response = get_paginated_comparisons_for_user(
+    snapshot = get_comparison_snapshot_for_user(
         db=db,
         monitored_id=monitored_id,
         user=user,
-        page=page,
-        per_page=per_page,
     )
+
     logger.info(
         "route_completed",
         path=request.url.path,
         method=request.method,
         status="success",
-        count=len(response.items),
-        total=response.meta.total,
+        monitored_id=str(monitored_id),
+        comparison_status=snapshot.status,
     )
-    return response
+    return snapshot
 
 @router.get("/{monitored_id}/summary", response_model=PriceComparisonSummaryResponse)
 def get_comparison_summary(

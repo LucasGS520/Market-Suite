@@ -10,11 +10,26 @@ from sqlalchemy.orm import Session
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
 
 
-def create_price_comparison(db: Session, monitored_product_id: UUID, data: dict) -> PriceComparison:
+def create_price_comparison(
+    db: Session,
+    monitored_product_id: UUID,
+    data: dict,
+    *,
+    status: Optional[str] = None,
+    is_complete: bool = False,
+    included_competitors_count: Optional[int] = None,
+    competitors_with_price_count: Optional[int] = None,
+    completed_at: Optional[datetime] = None,
+) -> PriceComparison:
     """ Persiste o resultado de uma comparação para o produto monitorado """
     comparison = PriceComparison(
         monitored_product_id=monitored_product_id,
-        data=data
+        data=data,
+        status=status,
+        is_complete=is_complete,
+        included_competitors_count=included_competitors_count,
+        competitors_with_price_count=competitors_with_price_count,
+        completed_at=completed_at,
     )
     db.add(comparison)
     db.commit()
@@ -97,6 +112,15 @@ def paginate_comparisons(
         .all()
     )
     return total, comparisons
+
+def get_latest_comparison(db: Session, monitored_product_id: UUID) -> Optional[PriceComparison]:
+    """ Retorna a comparação mais recente para o produto monitorado """
+    return (
+        db.query(PriceComparison)
+        .filter(PriceComparison.monitored_product_id == monitored_product_id)
+        .order_by(PriceComparison.timestamp.desc())
+        .first()
+    )
 
 def get_comparison_by_id(db: Session, comparison_id: UUID) -> Optional[PriceComparison]:
     """ Obtém um registro de comparação específico pelo ID """

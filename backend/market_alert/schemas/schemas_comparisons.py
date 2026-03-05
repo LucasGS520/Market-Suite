@@ -76,6 +76,40 @@ class PriceComparisonSummaryResponse(BaseModel):
     )
     discrepancies: List[Dict[str, Any]] = Field(default_factory=list)
 
+class PriceComparisonSnapshotResponse(BaseModel):
+    """ Snapshot enxuto da comparação mais recente de um produto monitorado.
+
+    Retornado por GET /comparisons/{monitored_id}.
+    Para estatísticas completas use GET /comparisons/{monitored_id}/summary.
+    """
+    model_config = ConfigDict(from_attributes=True, json_encoders={Decimal: float})
+
+    comparison_id: UUID
+    monitored_product_id: UUID
+    timestamp: datetime
+    status: Optional[str] = Field(
+        default=None,
+        description="Estado da comparação: 'complete', 'incomplete' ou 'skipped'.",
+    )
+    is_complete: bool = False
+    included_competitors_count: Optional[int] = Field(
+        default=None,
+        description="Total de concorrentes considerados na comparação.",
+    )
+    competitors_with_price_count: Optional[int] = Field(
+        default=None,
+        description="Concorrentes com preço válido disponível.",
+    )
+    monitored_price: Optional[Decimal] = Field(
+        default=None,
+        description="Preço do produto monitorado no momento da comparação.",
+    )
+    completed_at: Optional[datetime] = Field(
+        default=None,
+        description="Momento em que a comparação foi finalizada pelo worker.",
+    )
+
+
 class PaginationMeta(BaseModel):
     """ Informações básicas de paginação utilizadas em respostas listadas """
 

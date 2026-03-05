@@ -19,6 +19,7 @@ Fluxo principal:
 """
 
 from uuid import UUID
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from decimal import Decimal
 
@@ -34,11 +35,13 @@ from market_alert.models.models_products import CompetitorProduct
 from market_alert.schemas.schemas_comparisons import (
     PaginatedPriceComparisonResponse,
     PriceComparisonResponse,
+    PriceComparisonSnapshotResponse,
     PriceComparisonSummaryResponse,
 )
 from market_alert.comparisons.crud.crud_comparison import (
     create_price_comparison,
     get_comparison_by_id,
+    get_latest_comparison,
     get_latest_summary,
     paginate_comparisons,
     upsert_price_comparison_summary,
@@ -58,10 +61,15 @@ from market_alert.comparisons.utils.snapshot_comparator import extract_material_
 
 logger = structlog.get_logger("comparison_service")
 
+_COMPARISON_STATUS_SKIPPED = "skipped"
+_COMPARISON_STATUS_COMPLETE = "complete"
+_COMPARISON_STATUS_INCOMPLETE = "incomplete"
+
 #Re-exporta summarize_comparison para consumidores legados
 #(services_products.py e outros que importam daqui)
 __all__ = [
     "ensure_user_can_view_monitored",
+    "get_comparison_snapshot_for_user",
     "get_paginated_comparisons_for_user",
     "get_comparison_summary_for_user",
     "get_comparison_detail_for_user",
@@ -82,6 +90,45 @@ def ensure_user_can_view_monitored(
         product_id=monitored_id,
         user=user,
         context={"monitored_id": str(monitored_id)},
+    )
+
+def get_comparison_snapshot_for_user(
+    *, db: Session, monitored_id: UUID, user: User
+) -> PriceComparisonSnapshotResponse:
+    """ Retorna snapshot enxuto da comparação mais recente do produto monitorado.
+
+    Inclui apenas metadados (status, contagens, preço monitorado, timestamps).
+    Para estatísticas completas use get_comparison_summary_for_user.
+    """
+    ensure_user_can_view_monitored(db=db, monitored_id=monitored_id, user=user)
+
+    comparison = get_latest_comparison(db, monitored_product_id=monitored_id)
+    if comparison is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nenhuma comparação encontrada para este produto.",
+        )
+
+    monitored_price = None
+    data = comparison.data or {}
+    raw_price = data.get("monitored_price")
+    if raw_price is not None:
+        try:
+            from decimal import Decimal as _D
+            monitored_price = _D(str(raw_price))
+        except Exception:
+            pass
+
+    return PriceComparisonSnapshotResponse(
+        comparison_id=comparison.id,
+        monitored_product_id=comparison.monitored_product_id,
+        timestamp=comparison.timestamp,
+        status=comparison.status,
+        is_complete=comparison.is_complete,
+        included_competitors_count=comparison.included_competitors_count,
+        competitors_with_price_count=comparison.competitors_with_price_count,
+        monitored_price=monitored_price,
+        completed_at=comparison.completed_at,
     )
 
 def get_paginated_comparisons_for_user(
@@ -354,7 +401,17 @@ def _persist_inactive_comparison(
         "reason": reason,
         "ignored_due_to_inactive": True,
     }
-    comparison = create_price_comparison(db, monitored.id, payload_stub)
+    now = datetime.now(timezone.utc)
+    comparison = create_price_comparison(
+        db,
+        monitored.id,
+        payload_stub,
+        status="skipped",
+        is_complete=True,
+        included_competitors_count=total,
+        competitors_with_price_count=0,
+        completed_at=now,
+    )
     summary_payload = apply_summary_defaults(
         payload_stub,
         timestamp=comparison.timestamp,
@@ -397,7 +454,19 @@ def _persist_comparison_result(
         }
     )
 
-    comparison = create_price_comparison(db, monitored.id, stored_payload)
+    now = datetime.now(timezone.utc)
+    competitors_with_price = len(available)
+    status_value = _COMPARISON_STATUS_COMPLETE if competitors_with_price > 0 else _COMPARISON_STATUS_INCOMPLETE
+    comparison = create_price_comparison(
+        db,
+        monitored.id,
+        stored_payload,
+        status=status_value,
+        is_complete=True,
+        included_competitors_count=total,
+        competitors_with_price_count=competitors_with_price,
+        completed_at=now,
+    )
     summary_payload = apply_summary_defaults(
         compute_summary_from_payload(
             result,
