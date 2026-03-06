@@ -1,4 +1,4 @@
-"""Templates de chaves Redis para padrão Cache-Aside
+""" Templates de chaves Redis para padrão Cache-Aside
 
 Centraliza todos os padrões de chave usados para caching de dados de negócio.
 Prefixo `cache:` diferencia de chaves de controle (lock:, rate:, circuit:, idemp:).
