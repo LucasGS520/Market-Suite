@@ -33,7 +33,7 @@ class RateLimiter:
         *,
         max_requests: int,
         window_seconds: int,
-        namespace: str = "scraper:rate",
+        namespace: str = "rate:host",
     ) -> None:
         self._client_factory = client_factory
         self._max_requests = max_requests
@@ -183,7 +183,7 @@ def _increment_invalid_url_attempt(
     if client is None:
         return None
     
-    key = f"market_alert:scrape_invalid:{product_id}"
+    key = f"rate:invalid:{product_id}"
     try:
         pipeline = client.pipeline(True)
         pipeline.incr(key)
@@ -201,7 +201,7 @@ def _reset_invalid_url_attempt(product_id: str | None) -> None:
     if client is None:
         return
     try:
-        client.delete(f"market_alert:scrape_invalid:{product_id}")
+        client.delete(f"rate:invalid:{product_id}")
     except Exception:
         pass
 
@@ -217,7 +217,7 @@ def _increment_temporary_failure_attempt(
     if client is None:
         return None
     
-    key = f"market_alert:scrape_retry:{product_id}"
+    key = f"rate:retry:{product_id}"
     try:
         pipeline = client.pipeline(True)
         pipeline.incr(key)
@@ -235,7 +235,7 @@ def _reset_temporary_failure_attempt(product_id: str | None) -> None:
     if client is None:
         return
     try:
-        client.delete(f"market_alert:scrape_retry:{product_id}")
+        client.delete(f"rate:retry:{product_id}")
     except Exception:
         pass
 
@@ -248,7 +248,7 @@ def _register_scrape_cooldown(
     if product_id is None:
         return None
     return set_key_with_ttl(
-        f"market_alert:scrape_cooldown:{product_id}",
+        f"rate:cooldown:{product_id}",
         "1",
         ttl_seconds,
         only_if_absent=True,
@@ -260,7 +260,7 @@ def _resolve_cooldown_seconds(product_id: str) -> int | None:
     if client is None:
         return None
     try:
-        ttl = client.ttl(f"market_alert:scrape_cooldown:{product_id}")
+        ttl = client.ttl(f"rate:cooldown:{product_id}")
     except Exception:
         return None
     if ttl is None or ttl < 0:

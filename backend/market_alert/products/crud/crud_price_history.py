@@ -13,6 +13,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from market_alert.models.models_price_history import PriceHistory
+from shared.utils.cache_invalidator import invalidate_product_price
 import structlog
 
 
@@ -107,8 +108,11 @@ def create_for_monitored(
     if commit:
         db.commit()
         db.refresh(entry)
+        #Invalida cache após commit para garantir consistência com PostgreSQL
+        invalidate_product_price(monitored_product_id)
     else:
         db.flush()
+        #Nota: callers que gerenciam a própria transação devem chamar invalidate_product_price(monitored_product_id) após commit.
 
     logger.info(
         "price_history_created",

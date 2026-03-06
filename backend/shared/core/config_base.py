@@ -44,10 +44,6 @@ class ConfigBase(BaseSettings):
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0")) #Número do banco utilizado
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "") #Senha do Redis, se houver
 
-    #Chaves usadas pelo Circuit Breaker
-    CIRCUIT_FAILURES_KEY: str = os.getenv("CIRCUIT_FAILURES_KEY", "circuit:failures") #Hash com contagem de falhas
-    CIRCUIT_SUSPEND_KEY: str = os.getenv("CIRCUIT_SUSPEND_KEY", "circuit:suspend") #Flag global de suspensão
-
     #Limiares e tempos de suspensão do Circuit Breaker
     CIRCUIT_LVL1_THRESHOLD: int = int(os.getenv("CIRCUIT_LVL1_THRESHOLD", "3")) #Falhas p/ nível 1
     CIRCUIT_LVL1_SUSPEND: int = int(os.getenv("CIRCUIT_LVL1_SUSPEND", "300")) #Suspensão em segundos
@@ -56,9 +52,12 @@ class ConfigBase(BaseSettings):
     CIRCUIT_LVL3_THRESHOLD: int = int(os.getenv("CIRCUIT_LVL3_THRESHOLD", "25")) #Falhas p/ nível 3
     CIRCUIT_LVL3_SUSPEND: int = int(os.getenv("CIRCUIT_LVL3_SUSPEND", "7200")) #Suspensão nível 3
 
-    #Configurações de cache do robots.txt
-    ROBOTS_CACHE_KEY: str = os.getenv("ROBOTS_CACHE_KEY", "robots.txt:content") #Chave base para cache
-    ROBOTS_CACHE_TTL: int = int(os.getenv("ROBOTS_CACHE_TTL", str(24 * 3600))) #Tempo de vida do cache
+    #TTLs Redis centralizados por categoria de uso
+    REDIS_TTL_RATE_LIMITING_SECONDS: int = int(os.getenv("REDIS_TTL_RATE_LIMITING_SECONDS", "3600")) #Janelas de rate limit
+    REDIS_TTL_LOCKS_SECONDS: int = int(os.getenv("REDIS_TTL_LOCKS_SECONDS", "20")) #Locks distribuídos
+    REDIS_TTL_CACHE_DATA_SECONDS: int = int(os.getenv("REDIS_TTL_CACHE_DATA_SECONDS", "300")) #Cache de dados (preço, comparação)
+    REDIS_TTL_ROBOTS_CACHE_SECONDS: int = int(os.getenv("REDIS_TTL_ROBOTS_CACHE_SECONDS", "3600")) #Cache de robots.txt
+    REDIS_TTL_IDEMPOTENCY_SECONDS: int = int(os.getenv("REDIS_TTL_IDEMPOTENCY_SECONDS", "300")) #Chaves de idempotência
 
     #Proteção contra tentativas de brute-force
     BRUTE_FORCE_MAX_ATTEMPTS: int = int(os.getenv("BRUTE_FORCE_MAX_ATTEMPTS", "5")) #Tentativas permitidas
