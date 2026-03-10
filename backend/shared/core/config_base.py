@@ -77,6 +77,17 @@ class ConfigBase(BaseSettings):
         os.getenv("COMPARISON_LAST_SUCCESS_TTL", str(86400))
     ) #Expiração do registro
 
+    #URLs do Celery (broker e result backend) — lidas do .env para permitir DBs separados
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "") or ""
+    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "") or ""
+
+    #DLQ via Redis Streams
+    CELERY_DLQ_STREAM_NAME: str = os.getenv("CELERY_DLQ_STREAM_NAME", "celery:dlq")
+    CELERY_DLQ_RETENTION_MAX_ENTRIES: int = int(os.getenv("CELERY_DLQ_RETENTION_MAX_ENTRIES", "10000"))
+
+    #TTL dos resultados de tasks no Redis backend — deve ser > COLLECTION_TASK_TIMEOUT
+    CELERY_RESULT_EXPIRES: int = int(os.getenv("CELERY_RESULT_EXPIRES", "3600"))
+
     #Configuração de logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO") #Nível de log do root logger
     LOG_FORMAT: str = os.getenv("LOG_FORMAT", "json") #Formato de saída (json ou text)

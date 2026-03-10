@@ -1,21 +1,14 @@
 """ Gerenciamento do ciclo de vida e lógica de execução do coletor contínuo.
 
-Responsável por:
-- Decidir se o autostart do coletor contínuo está habilitado (via env)
-- Executar loop continuo de consumo da fila de monitorados
-- Gerenciar o lock Redis que previne múltiplas instâncias simultâneas
-- Gerenciar o cooldown pós-falha para evitar reinícios em loop
-- Disparar a task ``run_continuous_collector`` quando necessário
-- Manter o loop de revalidação em thread para recuperação automática
+Processo standalone que consome a fila Redis de monitorados e despacha
+tasks de coleta via Celery. O resultado de cada coleta é aguardado via
+``celery.result.AsyncResult.get()`` e tratado diretamente — sem canvas callbacks.
 
-Esta lógica estava misturada com a configuração do Celery em ``celery_app.py``.
-Extrair aqui permite testar o comportamento operacional isoladamente, sem
-precisar instanciar a aplicação Celery completa.
-
-Dependências externas:
-    - Redis (via ``get_redis_client`` / ``set_key_with_ttl``)
-    - Celery control inspect (para detectar tasks ativas)
-    - Variáveis de ambiente (configuração de TTL e flags)
+Responsabilidades:
+    - Lock Redis para instância única do loop
+    - Loop contínuo de consumo da fila de monitorados
+    - Aguardo de resultado de coleta e callback inline
+    - Cooldown pós-falha para evitar reinícios em loop
 """
 
 from __future__ import annotations
@@ -28,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from billiard.exceptions import TimeLimitExceeded
 from celery.exceptions import SoftTimeLimitExceeded
+from celery.result import AsyncResult as CeleryAsyncResult
 
 from shared.utils.redis_client import get_redis_client, set_key_with_ttl
 from shared.utils.redis_client import is_scraping_suspended
@@ -37,11 +31,8 @@ from shared.utils.redis_locks import (
     release_continuous_collector_lock,
 )
 
-from market_alert.core.config_alert import settings
-from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.collectors.domain.collection_queue import CollectionQueue
-from market_alert.collectors.utils.collector_result import _parse_collect_result
-from market_alert.collectors.utils.continuous_dispatch import (
+
+from market_continuous.orchestrator.dispatcher import (
     CollectDispatchDecision,
     _collect_group,
     _handle_processing_requeue,
@@ -49,6 +40,11 @@ from market_alert.collectors.utils.continuous_dispatch import (
     _requeue_monitored,
     _should_abort,
 )
+from market_continuous.queue.collection_queue import CollectionQueue
+
+from market_alert.core.config_alert import settings
+from market_alert.enums.enums_products import MonitoredStatus
+from market_alert.collectors.utils.collector_result import _parse_collect_result
 from market_alert.products.utils.interval_calculator_products import _parse_next_retry_at, _utc_now
 
 if TYPE_CHECKING:
@@ -58,36 +54,32 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("continuous_collector_manager")
 
-# Chaves Redis usadas pelo gerenciador
 _AUTOSTART_KEY = "market_alert:continuous_collector:autostart"
 _COOLDOWN_KEY = "market_alert:continuous_collector:autostart:cooldown"
 _TASK_NAME = "market_alert.collectors.tasks.continuous_collector_task.run_continuous_collector"
 _MONITOR_QUEUE = "monitor"
 
-# Referência ao monotonic de início do processo, injetada por `celery_app.py`
 _process_start_monotonic: float = time.monotonic()
 
 def set_process_start_monotonic(value: float) -> None:
-    """ Permite que ``celery_app.py`` injete o timestamp de início do processo. """
     global _process_start_monotonic
     _process_start_monotonic = value
 
 def _get_process_uptime_seconds() -> float:
-    """ Retorna o uptime do processo em segundos usando relógio monotônico. """
     return round(time.monotonic() - _process_start_monotonic, 2)
+
+# ---------------------------------------------------------------------------
+# Callbacks inline — chamados diretamente pelo loop após AsyncResult.get()
+# ---------------------------------------------------------------------------
 
 def finalize_processing_requeue(
     *,
-    db: Session,
+    db: "Session",
     collect_result: Any,
     monitored_id: str,
     trace_id: str | None = None,
 ) -> None:
-    """ Finaliza uma coleta bem-sucedida/normal e retorna o item para a fila
-    
-    Mantém a lógica de parse e de requeue fora do módulo Celery para reduzir
-    acoplamento entre camada de transporte (task) e regra operacional.
-    """
+    """ Finaliza coleta bem-sucedida e reenfileira o monitorado. """
     normalized = _parse_collect_result(collect_result)
     next_retry_at = _parse_next_retry_at(normalized.get("next_retry_at"))
     _handle_processing_requeue(
@@ -101,11 +93,11 @@ def finalize_processing_requeue(
 
 def finalize_processing_requeue_error(
     *,
-    db: Session,
+    db: "Session",
     monitored_id: str,
     trace_id: str | None = None,
 ) -> None:
-    """Finaliza uma coleta que falhou e reabilita nova tentativa no fluxo."""
+    """ Finaliza coleta com falha e reenfileira o monitorado com backoff. """
     _handle_processing_requeue(
         db=db,
         monitored_id=monitored_id,
@@ -114,11 +106,15 @@ def finalize_processing_requeue_error(
         trace_id=trace_id,
     )
 
+# ---------------------------------------------------------------------------
+# Loop principal
+# ---------------------------------------------------------------------------
+
 def run_collection_loop(*, db: "Session", task_request: Any, task_id: str | None = None) -> None:
     """ Executa o loop contínuo de consumo da fila de monitorados.
 
-    A task Celery chama esta função para manter a lógica operacional em um
-    único serviço, evitando duplicidade de responsabilidades no módulo de task.
+    Após o despacho de cada task, aguarda o resultado via ``AsyncResult.get()``
+    e invoca o callback de finalização diretamente — sem canvas callbacks Celery.
     """
     bound_logger = logger.bind(task_id=task_id)
     started_at = time.monotonic()
@@ -129,10 +125,7 @@ def run_collection_loop(*, db: "Session", task_request: Any, task_id: str | None
     lock_ttl_seconds = int(settings.CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS)
     lock_refresh_interval = max(1.0, lock_ttl_seconds / 2)
 
-    # Mantém garantia de singleton do loop mesmo com disparos concorrentes.
-    lock_acquired, lock_owner = acquire_continuous_collector_lock(
-        ttl_seconds=lock_ttl_seconds,
-    )
+    lock_acquired, lock_owner = acquire_continuous_collector_lock(ttl_seconds=lock_ttl_seconds)
     if not lock_acquired:
         bound_logger.warning("continuous_collector_lock_denied", lock_owner=lock_owner)
         return
@@ -140,7 +133,6 @@ def run_collection_loop(*, db: "Session", task_request: Any, task_id: str | None
     last_lock_refresh = time.monotonic()
 
     try:
-        # A sessão vem da task de entrada para obedecer a regra de sessão única.
         while True:
             processed_ids: list[str] = []
             if _should_abort(task_request):
@@ -152,10 +144,7 @@ def run_collection_loop(*, db: "Session", task_request: Any, task_id: str | None
                     owner_id=lock_owner,
                     ttl_seconds=lock_ttl_seconds,
                 ):
-                    bound_logger.warning(
-                        "continuous_collector_lock_lost",
-                        lock_owner=lock_owner,
-                    )
+                    bound_logger.warning("continuous_collector_lock_lost", lock_owner=lock_owner)
                     return
                 last_lock_refresh = time.monotonic()
 
@@ -181,7 +170,6 @@ def run_collection_loop(*, db: "Session", task_request: Any, task_id: str | None
 
                 reclaimed = queue.reclaim_stale_items(processing_ttl)
                 if reclaimed:
-                    # Reencaminha itens presos em processamento para nova tentativa.
                     bound_logger.warning(
                         "continuous_processing_reclaimed",
                         reclaimed_count=len(reclaimed),
@@ -220,22 +208,48 @@ def run_collection_loop(*, db: "Session", task_request: Any, task_id: str | None
                         )
                         bound_logger.exception("continuous_group_failed", monitored_id=str(monitored.id))
 
-                    if not decision.retain_processing:
-                        processed_ids.append(str(monitored.id))
-
-                    if decision.should_requeue:
-                        requeue_success, _ = _requeue_monitored(
-                            monitored=monitored,
-                            next_check_at=decision.next_check_at,
-                            queue=queue,
-                        )
-                        if not requeue_success:
-                            bound_logger.warning(
-                                "requeue_failed_but_retained",
+                    if decision.retain_processing and decision.task_id:
+                        # Aguarda resultado da task e invoca callback inline
+                        try:
+                            collect_result = CeleryAsyncResult(decision.task_id).get(
+                                timeout=settings.COLLECTION_TASK_TIMEOUT
+                            )
+                            finalize_processing_requeue(
+                                db=db,
+                                collect_result=collect_result,
+                                monitored_id=str(monitored.id),
+                                trace_id=decision.trace_id,
+                            )
+                        except Exception:
+                            db.rollback()
+                            bound_logger.exception(
+                                "continuous_callback_wait_failed",
+                                task_id=decision.task_id,
                                 monitored_id=str(monitored.id),
                             )
-                            if processed_ids and processed_ids[-1] == str(monitored.id):
-                                processed_ids.pop()
+                            finalize_processing_requeue_error(
+                                db=db,
+                                monitored_id=str(monitored.id),
+                                trace_id=decision.trace_id,
+                            )
+                        # finalize_processing_requeue já chama queue.mark_as_done() internamente
+                    else:
+                        if not decision.retain_processing:
+                            processed_ids.append(str(monitored.id))
+
+                        if decision.should_requeue:
+                            requeue_success, _ = _requeue_monitored(
+                                monitored=monitored,
+                                next_check_at=decision.next_check_at,
+                                queue=queue,
+                            )
+                            if not requeue_success:
+                                bound_logger.warning(
+                                    "requeue_failed_but_retained",
+                                    monitored_id=str(monitored.id),
+                                )
+                                if processed_ids and processed_ids[-1] == str(monitored.id):
+                                    processed_ids.pop()
 
                     bound_logger.info(
                         "continuous_item_processed",
@@ -271,16 +285,14 @@ def run_collection_loop(*, db: "Session", task_request: Any, task_id: str | None
         release_continuous_collector_lock(owner_id=lock_owner)
 
 # ---------------------------------------------------------------------------
-# Funções de estado — verificam flags e Redis
+# Autostart e revalidação — mantidos para compatibilidade durante transição
 # ---------------------------------------------------------------------------
 
 def autostart_enabled() -> bool:
-    """ Retorna True se o autostart do coletor contínuo está habilitado via env. """
     flag = os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART", "0").strip().lower()
     return flag in {"1", "true", "yes"}
 
 def _in_cooldown() -> bool:
-    """ Retorna True se há cooldown ativo (chave Redis presente). """
     client = get_redis_client()
     if client is None:
         logger.warning("continuous_autostart_cooldown_check_skipped", reason="redis_unavailable")
@@ -292,7 +304,6 @@ def _in_cooldown() -> bool:
         return False
 
 def _is_active(celery_app: "Celery") -> bool:
-    """ Verifica se há execução ativa do coletor contínuo nos workers Celery. """
     try:
         inspect = celery_app.control.inspect(timeout=1.0)
         active_tasks = inspect.active() or {}
@@ -306,13 +317,7 @@ def _is_active(celery_app: "Celery") -> bool:
                 return True
     return False
 
-
-# ---------------------------------------------------------------------------
-# Funções de escrita — modificam estado no Redis
-# ---------------------------------------------------------------------------
-
 def _register_cooldown(*, reason: str) -> None:
-    """ Registra cooldown pós-falha para bloquear reinícios consecutivos. """
     cooldown_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_COOLDOWN_SECONDS", "120"))
     result = set_key_with_ttl(
         _COOLDOWN_KEY,
@@ -321,20 +326,11 @@ def _register_cooldown(*, reason: str) -> None:
         only_if_absent=True,
     )
     if result is None:
-        logger.warning(
-            "continuous_autostart_cooldown_unavailable",
-            reason="redis_unavailable",
-            detail=reason,
-        )
+        logger.warning("continuous_autostart_cooldown_unavailable", reason="redis_unavailable", detail=reason)
         return
-    logger.info(
-        "continuous_autostart_cooldown_registered",
-        ttl_seconds=cooldown_seconds,
-        detail=reason,
-    )
+    logger.info("continuous_autostart_cooldown_registered", ttl_seconds=cooldown_seconds, detail=reason)
 
 def _delete_lock() -> None:
-    """ Remove o lock de autostart para evitar bloqueios indevidos após falha. """
     client = get_redis_client()
     if client is None:
         logger.warning("continuous_autostart_lock_delete_skipped", reason="redis_unavailable")
@@ -344,23 +340,8 @@ def _delete_lock() -> None:
     except Exception:
         logger.exception("continuous_autostart_lock_delete_failed")
 
-
-# ---------------------------------------------------------------------------
-# Ação principal — disparar o coletor contínuo
-# ---------------------------------------------------------------------------
-
 def request_start(celery_app: "Celery", *, action: str = "triggered") -> None:
-    """ Dispara ``run_continuous_collector`` uma única vez quando habilitado.
-
-    Protegido por lock Redis com TTL para prevenir múltiplos disparos
-    simultâneos quando vários workers sobem ao mesmo tempo.
-
-    Args:
-        celery_app: Instância da aplicação Celery (injetada para evitar import
-            circular com ``celery_app.py``).
-        action: Rótulo usado nos logs para identificar a origem do disparo
-            (``'triggered'``, ``'reactivated'``, etc.).
-    """
+    """ Dispara run_continuous_collector (mantido para compatibilidade). """
     if not autostart_enabled():
         return
 
@@ -379,16 +360,12 @@ def request_start(celery_app: "Celery", *, action: str = "triggered") -> None:
     logger.info("continuous_autostart_requested", ttl_seconds=ttl_seconds)
 
     lock_result = set_key_with_ttl(
-        _AUTOSTART_KEY,
-        value="1",
-        ttl_seconds=ttl_seconds,
-        only_if_absent=True,
+        _AUTOSTART_KEY, value="1", ttl_seconds=ttl_seconds, only_if_absent=True,
     )
     if lock_result is False:
         logger.info("continuous_autostart_skipped", reason="already_running")
         return
     if lock_result is None:
-        # Ainda tenta disparar para evitar ficar sem coletas em cenários instáveis
         logger.warning("continuous_autostart_lock_unavailable")
 
     try:
@@ -406,28 +383,13 @@ def request_start(celery_app: "Celery", *, action: str = "triggered") -> None:
         _register_cooldown(reason="falha ao iniciar coletor contínuo")
         logger.exception("continuous_autostart_failed")
 
-
-# ---------------------------------------------------------------------------
-# Loop de revalidação — thread de background para recuperação automática
-# ---------------------------------------------------------------------------
-
 def _revalidate(celery_app: "Celery") -> None:
-    """ Verifica se o coletor contínuo ainda está ativo e reativa se necessário.
-
-    Chamado periodicamente pelo loop de revalidação. Renova o lock quando o
-    coletor está ativo; remove lock orfão e reativa quando não está.
-    """
     if not autostart_enabled():
         return
 
     if _is_active(celery_app):
         ttl_seconds = int(os.getenv("CONTINUOUS_COLLECTOR_AUTOSTART_TTL", "60"))
-        set_key_with_ttl(
-            _AUTOSTART_KEY,
-            value="1",
-            ttl_seconds=ttl_seconds,
-            only_if_absent=False,  # Renova mesmo se já existir
-        )
+        set_key_with_ttl(_AUTOSTART_KEY, value="1", ttl_seconds=ttl_seconds, only_if_absent=False)
         return
 
     client = get_redis_client()
@@ -442,22 +404,13 @@ def _revalidate(celery_app: "Celery") -> None:
         return
 
     if has_lock:
-        # Remove lock orfão antes de tentar reativar a task
         _delete_lock()
 
     logger.warning("continuous_autostart_reactivated")
     request_start(celery_app, action="reactivated")
 
 def start_revalidation_loop(celery_app: "Celery") -> None:
-    """ Inicia thread daemon de revalidação periódica do coletor contínuo.
-
-    Executa apenas se ``CONTINUOUS_COLLECTOR_AUTOSTART=1``. O intervalo é
-    controlado por ``CONTINUOUS_COLLECTOR_AUTOSTART_RECHECK_INTERVAL`` (padrão
-    30 segundos).
-
-    Args:
-        celery_app: Instância da aplicação Celery para inspeção de tasks ativas.
-    """
+    """ Inicia thread daemon de revalidação periódica (mantida para compatibilidade). """
     if not autostart_enabled():
         return
 

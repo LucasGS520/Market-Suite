@@ -138,6 +138,9 @@ class Settings(ConfigBase):
     CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS: int = int(
         os.getenv("CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS", "45")
     ) #TTL do lock para garantir instância única do coletor contínuo
+    COLLECTION_TASK_TIMEOUT: int = int(
+        os.getenv("COLLECTION_TASK_TIMEOUT", "60")
+    ) #Timeout em segundos para aguardar AsyncResult de coleta no loop contínuo
 
     CLEANUP_CACHE_SCAN_COUNT: int = int(
         os.getenv("CLEANUP_CACHE_SCAN_COUNT", "200")

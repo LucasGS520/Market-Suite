@@ -28,6 +28,8 @@ from sqlalchemy.orm import Session
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
 from shared.utils.url_validation import normalize_and_validate_product_url
 
+from market_continuous.queue.collection_queue import CollectionQueue
+
 from market_alert.core.config_alert import settings
 from market_alert.infraestructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import User
@@ -44,7 +46,6 @@ from market_alert.products.crud.crud_competitor import (
 )
 from market_alert.products.services.services_products import build_competitor_response
 from market_alert.products.services.services_access_control import ensure_user_can_access_monitored
-from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.products.domain.product_lifecycle import compute_next_check_at
 from market_alert.products.utils.interval_calculator_products import EVENT_STANDARD

@@ -276,61 +276,6 @@ services:
           memory: 256M
 
 
-  #Worker do Celery dedicado ao coletor contínuo (fila monitor)
-  celery-worker-monitor:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - workers
-    env_file:
-      - .env.common
-      - ./backend/market_alert/.env.market_alert
-    environment:
-      - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
-      - CONTINUOUS_COLLECTOR_AUTOSTART=1
-      - CONTINUOUS_COLLECTOR_AUTOSTART_TTL=60
-    command:
-      - celery
-      - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
-      - "worker"
-      - "--loglevel=info"
-      - "--pool=prefork"
-      - "--concurrency=1"
-      - "-Q"
-      - "monitor"
-    user:
-      "1000:1000"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro
-    restart: on-failure
-    networks:
-      - monitoring-net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 384M
-        reservations:
-          cpus: '0.25'
-          memory: 192M
-
-
   #Worker do Celery dedicado às comparações de preço (fila compare)
   celery-worker-compare:
     build:

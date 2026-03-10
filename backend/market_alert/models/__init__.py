@@ -17,7 +17,6 @@ from market_alert.models.models_price_history import PriceHistory
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.models.models_refresh_token import RefreshToken
 from market_alert.models.models_scraping_errors import ScrapingError
-from market_alert.models.models_task_failures import TaskFailure
 from market_alert.models.models_users import User
 from market_alert.models.models_verification import Verification
 
@@ -34,7 +33,6 @@ __all__ = [
     "PriceHistory",
     "RefreshToken",
     "ScrapingError",
-    "TaskFailure",
     "User",
     "UserNotificationPreference",
     "Verification",

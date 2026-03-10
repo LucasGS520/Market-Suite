@@ -1,85 +1,46 @@
-# Claude - Arquitetura Redis + PostgreSQL
+# Claude - Reorganização Celery + Redis do `market_alert`
 
-Reorganizar e normalizar separação arquitetural e o uso de Redis e PostgreSQL no projeto, para que cada um assuma as responsabilidades ideias, garantindo:
-- **PostgreSQL:** Fonte de verdade única para dados persistentes críticos
-- **Redis:** Orquestrador de decisões rápidas e cache efêmero (~10ms)
-- **Sistema:** Mais resiliente, escalável e com separação clara de concerns
-
----
-
-## Análise de Riscos e Decisões Chave**
-
-### **Risco Principal**
-**Dessincronização entre Cache Redis e Source PostgreSQL**
-- Exemplo: `cache:product:123:price = 99.90` mas `monitored_products.current_price = 95.00`
-- **Mitigação**: Implementar padrão cache-aside com invalidation explícita e TTL curto
-
-### **Decisão Principal 1: Estratégia de Cache**
-- **Opção A** (Recomendado): Cache-Aside com Invalidation
-  - PostgreSQL é sempre source
-  - Redis cache é "nice-to-have", pode estar stale
-  - Invalidar ao escrever em DB
-  - TTL como fallback
-- **Opção B** (Não recomendado): Write-Through
-  - Melhor consistência, mas mais lento
-  - Complexidade maior
-
-**Decisão**: Usar **Cache-Aside** (Opção A) — alinha com velocidade
-
-### **Decisão Principal 2: TTL por Categoria**
-- **Rate limiting**: 60-3600s (janela de coleta)
-- **Locks**: 20-60s (duração de task)
-- **Cache dados**: 300-900s (preço, comparação)
-- **Robots.txt**: 3600s (1h, muda pouco)
-- **Idempotência**: 300s (5 min, curto por segurança)
-
-### **Decisão Principal 3: Segregação de Chaves**
-- Usar prefixos explícitos: `lock:`, `rate:`, `cache:`, `circuit:`, `idemp:`, `robots:`
-- Documentar padrão de chave em cada módulo
-
-### **Risco Secundário**
-**Perda de dados ao deletar cache Redis**
-- Se você fizer `FLUSHALL`, perde todos locks ativos
-- **Mitigação**: Scripts de clear seletivo por padrão (ex: `SCAN cache:*`)
+## Objetivo
+Reorganizar a arquitetura assíncrona para que:
+- Celery opere apenas como orquestrador de tarefas discretas (3 workers puros).
+- Redis tenha fronteiras claras por camada lógica (broker/backend, operacional do loop, cache/rate-limit/idempotência).
+- DLQ seja orientada a eventos em Redis Streams.
+- Loop contínuo saia do fluxo do Celery e fique isolado em módulo próprio, preparando evolução futura para serviço standalone.
+- Configuração de Celery passe a respeitar variáveis de ambiente oficiais.
 
 ---
 
-## **Resultado e valor agregado ao executar o plano**
-- **Melhor performance e escala:** reduz carga de leitura/gravação no Postgres ao servir dados voláteis via Redis (dashboard e caches), melhorando latência e throughput.
-- **Clareza de responsabilidade:** PostgreSQL vira fonte única de verdade para dados persistentes; Redis centraliza apenas estado transitório, locks e decisões em tempo real — menor risco de inconsistência.
-- **Resiliência previsível:** fallback documentado (o que acontece se o Redis cair) evita comportamento indefinido e facilita runbooks operacionais.
-- **Manutenção e observabilidade:** chaves, TTLs e padrões padronizados tornam debugging, métricas e tuning mais simples (hit-rate, keys growth).
-- **Custo operacional controlado:** evita armazenar dados históricos em RAM e permite dimensionar Redis para memória curta/rápida e Postgres para disco/consultas.
+### Análise de Riscos e Decisões Chave
 
-**Pontos e funcionalidades diretamente afetadas**
-- Redis (alterações/normalização e uso):
-  - Config e TTLs: `config_base.py`  
-  - Cliente/utis Redis: `redis_client.py`  
-  - Locks distribuídos: `redis_locks.py`  
-  - Idempotência: `idempotency.py`  
-  - Pub/Sub (sem mudança de broker agora, apenas documentação): `redis_pubsub.py`  
-  - Rate limiter / scripts Lua: `rate_limiter.py` e `backend/shared/infra/redis/redis-scripts/sliding_window.lua`
-  - robots.txt cache (migrar de memória local → Redis): `robots.py`
-  - Novos módulos a criar: `shared/infra/cache_strategy.py`, `shared/enums/cache_keys.py`, `shared/utils/cache_invalidator.py`
-- PostgreSQL (garantir source of truth e otimizar):
-  - Modelos e índices: `models_products.py`, `models_price_history.py`, `models_comparisons.py`
-  - Migrações Alembic para índices (nova migration em versions)
-- Fluxos afetados (código que executa lógica):
-  - Coleta/scraping: `collector_product_task.py`
-  - Cliente de scraping / circuit breaker: `scraper_client.py` e `circuit_breaker.py`
-  - Comparações e notificações (caching e invalidação) — serviços em `market_alert/comparisons/` e `market_alert/notifications/`
+**Decisão Técnica Principal**  
+Usar Redis Streams como DLQ de falhas permanentes (`celery:dlq`) com consumo por consumer group dedicado para processamento observável e desacoplado.
 
-**3) Impacto na situação atual do projeto**
-- Curto prazo (migração/implementação):
-  - Trabalho invasivo moderado: mudanças em utilitários Redis, introdução de cache-strategy e pequenas alterações em pontos de leitura/escrita (hooks de invalidation).
-  - Risco operacional: se TTLs ou invalidations não forem aplicados corretamente, haverá staleness; mitigação com testes e rollout por etapas.
-  - Coordenação necessária: atualizar configurações em `shared/core/config_base.py` e comunicar times (deploys, feature-freeze parcial durante migrações críticas).
-- Médio prazo (após conclusão):
-  - Menor latência nas leituras frequentes (dashboards, endpoints públicos).
-  - Menor carga no Postgres para consultas de leitura recorrentes.
-  - Mais previsibilidade em comportamento quando Redis está indisponível (fórmulas de fallback já definidas).
-- Não afetado nesta etapa:
-  - Configuração do Redis como broker/Celery (conforme requisitado, será tratada em etapa separada).
+**Risco Principal**  
+Interrupção operacional durante transição do loop contínuo e da DLQ (perda de eventos, dupla execução, ou lacunas de monitoramento).
+
+**Mitigação**
+- Rollout em etapas com feature flags por componente.
+- Janela de coexistência controlada (old/new) apenas quando necessário.
+- Testes de integração com Redis real e cenários de falha.
+- Runbook de rollback por fase.
+
+**Dependências**
+- Redis estável (Streams habilitado e monitorável).
+- Docker Compose/K8s com serviços ajustados.
+- Time de observabilidade para métricas e alertas.
+- Validação de contratos de tracing (`trace_id`) e idempotência.
+
+**Execução:** Eliminar `task_failures` e usar apenas stream + retenção + exportação.
+
+---
+
+### Resultado Esperado
+
+- Celery opera com 3 workers focados (scraping, compare, notifications) sem loop contínuo acoplado.
+- DLQ está em Redis Streams com consumer group ativo e monitorado.
+- Configuração Celery respeita CELERY_BROKER_URL e CELERY_RESULT_BACKEND.
+- Fronteiras de Redis estão documentadas e aplicadas por prefixo/camada.
+- Loop contínuo está isolado em módulo independente, pronto para futura migração tecnológica.
 
 ---
 

@@ -42,8 +42,8 @@ setup_worker_logging()
 
 celery_app = Celery(
     "market_alert",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
+    broker=settings.CELERY_BROKER_URL or settings.redis_url,
+    backend=settings.CELERY_RESULT_BACKEND or settings.redis_url,
     include=TASK_MODULES,
 )
 
@@ -57,6 +57,9 @@ celery_app.conf.update(
     worker_concurrency=int(os.getenv("CELERY_WORKER_CONCURRENCY", "12")),
     worker_prefetch_multiplier=int(os.getenv("CELERY_WORKER_PREFETCH", "1")),
     task_queue_max_priority=10,
+    # TTL explícito: resultados precisam durar apenas até AsyncResult.get() em manager.py
+    # COLLECTION_TASK_TIMEOUT=60s; 1h dá margem segura sem acumular memória no Redis.
+    result_expires=settings.CELERY_RESULT_EXPIRES,
 )
 
 celery_app.conf.task_queues = TASK_QUEUES

@@ -18,30 +18,23 @@ from kombu import Exchange, Queue
 #Módulos de tasks carregados pelo worker
 TASK_MODULES = [
     "market_alert.collectors.tasks.collector_product_task",
-    "market_alert.collectors.tasks.continuous_collector_task",
     "market_alert.comparisons.tasks.compare_prices_task",
     "market_alert.notifications.tasks.notifications_enqueue_task",
     "market_alert.notifications.tasks.send_notification_task",
     "market_alert.users.tasks.verification_tasks",
-    "market_alert.collectors.tasks.priority_queue_tasks",
     "market_alert.infraestructure.tasks.maintenance_tasks",
-    "market_alert.infraestructure.celery.dlq_handler",
 ]
 
-#Exchanges separados para scraping, monitoramento, comparação e DLQ
+#Exchanges separados por domínio funcional (3 workers: scraping, compare, notifications)
 SCRAPING_EXCHANGE = Exchange("scraping", type="direct")
-MONITOR_EXCHANGE = Exchange("monitor", type="direct")
 COMPARE_EXCHANGE = Exchange("compare", type="direct")
 NOTIFICATIONS_EXCHANGE = Exchange("notifications", type="direct")
-DLQ_EXCHANGE = Exchange("dead_letter", type="direct")
 
 #Filas conhecidas do serviço
 TASK_QUEUES = (
     Queue("scraping", SCRAPING_EXCHANGE, routing_key="scraping"),
-    Queue("monitor", MONITOR_EXCHANGE, routing_key="monitor"),
     Queue("compare", COMPARE_EXCHANGE, routing_key="compare"),
     Queue("notifications", NOTIFICATIONS_EXCHANGE, routing_key="notifications"),
-    Queue("dead_letter", DLQ_EXCHANGE, routing_key="dead_letter"),
 )
 
 #Roteamento explícito para manter cada domínio em sua fila
@@ -49,10 +42,6 @@ TASK_ROUTES = {
     "market_alert.collectors.tasks.collector_product_task.collect_product_task": {
         "queue": "scraping",
         "routing_key": "scraping",
-    },
-    "market_alert.collectors.tasks.continuous_collector_task.run_continuous_collector": {
-        "queue": "monitor",
-        "routing_key": "monitor",
     },
     "market_alert.comparisons.tasks.compare_prices_task.compare_prices_task": {
         "queue": "compare",
@@ -74,17 +63,13 @@ TASK_ROUTES = {
         "queue": "notifications",
         "routing_key": "notifications",
     },
-    "market_alert.infraestructure.celery.dlq_handler.handle_dead_letter": {
-        "queue": "dead_letter",
-        "routing_key": "dead_letter",
-    },
 }
 
 def _schedule_entry(
     task: str,
     schedule,
     *,
-    queue: str = "monitor",
+    queue: str = "maintenance",
     routing_key: str | None = None,
 ) -> dict:
     """ Cria uma entrada de agendamento consistente para o Beat. """
@@ -100,6 +85,7 @@ BEAT_SCHEDULE = {
     "cleanup-cache-daily": _schedule_entry(
         "market_alert.infraestructure.tasks.maintenance_tasks.cleanup_cache",
         crontab(hour=3, minute=0),
+        queue="scraping",
     ),
 }
 
