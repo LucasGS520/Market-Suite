@@ -61,7 +61,8 @@ As rotas publicas sao registradas em [`main.py`](main.py), com foco em um endpoi
 - [`utils/http_download.py`](utils/http_download.py) faz download com `httpx`, retries, limite de redirects, limite de tamanho e headers controlados.
 - [`utils/http_retry.py`](utils/http_retry.py) aplica politicas de retry com backoff para alvos HTTP.
 - [`utils/http_utils.py`](utils/http_utils.py) resolve DNS com cache e bloqueia hosts/IPs nao publicos (protecao SSRF).
-- [`utils/robots.py`](utils/robots.py) valida `robots.txt` antes da coleta; fallback atual e restritivo (bloqueia quando nao consegue validar o parser).
+- [`utils/robots.py`](utils/robots.py) valida `robots.txt` antes da coleta via Redis operacional (db 2); fallback atual e restritivo (bloqueia quando nao consegue validar o parser).
+- Rate limiting por host usa chaves com prefixo `rate:scraping:{host}` no Redis operacional (db 2), isolado do broker Celery (db 0) e do result backend (db 1).
 - [`utils/cache.py`](utils/cache.py), [`utils/singleflight.py`](utils/singleflight.py) e [`utils/conditional_payload.py`](utils/conditional_payload.py) suportam cache em memoria, coalescing e revalidacao condicional HTTP.
 
 #### Endpoints - Market Scraper
@@ -163,7 +164,7 @@ As configuracoes combinam base compartilhada em [`../shared/core/config_base.py`
 | HTTP e rede | `SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, `SCRAPER_HTTP_MAX_*`, `SCRAPER_DNS_TIMEOUT`, `SCRAPER_DNS_CACHE_TTL` |
 | Headers e identidade | `SCRAPER_DEFAULT_USER_AGENT`, `SCRAPER_USER_AGENT_POOL`, `SCRAPER_HEADERS_*` |
 | Parsing e qualidade de dado | `SCRAPER_PRICE_TOLERANCE`, `SCRAPER_HTTP_DOMAIN_TIMEOUTS` |
-| Base compartilhada | `REDIS_*`, `LOG_LEVEL`, `LOG_FORMAT`, `ROBOTS_CACHE_*`, `CIRCUIT_*` |
+| Base compartilhada | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_OPERATIONAL_DB` (db 2 — locks, rate limiting e cache de robots), `LOG_LEVEL`, `LOG_FORMAT`, `ROBOTS_CACHE_*`, `CIRCUIT_*` |
 
 Exemplo minimo de `.env.market_scraper`:
 ```env

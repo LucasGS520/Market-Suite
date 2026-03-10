@@ -24,7 +24,7 @@ from pydantic import ValidationError
 
 from shared.schemas import ParserRequest, ParserResponse
 from shared.utils import normalize_scraper_response
-from shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_operational
 
 from market_alert.core.config_alert import settings
 from market_alert.infraestructure.resilience.circuit_breaker import CircuitBreaker
@@ -132,13 +132,13 @@ def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
 
 #Definição global para reaproveitar o bucket entre instâncias e evitar picos
 rate_limiter = RateLimiter(
-    get_redis_client,
+    get_redis_operational,
     max_requests=settings.SCRAPER_HOST_RATE_LIMIT,
     window_seconds=settings.SCRAPER_HOST_RATE_WINDOW_SECONDS,
 )
 
 circuit_breaker = CircuitBreaker(
-    get_redis_client,
+    get_redis_operational,
     failure_threshold=settings.SCRAPER_CIRCUIT_FAILURE_THRESHOLD,
     failure_window=settings.SCRAPER_CIRCUIT_WINDOW_SECONDS,
     cooldown_seconds=settings.SCRAPER_CIRCUIT_COOLDOWN_SECONDS,
@@ -461,7 +461,7 @@ class ScraperClient:
     @staticmethod
     def _register_host_retry_window(host: str) -> int | None:
         """ Registra tentativa por host para limiar backoffs em janelas curtas """
-        client = get_redis_client()
+        client = get_redis_operational()
         if client is None:
             return None
         try:

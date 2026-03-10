@@ -63,8 +63,10 @@ COOLDOWN_REASONS: frozenset[str] = frozenset({"rate_limit", "429", "temporary_fa
 # ---------------------------------------------------------------------------
 
 #: Coleta de produto monitorado ou concorrente.
+#: Semântica: at-least-once — duplicação resulta em sobrescrita de preço (inofensivo).
 #: Retry apenas para lock_skipped — scrape retries são gerenciados pela política
 #: de backoff interna (RetryPolicy.should_retry_scrape_failure).
+#: time_limit=120s sobrescreve o global (45s) intencionalmente: scraping é I/O lento.
 COLLECTION_RETRY: dict = {
     "max_retries": LOCK_RETRY_MAX_RETRIES,
     "soft_time_limit": 90,
@@ -74,6 +76,7 @@ COLLECTION_RETRY: dict = {
 
 #: Comparação de preços. Falha rápida sem retry — o próximo ciclo de coleta
 #: aciona nova comparação automaticamente.
+#: Semântica: at-least-once — recomputação redundante produz mesmo resultado (OK).
 #:
 #: Nota operacional:
 #: ``max_retries=0`` é intencional para evitar backlog em picos e preservar
@@ -97,15 +100,22 @@ ENQUEUE_RETRY: dict = {
 }
 
 #: Verificação de email e SMS. Até 3 tentativas com backoff de 30s.
+#: acks_late=True: reentrega se o worker morrer durante o envio de email/OTP.
 VERIFICATION_RETRY: dict = {
     "max_retries": 3,
     "default_retry_delay": 30,
     "soft_time_limit": 30,
     "time_limit": 60,
+    "acks_late": True,
 }
 
 def _notification_retry() -> dict:
-    """ Retorna política de notificação com max_retries baseado em settings. """
+    """ Retorna política de notificação com max_retries baseado em settings.
+
+    Semântica: exactly-once — notificação duplicada causa experiência ruim.
+    Mecanismo: lock por hash de preço (TTL=300s) verificado antes do envio.
+    max_retries deve ser baixo (1–3) para não sobrecarregar o canal externo.
+    """
     from market_alert.core.config_alert import settings
     return {
         "max_retries": settings.NOTIFICATION_MAX_ATTEMPTS,

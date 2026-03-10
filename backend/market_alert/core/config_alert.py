@@ -86,9 +86,13 @@ class Settings(ConfigBase):
     ) #Política SameSite do cookie de refresh
 
     #Controles operacionais de coleta
-    PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "20")) #TTL padrão para lock de produto
+    # Invariante: PRODUCT_LOCK_TTL_SECONDS > TASK_GLOBAL_TIME_LIMIT_SECONDS (Decisão 4)
+    TASK_GLOBAL_TIME_LIMIT_SECONDS: int = int(
+        os.getenv("TASK_GLOBAL_TIME_LIMIT_SECONDS", "45")
+    ) #Limite global de execução de task (referência para TTL de locks)
+    PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "60")) #TTL padrão para lock de produto — deve ser > TASK_GLOBAL_TIME_LIMIT_SECONDS
     PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS: int = int(
-        os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "15")
+        os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "50")
     ) #Margem mínima recomendada para evitar expiração prematura do lock
 
     #Intervalos do agendamento contínuo (em segundos)
@@ -133,14 +137,20 @@ class Settings(ConfigBase):
         os.getenv("CONTINUOUS_WORKER_IDLE_SLEEP", "2.0")
     ) #Pausa aplicada quando a fila está vazia
     CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS: int = int(
-        os.getenv("CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS", str(15 * 60))
-    ) #TTL para recuperar itens travados no conjunto de processamento
+        os.getenv("CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS", "90")
+    ) #TTL para recuperar itens travados no conjunto de processamento (Decisão 4: reduzido de 900s)
     CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS: int = int(
         os.getenv("CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS", "45")
     ) #TTL do lock para garantir instância única do coletor contínuo
     COLLECTION_TASK_TIMEOUT: int = int(
         os.getenv("COLLECTION_TASK_TIMEOUT", "60")
     ) #Timeout em segundos para aguardar AsyncResult de coleta no loop contínuo
+
+    # Prefixos de namespacing para chaves Redis de rate limiting (Decisão 3)
+    # Formato: rate:{camada}:{identificador}
+    RATE_LIMIT_PREFIX_SCRAPING: str = "rate:scraping"   # coleta por domínio
+    RATE_LIMIT_PREFIX_BUSINESS: str = "rate:business"   # lógica de negócio
+    RATE_LIMIT_PREFIX_AUTH: str = "rate:auth"           # segurança/auth
 
     CLEANUP_CACHE_SCAN_COUNT: int = int(
         os.getenv("CLEANUP_CACHE_SCAN_COUNT", "200")

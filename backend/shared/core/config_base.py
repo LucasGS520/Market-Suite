@@ -77,7 +77,13 @@ class ConfigBase(BaseSettings):
         os.getenv("COMPARISON_LAST_SUCCESS_TTL", str(86400))
     ) #Expiração do registro
 
-    #URLs do Celery (broker e result backend) — lidas do .env para permitir DBs separados
+    # Isolamento de DBs Redis por camada (Decisão 5)
+    # db 0 → broker Celery | db 1 → result backend | db 2 → operacional (locks, rate limit, cache)
+    REDIS_BROKER_DB: int = int(os.getenv("REDIS_BROKER_DB", "0"))
+    REDIS_RESULT_DB: int = int(os.getenv("REDIS_RESULT_DB", "1"))
+    REDIS_OPERATIONAL_DB: int = int(os.getenv("REDIS_OPERATIONAL_DB", "2"))
+
+    #URLs do Celery (broker e result backend) — podem ser sobrescritas via .env
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "") or ""
     CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "") or ""
 
@@ -101,6 +107,28 @@ class ConfigBase(BaseSettings):
 
     @property
     def redis_url(self) -> str:
-        """ URL completa para conectar ao Redis """
+        """ URL genérica (usa REDIS_DB). Preferir redis_operational_url para código de aplicação. """
         pwd = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
         return f"redis://{pwd}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    @property
+    def redis_operational_url(self) -> str:
+        """ URL do db operacional (locks, rate limiting, cache, DLQ, filas operacionais). """
+        pwd = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{pwd}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_OPERATIONAL_DB}"
+
+    @property
+    def celery_broker_url(self) -> str:
+        """ URL do broker Celery — env CELERY_BROKER_URL tem precedência. """
+        if self.CELERY_BROKER_URL:
+            return self.CELERY_BROKER_URL
+        pwd = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{pwd}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_BROKER_DB}"
+
+    @property
+    def celery_result_backend_url(self) -> str:
+        """ URL do result backend Celery — env CELERY_RESULT_BACKEND tem precedência. """
+        if self.CELERY_RESULT_BACKEND:
+            return self.CELERY_RESULT_BACKEND
+        pwd = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        return f"redis://{pwd}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_RESULT_DB}"

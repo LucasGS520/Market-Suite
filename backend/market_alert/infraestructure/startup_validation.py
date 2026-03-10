@@ -60,7 +60,7 @@ def _validate_postgres() -> bool:
 def _validate_redis() -> bool:
     """ Executa ping no Redis para confirmar conectividade."""
     try:
-        redis_client = redis.from_url(settings.redis_url)
+        redis_client = redis.from_url(settings.redis_operational_url)
         redis_client.ping()
         logger.info("startup_redis_ok")
         return True

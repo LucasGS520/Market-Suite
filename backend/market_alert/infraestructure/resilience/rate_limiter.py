@@ -11,7 +11,7 @@ from redis import Redis
 from shared.utils.redis_client import (
     consume_leaky_bucket,
     consume_token_bucket,
-    get_redis_client,
+    get_redis_operational,
     set_key_with_ttl,
 )
 
@@ -33,7 +33,7 @@ class RateLimiter:
         *,
         max_requests: int,
         window_seconds: int,
-        namespace: str = "rate:host",
+        namespace: str = "rate:scraping",
     ) -> None:
         self._client_factory = client_factory
         self._max_requests = max_requests
@@ -179,11 +179,11 @@ def _increment_invalid_url_attempt(
     """ Incrementa contador de URls inválidas para limitar reprocessamentos """
     if product_id is None:
         return None
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return None
     
-    key = f"rate:invalid:{product_id}"
+    key = f"rate:business:invalid:{product_id}"
     try:
         pipeline = client.pipeline(True)
         pipeline.incr(key)
@@ -197,11 +197,11 @@ def _reset_invalid_url_attempt(product_id: str | None) -> None:
     """ Reseta contador de URLs inválidas após bloqueio """
     if product_id is None:
         return
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return
     try:
-        client.delete(f"rate:invalid:{product_id}")
+        client.delete(f"rate:business:invalid:{product_id}")
     except Exception:
         pass
 
@@ -213,11 +213,11 @@ def _increment_temporary_failure_attempt(
     """ Incrementa contador de falhas temporárias para limitar reprocessamentos """
     if product_id is None:
         return None
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return None
     
-    key = f"rate:retry:{product_id}"
+    key = f"rate:business:retry:{product_id}"
     try:
         pipeline = client.pipeline(True)
         pipeline.incr(key)
@@ -231,11 +231,11 @@ def _reset_temporary_failure_attempt(product_id: str | None) -> None:
     """ Reseta contador de falhas temporárias quando o limite é atingido """
     if product_id is None:
         return
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return
     try:
-        client.delete(f"rate:retry:{product_id}")
+        client.delete(f"rate:business:retry:{product_id}")
     except Exception:
         pass
 
@@ -248,7 +248,7 @@ def _register_scrape_cooldown(
     if product_id is None:
         return None
     return set_key_with_ttl(
-        f"rate:cooldown:{product_id}",
+        f"rate:business:cooldown:{product_id}",
         "1",
         ttl_seconds,
         only_if_absent=True,
@@ -256,11 +256,11 @@ def _register_scrape_cooldown(
 
 def _resolve_cooldown_seconds(product_id: str) -> int | None:
     """ Verifica se há cooldown ativo para evitar coletas consecutivas """
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return None
     try:
-        ttl = client.ttl(f"rate:cooldown:{product_id}")
+        ttl = client.ttl(f"rate:business:cooldown:{product_id}")
     except Exception:
         return None
     if ttl is None or ttl < 0:

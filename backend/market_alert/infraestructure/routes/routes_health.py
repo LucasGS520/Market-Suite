@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from shared.infra.db import get_engine
 from market_alert.core.config_alert import settings
+from market_alert.infraestructure.redis_monitoring import get_redis_metrics
 
 
 logger = structlog.get_logger("health_check")
@@ -34,7 +35,7 @@ def health_check():
     #Verificação do Redis
     redis_client = None
     try:
-        redis_client = redis.from_url(settings.redis_url)
+        redis_client = redis.from_url(settings.redis_operational_url)
         redis_client.ping()
         status["redis"] = {"status": "ok"}
     except Exception:
@@ -67,6 +68,13 @@ def health_check():
         status["beat"] = {"status": "error", "detail": "Falha ao obter heartbeat"}
         status["overall"] = "error"
 
+    # Métricas operacionais Redis
+    try:
+        status["redis_metrics"] = get_redis_metrics()
+    except Exception:
+        logger.exception("redis_metrics_collection_failed")
+        status["redis_metrics"] = None
+
     logger.info("health_check_result", status=status)
     return status
 
@@ -85,7 +93,7 @@ def readiness_check():
         status["overall"] = "error"
 
     try:
-        redis_client = redis.from_url(settings.redis_url)
+        redis_client = redis.from_url(settings.redis_operational_url)
         redis_client.ping()
         status["redis"] = {"status": "ok"}
     except Exception:

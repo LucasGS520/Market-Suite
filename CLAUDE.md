@@ -1,46 +1,61 @@
-# Claude - Reorganização Celery + Redis do `market_alert`
+# Claude — Consolidação Celery + Redis
 
-## Objetivo
-Reorganizar a arquitetura assíncrona para que:
-- Celery opere apenas como orquestrador de tarefas discretas (3 workers puros).
-- Redis tenha fronteiras claras por camada lógica (broker/backend, operacional do loop, cache/rate-limit/idempotência).
-- DLQ seja orientada a eventos em Redis Streams.
-- Loop contínuo saia do fluxo do Celery e fique isolado em módulo próprio, preparando evolução futura para serviço standalone.
-- Configuração de Celery passe a respeitar variáveis de ambiente oficiais.
+## Resumo e Estratégia do Plano
+
+### Objetivo
+Implementar decisões consolidadas sobre Celery e Redis para transformar a infraestrutura assíncrona e operacional do `market_alert` em um estado **totalmente endurecido, isolado logicamente e com fronteiras claras**, pronto para as fases posteriores de desenvolvimento.
+
+### Estratégia de Implementação
+O plano será executado em **fases sequenciais**, cada uma validável independentemente, mas com dependências explícitas:
+
+1. **Preparação** — Inventário de arquivos afetados e planejamento técnico
+2. **Configuração Celery** — Decisões 1, 2, 7 (pool, robustez, retry)
+3. **Isolamento Redux** — Decisão 5 (separação db 0/1/2)
+4. **Locks, TTL e Namespacing** — Decisões 3, 4 (rate limit, TTL)
+5. **Idempotência e Contratos** — Decisão 6 (semântica por domínio)
+6. **Hardening Operacional** — Decisão 9 (memória, persistência), monitoring, testes
 
 ---
 
-### Análise de Riscos e Decisões Chave
+## 2. Análise de Riscos e Decisões Chave
 
-**Decisão Técnica Principal**  
-Usar Redis Streams como DLQ de falhas permanentes (`celery:dlq`) com consumo por consumer group dedicado para processamento observável e desacoplado.
+### Decisão Técnica Principal
+Usar **isolamento de DBs Redis combinado com prefixação de chaves por camada** como padrão de governança operacional. Isso reduz risco de interferência entre broker Celery, result backend e estado operacional sem exigir instâncias Redis separadas (reduz complexidade operacional imediata).
 
-**Risco Principal**  
-Interrupção operacional durante transição do loop contínuo e da DLQ (perda de eventos, dupla execução, ou lacunas de monitoramento).
+### Risco Principal: **Interrupção Operacional Durante Transição**
+A mudança de pool **prefork → gevent** para scraping e a separação de DBs Redis são operações que podem causar perda de tarefas ou deadlock se não coordenadas corretamente.
 
-**Mitigação**
-- Rollout em etapas com feature flags por componente.
-- Janela de coexistência controlada (old/new) apenas quando necessário.
-- Testes de integração com Redis real e cenários de falha.
-- Runbook de rollback por fase.
+**Mitigação:**
+- Rollout em janelas pequenas com feature flags (se possível, ou pausas de tráfego controladas).
+- Draining explícito de filas antes de restarts.
+- Validação de compatibilidade de gevent com bibliotecas de scraping antes do merge.
+- Testes de failover localistas e em staging idêntico a produção.
 
-**Dependências**
-- Redis estável (Streams habilitado e monitorável).
-- Docker Compose/K8s com serviços ajustados.
-- Time de observabilidade para métricas e alertas.
-- Validação de contratos de tracing (`trace_id`) e idempotência.
+### Riscos Secundários
 
-**Execução:** Eliminar `task_failures` e usar apenas stream + retenção + exportação.
+| Risco | Probabilidade | Impacto | Mitigação |
+|---|---|---|---|
+| Conflito de TTL entre lock (60s) e task (45s) | Baixa | Alto | Validação com duração real de tasks |
+| Gevent incompatível com cliente HTTP | Média | Alto | PoC isolado antes de merge |
+| Perda de mensagens se Redis encher | Média | Alto | `noeviction` obrigatório + monitoring de memória |
+| DLQ crescer sem consumo definido | Alta | Médio | Será tratado pós-esta fase |
+
+### Dependências Externas
+- Redis estável com Streams habilitado (já disponível).
+- Docker e Docker Compose up-to-date.
+- Acesso a ambiente de staging idêntico a produção.
+- Validação de afinidade de plataforma (gevent + scraping libs).
 
 ---
 
 ### Resultado Esperado
-
-- Celery opera com 3 workers focados (scraping, compare, notifications) sem loop contínuo acoplado.
-- DLQ está em Redis Streams com consumer group ativo e monitorado.
-- Configuração Celery respeita CELERY_BROKER_URL e CELERY_RESULT_BACKEND.
-- Fronteiras de Redis estão documentadas e aplicadas por prefixo/camada.
-- Loop contínuo está isolado em módulo independente, pronto para futura migração tecnológica.
+- Celery opera com 3 workers em pools ajustados, nenhum com fallback de concorrência.
+- Redis tem 3 DBs lógicos completamente isolados (broker, result, operacional).
+- Todos os locks, rate limiting e cache usam prefixos declarados em config.
+- TTLs são definidos e validados contra duração real de tasks.
+- Cada task tem contrato claro de semântica (at-least-once ou exactly-once).
+- DLQ stream está pronto para consumo (infra OK, apenas consumidor adiado).
+- Sistema aguenta carga moderada (50 coletas concorrentes) sem memory leak, deadlock ou perda silenciosa.
 
 ---
 

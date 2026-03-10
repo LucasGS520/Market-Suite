@@ -23,9 +23,9 @@ def xadd_event(
     overhead de trimming exato. Retorna o ID do evento inserido, ou
     ``None`` em caso de falha de conexão.
     """
-    from shared.utils.redis_client import get_redis_client
+    from shared.utils.redis_client import get_redis_operational
 
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         logger.error("xadd_event_skipped_no_client", extra={"key": key})
         return None
@@ -36,12 +36,11 @@ def xadd_event(
         logger.exception("xadd_event_failed", extra={"key": key})
         return None
 
-
 def xlen_stream(key: str) -> int:
     """ Retorna o número de entradas no stream. Retorna -1 em caso de falha. """
-    from shared.utils.redis_client import get_redis_client
+    from shared.utils.redis_client import get_redis_operational
 
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return -1
     try:
@@ -50,15 +49,14 @@ def xlen_stream(key: str) -> int:
         logger.exception("xlen_stream_failed", extra={"key": key})
         return -1
 
-
 def xrange_stream(key: str, count: int = 100) -> list[tuple]:
     """ Lê as primeiras ``count`` entradas do stream (da mais antiga para a mais nova).
 
     Retorna lista de tuplas ``(id, fields_dict)`` ou lista vazia em caso de falha.
     """
-    from shared.utils.redis_client import get_redis_client
+    from shared.utils.redis_client import get_redis_operational
 
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return []
     try:

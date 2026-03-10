@@ -3,22 +3,22 @@
 import structlog
 from fastapi import HTTPException, Request, status
 
-from shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_operational
 
 from market_alert.core.config_alert import settings
 
 
 logger = structlog.get_logger("infraestructure.security.bruteforce")
 
-#Cliente Redis compartilhado usado para rastrear tentativas
-redis_client = get_redis_client()
+#Cliente Redis operacional usado para rastrear tentativas de brute-force
+redis_client = get_redis_operational()
 
 def block_ip(request: Request) -> None:
     """ Dependência que bloqueia o IP após exceder tentativas de login """
     #IP do solicitante
     ip = request.client.host
     #Chave utilizada para armazenar as tentativas
-    key = f"bf:{ip}"
+    key = f"rate:auth:{ip}"
     try:
         #Recupera o contador de falhas para este IP
         attempts = int(redis_client.get(key) or 0)
@@ -39,7 +39,7 @@ def record_failed_attempt(request: Request) -> None:
     #IP do solicitante
     ip = request.client.host
     #Chave no Redis para esse IP
-    key = f"bf:{ip}"
+    key = f"rate:auth:{ip}"
     try:
         attempts = redis_client.incr(key)
         if attempts == 1:
@@ -55,7 +55,7 @@ def reset_failed_attempts(request: Request) -> None:
     #IP do solicitante
     ip = request.client.host
     #Chave de rastreamento no Redis
-    key = f"bf:{ip}"
+    key = f"rate:auth:{ip}"
     try:
         redis_client.delete(key)
         logger.info("reset_failed_attempts", ip=ip)

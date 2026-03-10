@@ -14,7 +14,7 @@ from typing import Any
 
 import structlog
 
-from backend.shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_operational
 
 
 logger = structlog.get_logger("redis_idempotency")
@@ -77,7 +77,7 @@ def register_idempotency_key(
     if not key:
         return None
 
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         logger.info("idempotency_disabled", namespace=namespace, reason="redis_unavailable")
         return None
@@ -127,7 +127,7 @@ def store_idempotency_response(
     if not key:
         return
 
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return
 

@@ -21,7 +21,7 @@ import httpx
 import structlog
 
 from shared.utils.logging_utils import sanitize_log_data
-from shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_operational
 from shared.enums.cache_keys import CacheKey
 
 from market_scraper.utils.http_retry import (
@@ -162,7 +162,7 @@ async def _get_parser(
 
     #Tentativa de cache Redis
     try:
-        client = get_redis_client()
+        client = get_redis_operational()
         cached_text = client.get(cache_key)
         if cached_text is not None:
             logger.debug("robots_cache_hit", host=host)
@@ -181,7 +181,7 @@ async def _get_parser(
 
     #Persiste no Redis com TTL
     try:
-        client = get_redis_client()
+        client = get_redis_operational()
         client.setex(cache_key, _ROBOTS_REDIS_TTL, text)
         logger.debug("robots_cache_populated", host=host, ttl=_ROBOTS_REDIS_TTL)
     except Exception as exc:
@@ -237,6 +237,4 @@ async def is_allowed(
     return allowed
 
 
-__all__ = [
-    "is_allowed",
-]
+__all__ = ["is_allowed"]

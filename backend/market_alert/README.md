@@ -223,11 +223,21 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 - Na configuracao atual do repositorio, o `docker-compose.yml` nao declara um servico dedicado de `celery beat`, embora o codigo esteja pronto para receber esse scheduler.
 - O endpoint `/health/` consulta `beat:last_success`, mas nao ha um produtor desse heartbeat dentro dos modulos carregados atualmente; se o scheduler for operado externamente, ele precisa atualizar essa chave para que o health reflita o estado real do Beat.
 
+### Workers Celery
+
+| Servico | Pool | Concorrencia | Fila(s) | Semântica de entrega |
+|---------|------|--------------|---------|----------------------|
+| `celery-worker-scraping` | prefork | 10 | `scraping`, `celery` | at-least-once — recoleta sobrescreve valor idêntico |
+| `celery-worker-compare` | prefork | 4 | `compare` | at-least-once com debounce Redis (`compare:debounce:{id}`, TTL=600s) |
+| `celery-worker-notifications` | prefork | 4 | `notifications` | exactly-once — dedup_hash + lock por hash + verificacao no banco |
+
+Configuracoes globais de robustez em [`infraestructure/celery/celery_app.py`](infraestructure/celery/celery_app.py): `task_acks_late=True`, `task_reject_on_worker_lost=True`, `task_soft_time_limit=30`, `task_time_limit=45`, `worker_max_tasks_per_child=200`, `broker_transport_options.visibility_timeout=3600`.
+
 ### Retry, Rate Limit e Resiliencia
 - [`infraestructure/celery/retry_policies.py`](infraestructure/celery/retry_policies.py) centraliza os limites de retry por dominio: coleta, comparacao, enfileiramento de notificacoes, verificacoes e envio de notificacoes.
 - `collect_product_task` usa `COLLECTION_RETRY` para lock contention e, adicionalmente, gerencia retries de scraping por politica propria (`RetryPolicy`) com backoff, `Retry-After`, cooldown e contadores Redis.
 - [`infraestructure/resilience/rate_limiter.py`](infraestructure/resilience/rate_limiter.py) oferece dois niveis de controle: `token bucket` por host para o `ScraperClient` e `leaky bucket` para limitar onboarding de monitorados/concorrentes.
-- O mesmo modulo controla contadores Redis para URLs invalidas, falhas temporarias e cooldown de scraping, evitando loops agressivos sobre alvos problematicos.
+- Chaves Redis de rate limiting seguem namespacing por camada: `rate:scraping:{host}` (coleta por dominio), `rate:business:invalid/retry/cooldown:{id}` (logica de negocio), `rate:auth:{ip}` (brute force/auth).
 - [`infraestructure/resilience/circuit_breaker.py`](infraestructure/resilience/circuit_breaker.py) abre circuito por host quando falhas consecutivas ultrapassam o limiar configurado, reduzindo pressao sobre integracoes externas instaveis.
 - O coletor continuo tambem reexecuta itens presos usando `reclaim_stale_processing`, recuperando IDs que ficaram no conjunto `processing` apos queda de worker ou perda de callback.
 
@@ -302,11 +312,11 @@ As configuracoes combinam a base compartilhada em `shared/core/config_base.py` c
 ### Categorias de variaveis
 | Categoria | Variaveis relevantes |
 |-----------|----------------------|
-| Infra base | `DATABASE_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD`, `LOG_LEVEL`, `LOG_FORMAT` |
+| Infra base | `DATABASE_URL`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_BROKER_DB` (db 0), `REDIS_RESULT_DB` (db 1), `REDIS_OPERATIONAL_DB` (db 2), `LOG_LEVEL`, `LOG_FORMAT` |
 | API e frontend | `FRONTEND_ORIGINS` |
 | Autenticacao | `SECRET_KEY`, `ALGORITHM`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `REFRESH_TOKEN_COOKIE_*` |
 | Protecao operacional | `BRUTE_FORCE_MAX_ATTEMPTS`, `BRUTE_FORCE_BLOCK_DURATION`, `REGISTRATION_MAX_PER_HOUR` |
-| Coleta continua | `PRODUCT_LOCK_TTL_SECONDS`, `PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS`, `COLLECT_INTERVAL_*`, `STABILITY_DAYS_*`, `CONTINUOUS_WORKER_*`, `CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS`, `PRIORITY_QUEUE_*` |
+| Coleta continua | `TASK_GLOBAL_TIME_LIMIT_SECONDS` (45s — referência para invariante de lock), `PRODUCT_LOCK_TTL_SECONDS` (60s — deve ser > `TASK_GLOBAL_TIME_LIMIT_SECONDS`), `PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS`, `CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS` (90s — stale recovery), `COLLECT_INTERVAL_*`, `STABILITY_DAYS_*`, `CONTINUOUS_WORKER_*`, `CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS`, `PRIORITY_QUEUE_*` |
 | Integracao com scraper | `SCRAPER_SERVICE_URL`, `SCRAPER_*TIMEOUT*`, `SCRAPER_RETRY_*`, `SCRAPER_HOST_*`, `SCRAPER_CIRCUIT_*`, `SCRAPER_FORCE_REFRESH_TTL_SECONDS`, `SCRAPER_NO_RESULT_RETRY_SECONDS`, `MAX_COMPETITORS_PER_MONITORED` |
 | Comparacao | `PRICE_TOLERANCE`, `PRICE_CHANGE_THRESHOLD`, `COMPARE_RATE_LIMIT`, `COMPETITIVENESS_THRESHOLD_*`, `COMPARISON_IDEMPOTENCY_TTL_SECONDS`, `COMPARISON_STORE_RAW_RESULT` |
 | Notificacoes | `SMTP_*`, `TWILIO_*`, `FCM_SERVER_KEY`, `DEFAULT_COOLDOWN_SECONDS`, `MIN_PRICE_DELTA_PERCENT`, `NOTIFICATION_*` |
@@ -350,7 +360,7 @@ CONTINUOUS_LOOP_SLEEP_MAX=15
 CONTINUOUS_WORKER_POLL_INTERVAL=1.0
 CONTINUOUS_WORKER_BATCH_SIZE=20
 CONTINUOUS_WORKER_IDLE_SLEEP=2.0
-CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS=900
+CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS=90
 CONTINUOUS_WORKER_STOP_REDIS_KEY=market_alert:continuous_worker:stop
 CONTINUOUS_WORKER_STOP_FILE=/tmp/market_alert_continuous_worker.stop
 
@@ -374,8 +384,8 @@ SCRAPER_SERVICE_URL=http://market_scraper:8000
 
 - **Observabilidade:**
   - Auditoria e rastreabilidade: logs estruturados com `trace_id`, registro de falhas permanentes em `task_failures` via DLQ e volume dedicado `audit-logs` no compose.
-  - Health checks: `/health/` e `/health/readiness` monitoram disponibilidade de PostgreSQL/Redis e estado operacional do scheduler.
-  - Observabilidade de workers: logging dedicado em `logging_config.py`, supressao de ruido em bibliotecas de infraestrutura e alertas para configuracoes de lock inseguras.
+  - Health checks: `/health/` expoe status de PostgreSQL, Redis, Beat e metricas operacionais do Redis (`redis_metrics`: uso de memoria, dbsize, backlog DLQ, fila de prioridade, itens em processamento). `/health/readiness` valida dependencias para liveness probe.
+  - Observabilidade de workers: logging dedicado em `logging_config.py`, supressao de ruido em bibliotecas de infraestrutura e alertas para configuracoes de lock inseguras (validacao `PRODUCT_LOCK_TTL > TASK_GLOBAL_TIME_LIMIT` no startup do worker).
 
 ---
 

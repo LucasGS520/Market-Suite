@@ -17,14 +17,14 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_operational
 
 
 logger = structlog.get_logger(__name__)
 _ENV_NAMESPACE: Final = (os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip()
 _LOCK_PREFIX: Final = f"lock:{_ENV_NAMESPACE}:" if _ENV_NAMESPACE else "lock:"
-_DEFAULT_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "20"))
-_MIN_SAFE_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "15"))
+_DEFAULT_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "60"))
+_MIN_SAFE_TTL_SECONDS: Final = int(os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "50"))
 
 _RELEASE_SCRIPT: Final = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -70,7 +70,7 @@ def acquire_product_lock(product_id: UUID | str, *, ttl_seconds: int | None = No
     Quando o Redis não estiver disponível, consideramos a aquisição como
     malsucedida para manter a previsibilidade.
     """
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         logger.warning("product_lock_unavailable", product_id=str(product_id))
         return False, None
@@ -112,7 +112,7 @@ def release_product_lock(product_id: UUID | str, owner_id: str | None) -> bool:
         logger.warning("product_lock_release_skipped", product_id=str(product_id), reason="missing_owner")
         return False
 
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return False
 
@@ -135,7 +135,7 @@ def get_product_lock_defaults() -> tuple[int, int]:
 # ----- Lock do coletor contínuo -----
 def acquire_continuous_collector_lock(*, ttl_seconds: int) -> tuple[bool, str | None]:
     """ Tenta adquirir lock exclusivo para o loop contínuo e retorna estado e dono """
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         logger.warning("continuous_collector_lock_unavailable", reason="redis_unavailable")
         return False, None
@@ -172,7 +172,7 @@ def refresh_continuous_collector_lock(*, owner_id: str | None, ttl_seconds: int)
         )
         return False
     
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         logger.warning(
             "continuous_collector_lock_refresh_skipped",
@@ -202,7 +202,7 @@ def release_continuous_collector_lock(*, owner_id: str | None) -> bool:
         )
         return False
     
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return False
     
@@ -231,7 +231,7 @@ def release_continuous_collector_lock(*, owner_id: str | None) -> bool:
 # ----- Lock de notificação com deduplicação -----
 def acquire_notification_lock(dedup_key: str, *, ttl_seconds: int | None = None) -> tuple[bool, str | None]:
     """ Tenta adquirir um lock exclusivo para a deduplicação informada """
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         logger.warning("notification_lock_unavailable", dedup_key=dedup_key)
         return False, None
@@ -267,7 +267,7 @@ def release_notification_lock(dedup_key: str, owner_id: str | None) -> bool:
         logger.warning("notification_lock_release_skipped", dedup_key=dedup_key, reason="missing_owner")
         return False
     
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return False
     

@@ -7,7 +7,7 @@ import time
 import structlog
 from celery import shared_task
 
-from shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_operational
 
 from market_alert.core.config_alert import settings
 
@@ -27,7 +27,7 @@ def cleanup_cache() -> None:
     expired = 0
     scanned_keys = 0
     scan_iterations = 0
-    redis_client = get_redis_client()
+    redis_client = get_redis_operational()
     if redis_client is None:
         logger.warning("cleanup_cache_skipped", reason="redis_unavailable")
         return

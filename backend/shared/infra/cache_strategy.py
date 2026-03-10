@@ -28,13 +28,12 @@ from typing import Any, Callable, TypeVar
 
 import structlog
 
-from shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_operational
 
 
 logger = structlog.get_logger(__name__)
 
 T = TypeVar("T")
-
 
 def get_with_cache(
     key: str,
@@ -57,7 +56,7 @@ def get_with_cache(
     """
     # --- Tentativa de cache hit ---
     try:
-        client = get_redis_client()
+        client = get_redis_operational()
         cached = client.get(key)
         if cached is not None:
             logger.debug("cache_hit", key=key)
@@ -71,14 +70,13 @@ def get_with_cache(
     # --- Popula cache apenas se há resultado válido ---
     if result is not None:
         try:
-            client = get_redis_client()
+            client = get_redis_operational()
             client.setex(key, ttl, json.dumps(result, default=str))
             logger.debug("cache_populated", key=key, ttl=ttl)
         except Exception as exc:
             logger.warning("cache_set_failed", key=key, error=str(exc))
 
     return result
-
 
 def invalidate(key: str) -> None:
     """Remove uma chave de cache do Redis.
@@ -87,12 +85,11 @@ def invalidate(key: str) -> None:
     simplesmente não é invalidado — expirará via TTL.
     """
     try:
-        client = get_redis_client()
+        client = get_redis_operational()
         deleted = client.delete(key)
         logger.debug("cache_invalidated", key=key, deleted=bool(deleted))
     except Exception as exc:
         logger.warning("cache_invalidate_failed", key=key, error=str(exc))
-
 
 def invalidate_pattern(pattern: str) -> None:
     """Invalida todas as chaves Redis que casam com o padrão (via SCAN).
@@ -101,7 +98,7 @@ def invalidate_pattern(pattern: str) -> None:
     Exemplo de padrão: ``cache:product:123:*``
     """
     try:
-        client = get_redis_client()
+        client = get_redis_operational()
         cursor = 0
         total_deleted = 0
         while True:

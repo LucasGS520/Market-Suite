@@ -3,6 +3,16 @@
 Esta task roda de forma assíncrona via Celery. Ela delega comparação ao
 service layer, avalia notificações e enfileira o envio. Opera em sessão
 única — run_price_comparison commita internamente, permitindo reuso seguro.
+
+Semântica de entrega: **at-least-once** com debounce Redis.
+
+- Debounce upstream: ``price_comparator.py`` registra ``compare:debounce:{id}``
+  (SET NX, TTL=600s) antes de enfileirar. Enfileiramentos duplicados dentro
+  da janela são absorvidos sem chegar a esta task.
+- Duplicação inofensiva: recomputação do mesmo snapshot produz resumo idêntico
+  (operação determinística e idempotente por resultado).
+- Sem efeito colateral cumulativo: ``run_price_comparison`` usa upsert no banco
+  — execuções repetidas sobrescrevem, não acumulam.
 """
 
 from uuid import UUID, uuid4
