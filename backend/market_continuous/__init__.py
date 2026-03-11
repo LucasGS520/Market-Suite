@@ -1,19 +1,17 @@
-""" Processo standalone do coletor contínuo de monitorados.
+"""
+market_continuous — Orquestração Contínua
 
-Este pacote contém toda a lógica do loop contínuo de coleta,
-extraída do Celery para permitir evolução independente e futura
-reimplementação em Go/Rust.
+Módulo em reestruturação. A orquestração baseada em Redis foi removida.
+Próxima fase: implementação de orquestração com Temporal.
 
-Módulos:
-    manager           — Ciclo de vida e loop principal
-    dispatcher        — Despacho de tasks e decisões de reenqueue
-    callbacks         — Callbacks pós-coleta (sucesso/erro)
-    queue             — Abstração de domínio sobre a fila Redis
-    reconciliation    — Sincronização DB ↔ fila Redis
-    services_priority_queue — Primitivas Redis Sorted Set
-    main              — Entry point standalone
+O que foi removido:
+  - orchestrator/ (manager, dispatcher, callbacks, reconciliation)
+  - services/services_priority_queue.py (Redis Sorted Set)
+  - queue/collection_queue.py (interface da fila)
+  - main.py (entrada do processo standalone)
 
-Uso standalone::
-
-    cd backend && python -m market_continuous.main
+O que permanece operacional:
+  - Celery workers e tasks (market_alert/tasks/)
+  - CollectionEnqueuer (market_alert/infra/celery/enqueuer.py)
+  - payload_builders (market_alert/collectors/orchestrator/payload_builders.py)
 """

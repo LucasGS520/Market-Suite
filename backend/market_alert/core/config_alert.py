@@ -126,25 +126,9 @@ class Settings(ConfigBase):
         os.getenv("STABILITY_DAYS_VERY_STABLE", "7")
     ) #Janela para considerar produto muito estável
 
-    #Configuração do worker contínuo
-    CONTINUOUS_WORKER_POLL_INTERVAL: float = float(
-        os.getenv("CONTINUOUS_WORKER_POLL_INTERVAL", "1.0")
-    ) #Intervalo base entre verificações da fila
-    CONTINUOUS_WORKER_BATCH_SIZE: int = int(
-        os.getenv("CONTINUOUS_WORKER_BATCH_SIZE", "20")
-    ) #Quantidade de itens processados por ciclo
-    CONTINUOUS_WORKER_IDLE_SLEEP: float = float(
-        os.getenv("CONTINUOUS_WORKER_IDLE_SLEEP", "2.0")
-    ) #Pausa aplicada quando a fila está vazia
-    CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS: int = int(
-        os.getenv("CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS", "90")
-    ) #TTL para recuperar itens travados no conjunto de processamento (Decisão 4: reduzido de 900s)
-    CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS: int = int(
-        os.getenv("CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS", "45")
-    ) #TTL do lock para garantir instância única do coletor contínuo
     COLLECTION_TASK_TIMEOUT: int = int(
         os.getenv("COLLECTION_TASK_TIMEOUT", "60")
-    ) #Timeout em segundos para aguardar AsyncResult de coleta no loop contínuo
+    ) #Timeout em segundos para tasks de coleta Celery
 
     # Prefixos de namespacing para chaves Redis de rate limiting (Decisão 3)
     # Formato: rate:{camada}:{identificador}
@@ -167,16 +151,6 @@ class Settings(ConfigBase):
     CLEANUP_CACHE_SLEEP_BETWEEN_BATCHES_MS: int = int(
         os.getenv("CLEANUP_CACHE_SLEEP_BETWEEN_BATCHES_MS", "0")
     ) #Pausa opcional entre lotes para reduzir pressão no Redis
-
-    #Chaves Redis do agendamento contínuo
-    PRIORITY_QUEUE_KEY: str = os.getenv(
-        "PRIORITY_QUEUE_KEY",
-        "market_alert:priority_queue",
-    ) #Sorted set principal de agendamento
-    PRIORITY_QUEUE_PROCESSING_KEY: str = os.getenv(
-        "PRIORITY_QUEUE_PROCESSING_KEY",
-        "market_alert:priority_queue:processing",
-    ) #Sorted set auxiliar para itens em processamento
 
     #URL base do serviço externo de scraping
     SCRAPER_SERVICE_URL: str = os.getenv(

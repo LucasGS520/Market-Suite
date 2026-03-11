@@ -5,7 +5,7 @@ Responsabilidade única: criar, pausar e deletar concorrentes.
 Fluxo de dependências:
     Routes → este service → CRUD (persistência)
     Routes → este service → Orchestrator (enfileiramento Celery)
-    Routes → este service → Orchestrator (fila Redis via CollectionQueue)
+    Routes → este service → Orchestrator (enfileiramento Celery)
 
 NÃO conhece: comparações, notificações, dashboards, rate limiting de monitorados.
 
@@ -27,8 +27,6 @@ from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
 from shared.utils.url_validation import normalize_and_validate_product_url
-
-from market_continuous.queue.collection_queue import CollectionQueue
 
 from market_alert.core.config_alert import settings
 from market_alert.infraestructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
@@ -240,18 +238,7 @@ def create_competitor_scrape_request(
     db.commit()
     db.refresh(monitored_product)
 
-    enqueued = CollectionQueue().enqueue_for_collection(
-        monitored_product.id,
-        monitored_product.next_check_at,
-        source="competitor_create",
-    )
-    if not enqueued:
-        #Não bloqueia criação quando Redis estiver indisponível
-        logger.warning(
-            "monitored_priority_queue_enqueue_failed",
-            monitored_id=str(monitored_product.id),
-            source="competitor_create",
-        )
+    # TODO: enqueue via Temporal signal on activate
 
     #Flag explicita para indicar se a tentativa de coleta imediata foi enfileirada
     initial_enqueue_ok = False
@@ -350,14 +337,7 @@ def delete_competitor_entry(
         #Cascatas de relacionamento cuidam do histórico de preços e dependências
         logger.info("competitor_deleted", **log_context, monitored_id=str(monitored_id))
 
-        removed = CollectionQueue().remove_from_collection(competitor_id, source="competitor_delete")
-        if not removed:
-            #Não bloqueia remoção do banco quando houver falha de Redis
-            logger.warning(
-                "competitor_priority_queue_remove_failed",
-                competitor_id=str(competitor_id),
-                reason="competitor_delete",
-            )
+        # TODO: remove via Temporal signal on delete
 
         request_comparison_recompute(monitored_id, "competitor_deleted")
         logger.info(
@@ -407,13 +387,5 @@ def clear_competitors_from_monitored(
         )
 
     deleted_ids = delete_competitors_by_monitored_id(db, monitored_product_id)
-    for competitor_id in deleted_ids:
-        removed = CollectionQueue().remove_from_collection(competitor_id, source="competitor_delete")
-        if not removed:
-            #Mantém remoção em banco mesmo quando Redis estiver indisponível
-            logger.warning(
-                "competitor_priority_queue_remove_failed",
-                competitor_id=str(competitor_id),
-                reason="competitor_delete",
-            )
+    # TODO: remove via Temporal signal on delete
     return deleted_ids

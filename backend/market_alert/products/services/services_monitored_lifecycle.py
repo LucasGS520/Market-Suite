@@ -4,7 +4,7 @@ Responsabilidade única: criar, pausar, retomar e deletar monitorados.
 
 Fluxo de dependências:
     Routes → este service → CRUD (persistência) → Domain (decisões de estado)
-    Routes → este service → Orchestrator (enfileiramento)
+    Routes → este service → Orchestrator (enfileiramento Celery)
 
 NÃO conhece: comparações, notificações, dashboards, rate limiting de concorrentes.
 
@@ -28,8 +28,6 @@ from sqlalchemy.orm import Session
 from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
 from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
-
-from market_continuous.queue.collection_queue import CollectionQueue
 
 from market_alert.core.config_alert import settings
 from market_alert.infraestructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
@@ -97,18 +95,9 @@ def _acquire_monitored_lock(monitored_id: UUID) -> str:
     return owner or ""
 
 def _remove_ids_from_priority_queue(product_ids: list[UUID], *, source: str) -> None:
-    """ Remove IDs da fila de prioridade fora do CRUD para manter separação de responsabilidades """
-    for product_id in product_ids:
-        try:
-            CollectionQueue().remove_from_collection(product_id, source=source)
-        except Exception as exc:
-            #Mantém o fluxo principal mesmo quando Redis estiver indisponível
-            logger.warning(
-                "priority_queue_remove_failed",
-                product_id=str(product_id),
-                source=source,
-                error=str(exc),
-            )
+    """ No-op — remoção da fila de prioridade será reimplementada com Temporal. """
+    # TODO: remover via Temporal signal on delete
+    pass
 
 def _enqueue_resume_collection(monitored: MonitoredProduct, user: User) -> None:
     """ Agenda coleta imediata com comparação forçada para retomadas """
@@ -134,24 +123,9 @@ def _enqueue_monitored_at_priority_queue(
     reference: datetime,
     source: str,
 ) -> None:
-    """ Reinsere monitorado na fila de prioridade Redis após retomada.
-
-    A fila de prioridade controla o ciclo de rechecagem contínua. O CRUD
-    atualiza o next_check_at; este service responsabiliza-se pelo enfileiramento.
-    """
-    try:
-        CollectionQueue().enqueue_for_collection(
-            monitored.id,
-            monitored.next_check_at or reference,
-            source=source,
-        )
-    except Exception as exc:
-        #Mantém a retomada mesmo que o Redis não responda
-        logger.warning(
-            "monitored_resume_priority_queue_enqueue_failed",
-            monitored_id=str(monitored.id),
-            error=str(exc),
-        )
+    """ No-op — enfileiramento na fila de prioridade será reimplementado com Temporal. """
+    # TODO: enqueue via Temporal signal on activate
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -274,14 +248,7 @@ def create_monitored_product(
             monitored_id=str(pending.id),
             trace_id=immediate_trace_id,
         )
-        #Mantém monitorado na fila contínua para rechecagens subsequentes
-        enqueued = CollectionQueue().enqueue_now(pending.id, source="new_monitored")
-        if not enqueued:
-            logger.warning(
-                "monitored_enqueue_failed_fallback",
-                monitored_id=str(pending.id),
-                reason="priority_queue_unavailable",
-            )
+        # TODO: enqueue via Temporal signal on activate (rechecagens contínuas)
     except Exception:
         #Evita bloquear a criação quando Redis estiver indisponível
         logger.warning(

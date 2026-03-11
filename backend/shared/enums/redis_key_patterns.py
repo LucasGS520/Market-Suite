@@ -6,7 +6,6 @@ Documenta as fronteiras de cada camada lógica do Redis:
   - cache:         Cache-aside de dados de negócio (ver cache_keys.py)
   - idemp:         Idempotência de operações críticas
   - celery:        Broker/backend do Celery e streams de eventos
-  - collection:    Estado operacional do loop contínuo de coleta
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Locks distribuídos
 # ---------------------------------------------------------------------------
-LOCK_CONTINUOUS_COLLECTOR = "lock:continuous_collector"
 LOCK_COLLECT_PRODUCT = "lock:collect:{monitored_id}"
 
 # ---------------------------------------------------------------------------
@@ -33,12 +31,3 @@ IDEMP_COLLECT = "idemp:collect:{monitored_id}:{trace_id}"
 # Celery broker/backend/streams
 # ---------------------------------------------------------------------------
 CELERY_DLQ_STREAM = "celery:dlq"
-CELERY_AUTOSTART_KEY = "market_alert:continuous_collector:autostart"
-CELERY_AUTOSTART_COOLDOWN = "market_alert:continuous_collector:autostart:cooldown"
-
-# ---------------------------------------------------------------------------
-# Loop contínuo de coleta (CollectionQueue / PriorityQueueService)
-# ---------------------------------------------------------------------------
-COLLECTION_PRIORITY_QUEUE = "collection:priority_queue:{namespace}"
-COLLECTION_PROCESSING_SET = "collection:processing:{namespace}"
-COLLECTION_ENQUEUED_AT = "collection:enqueued_at:{monitored_id}"

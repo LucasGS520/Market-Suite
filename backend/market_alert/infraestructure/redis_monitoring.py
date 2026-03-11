@@ -76,19 +76,9 @@ def get_redis_metrics() -> dict:
         logger.warning("redis_monitoring_dlq_failed", exc_info=True)
         metrics["dlq_backlog"] = None
 
-    # Fila operacional — itens aguardando próxima coleta
-    try:
-        metrics["queue_pending"] = client.zcard(settings.PRIORITY_QUEUE_KEY)
-    except Exception:
-        logger.warning("redis_monitoring_queue_pending_failed", exc_info=True)
-        metrics["queue_pending"] = None
-
-    # Fila de processamento — itens em voo
-    try:
-        metrics["queue_processing"] = client.zcard(settings.PRIORITY_QUEUE_PROCESSING_KEY)
-    except Exception:
-        logger.warning("redis_monitoring_queue_processing_failed", exc_info=True)
-        metrics["queue_processing"] = None
+    # TODO: métricas de fila serão reimplementadas com Temporal
+    metrics["queue_pending"] = None
+    metrics["queue_processing"] = None
 
     logger.debug("redis_metrics_collected", **{k: v for k, v in metrics.items() if v is not None})
     return metrics

@@ -116,7 +116,7 @@ def enqueue_competitors_for_monitored(
 ) -> None:
     """ Agenda coleta para concorrentes vinculados aplicando batching e jitter """
     try:
-        resolved_batch_size = batch_size or settings.CONTINUOUS_WORKER_BATCH_SIZE
+        resolved_batch_size = batch_size or 20  # TODO: mover para config quando Temporal for implementado
         resolved_base_delay = base_delay or settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS
 
         if resolved_batch_size <= 0:
