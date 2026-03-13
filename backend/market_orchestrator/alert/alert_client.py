@@ -15,21 +15,21 @@ from temporalio.client import Client
 from temporalio.service import RPCError
 
 from market_orchestrator.core.config_orchestrator import settings
-from market_orchestrator.schemas.schemas_workflow import (
+from market_orchestrator.enums.enums_workflow import WorkflowState
+from market_orchestrator.schemas.schemas_signals import (
     CompetitorChangedPayload,
     ResumeSignalPayload,
     UpdatePolicySignalPayload,
-    WorkflowInput,
-    WorkflowSnapshot,
-    WorkflowState,
 )
+from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
+from market_orchestrator.schemas.schemas_workflow import WorkflowInput
 from market_orchestrator.worker import TASK_QUEUE
 from shared.exceptions import TemporalUnavailableError
 
 
 logger = structlog.get_logger("orchestrator.client")
 
-#ID reuse policy: permite criar novo workflow se o anterior completou/falhou
+# Política de reutilização de ID: permite criar novo workflow se o anterior completou/falhou
 _WORKFLOW_ID_REUSE = "ALLOW_DUPLICATE_FAILED_ONLY"
 
 def _workflow_id(monitored_id: str) -> str:

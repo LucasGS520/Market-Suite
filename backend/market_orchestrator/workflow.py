@@ -16,16 +16,15 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
-    from market_orchestrator.schemas.schemas_workflow import (
-        CollectionPolicy,
-        CollectionStatusResult,
-        CompetitorChangedPayload,
+    from market_orchestrator.enums.enums_workflow import WorkflowState
+    from market_orchestrator.schemas.schemas_policy import CollectionPolicy
+    from market_orchestrator.schemas.schemas_signals import (
         ResumeSignalPayload,
         UpdatePolicySignalPayload,
-        WorkflowInput,
-        WorkflowSnapshot,
-        WorkflowState,
+        CompetitorChangedPayload,
     )
+    from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot, CollectionStatusResult
+    from market_orchestrator.schemas.schemas_workflow import WorkflowInput
 
 logger = structlog.get_logger("orchestrator.workflow")
 
@@ -398,3 +397,4 @@ class MonitoredProductWorkflow:
             },
         )
         workflow.continue_as_new(new_input)
+        

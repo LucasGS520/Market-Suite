@@ -12,7 +12,8 @@ from __future__ import annotations
 import structlog
 
 from market_orchestrator.alert.alert_client import TemporalOrchestrationClient
-from market_orchestrator.schemas.schemas_workflow import CollectionPolicy, WorkflowInput
+from market_orchestrator.schemas.schemas_policy import CollectionPolicy
+from market_orchestrator.schemas.schemas_workflow import WorkflowInput
 
 
 logger = structlog.get_logger("orchestrator.reconciler")

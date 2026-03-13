@@ -1,33 +1,33 @@
 """
-market_orchestrator — Orquestração Contínua com Temporal
+market_orchestrator - Orquestracao continua com Temporal
 
-Módulo responsável pelo plano de controle durável de cada monitoramento ativo.
-Cada monitorado ativo é uma Workflow Execution independente e persistente.
+Modulo responsavel pelo plano de controle duravel de cada monitoramento ativo.
+Cada monitorado ativo e uma Workflow Execution independente e persistente.
 
 Componentes:
-  - workflow.py        — MonitoredProductWorkflow (máquina de estados)
-  - activities.py      — Activities de integração (ponte Temporal ↔ Celery/DB/Redis)
-  - worker.py          — Temporal Worker Python
-  - reconciler.py      — Reconciliador de monitorados ativos
-  - alert/alert_client — TemporalOrchestrationClient (adaptador para o domínio)
-  - schemas/           — Dataclasses de input/output/signals/queries
-  - core/              — Configurações (OrchestratorSettings)
+  - workflow/          - pacote do MonitoredProductWorkflow (entrypoint + handlers)
+  - activities/        - pacote de activities de integracao (Temporal <-> Celery/DB/Redis)
+  - worker.py          - Temporal Worker Python
+  - reconciler.py      - Reconciliador de monitorados ativos
+  - alert/alert_client - TemporalOrchestrationClient (adaptador para o dominio)
+  - schemas/           - Dataclasses de input/output/signals/queries
+  - core/              - Configuracoes (OrchestratorSettings)
 
-A camada de execução existente não foi alterada:
+A camada de execucao existente nao foi alterada:
   - Celery workers e tasks (market_alert/tasks/)
   - CollectionEnqueuer (market_alert/infraestructure/celery/enqueuer.py)
   - payload_builders (market_alert/collectors/orchestrator/payload_builders.py)
 """
 from market_orchestrator.alert.alert_client import TemporalOrchestrationClient, get_temporal_client
-from market_orchestrator.schemas.schemas_workflow import (
-    CollectionPolicy,
+from market_orchestrator.enums.enums_workflow import WorkflowState
+from market_orchestrator.schemas.schemas_policy import CollectionPolicy
+from market_orchestrator.schemas.schemas_signals import (
     CompetitorChangedPayload,
     ResumeSignalPayload,
     UpdatePolicySignalPayload,
-    WorkflowInput,
-    WorkflowSnapshot,
-    WorkflowState,
 )
+from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
+from market_orchestrator.schemas.schemas_workflow import WorkflowInput
 
 __all__ = [
     "TemporalOrchestrationClient",
