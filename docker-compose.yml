@@ -406,6 +406,7 @@ services:
           cpus: '0.25'
           memory: 256M
 
+
   #Banco PostgreSQL exclusivo para persistência do Temporal (separado do banco de negócio)
   temporal-db:
     image: postgres:15
@@ -437,15 +438,15 @@ services:
       - ./backend/market_orchestrator/.env.market_orchestrator
     environment:
       - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_SEEDS=temporal-db
+      - DB_PORT=${TEMPORAL_DB_PORT}
+      - POSTGRES_SEEDS=${TEMPORAL_DB_HOST}
       - POSTGRES_USER=${TEMPORAL_DB_USER}
       - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD}
-      - DEFAULT_NAMESPACE=default
+      - DEFAULT_NAMESPACE=${TEMPORAL_NAMESPACE}
     ports:
       - "7233:7233"
     depends_on:
-      temporal-db:
+      db:
         condition: service_healthy
     networks:
       - monitoring-net

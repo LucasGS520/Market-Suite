@@ -16,6 +16,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
+    from market_orchestrator.core.config_orchestrator import settings
     from market_orchestrator.enums.enums_workflow import WorkflowState
     from market_orchestrator.schemas.schemas_policy import CollectionPolicy
     from market_orchestrator.schemas.schemas_signals import (
@@ -25,31 +26,32 @@ with workflow.unsafe.imports_passed_through():
     )
     from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot, CollectionStatusResult
     from market_orchestrator.schemas.schemas_workflow import WorkflowInput
+    
 
 logger = structlog.get_logger("orchestrator.workflow")
 
 #Limites para Continue-As-New
-_HISTORY_LENGTH_LIMIT = 5000
-_SIGNAL_COUNT_LIMIT = 500
+_HISTORY_LENGTH_LIMIT = settings.WORKFLOW_HISTORY_LENGTH_LIMIT
+_SIGNAL_COUNT_LIMIT = settings.WORKFLOW_SIGNAL_COUNT_LIMIT
 
 #Timeout máximo de espera por resultado de coleta (polling)
-_COLLECTION_RESULT_TIMEOUT_SECONDS = 1800  #30 min
-_COLLECTION_POLL_INTERVAL_SECONDS = 30
+_COLLECTION_RESULT_TIMEOUT_SECONDS = settings.COLLECTION_RESULT_TIMEOUT_SECONDS
+_COLLECTION_POLL_INTERVAL_SECONDS = settings.COLLECTION_POLL_INTERVAL_SECONDS
 
 #Retry policy padrão para activities
 _DEFAULT_RETRY = RetryPolicy(
-    maximum_attempts=3,
-    initial_interval=timedelta(seconds=10),
-    maximum_interval=timedelta(minutes=5),
-    backoff_coefficient=2.0,
+    maximum_attempts=settings.RETRY_MAX_ATTEMPTS,
+    initial_interval=timedelta(seconds=settings.RETRY_INITIAL_INTERVAL_SECONDS),
+    maximum_interval=timedelta(seconds=settings.RETRY_MAX_INTERVAL_SECONDS),
+    backoff_coefficient=settings.RETRY_BACKOFF_COEFFICIENT,
 )
 
 #Activity timeouts
-_DISPATCH_TIMEOUT = timedelta(seconds=30)
-_QUERY_STATUS_TIMEOUT = timedelta(seconds=15)
-_PERSIST_SNAPSHOT_TIMEOUT = timedelta(seconds=10)
-_CLEANUP_TIMEOUT = timedelta(seconds=10)
-_FETCH_POLICY_TIMEOUT = timedelta(seconds=15)
+_DISPATCH_TIMEOUT = timedelta(seconds=settings.ACTIVITY_DISPATCH_TIMEOUT_SECONDS)
+_QUERY_STATUS_TIMEOUT = timedelta(seconds=settings.ACTIVITY_QUERY_STATUS_TIMEOUT_SECONDS)
+_PERSIST_SNAPSHOT_TIMEOUT = timedelta(seconds=settings.ACTIVITY_PERSIST_SNAPSHOT_TIMEOUT_SECONDS)
+_CLEANUP_TIMEOUT = timedelta(seconds=settings.ACTIVITY_CLEANUP_TIMEOUT_SECONDS)
+_FETCH_POLICY_TIMEOUT = timedelta(seconds=settings.ACTIVITY_FETCH_POLICY_TIMEOUT_SECONDS)
 
 @workflow.defn(name="MonitoredProductWorkflow")
 class MonitoredProductWorkflow:

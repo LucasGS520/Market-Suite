@@ -8,13 +8,11 @@ from datetime import timedelta
 import structlog
 from temporalio import activity
 
+from market_orchestrator.core.config_orchestrator import settings
 from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
 
 
 logger = structlog.get_logger("orchestrator.activities.snapshot")
-
-_SNAPSHOT_KEY = "workflow:snapshot:{monitored_id}"
-_SNAPSHOT_TTL_SECONDS = 86400
 
 @activity.defn(name="persist_workflow_snapshot")
 async def persist_workflow_snapshot(snapshot: WorkflowSnapshot) -> None:
@@ -26,7 +24,7 @@ async def persist_workflow_snapshot(snapshot: WorkflowSnapshot) -> None:
         if client is None:
             return
 
-        key = _SNAPSHOT_KEY.format(monitored_id=snapshot.monitored_id)
+        key = settings.SNAPSHOT_KEY_TEMPLATE.format(monitored_id=snapshot.monitored_id)
         data = {
             "state": snapshot.state.value
             if hasattr(snapshot.state, "value")
@@ -40,7 +38,7 @@ async def persist_workflow_snapshot(snapshot: WorkflowSnapshot) -> None:
             "last_error": snapshot.last_error,
             "attempt_count": snapshot.attempt_count,
         }
-        client.setex(key, timedelta(seconds=_SNAPSHOT_TTL_SECONDS), json.dumps(data))
+        client.setex(key, timedelta(seconds=settings.SNAPSHOT_TTL_SECONDS), json.dumps(data))
 
     except Exception as exc:
         logger.warning("persist_workflow_snapshot_error", error=str(exc))
@@ -55,7 +53,7 @@ async def cleanup_workflow_state(monitored_id: str) -> None:
         if client is None:
             return
 
-        key = _SNAPSHOT_KEY.format(monitored_id=monitored_id)
+        key = settings.SNAPSHOT_KEY_TEMPLATE.format(monitored_id=monitored_id)
         client.delete(key)
 
     except Exception as exc:

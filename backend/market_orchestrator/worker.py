@@ -26,7 +26,6 @@ from market_orchestrator.workflow import MonitoredProductWorkflow
 
 logger = structlog.get_logger("orchestrator.worker")
 
-TASK_QUEUE = "market-orchestrator"
 
 async def start_temporal_worker() -> None:
     """ Conecta ao Temporal Server e inicia o worker em loop assíncrono.
@@ -43,7 +42,7 @@ async def start_temporal_worker() -> None:
 
     worker = Worker(
         client,
-        task_queue=TASK_QUEUE,
+        task_queue=settings.TEMPORAL_TASK_QUEUE,
         workflows=[MonitoredProductWorkflow],
         activities=[
             dispatch_collection,
@@ -68,7 +67,7 @@ async def start_temporal_worker() -> None:
             #Windows não suporta add_signal_handler em todos os contextos
             signal.signal(sig, _request_shutdown)  # type: ignore[arg-type]
 
-    logger.info("temporal_worker_started", task_queue=TASK_QUEUE)
+    logger.info("temporal_worker_started", task_queue=settings.TEMPORAL_TASK_QUEUE)
 
     async with worker:
         await shutdown_event.wait()
