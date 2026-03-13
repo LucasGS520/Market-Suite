@@ -43,7 +43,7 @@ def get_redis_metrics() -> dict:
 
     metrics: dict = {}
 
-    # Memória
+    #Memória
     try:
         mem_info = client.info("memory")
         metrics["memory_used_bytes"] = mem_info.get("used_memory")
@@ -61,14 +61,14 @@ def get_redis_metrics() -> dict:
             "memory_fragmentation_ratio": None,
         })
 
-    # Total de chaves no DB operacional (db 2)
+    #Total de chaves no DB operacional (db 2)
     try:
         metrics["keys_total"] = client.dbsize()
     except Exception:
         logger.warning("redis_monitoring_dbsize_failed", exc_info=True)
         metrics["keys_total"] = None
 
-    # DLQ backlog (stream)
+    #DLQ backlog (stream)
     try:
         dlq_key = settings.CELERY_DLQ_STREAM_NAME
         metrics["dlq_backlog"] = client.xlen(dlq_key)
@@ -76,9 +76,26 @@ def get_redis_metrics() -> dict:
         logger.warning("redis_monitoring_dlq_failed", exc_info=True)
         metrics["dlq_backlog"] = None
 
-    # TODO: métricas de fila serão reimplementadas com Temporal
-    metrics["queue_pending"] = None
-    metrics["queue_processing"] = None
+    #Métricas de orquestração Temporal via snapshots Redis (best-effort)
+    try:
+        import json as _json
+        snapshot_keys = client.keys("workflow:snapshot:*")
+        pending_count = 0
+        processing_count = 0
+        for key in snapshot_keys:
+            raw = client.get(key)
+            if raw:
+                state = _json.loads(raw).get("state", "")
+                if state in ("WaitingTimer", "Active", "Backoff"):
+                    pending_count += 1
+                elif state in ("Dispatching", "WaitingResult"):
+                    processing_count += 1
+        metrics["queue_pending"] = pending_count
+        metrics["queue_processing"] = processing_count
+    except Exception:
+        logger.warning("redis_monitoring_temporal_snapshots_failed", exc_info=True)
+        metrics["queue_pending"] = None
+        metrics["queue_processing"] = None
 
     logger.debug("redis_metrics_collected", **{k: v for k, v in metrics.items() if v is not None})
     return metrics

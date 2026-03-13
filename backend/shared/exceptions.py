@@ -1,8 +1,15 @@
 """ Exceções compartilhadas entre os serviços
 
-Este utilitário é reutilizado por `market_alert` e `market_scraper` para
-padronizar erros de scraping serializáveis pelo Celery
+Este utilitário é reutilizado por `market_alert`, `market_orchestrator` e `market_scraper` para
+padronizar erros de scraping ou orquestração serializáveis.
 """
+
+class TemporalUnavailableError(Exception):
+    """ Levantada quando o Temporal Server não está acessível.
+
+    Deve ser capturada no cliente adaptador e logada como warning/error
+    sem propagar para o chamador (fallback não-bloqueante).
+    """
 
 class ScraperError(Exception):
     """ Erro levantado durante tarefas de scraping """

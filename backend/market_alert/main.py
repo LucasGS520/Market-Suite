@@ -71,6 +71,28 @@ def create_app() -> FastAPI:
         # Falha imediata evita aceitar tráfego com Redis/DB indisponível.
         validate_startup_dependencies(strict=True)
 
+    @app.on_event("startup")
+    async def _reconcile_temporal_workflows_on_startup() -> None:
+        """ Reconcilia workflows Temporal na inicialização da API.
+
+        Não-bloqueante: falhas de conexão com o Temporal são silenciadas
+        para não impedir a API de servir tráfego.
+        """
+        import asyncio
+        import concurrent.futures
+
+        def _run_reconcile() -> None:
+            try:
+                from market_orchestrator.reconciler import WorkflowReconciler
+                counts = WorkflowReconciler().reconcile_all()
+                logger.info("startup_temporal_reconciliation_done", **counts)
+            except Exception as exc:
+                logger.warning("startup_temporal_reconciliation_skipped", error=str(exc))
+
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            await loop.run_in_executor(pool, _run_reconcile)
+
     #Habilita CORS com base nas origens configuradas no ambiente
     app.add_middleware(
         CORSMiddleware,

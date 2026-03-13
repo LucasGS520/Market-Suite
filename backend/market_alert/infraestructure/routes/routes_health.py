@@ -68,19 +68,32 @@ def health_check():
         status["beat"] = {"status": "error", "detail": "Falha ao obter heartbeat"}
         status["overall"] = "error"
 
-    # Métricas operacionais Redis
+    #Métricas operacionais Redis
     try:
         status["redis_metrics"] = get_redis_metrics()
     except Exception:
         logger.exception("redis_metrics_collection_failed")
         status["redis_metrics"] = None
 
+    #Verificação de conectividade com o Temporal Server (não-bloqueante)
+    try:
+        from market_orchestrator.alert.alert_client import get_temporal_client
+        temporal_ok = get_temporal_client().probe_connectivity_sync()
+        status["temporal"] = {"status": "ok" if temporal_ok else "degraded"}
+        if not temporal_ok and status["overall"] == "ok":
+            status["overall"] = "degraded"
+    except ImportError:
+        status["temporal"] = {"status": "unavailable", "detail": "módulo não instalado"}
+    except Exception:
+        logger.exception("temporal_health_check_failed")
+        status["temporal"] = {"status": "degraded", "detail": "Falha ao verificar Temporal"}
+
     logger.info("health_check_result", status=status)
     return status
 
 @router.get("/readiness", tags=["Health"])
 def readiness_check():
-    """Valida se as dependências principais estão prontas para uso."""
+    """ Valida se as dependências principais estão prontas para uso."""
     status = {"overall": "ok"}
 
     try:

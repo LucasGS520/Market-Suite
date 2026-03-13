@@ -52,6 +52,19 @@ from market_alert.comparisons.utils.price_comparator import request_comparison_r
 
 logger = structlog.get_logger(__name__)
 
+#Import condicional: protege testes unitários e ambientes sem Temporal disponível
+try:
+    from market_orchestrator.alert.alert_client import get_temporal_client
+    from market_orchestrator.schemas.schemas_workflow import CompetitorChangedPayload
+    _TEMPORAL_AVAILABLE = True
+except ImportError:
+    _TEMPORAL_AVAILABLE = False
+
+
+def _get_monitored_workflow_id(monitored_id: UUID) -> str:
+    """ Retorna o workflow_id estável por convenção de naming do Temporal """
+    return f"monitored:{monitored_id}"
+
 # ---------------------------------------------------------------------------
 # Helpers internos
 # ---------------------------------------------------------------------------
@@ -238,7 +251,21 @@ def create_competitor_scrape_request(
     db.commit()
     db.refresh(monitored_product)
 
-    # TODO: enqueue via Temporal signal on activate
+    #Sinaliza o workflow do monitorado pai para acordar o ciclo de rechecagem
+    if _TEMPORAL_AVAILABLE:
+        try:
+            get_temporal_client().signal_sync(
+                "competitor_changed",
+                str(monitored_product.id),
+                CompetitorChangedPayload(event="added", competitor_id=str(pending.id)),
+            )
+        except Exception as exc:
+            logger.warning(
+                "temporal_signal_failed",
+                signal="competitor_changed",
+                monitored_id=str(monitored_product.id),
+                error=str(exc),
+            )
 
     #Flag explicita para indicar se a tentativa de coleta imediata foi enfileirada
     initial_enqueue_ok = False
@@ -337,7 +364,21 @@ def delete_competitor_entry(
         #Cascatas de relacionamento cuidam do histórico de preços e dependências
         logger.info("competitor_deleted", **log_context, monitored_id=str(monitored_id))
 
-        # TODO: remove via Temporal signal on delete
+        #Sinaliza workflow do monitorado pai sobre remoção do concorrente
+        if _TEMPORAL_AVAILABLE:
+            try:
+                get_temporal_client().signal_sync(
+                    "competitor_changed",
+                    str(monitored_id),
+                    CompetitorChangedPayload(event="removed", competitor_id=str(competitor_id)),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "temporal_signal_failed",
+                    signal="competitor_changed",
+                    monitored_id=str(monitored_id),
+                    error=str(exc),
+                )
 
         request_comparison_recompute(monitored_id, "competitor_deleted")
         logger.info(
@@ -387,5 +428,23 @@ def clear_competitors_from_monitored(
         )
 
     deleted_ids = delete_competitors_by_monitored_id(db, monitored_product_id)
-    # TODO: remove via Temporal signal on delete
+
+    #Sinaliza remoção de cada concorrente ao workflow do monitorado pai
+    if _TEMPORAL_AVAILABLE and deleted_ids:
+        client = get_temporal_client()
+        for cid in deleted_ids:
+            try:
+                client.signal_sync(
+                    "competitor_changed",
+                    str(monitored_product_id),
+                    CompetitorChangedPayload(event="removed", competitor_id=str(cid)),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "temporal_signal_failed",
+                    signal="competitor_changed",
+                    monitored_id=str(monitored_product_id),
+                    error=str(exc),
+                )
+
     return deleted_ids

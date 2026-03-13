@@ -104,9 +104,6 @@ services:
       - PYTHONPATH=/backend
     volumes:
       - ./backend/market_alert:/market_alert
-      # Monta o pacote `shared` inteiro para que imports como `import shared` funcionem
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend/shared/infra:/market_alert/infra
       - ./backend:/backend:ro   
     working_dir: /market_alert
     command:
@@ -163,9 +160,6 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
       - ./backend:/backend:ro   
     restart: unless-stopped
     networks:
@@ -266,9 +260,6 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
       - ./backend:/backend:ro   
     restart: on-failure
     networks:
@@ -319,9 +310,6 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
       - ./backend:/backend:ro
     restart: on-failure
     networks:
@@ -372,9 +360,6 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
       - ./backend:/backend:ro
     restart: on-failure
     networks:
@@ -421,12 +406,74 @@ services:
           cpus: '0.25'
           memory: 256M
 
+  #Banco PostgreSQL exclusivo para persistência do Temporal (separado do banco de negócio)
+  temporal-db:
+    image: postgres:15
+    profiles:
+      - temporal
+    env_file:
+      - ./backend/market_orchestrator/.env.market_orchestrator
+    environment:
+      - POSTGRES_USER=${TEMPORAL_DB_USER}
+      - POSTGRES_PASSWORD=${TEMPORAL_DB_PASSWORD}
+      - POSTGRES_DB=temporal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_DB_USER} -d temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - temporal-db-data:/var/lib/postgresql/data
+    networks:
+      - monitoring-net
+
+
+  #Servidor Temporal (orquestrador de workflows duráveis)
+  temporal:
+    image: temporalio/auto-setup:1.25
+    profiles:
+      - temporal
+    env_file:
+      - ./backend/market_orchestrator/.env.market_orchestrator
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_SEEDS=temporal-db
+      - POSTGRES_USER=${TEMPORAL_DB_USER}
+      - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD}
+      - DEFAULT_NAMESPACE=default
+    ports:
+      - "7233:7233"
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    networks:
+      - monitoring-net
+
+
+  #Interface web do Temporal para visualização de workflows
+  temporal-ui:
+    image: temporalio/ui:2.31
+    profiles:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:8080
+    ports:
+      - "8088:8080"
+    depends_on:
+      - temporal
+    networks:
+      - monitoring-net
+
+
 volumes:
   db-data:
   redis-data:
   audit-logs:
   frontend-node-modules:
   frontend-pnpm-store:
+  temporal-db-data:
 
 networks:
   monitoring-net:
