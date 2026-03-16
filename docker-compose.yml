@@ -10,9 +10,10 @@ services:
       - workers
     env_file:
       - .env.common
+      - ./backend/market_alert/.env.market_alert
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d marketalert"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
       retries: 3
     ports:
@@ -46,7 +47,7 @@ services:
           --appendonly no
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
       retries: 3
     ports:
@@ -145,7 +146,7 @@ services:
       - "8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 30s
+      interval: 20s
       timeout: 5s
       retries: 3
       start_period: 10s
@@ -412,17 +413,15 @@ services:
     image: postgres:15
     profiles:
       - temporal
-    env_file:
-      - ./backend/market_orchestrator/.env.market_orchestrator
     environment:
-      - POSTGRES_USER=${TEMPORAL_DB_USER}
-      - POSTGRES_PASSWORD=${TEMPORAL_DB_PASSWORD}
-      - POSTGRES_DB=temporal
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal86
+      POSTGRES_DB: temporal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_DB_USER} -d temporal"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 3
     volumes:
       - temporal-db-data:/var/lib/postgresql/data
     networks:
@@ -434,36 +433,18 @@ services:
     image: temporalio/auto-setup:1.25
     profiles:
       - temporal
-    env_file:
-      - ./backend/market_orchestrator/.env.market_orchestrator
     environment:
-      - DB=postgres12
-      - DB_PORT=${TEMPORAL_DB_PORT}
-      - POSTGRES_SEEDS=${TEMPORAL_DB_HOST}
-      - POSTGRES_USER=${TEMPORAL_DB_USER}
-      - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD}
-      - DEFAULT_NAMESPACE=${TEMPORAL_NAMESPACE}
+    - DB=postgres12
+    - DB_PORT=5432
+    - POSTGRES_SEEDS=temporal-db
+    - POSTGRES_USER=temporal
+    - POSTGRES_PWD=temporal86
+    - POSTGRES_DB=temporal
     ports:
       - "7233:7233"
     depends_on:
-      db:
+      temporal-db:
         condition: service_healthy
-    networks:
-      - monitoring-net
-
-
-  #Interface web do Temporal para visualização de workflows
-  temporal-ui:
-    image: temporalio/ui:2.31
-    profiles:
-      - temporal
-    environment:
-      - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://localhost:8080
-    ports:
-      - "8088:8080"
-    depends_on:
-      - temporal
     networks:
       - monitoring-net
 

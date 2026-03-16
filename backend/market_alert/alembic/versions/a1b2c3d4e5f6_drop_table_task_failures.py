@@ -26,7 +26,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_table("task_failures")
+    op.execute("DROP TABLE IF EXISTS public.task_failures CASCADE;")
 
 
 def downgrade() -> None:
