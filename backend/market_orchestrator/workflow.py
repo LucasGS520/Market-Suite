@@ -18,7 +18,7 @@ from temporalio.exceptions import ActivityError
 with workflow.unsafe.imports_passed_through():
     from market_orchestrator.core.config_orchestrator import settings
     from market_orchestrator.enums.enums_workflow import WorkflowState
-    from market_orchestrator.schemas.schemas_policy import CollectionPolicy
+    from market_orchestrator.schemas.schemas_policy import CollectionPolicy, PolicyActivityResponse
     from market_orchestrator.schemas.schemas_signals import (
         ResumeSignalPayload,
         UpdatePolicySignalPayload,
@@ -148,21 +148,30 @@ class MonitoredProductWorkflow:
             start_to_close_timeout=_FETCH_POLICY_TIMEOUT,
             retry_policy=_DEFAULT_RETRY,
         )
+        resp = PolicyActivityResponse.from_dict(policy_data)
 
         #Se pausado externamente, transicionar
-        if policy_data.get("paused"):
+        if resp.paused:
             self._state = WorkflowState.Paused
             return
 
-        #Aplica atualização de política pendente
+        #Atualiza policy com valores frescos (preserva backoff settings do signal update_policy)
+        self._policy = CollectionPolicy(
+            interval_seconds=resp.interval_seconds,
+            backoff_max_attempts=self._policy.backoff_max_attempts,
+            backoff_base_seconds=self._policy.backoff_base_seconds,
+            stability_score=resp.stability_score,
+            scheduling_reason=resp.scheduling_reason,
+        )
+
+        #Aplica atualização de política pendente (pode sobrescrever backoff settings)
         if self._policy_update is not None:
             self._policy = self._policy_update
             self._policy_update = None
 
         #Calcula delta até próxima coleta
-        next_check_iso: str | None = policy_data.get("next_check_at")
-        if next_check_iso:
-            next_check_at = datetime.fromisoformat(next_check_iso)
+        if resp.next_check_at:
+            next_check_at = datetime.fromisoformat(resp.next_check_at)
             delta = (next_check_at - workflow.now()).total_seconds()
             sleep_seconds = max(delta, 0)
         else:

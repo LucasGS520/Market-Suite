@@ -90,8 +90,8 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 ### Products
 - O pacote [`products/`](products/) gerencia o ciclo de vida de produtos monitorados e concorrentes, alem das consultas usadas pelo dashboard.
 - [`products/services/services_monitored.py`](products/services/services_monitored.py) e [`products/services/services_competitors.py`](products/services/services_competitors.py) sao camadas read-only para listagem, paginacao e montagem dos DTOs retornados pela API.
-- [`products/services/services_monitored_lifecycle.py`](products/services/services_monitored_lifecycle.py) cria, pausa, retoma e remove monitorados, validando URL, duplicidade, rate limit, lock Redis e sincronizacao com a fila de coleta continua.
-- [`products/services/services_competitor_lifecycle.py`](products/services/services_competitor_lifecycle.py) cria e remove concorrentes, impede auto-referencia, respeita limite maximo por monitorado e agenda recaptura/comparacao apos mudancas.
+- [`products/services/services_monitored_lifecycle.py`](products/services/services_monitored_lifecycle.py) cria, pausa, retoma e remove monitorados, validando URL, duplicidade, rate limit, lock Redis e sincronizacao com a fila de coleta continua. Apos criar, chama `signal_with_start_sync(WorkflowInput)` para iniciar o workflow duravel Temporal; pause/resume/delete enviam os signals `pause`/`resume`/`delete` ao workflow via `signal_sync()`. Todas as chamadas Temporal sao graciosamente silenciadas se o modulo nao estiver disponivel ou a conexao falhar.
+- [`products/services/services_competitor_lifecycle.py`](products/services/services_competitor_lifecycle.py) cria e remove concorrentes, impede auto-referencia, respeita limite maximo por monitorado e agenda recaptura/comparacao apos mudancas. Ao criar ou remover um concorrente, envia o signal `competitor_changed` com `CompetitorChangedPayload(event="added"/"removed")` ao workflow do monitorado pai para acorda-lo e antecipar o proximo ciclo de coleta.
 - [`products/services/services_access_control.py`](products/services/services_access_control.py) garante ownership por usuário antes de expor ou alterar um monitorado.
 - [`products/domain/product_lifecycle.py`](products/domain/product_lifecycle.py) concentra regras puras de transicao de status, rastreio de mudanca de preco e calculo do proximo `next_check_at`.
 - [`products/domain/stability.py`](products/domain/stability.py) reexporta a politica de estabilidade usada para acelerar ou desacelerar o monitoramento continuo conforme variacao observada.
@@ -172,7 +172,9 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 - O catalogo de filas e rotas vive em [`infraestructure/celery/config.py`](infraestructure/celery/config.py), com separacao explicita entre `scraping`, `monitor`, `compare`, `notifications` e `dead_letter`.
 - O bootstrap do worker repete a validacao de infraestrutura, registra signals de lifecycle e carrega os modulos de tasks explicitamente para evitar workers "saudaveis" sem tasks registradas.
 - O signal `worker_ready` delega para `continuous_collector_manager`, iniciando o coletor continuo e o loop de revalidacao assim que o processo fica pronto.
-- O agendamento periodico registrado nesta fase e `cleanup-cache-daily`, executado pelo Celery Beat diariamente as `03:00`.
+- O mesmo signal `worker_ready` tambem inicia o **Temporal Worker** em thread daemon via [`infraestructure/worker_lifecycle.py`](infraestructure/worker_lifecycle.py), registrando `MonitoredProductWorkflow` e todas as activities na task queue `market-orchestrator`. Importação condicional (`try/except ImportError`) garante que workers sem o módulo `market_orchestrator` instalado continuem funcionando normalmente.
+- Os agendamentos periodicos registrados no Beat sao `cleanup-cache-daily` (diario as `03:00`) e `reconcile-workflows-periodic` (a cada 5 minutos).
+- A lógica de cadência e estabilidade (`calculate_schedule`, `calculate_stability_score`) vive em [`shared/scheduling/`](../shared/scheduling/) e é consumida diretamente por `market_alert` (services, crud, collectors). A conversão `MonitoredProduct → SchedulingContext` é feita por `to_scheduling_context()` em [`products/domain/product_lifecycle.py`](products/domain/product_lifecycle.py).
 
 ### Filas e Topologia Celery
 - [`infraestructure/celery/config.py`](infraestructure/celery/config.py) define cinco filas logicas: `scraping`, `monitor`, `compare`, `notifications` e `dead_letter`.
@@ -217,8 +219,10 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 6. `send_notification_task` chama `process_notification`, que seleciona o adapter do canal, registra tentativas, marca envio, reagenda retry ou envia para dead-letter quando o limite e atingido.
 
 ### Agendamentos e Scheduling
-- O catalogo atual de Beat em [`infraestructure/celery/config.py`](infraestructure/celery/config.py) possui uma entrada explicita: `cleanup-cache-daily`, executada diariamente as `03:00` na fila `monitor`.
-- [`infraestructure/tasks/maintenance_tasks.py`](infraestructure/tasks/maintenance_tasks.py) implementa essa limpeza de forma incremental, com limites de tempo, volume e tamanho de lote para nao monopolizar o Redis.
+- O catalogo de Beat em [`infraestructure/celery/config.py`](infraestructure/celery/config.py) possui duas entradas:
+  - `cleanup-cache-daily`: limpeza de cache Redis, executada diariamente as `03:00` na fila `scraping`.
+  - `reconcile-workflows-periodic`: reconciliação de workflows Temporal, executada a cada 10 minutos (600s) na fila `scraping`, chamando [`infraestructure/tasks/reconciler_task.py`](infraestructure/tasks/reconciler_task.py).
+- [`infraestructure/tasks/maintenance_tasks.py`](infraestructure/tasks/maintenance_tasks.py) implementa a limpeza de cache de forma incremental, com limites de tempo, volume e tamanho de lote para nao monopolizar o Redis.
 - [`collectors/tasks/priority_queue_tasks.py`](collectors/tasks/priority_queue_tasks.py) disponibiliza `reconcile_priority_queue` para recarregar a fila de prioridade, mas essa task nao está no `BEAT_SCHEDULE` atual; hoje ela serve como rotina manual/emergencial.
 - Na configuracao atual do repositorio, o `docker-compose.yml` nao declara um serviço dedicado de `celery beat`, embora o codigo esteja pronto para receber esse scheduler.
 - O endpoint `/health/` consulta `beat:last_success`, mas nao ha um produtor desse heartbeat dentro dos modulos carregados atualmente; se o scheduler for operado externamente, ele precisa atualizar essa chave para que o health reflita o estado real do Beat.
@@ -384,7 +388,7 @@ SCRAPER_SERVICE_URL=http://market_scraper:8000
 
 - **Observabilidade:**
   - Auditoria e rastreabilidade: logs estruturados com `trace_id`, registro de falhas permanentes em `task_failures` via DLQ e volume dedicado `audit-logs` no compose.
-  - Health checks: `/health/` expoe status de PostgreSQL, Redis, Beat e metricas operacionais do Redis (`redis_metrics`: uso de memoria, dbsize, backlog DLQ, fila de prioridade, itens em processamento). `/health/readiness` valida dependencias para liveness probe.
+  - Health checks: `/health/` expoe status de PostgreSQL, Redis, Beat, Temporal e metricas operacionais do Redis (`redis_metrics`: uso de memoria, dbsize, backlog DLQ, fila de prioridade, itens em processamento). `/health/readiness` valida dependencias para liveness probe. `/health/temporal` retorna `{ temporal_connected: bool, last_check_at: ISO }` via `probe_connectivity_sync()`, sem propagar exceções (indisponibilidade e reportada como `temporal_connected: false`).
   - Observabilidade de workers: logging dedicado em `logging_config.py`, supressao de ruido em bibliotecas de infraestrutura e alertas para configuracoes de lock inseguras (validacao `PRODUCT_LOCK_TTL > TASK_GLOBAL_TIME_LIMIT` no startup do worker).
 
 ---

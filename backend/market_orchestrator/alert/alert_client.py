@@ -12,6 +12,7 @@ from typing import Any
 
 import structlog
 from temporalio.client import Client
+from temporalio.common import WorkflowIDReusePolicy
 from temporalio.service import RPCError
 
 from market_orchestrator.core.config_orchestrator import settings
@@ -23,14 +24,12 @@ from market_orchestrator.schemas.schemas_signals import (
 )
 from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
 from market_orchestrator.schemas.schemas_workflow import WorkflowInput
-from market_orchestrator.worker import TASK_QUEUE
-from shared.exceptions import TemporalUnavailableError
 
 
 logger = structlog.get_logger("orchestrator.client")
 
 # Política de reutilização de ID: permite criar novo workflow se o anterior completou/falhou
-_WORKFLOW_ID_REUSE = "ALLOW_DUPLICATE_FAILED_ONLY"
+_WORKFLOW_ID_REUSE = WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
 
 def _workflow_id(monitored_id: str) -> str:
     return f"monitored:{monitored_id}"
@@ -78,7 +77,7 @@ class TemporalOrchestrationClient:
                 "MonitoredProductWorkflow",
                 input,
                 id=_workflow_id(input.monitored_id),
-                task_queue=TASK_QUEUE,
+                task_queue=settings.TEMPORAL_TASK_QUEUE,
                 id_reuse_policy=_WORKFLOW_ID_REUSE,
             )
             if signal_name and signal_arg is not None:
@@ -228,6 +227,58 @@ class TemporalOrchestrationClient:
         result = self._run_async(self.probe_connectivity())
         return bool(result)
 
+    # ------------------------------------------------------------------
+    # Facade de domínio — oculta signal names, payload types e WorkflowInput
+    # market_alert deve usar APENAS estes métodos, nunca signal_sync diretamente
+    # ------------------------------------------------------------------
+
+    def start_monitoring(
+        self,
+        monitored_id: Any,
+        user_id: Any,
+        interval_seconds: int = 3600,
+    ) -> bool:
+        """ Inicia (ou idempotentemente retoma) o workflow de monitoramento. """
+        from market_orchestrator.schemas.schemas_workflow import WorkflowInput
+        from market_orchestrator.schemas.schemas_policy import CollectionPolicy
+        return self.signal_with_start_sync(WorkflowInput(
+            monitored_id=str(monitored_id),
+            user_id=str(user_id),
+            policy=CollectionPolicy(interval_seconds=interval_seconds),
+        ))
+
+    def pause_monitoring(self, monitored_id: Any) -> bool:
+        """ Envia signal de pausa para o workflow do monitorado. """
+        return self.signal_sync("pause", str(monitored_id))
+
+    def resume_monitoring(
+        self,
+        monitored_id: Any,
+        *,
+        immediate_collect: bool = True,
+    ) -> bool:
+        """ Envia signal de retomada, com opção de coleta imediata. """
+        from market_orchestrator.schemas.schemas_signals import ResumeSignalPayload
+        return self.signal_sync("resume", str(monitored_id), ResumeSignalPayload(immediate_collect=immediate_collect))
+
+    def delete_monitoring(self, monitored_id: Any) -> bool:
+        """ Envia signal de deleção para encerrar o workflow do monitorado. """
+        return self.signal_sync("delete", str(monitored_id))
+
+    def notify_competitor_changed(
+        self,
+        monitored_id: Any,
+        *,
+        event: str,
+        competitor_id: Any,
+    ) -> bool:
+        """ Notifica o workflow que um concorrente foi adicionado ou removido. """
+        from market_orchestrator.schemas.schemas_signals import CompetitorChangedPayload
+        return self.signal_sync(
+            "competitor_changed",
+            str(monitored_id),
+            CompetitorChangedPayload(event=event, competitor_id=str(competitor_id)),
+        )
 
 #Instância singleton lazy — inicializada na primeira chamada
 _client_instance: TemporalOrchestrationClient | None = None

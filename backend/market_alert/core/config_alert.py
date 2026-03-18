@@ -95,37 +95,6 @@ class Settings(ConfigBase):
         os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "50")
     ) #Margem mínima recomendada para evitar expiração prematura do lock
 
-    #Intervalos do agendamento contínuo (em segundos)
-    COLLECT_INTERVAL_UNSTABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_UNSTABLE_MIN", str(5 * 60))
-    ) #Intervalo mínimo para produtos instáveis
-    COLLECT_INTERVAL_UNSTABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_UNSTABLE_MAX", str(10 * 60))
-    ) #Intervalo máximo para produtos instáveis
-    COLLECT_INTERVAL_STABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_STABLE_MIN", str(10 * 60))
-    ) #Intervalo mínimo para produtos estáveis
-    COLLECT_INTERVAL_STABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_STABLE_MAX", str(20 * 60))
-    ) #Intervalo máximo para produtos estáveis
-    COLLECT_INTERVAL_VERY_STABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MIN", str(20 * 60))
-    ) #Intervalo mínimo para produtos muito estáveis
-    COLLECT_INTERVAL_VERY_STABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MAX", str(30 * 60))
-    ) #Intervalo máximo para produtos muito estáveis
-
-    #Thresholds de estabilidade em dias
-    STABILITY_DAYS_UNSTABLE: int = int(
-        os.getenv("STABILITY_DAYS_UNSTABLE", "1")
-    ) #Janela para considerar produto instável
-    STABILITY_DAYS_STABLE: int = int(
-        os.getenv("STABILITY_DAYS_STABLE", "3")
-    ) #Janela para considerar produto estável
-    STABILITY_DAYS_VERY_STABLE: int = int(
-        os.getenv("STABILITY_DAYS_VERY_STABLE", "7")
-    ) #Janela para considerar produto muito estável
-
     COLLECTION_TASK_TIMEOUT: int = int(
         os.getenv("COLLECTION_TASK_TIMEOUT", "60")
     ) #Timeout em segundos para tasks de coleta Celery
@@ -219,9 +188,6 @@ class Settings(ConfigBase):
     SCRAPER_MAX_RETRY_DELAY_SECONDS: int = int(
         os.getenv("SCRAPER_MAX_RETRY_DELAY_SECONDS", str(5 * 60))
     ) #Limite superior para backoff de Celery
-    SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS: int = int(
-        os.getenv("SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS", str(10 * 60))
-    ) #Cooldown adicional após falhas de rate limit
     SCRAPER_INVALID_URL_MAX_ATTEMPTS: int = int(
         os.getenv("SCRAPER_INVALID_URL_MAX_ATTEMPTS", "3")
     ) #Tentativas antes de marcar URL como inválida

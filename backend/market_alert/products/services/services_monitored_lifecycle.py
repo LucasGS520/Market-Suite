@@ -26,6 +26,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.scheduling import EVENT_STANDARD
 from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
@@ -54,23 +55,17 @@ from market_alert.products.services.services_products import build_monitored_res
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_collect
 from market_alert.collectors.orchestrator.payload_builders import build_monitored_payload
 from market_alert.products.domain.product_lifecycle import compute_next_check_at
-from market_alert.products.utils.interval_calculator_products import EVENT_STANDARD
-
-
-logger = structlog.get_logger("services_monitored_lifecycle")
-_LOCK_TTL_SECONDS = min(settings.PRODUCT_LOCK_TTL_SECONDS, 30)
 
 #Import condicional: protege testes unitários e ambientes sem Temporal disponível
 try:
     from market_orchestrator.alert.alert_client import get_temporal_client
-    from market_orchestrator.schemas.schemas_workflow import (
-        CollectionPolicy,
-        ResumeSignalPayload,
-        WorkflowInput,
-    )
     _TEMPORAL_AVAILABLE = True
 except ImportError:
     _TEMPORAL_AVAILABLE = False
+
+
+logger = structlog.get_logger("services_monitored_lifecycle")
+_LOCK_TTL_SECONDS = min(settings.PRODUCT_LOCK_TTL_SECONDS, 30)
 
 # ---------------------------------------------------------------------------
 # Helpers internos
@@ -110,15 +105,17 @@ def _remove_ids_from_priority_queue(product_ids: list[UUID], *, source: str) -> 
     """ Sinaliza o workflow Temporal para pausar ou encerrar cada monitorado """
     if not _TEMPORAL_AVAILABLE:
         return
-    signal_name = "pause" if source == "user_paused" else "delete"
     client = get_temporal_client()
     for pid in product_ids:
         try:
-            client.signal_sync(signal_name, str(pid))
+            if source == "user_paused":
+                client.pause_monitoring(pid)
+            else:
+                client.delete_monitoring(pid)
         except Exception as exc:
             logger.warning(
                 "temporal_signal_failed",
-                signal=signal_name,
+                signal="pause" if source == "user_paused" else "delete",
                 monitored_id=str(pid),
                 error=str(exc),
             )
@@ -144,11 +141,7 @@ def _enqueue_resume_collection(monitored: MonitoredProduct, user: User) -> None:
     #Registra retomada no workflow durável para manter estado consistente
     if _TEMPORAL_AVAILABLE:
         try:
-            get_temporal_client().signal_sync(
-                "resume",
-                str(monitored.id),
-                ResumeSignalPayload(immediate_collect=True),
-            )
+            get_temporal_client().resume_monitoring(monitored.id, immediate_collect=True)
         except Exception as exc:
             logger.warning(
                 "temporal_signal_failed",
@@ -167,11 +160,7 @@ def _enqueue_monitored_at_priority_queue(
     if not _TEMPORAL_AVAILABLE:
         return
     try:
-        get_temporal_client().signal_sync(
-            "resume",
-            str(monitored.id),
-            ResumeSignalPayload(immediate_collect=False),
-        )
+        get_temporal_client().resume_monitoring(monitored.id, immediate_collect=False)
     except Exception as exc:
         logger.warning(
             "temporal_signal_failed",
@@ -305,14 +294,11 @@ def create_monitored_product(
         #Inicia workflow durável de rechecagem contínua (não-bloqueante)
         if _TEMPORAL_AVAILABLE:
             try:
-                workflow_input = WorkflowInput(
-                    monitored_id=str(pending.id),
-                    user_id=str(user.id),
-                    policy=CollectionPolicy(
-                        interval_seconds=getattr(pending, "check_interval", 3600) or 3600,
-                    ),
+                get_temporal_client().start_monitoring(
+                    pending.id,
+                    user.id,
+                    interval_seconds=getattr(pending, "check_interval", 3600) or 3600,
                 )
-                get_temporal_client().signal_with_start_sync(workflow_input)
             except Exception as exc:
                 logger.warning(
                     "temporal_signal_with_start_failed",

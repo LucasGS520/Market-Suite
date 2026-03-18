@@ -26,6 +26,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
+from shared.scheduling import EVENT_STANDARD
 from shared.utils.url_validation import normalize_and_validate_product_url
 
 from market_alert.core.config_alert import settings
@@ -38,7 +39,6 @@ from market_alert.products.crud.crud_competitor import (
     create_pending_competitor_product,
     get_competitor_by_monitored_and_url,
     get_competitor_by_id,
-    paginate_competitors,
     delete_competitor,
     delete_competitors_by_monitored_id,
 )
@@ -46,24 +46,17 @@ from market_alert.products.services.services_products import build_competitor_re
 from market_alert.products.services.services_access_control import ensure_user_can_access_monitored
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.products.domain.product_lifecycle import compute_next_check_at
-from market_alert.products.utils.interval_calculator_products import EVENT_STANDARD
 from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
-
-
-logger = structlog.get_logger(__name__)
 
 #Import condicional: protege testes unitários e ambientes sem Temporal disponível
 try:
     from market_orchestrator.alert.alert_client import get_temporal_client
-    from market_orchestrator.schemas.schemas_workflow import CompetitorChangedPayload
     _TEMPORAL_AVAILABLE = True
 except ImportError:
     _TEMPORAL_AVAILABLE = False
 
 
-def _get_monitored_workflow_id(monitored_id: UUID) -> str:
-    """ Retorna o workflow_id estável por convenção de naming do Temporal """
-    return f"monitored:{monitored_id}"
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helpers internos
@@ -254,10 +247,8 @@ def create_competitor_scrape_request(
     #Sinaliza o workflow do monitorado pai para acordar o ciclo de rechecagem
     if _TEMPORAL_AVAILABLE:
         try:
-            get_temporal_client().signal_sync(
-                "competitor_changed",
-                str(monitored_product.id),
-                CompetitorChangedPayload(event="added", competitor_id=str(pending.id)),
+            get_temporal_client().notify_competitor_changed(
+                monitored_product.id, event="added", competitor_id=pending.id
             )
         except Exception as exc:
             logger.warning(
@@ -367,10 +358,8 @@ def delete_competitor_entry(
         #Sinaliza workflow do monitorado pai sobre remoção do concorrente
         if _TEMPORAL_AVAILABLE:
             try:
-                get_temporal_client().signal_sync(
-                    "competitor_changed",
-                    str(monitored_id),
-                    CompetitorChangedPayload(event="removed", competitor_id=str(competitor_id)),
+                get_temporal_client().notify_competitor_changed(
+                    monitored_id, event="removed", competitor_id=competitor_id
                 )
             except Exception as exc:
                 logger.warning(
@@ -434,10 +423,8 @@ def clear_competitors_from_monitored(
         client = get_temporal_client()
         for cid in deleted_ids:
             try:
-                client.signal_sync(
-                    "competitor_changed",
-                    str(monitored_product_id),
-                    CompetitorChangedPayload(event="removed", competitor_id=str(cid)),
+                client.notify_competitor_changed(
+                    monitored_product_id, event="removed", competitor_id=cid
                 )
             except Exception as exc:
                 logger.warning(

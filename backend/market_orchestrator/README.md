@@ -85,7 +85,7 @@ Essa separação preserva o pipeline operacional existente e adiciona governanç
 |----------|--------|----------------------|
 | `dispatch_collection` | Enfileira coleta do monitorado | `market_alert.collectors.orchestrator.enqueue_collect` |
 | `query_collection_status` | Infere conclusão da coleta | leitura de `MonitoredProduct.last_collected_at` |
-| `fetch_monitored_policy` | Lê policy atual do monitorado | leitura de `check_interval`, `next_check_at`, `paused` |
+| `fetch_monitored_policy` | Calcula agendamento real do monitorado | `shared.scheduling.calculate_schedule()` + leitura de `next_check_at`, `paused`; retorna `interval_seconds`, `stability_score`, `scheduling_reason` |
 | `persist_workflow_snapshot` | Salva snapshot de estado no Redis | chave `workflow:snapshot:{monitored_id}` |
 | `cleanup_workflow_state` | Remove estado transitario | delete da chave de snapshot |
 
@@ -97,10 +97,11 @@ Essa separação preserva o pipeline operacional existente e adiciona governanç
 - Startup da API reconcilia workflows via [`../market_alert/main.py`](../market_alert/main.py) (`WorkflowReconciler().reconcile_all()`).
 - Worker Celery inicia o Temporal Worker em thread daemon no `worker_ready` via [`../market_alert/infraestructure/worker_lifecycle.py`](../market_alert/infraestructure/worker_lifecycle.py).
 - Health check consulta conectividade Temporal com `probe_connectivity_sync()` em [`../market_alert/infraestructure/routes/routes_health.py`](../market_alert/infraestructure/routes/routes_health.py).
-- Lifecycle de monitorados usa `signal_with_start_sync` e `signal_sync` em [`../market_alert/products/services/services_monitored_lifecycle.py`](../market_alert/products/services/services_monitored_lifecycle.py).
-- Lifecycle de concorrentes sinaliza `competitor_changed` em [`../market_alert/products/services/services_competitor_lifecycle.py`](../market_alert/products/services/services_competitor_lifecycle.py).
+- Lifecycle de monitorados usa os métodos de facade `start_monitoring`, `pause_monitoring`, `resume_monitoring`, `delete_monitoring` em [`../market_alert/products/services/services_monitored_lifecycle.py`](../market_alert/products/services/services_monitored_lifecycle.py).
+- Lifecycle de concorrentes usa `notify_competitor_changed` em [`../market_alert/products/services/services_competitor_lifecycle.py`](../market_alert/products/services/services_competitor_lifecycle.py).
 - Endpoint `GET /monitored/{product_id}/workflow-status` consulta `query_sync()` em [`../market_alert/products/routes/routes_monitored.py`](../market_alert/products/routes/routes_monitored.py).
-- Tarefa periodica de reconciliação (`reconcile-workflows-periodic`, 600s) em [`../market_alert/infraestructure/celery/config.py`](../market_alert/infraestructure/celery/config.py) chama [`../market_alert/infraestructure/tasks/reconciler_task.py`](../market_alert/infraestructure/tasks/reconciler_task.py).
+- Tarefa periodica de reconciliação (`reconcile-workflows-periodic`, 600s / 10 min) em [`../market_alert/infraestructure/celery/config.py`](../market_alert/infraestructure/celery/config.py) chama [`../market_alert/infraestructure/tasks/reconciler_task.py`](../market_alert/infraestructure/tasks/reconciler_task.py).
+- Endpoint `GET /health/temporal` em [`../market_alert/infraestructure/routes/routes_health.py`](../market_alert/infraestructure/routes/routes_health.py) retorna `{ temporal_connected: bool, last_check_at: ISO }` via `probe_connectivity_sync()`, sem propagar exceções.
 
 ### Relação com `market_scraper`
 `market_orchestrator` não conversa diretamente com `market_scraper`. O caminho e indireto:
@@ -203,13 +204,14 @@ As definicoes estao em [`../../docker-compose.yml`](../../docker-compose.yml).
 - **Determinismo do workflow**: I/O fica fora do workflow, todo acesso externo passa por activities.
 - **Fallback não bloqueante**: cliente do Temporal retorna `False/None` em falha para não derrubar fluxo de negocio.
 - **Snapshots best-effort**: estado operacional e salvo no Redis sem impactar o ciclo se houver falha.
-- **Reconciliação periodica**: reduz risco de monitorado ativo sem workflow.
-- **Logs estruturados**: `structlog` em workflow, worker, activities, reconciler e client.
+- **Reconciliação periodica**: reduz risco de monitorado ativo sem workflow (a cada 10 minutos via Celery Beat).
+- **Logs estruturados**: `structlog` em workflow, worker, activities, reconciler e client. O processor `_inject_trace_id` em `shared/infra/logging.py` injeta automaticamente `trace_id` do `ContextVar` em todos os eventos de log; `dispatch_collection` seta o ContextVar para propagar o trace_id gerado pelo workflow para os logs de activities e tasks Celery.
+- **Correlação de dispatch**: `dispatch_collection` salva o timestamp de dispatch no Redis (`workflow:dispatch:{monitored_id}:{correlation_id}`, TTL 2h); `query_collection_status` compara `last_collected_at >= dispatch_timestamp` para garantir que apenas coletas posteriores ao dispatch corrente contam como conclusão.
 
 ## Pontos de Atenção Atuais
-- O `query_collection_status` usa `last_collected_at` como proxy de conclusão (não correlaciona explicitamente por `correlation_id`).
 - No setup atual, o Temporal Worker roda co-localizado com worker Celery (thread daemon em `worker_ready`), o que simplifica operação mas compartilha recursos do processo.
 - O módulo não possui API HTTP propria; todo acesso operacional acontece via cliente em `market_alert`.
+- Se o Redis estiver indisponível no momento do `query_collection_status`, o fallback aceita qualquer `last_collected_at` para evitar loop infinito de polling.
 
 ---
 

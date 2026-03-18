@@ -90,7 +90,7 @@ BEAT_SCHEDULE = {
     ),
     "reconcile-workflows-periodic": _schedule_entry(
         "market_alert.infraestructure.tasks.reconciler_task.reconcile_workflows_task",
-        600,  #10 minutos
+        600,  #10 minutos para garantir que falhas sejam detectadas
         queue="scraping",
     ),
 }

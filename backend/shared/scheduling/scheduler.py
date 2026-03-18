@@ -1,9 +1,12 @@
-""" Utilitários para política central de agendamento de monitorados.
+""" Política central de agendamento de monitorados — lógica pura sem I/O.
 
 Este módulo concentra toda a decisão de ``next_check_at`` para evitar regras
 espalhadas entre CRUD, serviços e orquestrador. A API principal é
 :func:`calculate_schedule`, que produz uma decisão explicável com estabilidade,
 intervalo e motivo aplicado.
+
+Não possui dependências de ``market_alert`` — consome apenas ``shared.core.config_base``
+e ``shared.scheduling.context``.
 """
 
 from __future__ import annotations
@@ -12,10 +15,11 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from market_alert.core.config_alert import settings
-from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.models.models_products import MonitoredProduct
+from shared.core.config_base import ConfigBase
+from shared.scheduling.context import SchedulingContext
 
+
+_cfg = ConfigBase()
 
 STABILITY_UNSTABLE = 0
 STABILITY_STABLE = 1
@@ -30,6 +34,8 @@ EVENT_RETRY = "retry"
 
 _COOLDOWN_REASONS = {"rate_limit", "too_many_requests", "429", "temporary_failure"}
 _TRANSITION_EVENTS = {EVENT_PRICE_CHANGED, EVENT_AVAILABILITY_CHANGED, EVENT_RESUMED}
+_STATUS_PENDING = "pending"
+
 
 @dataclass(frozen=True)
 class RetryContext:
@@ -41,7 +47,6 @@ class RetryContext:
     """
     reason: str | None = None
     next_retry_at: datetime | None = None
-
 
 @dataclass(frozen=True)
 class SchedulingDecision:
@@ -88,20 +93,8 @@ def _random_interval(min_seconds: int, max_seconds: int) -> int:
         return min_seconds
     return random.randint(min_seconds, max_seconds)
 
-def _resolve_next_check_at(
-    monitored: MonitoredProduct,
-    next_check_at: datetime | None,
-) -> tuple[datetime, datetime]:
-    """ Resolve o próximo check garantindo data válida e retorna também o horário base """
-    now = _utc_now()
-    resolved_next_check_at = _normalize_datetime(next_check_at) or _normalize_datetime(monitored.next_check_at) or now
-    if resolved_next_check_at < now:
-        #Evita reenqueue com horário no passado para impedir loops ociosos
-        resolved_next_check_at = now
-    return resolved_next_check_at, now
-
 def calculate_stability_score(
-    product: MonitoredProduct,
+    ctx: SchedulingContext,
     *,
     reference_time: datetime | None = None,
 ) -> int:
@@ -110,21 +103,21 @@ def calculate_stability_score(
 
     #Prioriza mudanças explícitas, mas considera indicadores de grupo e criação como fallback
     last_change = (
-        product.last_price_change_at
-        or product.group_collected_at
-        or product.last_scraped_at
-        or product.created_at
+        ctx.last_price_change_at
+        or ctx.group_collected_at
+        or ctx.last_scraped_at
+        or ctx.created_at
     )
     last_change = _normalize_datetime(last_change)
 
     if last_change is None:
         return STABILITY_UNSTABLE
-    
+
     days_since_change = (now - last_change).total_seconds() / 86400
 
-    if days_since_change >= settings.STABILITY_DAYS_VERY_STABLE:
+    if days_since_change >= _cfg.STABILITY_DAYS_VERY_STABLE:
         return STABILITY_VERY_STABLE
-    if days_since_change >= settings.STABILITY_DAYS_STABLE:
+    if days_since_change >= _cfg.STABILITY_DAYS_STABLE:
         return STABILITY_STABLE
     return STABILITY_UNSTABLE
 
@@ -132,21 +125,21 @@ def _interval_window_from_stability(stability_score: int) -> tuple[int, int, str
     """ Retorna janela (min, max) e motivo associado à estabilidade informada """
     if stability_score == STABILITY_VERY_STABLE:
         return (
-            settings.COLLECT_INTERVAL_VERY_STABLE_MIN,
-            settings.COLLECT_INTERVAL_VERY_STABLE_MAX,
+            _cfg.COLLECT_INTERVAL_VERY_STABLE_MIN,
+            _cfg.COLLECT_INTERVAL_VERY_STABLE_MAX,
             "stability_very_stable",
         )
-    
+
     if stability_score == STABILITY_STABLE:
         return (
-            settings.COLLECT_INTERVAL_STABLE_MIN,
-            settings.COLLECT_INTERVAL_STABLE_MAX,
+            _cfg.COLLECT_INTERVAL_STABLE_MIN,
+            _cfg.COLLECT_INTERVAL_STABLE_MAX,
             "stability_stable",
         )
-    
+
     return (
-        settings.COLLECT_INTERVAL_UNSTABLE_MIN,
-        settings.COLLECT_INTERVAL_UNSTABLE_MAX,
+        _cfg.COLLECT_INTERVAL_UNSTABLE_MIN,
+        _cfg.COLLECT_INTERVAL_UNSTABLE_MAX,
         "stability_unstable",
     )
 
@@ -156,7 +149,7 @@ def _resolve_retry_candidate(
     retry_context: RetryContext | None,
 ) -> tuple[datetime | None, str | None]:
     """ Resolve horário mínimo de retry para erros transitórios e rate-limit
-    
+
     O cálculo respeita ``next_retry_at`` quando já vier do fluxo de coleta e,
     para motivos sensíveis, aplica cooldown mínimo configurável.
     """
@@ -171,24 +164,24 @@ def _resolve_retry_candidate(
     if retry_reason not in _COOLDOWN_REASONS:
         return parsed_retry_at, None
 
-    cooldown_floor = reference_time + timedelta(seconds=settings.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS)
+    cooldown_floor = reference_time + timedelta(seconds=_cfg.SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS)
     if parsed_retry_at is None or parsed_retry_at < cooldown_floor:
         return cooldown_floor, "retry_cooldown_floor"
     return parsed_retry_at, "retry_payload_respected"
 
 def calculate_next_interval(
-    product: MonitoredProduct,
+    ctx: SchedulingContext,
     *,
     reference_time: datetime | None = None,
 ) -> int:
     """ Retorna intervalo aleatório para o próximo ciclo conforme estabilidade """
     normalized_reference = _normalize_datetime(reference_time) or datetime.now(timezone.utc)
-    stability_score = calculate_stability_score(product, reference_time=normalized_reference)
+    stability_score = calculate_stability_score(ctx, reference_time=normalized_reference)
     min_seconds, max_seconds, _ = _interval_window_from_stability(stability_score)
     return _random_interval(min_seconds, max_seconds)
 
 def calculate_schedule(
-    product: MonitoredProduct,
+    ctx: SchedulingContext,
     *,
     reference_time: datetime | None = None,
     event_type: str = EVENT_STANDARD,
@@ -197,7 +190,7 @@ def calculate_schedule(
     """ Calcula decisão completa de agendamento em um único ponto.
 
     Args:
-        product: Instância do monitorado que será agendada.
+        ctx: Estado do monitorado necessário para a decisão.
         reference_time: Tempo-base do cálculo (ex.: coleta finalizada).
         event_type: Tipo de evento que disparou o cálculo.
         retry_context: Contexto opcional para fluxos de retry/cooldown.
@@ -207,7 +200,7 @@ def calculate_schedule(
     """
     normalized_reference = _normalize_datetime(reference_time) or datetime.now(timezone.utc)
 
-    if product.status == MonitoredStatus.pending and not product.last_checked:
+    if ctx.status == _STATUS_PENDING and not ctx.last_checked:
         #Mantém primeira coleta imediata para itens recém-criados em estado pendente
         return SchedulingDecision(
             stability_score=STABILITY_UNSTABLE,
@@ -221,7 +214,7 @@ def calculate_schedule(
         #Mudanças relevantes reduzem estabilidade para acelerar convergência
         stability_score = STABILITY_UNSTABLE
     else:
-        stability_score = calculate_stability_score(product, reference_time=normalized_reference)
+        stability_score = calculate_stability_score(ctx, reference_time=normalized_reference)
 
     min_seconds, max_seconds, window_reason = _interval_window_from_stability(stability_score)
     sampled_interval = _random_interval(min_seconds, max_seconds)
@@ -245,16 +238,17 @@ def calculate_schedule(
     )
 
 def calculate_next_check_at(
-    product: MonitoredProduct,
+    ctx: SchedulingContext,
     collected_at: datetime | None,
 ) -> datetime:
     """ Mantém API legada retornando apenas o datetime da próxima coleta """
     decision = calculate_schedule(
-        product,
+        ctx,
         reference_time=collected_at,
         event_type=EVENT_STANDARD,
     )
     return decision.next_check_at
+
 
 __all__ = [
     "STABILITY_UNSTABLE",
@@ -273,6 +267,5 @@ __all__ = [
     "calculate_next_check_at",
     "calculate_schedule",
     "_utc_now",
-    "_resolve_next_check_at",
     "_parse_next_retry_at",
 ]

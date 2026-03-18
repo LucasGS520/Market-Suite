@@ -91,6 +91,35 @@ def health_check():
     logger.info("health_check_result", status=status)
     return status
 
+@router.get("/temporal", tags=["Health"])
+def temporal_health():
+    """ Verifica conectividade com o Temporal Server.
+
+    Retorna status e timestamp da verificação. Nunca lança exceção —
+    indisponibilidade do Temporal é reportada como degraded, não como erro HTTP.
+    """
+    checked_at = datetime.now(timezone.utc).isoformat()
+    try:
+        from market_orchestrator.alert.alert_client import get_temporal_client
+        connected = get_temporal_client().probe_connectivity_sync()
+        return {
+            "temporal_connected": connected,
+            "last_check_at": checked_at,
+        }
+    except ImportError:
+        return {
+            "temporal_connected": False,
+            "last_check_at": checked_at,
+            "detail": "módulo market_orchestrator não instalado",
+        }
+    except Exception:
+        logger.exception("temporal_health_endpoint_failed")
+        return {
+            "temporal_connected": False,
+            "last_check_at": checked_at,
+            "detail": "falha ao verificar Temporal",
+        }
+
 @router.get("/readiness", tags=["Health"])
 def readiness_check():
     """ Valida se as dependências principais estão prontas para uso."""

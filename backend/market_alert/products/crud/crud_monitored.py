@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
+from shared.scheduling import EVENT_RESUMED, EVENT_STANDARD
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url_for_storage
 
@@ -27,7 +28,6 @@ from market_alert.products.domain.product_lifecycle import (
     resolve_scheduling_event,
     update_price_change_tracking,
 )
-from market_alert.products.utils.interval_calculator_products import EVENT_RESUMED, EVENT_STANDARD
 from market_alert.products.utils.name_derivation import prepare_effective_name, should_replace_with_scraped
 from market_alert.products.utils.price_utils import normalize_scraped_price, should_create_price_history
 from market_alert.products.utils.price_decimal import different_price

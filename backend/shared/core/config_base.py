@@ -98,6 +98,18 @@ class ConfigBase(BaseSettings):
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO") #Nível de log do root logger
     LOG_FORMAT: str = os.getenv("LOG_FORMAT", "json") #Formato de saída (json ou text)
 
+    #Cadência de coleta por nível de estabilidade — compartilhado com market_orchestrator
+    COLLECT_INTERVAL_UNSTABLE_MIN: int = int(os.getenv("COLLECT_INTERVAL_UNSTABLE_MIN", str(5 * 60))) #Intervalo mínimo para produtos instáveis
+    COLLECT_INTERVAL_UNSTABLE_MAX: int = int(os.getenv("COLLECT_INTERVAL_UNSTABLE_MAX", str(10 * 60))) #Intervalo máximo para produtos instáveis
+    COLLECT_INTERVAL_STABLE_MIN: int = int(os.getenv("COLLECT_INTERVAL_STABLE_MIN", str(10 * 60))) #Intervalo mínimo para produtos estáveis
+    COLLECT_INTERVAL_STABLE_MAX: int = int(os.getenv("COLLECT_INTERVAL_STABLE_MAX", str(20 * 60))) #Intervalo máximo para produtos estáveis
+    COLLECT_INTERVAL_VERY_STABLE_MIN: int = int(os.getenv("COLLECT_INTERVAL_VERY_STABLE_MIN", str(20 * 60))) #Intervalo mínimo para produtos muito estáveis
+    COLLECT_INTERVAL_VERY_STABLE_MAX: int = int(os.getenv("COLLECT_INTERVAL_VERY_STABLE_MAX", str(30 * 60))) #Intervalo máximo para produtos muito estáveis
+    STABILITY_DAYS_UNSTABLE: int = int(os.getenv("STABILITY_DAYS_UNSTABLE", "1")) #Janela para considerar produto instável
+    STABILITY_DAYS_STABLE: int = int(os.getenv("STABILITY_DAYS_STABLE", "3")) #Janela para considerar produto estável
+    STABILITY_DAYS_VERY_STABLE: int = int(os.getenv("STABILITY_DAYS_VERY_STABLE", "7")) #Janela para considerar produto muito estável
+    SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS: int = int(os.getenv("SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS", str(10 * 60))) #Cooldown adicional após falhas de rate limit
+
     #Configurações extras do Pydantic
     model_config = ConfigDict(
         env_file=ENV_FILE,

@@ -19,10 +19,34 @@ Uso::
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import Any, Sequence
 
 import structlog
-from structlog.typing import Processor
+from structlog.typing import EventDict, Processor, WrappedLogger
+
+
+def _inject_trace_id(
+    logger: WrappedLogger, method_name: str, event_dict: EventDict
+) -> EventDict:
+    """ Processor structlog: injeta trace_id do ContextVar em todos os eventos de log.
+
+    Lê o valor atual de ``trace_id`` da ContextVar (definida via
+    ``shared.utils.trace_context.set_trace_id``) e o adiciona ao evento
+    somente se não houver um valor explícito já presente. Dessa forma,
+    chamadas que passam ``trace_id=`` explicitamente preservam seu valor.
+
+    Não propaga exceções — se a leitura do ContextVar falhar, o log
+    prossegue sem o campo.
+    """
+    if "trace_id" not in event_dict:
+        try:
+            from shared.utils.trace_context import get_trace_id
+            tid = get_trace_id()
+            if tid:
+                event_dict["trace_id"] = tid
+        except Exception:
+            pass
+    return event_dict
 
 
 def configure_structlog(
@@ -49,6 +73,7 @@ def configure_structlog(
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        _inject_trace_id,
         *extra_processors,
         structlog.processors.JSONRenderer(),
     ]
