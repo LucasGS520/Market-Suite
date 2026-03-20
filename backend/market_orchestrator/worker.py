@@ -12,6 +12,7 @@ import sys
 import structlog
 from temporalio.client import Client
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 from market_orchestrator.activities import (
     cleanup_workflow_state,
@@ -34,11 +35,37 @@ async def start_temporal_worker() -> None:
     """
     logger.info("temporal_worker_connecting", target=settings.temporal_target)
 
-    try:
-        client = await Client.connect(settings.temporal_target, namespace=settings.TEMPORAL_NAMESPACE)
-    except Exception as exc:
-        logger.error("temporal_worker_connect_failed", error=str(exc))
-        return
+    client: Client | None = None
+    delays = [2, 4, 8, 16, 30]
+    for attempt, delay in enumerate(delays, 1):
+        try:
+            client = await Client.connect(settings.temporal_target, namespace=settings.TEMPORAL_NAMESPACE)
+            if attempt > 1:
+                logger.info("temporal_worker_connected_after_retry", attempt=attempt, target=settings.temporal_target)
+            break
+        except Exception as exc:
+            logger.warning(
+                "temporal_worker_connect_attempt_failed",
+                attempt=attempt,
+                max_attempts=len(delays),
+                target=settings.temporal_target,
+                error=str(exc),
+            )
+            if attempt < len(delays):
+                await asyncio.sleep(delay)
+            else:
+                logger.error("temporal_worker_connect_failed_giving_up", target=settings.temporal_target, error=str(exc))
+                return
+
+    assert client is not None
+
+    # Passthrough: módulos com I/O legítimo que não devem ser bloqueados pelo sandbox.
+    # pydantic_settings usa Path.expanduser() para resolver env files — operação não-determinística
+    # proibida por padrão no sandbox do Temporal. pathlib é adicionado como camada extra de segurança.
+    _sandbox_restrictions = SandboxRestrictions.default.with_passthrough_modules(
+        "pydantic_settings",
+        "pathlib",
+    )
 
     worker = Worker(
         client,
@@ -51,6 +78,7 @@ async def start_temporal_worker() -> None:
             cleanup_workflow_state,
             fetch_monitored_policy,
         ],
+        workflow_runner=SandboxedWorkflowRunner(restrictions=_sandbox_restrictions),
     )
 
     loop = asyncio.get_running_loop()

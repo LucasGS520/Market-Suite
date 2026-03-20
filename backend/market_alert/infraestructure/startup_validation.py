@@ -28,14 +28,19 @@ def validate_startup_dependencies(*, strict: bool = True) -> bool:
     conectividade básica. Isso reduz o risco de subir API/worker em estado
     degradado e só descobrir falhas após receber carga.
 
+    Temporal é verificado de forma não-bloqueante: falha gera warning mas NÃO
+    impede o startup (fallback para Celery continua disponível).
+
     Args:
-        strict: Quando ``True``, interrompe o processo em caso de falha.
+        strict: Quando ``True``, interrompe o processo em caso de falha de
+                PostgreSQL ou Redis.
 
     Returns:
         ``True`` quando todas as validações passam, caso contrário ``False``.
     """
     postgres_ok = _validate_postgres()
     redis_ok = _validate_redis()
+    _validate_temporal_nonblocking()
     is_valid = postgres_ok and redis_ok
 
     if is_valid:
@@ -67,4 +72,42 @@ def _validate_redis() -> bool:
     except Exception:
         logger.exception("startup_redis_unavailable")
         return False
+
+def _validate_temporal_nonblocking() -> None:
+    """ Verifica Temporal com retry exponencial — falha gera warning, nunca RuntimeError.
+
+    Tenta conectar até 5 vezes com backoff crescente antes de declarar fallback.
+    Delays totais: 2+4+8+16 = 30 segundos de espera máxima entre tentativas.
+    """
+    import time
+
+    try:
+        from market_orchestrator.alert.alert_client import get_temporal_client
+    except ImportError:
+        logger.warning("temporal_module_not_installed", fallback="celery_available")
+        return
+
+    delays = [2, 4, 8, 16, 30]
+    client = get_temporal_client()
+    for attempt, delay in enumerate(delays, 1):
+        connected = client.probe_connectivity_sync()
+        if connected:
+            logger.info("startup_temporal_ok", attempt=attempt)
+            return
+        next_delay = delay if attempt < len(delays) else None
+        logger.warning(
+            "temporal_health_check_attempt",
+            attempt=attempt,
+            max_attempts=len(delays),
+            next_delay=next_delay,
+            fallback="celery_available",
+        )
+        if next_delay is not None:
+            time.sleep(next_delay)
+
+    logger.warning(
+        "temporal_health_check_failed",
+        severity="warning",
+        fallback="celery_available",
+    )
     

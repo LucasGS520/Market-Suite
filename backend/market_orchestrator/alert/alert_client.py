@@ -8,6 +8,7 @@ None sem propagar para o chamador.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from typing import Any
 
 import structlog
@@ -15,7 +16,6 @@ from temporalio.client import Client
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.service import RPCError
 
-from market_orchestrator.core.config_orchestrator import settings
 from market_orchestrator.enums.enums_workflow import WorkflowState
 from market_orchestrator.schemas.schemas_signals import (
     CompetitorChangedPayload,
@@ -27,6 +27,16 @@ from market_orchestrator.schemas.schemas_workflow import WorkflowInput
 
 
 logger = structlog.get_logger("orchestrator.client")
+
+def _config():
+    """Lazy accessor para OrchestratorSettings — evita import de config no nível de módulo.
+
+    O import em nível de módulo acionaria Path.expanduser() durante carregamento do pacote,
+    o que é proibido pelo sandbox determinístico do Temporal SDK.
+    Python cacheia módulos em sys.modules, portanto chamadas subsequentes são baratas.
+    """
+    from market_orchestrator.core.config_orchestrator import settings
+    return settings
 
 # Política de reutilização de ID: permite criar novo workflow se o anterior completou/falhou
 _WORKFLOW_ID_REUSE = WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
@@ -50,12 +60,34 @@ class TemporalOrchestrationClient:
     # ------------------------------------------------------------------
 
     async def _get_client(self) -> Client:
-        if self._client is None:
-            self._client = await Client.connect(
-                settings.temporal_target,
-                namespace=settings.TEMPORAL_NAMESPACE,
-            )
-        return self._client
+        if self._client is not None:
+            return self._client
+
+        delays = [1, 2, 4]
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate(delays, 1):
+            try:
+                self._client = await Client.connect(
+                    _config().temporal_target,
+                    namespace=_config().TEMPORAL_NAMESPACE,
+                )
+                if attempt > 1:
+                    logger.info("temporal_client_connected_after_retry", attempt=attempt, target=_config().temporal_target)
+                return self._client
+            except Exception as exc:
+                last_exc = exc
+                self._client = None
+                logger.warning(
+                    "temporal_client_connect_attempt_failed",
+                    attempt=attempt,
+                    max_attempts=len(delays),
+                    target=_config().temporal_target,
+                    error=str(exc),
+                )
+                if attempt < len(delays):
+                    await asyncio.sleep(delay)
+
+        raise last_exc
 
     # ------------------------------------------------------------------
     # Métodos assíncronos (para uso em contexto async)
@@ -71,13 +103,19 @@ class TemporalOrchestrationClient:
 
         Retorna True em sucesso, False em falha não-bloqueante.
         """
+        logger.info(
+            "temporal_signal_with_start_attempt",
+            monitored_id=input.monitored_id,
+            signal_name=signal_name or "start",
+            target=_config().temporal_target,
+        )
         try:
             client = await self._get_client()
             handle = await client.start_workflow(
                 "MonitoredProductWorkflow",
                 input,
                 id=_workflow_id(input.monitored_id),
-                task_queue=settings.TEMPORAL_TASK_QUEUE,
+                task_queue=_config().TEMPORAL_TASK_QUEUE,
                 id_reuse_policy=_WORKFLOW_ID_REUSE,
             )
             if signal_name and signal_arg is not None:
@@ -173,17 +211,24 @@ class TemporalOrchestrationClient:
     # ------------------------------------------------------------------
 
     def _run_async(self, coro: Any) -> Any:
-        """ Executa coroutine em event loop existente ou cria um novo """
+        """ Executa coroutine reutilizando loop existente (FastAPI/AnyIO) ou criando um novo.
+
+        Padrão seguro para contextos síncronos dentro de ambientes async:
+        - Se há loop rodando (FastAPI/AnyIO): usa run_coroutine_threadsafe para submeter
+          ao loop existente sem criar conflito com asyncio.run()
+        - Se não há loop (contexto puramente síncrono): cria loop com asyncio.run()
+        """
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Contexto assíncrono (FastAPI): schedule e aguarda via thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(asyncio.run, coro)
-                    return future.result(timeout=10)
-            else:
-                return loop.run_until_complete(coro)
+            loop = asyncio.get_running_loop()
+            #Há um loop rodando (FastAPI/AnyIO worker thread) — submete ao loop existente
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            return future.result(timeout=30)
+        except RuntimeError:
+            #Nenhum loop rodando — contexto síncrono puro, cria novo loop
+            return asyncio.run(coro)
+        except concurrent.futures.TimeoutError:
+            logger.error("temporal_client_run_async_timeout", timeout_seconds=30)
+            return None
         except Exception as exc:
             logger.error("temporal_client_unreachable", error=str(exc))
             return None
@@ -195,7 +240,14 @@ class TemporalOrchestrationClient:
         signal_arg: Any = None,
     ) -> bool:
         result = self._run_async(self.signal_with_start(input, signal_name, signal_arg))
-        return bool(result)
+        success = bool(result)
+        if success:
+            logger.info(
+                "temporal_workflow_signal_succeeded",
+                workflow_id=_workflow_id(str(input.monitored_id)),
+                signal_name=signal_name or "start",
+            )
+        return success
 
     def signal_sync(
         self,
@@ -204,7 +256,14 @@ class TemporalOrchestrationClient:
         payload: Any = None,
     ) -> bool:
         result = self._run_async(self.signal(signal_name, monitored_id, payload))
-        return bool(result)
+        success = bool(result)
+        if success:
+            logger.info(
+                "temporal_workflow_signal_succeeded",
+                workflow_id=_workflow_id(monitored_id),
+                signal_name=signal_name,
+            )
+        return success
 
     def query_sync(self, monitored_id: str) -> WorkflowSnapshot | None:
         return self._run_async(self.query(monitored_id))
@@ -213,10 +272,19 @@ class TemporalOrchestrationClient:
         """ Verifica conectividade com o Temporal Server.
 
         Retorna True se a conexão foi estabelecida, False caso contrário.
-        Não lança exceções — usado pelo health check.
+        Não lança exceções — usado pelo health check e startup.
+
+        Não usa _get_client() para evitar retry com asyncio.sleep(), que bloqueia
+        indefinidamente quando chamado a partir da thread do event loop (startup handler).
+        Conexão bem-sucedida é cacheada em self._client para uso subsequente.
         """
+        if self._client is not None:
+            return True
         try:
-            await self._get_client()
+            self._client = await Client.connect(
+                _config().temporal_target,
+                namespace=_config().TEMPORAL_NAMESPACE,
+            )
             return True
         except Exception as exc:
             logger.warning("temporal_connectivity_probe_failed", error=str(exc))

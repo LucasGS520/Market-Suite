@@ -1,4 +1,4 @@
-# CLAUDE.md
+# Claude — Correção Orquestrador Contínuo com Temporal
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -17,13 +17,40 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Resumo e Estratégia do Plano - Orquestrador Contínuo com Temporal
+## Objetivo e Problemas a ser Resolvido
 
-### Objetivo
-Integrar o `market_orchestrator` como orquestrador durável de workflows de coleta de produtos, garantindo estado persistido, resiliência a falhas e sinalização em tempo real, sem reescrever Celery/Comparações/Notificações.
+## Confirmação do Problema
 
-Organizar e Migrar corretamente componentes e arquivos ligados a politica e regras de definição de tempo de coletas.
-Separar claramente funcões de orquestração (`market_orchestrator`) e execução da API (`market_alert`).
+### **Problema Principal (Crítico)**
+**O Temporal Worker (orquestrador) conecta com sucesso, mas os clientes (API + Celery Workers) não conseguem atingir o servidor Temporal durante a inicialização, causando degradação do sistema para Celery-only e inativação da orquestração durável.**
+
+**Raiz:** Race condition de inicialização — clientes tentam conectar ao Temporal **antes dele estar pronto** (42 segundos de diferença: 15:09:53 vs 15:10:50).
+
+**Impacto:** 
+- ❌ Workflows duráveis não são iniciados
+- ❌ Signals de monitoramento não são entregues
+- ✅ Sistema cai back para Celery (funciona parcialmente, mas sem plano de controle durável)
+
+### **Problemas Secundários (Médio e Baixo Impacto)**
+
+| # | Problema | Severidade | Impacto |
+|---|----------|-----------|--------|
+| 2 | Health check Temporal é bloqueante e sem retry | ⚠️ Média | Torna inicialização lenta; não aproveita retry exponencial |
+| 3 | Clock drift de 18 segundos entre host e containers | ⚠️ Média | Falhas aleatórias na expiração de tokens/locks |
+| 4 | Workers rodando como superuser/root | 🔴 Baixa (Dev) | Anti-pattern de segurança; aceitável em dev, deve ser corrigido em produção |
+
+---
+
+## Estratégia de Implementação
+
+### **Objetivo Geral**
+Garantir que **clientes Temporal (API + Workers) consigam conectar ao servidor durante a inicialização**, eliminando a race condition e permitindo que workflows sejam orquestrados no momento de startup.
+
+### **Abordagem em 3 Camadas**
+
+1. **Camada de Orquestração (Temporal):** Garantir que o servidor está PRONTO antes de aceitar clientes
+2. **Camada de Cliente (API + Workers):** Implementar retry robusta e health check com backoff
+3. **Camada de Infraestrutura (Docker Compose):** Adicionar health checks e dependency ordering
 
 ---
 

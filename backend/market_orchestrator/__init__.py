@@ -18,7 +18,6 @@ A camada de execucao existente nao foi alterada:
   - CollectionEnqueuer (market_alert/infraestructure/celery/enqueuer.py)
   - payload_builders (market_alert/collectors/orchestrator/payload_builders.py)
 """
-from market_orchestrator.alert.alert_client import TemporalOrchestrationClient, get_temporal_client
 from market_orchestrator.enums.enums_workflow import WorkflowState
 from market_orchestrator.schemas.schemas_policy import CollectionPolicy
 from market_orchestrator.schemas.schemas_signals import (
@@ -30,8 +29,6 @@ from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
 from market_orchestrator.schemas.schemas_workflow import WorkflowInput
 
 __all__ = [
-    "TemporalOrchestrationClient",
-    "get_temporal_client",
     "WorkflowInput",
     "WorkflowState",
     "WorkflowSnapshot",

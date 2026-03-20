@@ -95,30 +95,55 @@ def health_check():
 def temporal_health():
     """ Verifica conectividade com o Temporal Server.
 
-    Retorna status e timestamp da verificação. Nunca lança exceção —
-    indisponibilidade do Temporal é reportada como degraded, não como erro HTTP.
+    Retorna HTTP 200 com status=healthy quando conectado,
+    HTTP 503 com status=unhealthy quando indisponível.
     """
     checked_at = datetime.now(timezone.utc).isoformat()
     try:
         from market_orchestrator.alert.alert_client import get_temporal_client
+        from market_orchestrator.core.config_orchestrator import settings as orchestrator_settings
         connected = get_temporal_client().probe_connectivity_sync()
-        return {
-            "temporal_connected": connected,
-            "last_check_at": checked_at,
-        }
+        if connected:
+            return {
+                "status": "healthy",
+                "temporal_connected": True,
+                "namespace": orchestrator_settings.TEMPORAL_NAMESPACE,
+                "task_queue": orchestrator_settings.TEMPORAL_TASK_QUEUE,
+                "last_check_at": checked_at,
+            }
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "temporal_connected": False,
+                "namespace": orchestrator_settings.TEMPORAL_NAMESPACE,
+                "task_queue": orchestrator_settings.TEMPORAL_TASK_QUEUE,
+                "last_check_at": checked_at,
+            },
+        )
+    except HTTPException:
+        raise
     except ImportError:
-        return {
-            "temporal_connected": False,
-            "last_check_at": checked_at,
-            "detail": "módulo market_orchestrator não instalado",
-        }
-    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "temporal_connected": False,
+                "error": "módulo market_orchestrator não instalado",
+                "last_check_at": checked_at,
+            },
+        )
+    except Exception as exc:
         logger.exception("temporal_health_endpoint_failed")
-        return {
-            "temporal_connected": False,
-            "last_check_at": checked_at,
-            "detail": "falha ao verificar Temporal",
-        }
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "temporal_connected": False,
+                "error": str(exc),
+                "last_check_at": checked_at,
+            },
+        )
 
 @router.get("/readiness", tags=["Health"])
 def readiness_check():

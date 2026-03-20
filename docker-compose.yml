@@ -8,6 +8,7 @@ services:
       - api
       - scraper
       - workers
+      - temporal
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
@@ -32,6 +33,7 @@ services:
       - api
       - scraper
       - workers
+      - temporal
     env_file:
       - .env.common
     command:
@@ -68,6 +70,7 @@ services:
       - api
       - scraper
       - workers
+      - temporal
     env_file:
       - .env.common
     depends_on:
@@ -77,9 +80,22 @@ services:
       - sh
       - -c
       - |
-        export REDISCLI_AUTH="$$REDIS_PASSWORD";
-        until redis-cli -h redis ping | grep -q PONG; do sleep 1; done;
-        redis-cli -h redis SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+        set -e
+        echo "redis-init: esperando redis..."
+        timeout=60
+        t=0
+        until redis-cli -h redis -a "$$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do
+          sleep 1
+          t=$$((t+1))
+          echo "redis-init: aguardando redis... $${t}s"
+          if [ "$$t" -ge "$${timeout}" ]; then
+            echo "redis-init: timeout esperando redis ($${timeout}s)" >&2
+            exit 1
+          fi
+        done
+        echo "redis-init: carregando script..."
+        redis-cli -h redis -a "$$REDIS_PASSWORD" SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+        echo "redis-init: script carregado com sucesso"
     volumes:
       - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
     restart: on-failure
@@ -159,9 +175,11 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
+      temporal-prober:
+        condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - ./backend:/backend:ro   
+      - ./backend:/backend:ro
     restart: unless-stopped
     networks:
       - monitoring-net
@@ -175,6 +193,35 @@ services:
           memory: 512M
 
 
+  #Worker Temporal — orquestração durável de workflows de monitoramento
+  market_orchestrator:
+    build:
+      context: ./backend/market_orchestrator
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - temporal
+    env_file:
+      - .env.common
+      - ./backend/market_orchestrator/.env.market_orchestrator
+    environment:
+      - PYTHONPATH=/backend
+    command: ["python", "-m", "market_orchestrator.worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal-prober:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+
+
   #Serviço dedicado ao scraping de produtos
   market_scraper:
     build:
@@ -185,6 +232,7 @@ services:
     profiles:
       - scraper
     env_file:
+      - .env.common
       - ./backend/market_scraper/.env.market_scraper
     environment:
       - ENV_FILE=.env.market_scraper
@@ -207,6 +255,8 @@ services:
       redis:
         condition: service_healthy
       redis-init:
+        condition: service_completed_successfully
+      temporal-prober:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_scraper:/app/market_scraper
@@ -259,9 +309,11 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
+      temporal-prober:
+        condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - ./backend:/backend:ro   
+      - ./backend:/backend:ro
     restart: on-failure
     networks:
       - monitoring-net
@@ -308,6 +360,8 @@ services:
       redis:
         condition: service_healthy
       redis-init:
+        condition: service_completed_successfully
+      temporal-prober:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
@@ -445,6 +499,19 @@ services:
     depends_on:
       temporal-db:
         condition: service_healthy
+    networks:
+      - monitoring-net
+
+  #Pequeno prober que aguarda temporariamente until Temporal esteja aceitando conexoes
+  temporal-prober:
+    image: alpine:3.18
+    profiles:
+      - temporal
+      - api
+      - workers
+      - scraper
+    command: ["sh","-c","apk add --no-cache netcat-openbsd bind-tools >/dev/null 2>&1 || true; echo 'temporal-prober: verificando presença de temporal...'; if ! nslookup temporal >/dev/null 2>&1; then echo 'temporal-prober: serviço temporal não presente — pulando probe'; exit 0; fi; echo 'temporal-prober: aguardando temporal:7233...'; timeout=120; t=0; until nc -z temporal 7233 2>/dev/null; do sleep 1; t=$$((t+1)); if [ $$t -ge $$timeout ]; then echo 'temporal-prober: timeout' >&2; exit 1; fi; done; echo 'temporal-prober: pronto'"]
+    restart: 'no'
     networks:
       - monitoring-net
 

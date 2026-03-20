@@ -101,7 +101,7 @@ Essa separação preserva o pipeline operacional existente e adiciona governanç
 - Lifecycle de concorrentes usa `notify_competitor_changed` em [`../market_alert/products/services/services_competitor_lifecycle.py`](../market_alert/products/services/services_competitor_lifecycle.py).
 - Endpoint `GET /monitored/{product_id}/workflow-status` consulta `query_sync()` em [`../market_alert/products/routes/routes_monitored.py`](../market_alert/products/routes/routes_monitored.py).
 - Tarefa periodica de reconciliação (`reconcile-workflows-periodic`, 600s / 10 min) em [`../market_alert/infraestructure/celery/config.py`](../market_alert/infraestructure/celery/config.py) chama [`../market_alert/infraestructure/tasks/reconciler_task.py`](../market_alert/infraestructure/tasks/reconciler_task.py).
-- Endpoint `GET /health/temporal` em [`../market_alert/infraestructure/routes/routes_health.py`](../market_alert/infraestructure/routes/routes_health.py) retorna `{ temporal_connected: bool, last_check_at: ISO }` via `probe_connectivity_sync()`, sem propagar exceções.
+- Endpoint `GET /health/temporal` em [`../market_alert/infraestructure/routes/routes_health.py`](../market_alert/infraestructure/routes/routes_health.py) retorna `{ status, temporal_connected, namespace, task_queue, last_check_at }` via `probe_connectivity_sync()`. HTTP 200 quando conectado (`status=healthy`), HTTP 503 quando indisponível (`status=unhealthy`). Nunca propaga exceção — falha é reportada no body com `error`.
 
 ### Relação com `market_scraper`
 `market_orchestrator` não conversa diretamente com `market_scraper`. O caminho e indireto:
@@ -147,6 +147,14 @@ As configurações do módulo estão em [`core/config_orchestrator.py`](core/con
 2. `.env.market_orchestrator` sobrescreve defaults quando presente.
 3. Variáveis exportadas no ambiente do processo tem precedencia final.
 
+> **Importante — Docker:** o `env_file` usa caminho relativo e pode não ser encontrado dependendo do working directory do container. Em ambiente Docker, declare `TEMPORAL_HOST` e `TEMPORAL_PORT` diretamente no ambiente do processo. A forma canônica é adicioná-los em `.env.common` (carregado por todos os serviços via docker-compose). Variáveis de processo sempre têm precedência sobre o `env_file`.
+>
+> Linha obrigatória em `.env.common` para ambiente Docker:
+> ```env
+> TEMPORAL_HOST=temporal
+> TEMPORAL_PORT=7233
+> ```
+
 ### Categorias de variaveis
 | Categoria | Variaveis relevantes |
 |-----------|----------------------|
@@ -171,7 +179,7 @@ WORKFLOW_SIGNAL_COUNT_LIMIT=500
 COLLECTION_RESULT_TIMEOUT_SECONDS=1800
 COLLECTION_POLL_INTERVAL_SECONDS=30
 
-RETRY_MAX_ATTEMPTS=3
+RETRY_MAX_ATTEMPTS=5
 RETRY_INITIAL_INTERVAL_SECONDS=10
 RETRY_MAX_INTERVAL_SECONDS=300
 RETRY_BACKOFF_COEFFICIENT=2.0
@@ -212,6 +220,59 @@ As definicoes estao em [`../../docker-compose.yml`](../../docker-compose.yml).
 - No setup atual, o Temporal Worker roda co-localizado com worker Celery (thread daemon em `worker_ready`), o que simplifica operação mas compartilha recursos do processo.
 - O módulo não possui API HTTP propria; todo acesso operacional acontece via cliente em `market_alert`.
 - Se o Redis estiver indisponível no momento do `query_collection_status`, o fallback aceita qualquer `last_collected_at` para evitar loop infinito de polling.
+
+---
+
+## Troubleshooting
+
+### Erro: "There is no current event loop in thread"
+
+**Sintoma:** `RuntimeError: There is no current event loop in thread 'AnyIO worker thread'` nos logs da API ao chamar `signal_with_start_sync()`, `signal_sync()` ou `query_sync()`. As coroutines podem aparecer como "never awaited" no mesmo log.
+
+**Causa raiz:** `asyncio.get_event_loop()` (versão anterior) levantava `RuntimeError` em threads AnyIO porque essas threads não têm event loop padrão configurado. A tentativa de fallback com `asyncio.run()` dentro de uma `ThreadPoolExecutor` criava um novo loop isolado em vez de reutilizar o loop principal do FastAPI.
+
+**Solução aplicada** em `alert/alert_client.py`, método `_run_async()`:
+```python
+try:
+    loop = asyncio.get_running_loop()          # seguro: retorna o loop existente ou levanta RuntimeError
+    future = asyncio.run_coroutine_threadsafe(coro, loop)  # submete ao loop existente
+    return future.result(timeout=30)
+except RuntimeError:
+    return asyncio.run(coro)                   # fallback: contexto puramente síncrono
+except concurrent.futures.TimeoutError:
+    logger.error("temporal_client_run_async_timeout", timeout_seconds=30)
+    return None
+```
+
+**Como verificar que foi resolvido:** após reiniciar os serviços, buscar `temporal_workflow_signal_succeeded` nos logs da API — presença desse evento confirma que os sinais estão chegando ao Temporal sem erro.
+
+**Atenção:** `future.result(timeout=30)` bloqueia a thread AnyIO chamante. Em carga muito alta com muitas chamadas simultâneas ao cliente Temporal, isso pode gerar contenção no pool de threads do FastAPI. Monitorar latência de endpoints que disparam sinais (`POST /monitored/scrape`, `PUT /monitored/{id}/paused`, etc.) em produção.
+
+### Erro: "Connection refused" ao conectar ao Temporal (127.0.0.1:7233)
+
+**Sintoma:** `temporal_client_unreachable` ou `temporal_client_connect_attempt_failed` nos logs com `error: "Connection refused"` apontando para `127.0.0.1:7233` ou `localhost:7233`.
+
+**Causa raiz:** `TEMPORAL_HOST` não foi carregado do ambiente do processo — o valor default `"localhost"` foi usado. Em Docker, containers não se alcançam via `localhost`; o hostname deve ser o nome do serviço no compose (`temporal`).
+
+**Checklist de diagnóstico:**
+1. Verificar se `TEMPORAL_HOST=temporal` está em `.env.common` (linha obrigatória para Docker).
+2. Confirmar que o serviço `temporal` está no mesmo network (`monitoring-net`) que API e workers.
+3. Validar que o profile `temporal` está ativo no `docker-compose up` (`--profile temporal`).
+4. Testar o endpoint `GET /health/temporal` — retorna `{ "status": "healthy" }` quando conectado.
+5. Nos logs do worker Celery, buscar `temporal_worker_thread_started` seguido de `temporal_worker_connecting` e depois `temporal_worker_started`. Ausência de `temporal_worker_started` indica falha de conexão; o worker tentará novamente com backoff `[2, 4, 8, 16, 30]s`.
+
+**Como confirmar resolução:** evento `temporal_worker_started` nos logs do worker + `temporal_signal_with_start_attempt` seguido de `temporal_workflow_signal_succeeded` nos logs da API ao criar um monitoramento.
+
+### Worker Temporal não inicia (thread daemon morre silenciosamente)
+
+**Sintoma:** `temporal_worker_thread_started` aparece nos logs, mas `temporal_worker_started` nunca aparece. Workflows nunca chegam ao Temporal UI.
+
+**Causa:** falha na conexão inicial de `start_temporal_worker()`. O worker tentará até 5 vezes com backoff exponencial antes de desistir (log final: `temporal_worker_connect_failed_giving_up`).
+
+**Ações:**
+1. Verificar `TEMPORAL_HOST` conforme checklist acima.
+2. Confirmar que o container `temporal` está `healthy` antes dos workers subirem (considere `depends_on: temporal: condition: service_healthy` para workers em dev).
+3. Após corrigir, reiniciar o container do worker Celery — a thread daemon não é reiniciada automaticamente após falha.
 
 ---
 

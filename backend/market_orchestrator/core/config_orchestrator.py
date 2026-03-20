@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 class OrchestratorSettings(BaseSettings):
     # --- Temporal ---
-    TEMPORAL_HOST: str = "localhost"
+    TEMPORAL_HOST: str = "temporal"
     TEMPORAL_PORT: int = 7233
     TEMPORAL_NAMESPACE: str = "default"
     TEMPORAL_TASK_QUEUE: str = "market-orchestrator"
@@ -19,7 +19,7 @@ class OrchestratorSettings(BaseSettings):
     COLLECTION_POLL_INTERVAL_SECONDS: int = 30
 
     # --- Retry policy padrão para activities ---
-    RETRY_MAX_ATTEMPTS: int = 3
+    RETRY_MAX_ATTEMPTS: int = 5
     RETRY_INITIAL_INTERVAL_SECONDS: int = 10
     RETRY_MAX_INTERVAL_SECONDS: int = 300  # 5 min
     RETRY_BACKOFF_COEFFICIENT: float = 2.0
