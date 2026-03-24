@@ -1,7 +1,7 @@
 """ Carrega variáveis de ambiente específicas do serviço `market_alert` """
 
 import os
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from shared.core.config_base import ConfigBase
 
@@ -32,9 +32,7 @@ class Settings(ConfigBase):
     ]
 
     #Configuração do banco de dados
-    DATABASE_URL: str = os.getenv("DATABASE_URL")  # URL de conexão do Postgres
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL não foi encontrada no arquivo .env.market_alert")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")  # URL de conexão do Postgres
 
     #Configurações de email SMTP
     SMTP_HOST: str | None = os.getenv("SMTP_HOST") #Endereço do servidor SMTP
@@ -54,12 +52,7 @@ class Settings(ConfigBase):
     FCM_SERVER_KEY: str | None = os.getenv("FCM_SERVER_KEY") #Autorização do FCM
 
     #Segurança e tokens
-    SECRET_KEY: str = os.getenv("SECRET_KEY") #Chave para asisnar JWTs
-    #Falha rápida evita tokens sem assinatura forte em ambientes mal configurados
-    if not SECRET_KEY:
-        raise ValueError(
-            "SECRET_KEY não foi encontrada no arquivo .env.market_alert; defina uma chave segura para assinar os JWTs"
-        )
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "")  #Chave para assinar JWTs
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256") #Algoritmo de assinatura
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60)
@@ -84,6 +77,19 @@ class Settings(ConfigBase):
         if _refresh_cookie_samesite_env
         else "none"
     ) #Política SameSite do cookie de refresh
+
+    #Inicialização e health check do Temporal
+    # Sequência de startup: postgres → redis → temporal (com retry) → API aceita tráfego
+    # Todos os parâmetros abaixo são ajustáveis via variáveis de ambiente.
+    TEMPORAL_HEALTH_MAX_ATTEMPTS: int = int(
+        os.getenv("TEMPORAL_HEALTH_MAX_ATTEMPTS", "10")
+    ) #Número máximo de tentativas de health check do Temporal no startup
+    TEMPORAL_HEALTH_TIMEOUT: int = int(
+        os.getenv("TEMPORAL_HEALTH_TIMEOUT", "60")
+    ) #Timeout em segundos por tentativa de conexão ao Temporal (referência para _run_async)
+    TEMPORAL_HEALTH_CHECK_INTERVAL: int = int(
+        os.getenv("TEMPORAL_HEALTH_CHECK_INTERVAL", "60")
+    ) #Intervalo em segundos para re-verificações periódicas do Temporal em runtime (reservado)
 
     #Controles operacionais de coleta
     # Invariante: PRODUCT_LOCK_TTL_SECONDS > TASK_GLOBAL_TIME_LIMIT_SECONDS (Decisão 4)
@@ -275,6 +281,21 @@ class Settings(ConfigBase):
     REGISTRATION_MAX_PER_HOUR: int = int(
         os.getenv("REGISTRATION_MAX_PER_HOUR", "5")
     ) #Limite de cadastros por hora por IP
+
+    @model_validator(mode="after")
+    def _validate_required_secrets(self) -> "Settings":
+        """Valida campos obrigatórios com falha em tempo de instanciação (não de importação)."""
+        if not self.DATABASE_URL:
+            raise ValueError(
+                "DATABASE_URL não configurada. "
+                "Defina em .env.market_alert (market_alert) ou .env.market_orchestrator (orchestrator)."
+            )
+        if not self.SECRET_KEY:
+            raise ValueError(
+                "SECRET_KEY não configurada. "
+                "Defina uma chave segura para assinar os JWTs em .env.common ou .env.market_alert."
+            )
+        return self
 
 #Instância única de settings para a aplicação
 settings = Settings()

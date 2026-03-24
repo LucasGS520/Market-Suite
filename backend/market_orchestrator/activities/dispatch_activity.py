@@ -1,12 +1,15 @@
-""" Activity Temporal para disparar uma coleta """
-
+"""Activity Temporal para disparar uma coleta."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import UUID
 
 import structlog
+from sqlalchemy import text
 from temporalio import activity
+
+from shared.infra.db.database import SessionLocal
+from shared.schemas.shared_schemas_orchestrator import CollectionPayload, DispatchActivityOutput
 
 
 logger = structlog.get_logger("orchestrator.activities.dispatch")
@@ -15,6 +18,23 @@ logger = structlog.get_logger("orchestrator.activities.dispatch")
 _DISPATCH_KEY_PREFIX = "workflow:dispatch"
 _DISPATCH_TTL_SECONDS = 7200  # 2h — tempo máximo esperado para conclusão de coleta
 
+def _fetch_monitored_url(monitored_id: str) -> str | None:
+    """Lê normalized_url (ou product_url como fallback) de monitored_products via SQL direto."""
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                "SELECT normalized_url, product_url "
+                "FROM monitored_products WHERE id = CAST(:id AS UUID)"
+            ),
+            {"id": monitored_id},
+        ).fetchone()
+        if row is None:
+            return None
+        return row.normalized_url or row.product_url
+    finally:
+        db.close()
+
 @activity.defn(name="dispatch_collection")
 async def dispatch_collection(
     monitored_id: str,
@@ -22,16 +42,19 @@ async def dispatch_collection(
     correlation_id: str,
     trace_id: str,
     force_compare: bool = False,
-) -> bool:
-    """ Enfileira a coleta usando o fluxo de Celery já existente.
+) -> DispatchActivityOutput:
+    """Enfileira a coleta do monitorado via Celery.
 
-    Persiste o timestamp de dispatch no Redis para que query_collection_status
-    possa verificar se last_collected_at é posterior a este momento.
+    Busca a URL do produto no BD, constrói o CollectionPayload completo e
+    delega o enfileiramento ao enqueuer. Persiste o timestamp de dispatch no
+    Redis para que query_collection_status possa verificar conclusão.
+
+    Nota: o enfileiramento Celery ainda ocorre via market_alert.enqueue_collect
+    (acoplamento lazy necessário). Fase 4 irá mover esta responsabilidade para shared.
     """
     from temporalio.exceptions import ApplicationError
 
     #Propaga trace_id para o ContextVar — o processor structlog injeta automaticamente
-    #em todos os logs subsequentes desta execução de activity
     try:
         from shared.utils.trace_context import set_trace_id as _set_trace_id
         _set_trace_id(trace_id)
@@ -39,15 +62,24 @@ async def dispatch_collection(
         pass
 
     try:
-        from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_collect
-        from market_alert.schemas.schemas_collection_payload import CollectionPayload
+        url = _fetch_monitored_url(monitored_id)
+        if not url:
+            raise ApplicationError(
+                f"Produto monitorado {monitored_id} não encontrado ou sem URL",
+                non_retryable=True,
+            )
 
         payload = CollectionPayload(
+            kind="monitored",
             monitored_id=UUID(monitored_id),
             user_id=UUID(user_id),
+            url=url,
             trace_id=trace_id,
             force_compare="true" if force_compare else None,
         )
+
+        # TODO Fase 4: substituir por shared.infra.celery.enqueuer (sem import de market_alert)
+        from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_collect
         enqueue_collect(payload)
 
         #Salva timestamp de dispatch para correlação em query_collection_status
@@ -59,7 +91,6 @@ async def dispatch_collection(
                 dispatch_ts = datetime.now(timezone.utc).isoformat()
                 redis_client.setex(dispatch_key, _DISPATCH_TTL_SECONDS, dispatch_ts)
         except Exception as redis_exc:
-            #Redis inoperante não deve bloquear o enfileiramento
             logger.warning(
                 "dispatch_collection_redis_store_failed",
                 monitored_id=monitored_id,
@@ -73,8 +104,10 @@ async def dispatch_collection(
             correlation_id=correlation_id,
             trace_id=trace_id,
         )
-        return True
+        return DispatchActivityOutput(success=True)
 
+    except ApplicationError:
+        raise
     except (ValueError, TypeError) as exc:
         raise ApplicationError(
             f"Payload inválido para dispatch_collection: {exc}",

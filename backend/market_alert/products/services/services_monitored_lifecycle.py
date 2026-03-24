@@ -58,7 +58,7 @@ from market_alert.products.domain.product_lifecycle import compute_next_check_at
 
 #Import condicional: protege testes unitários e ambientes sem Temporal disponível
 try:
-    from market_orchestrator.alert.alert_client import get_temporal_client
+    from shared.clients.orchestrator_client import get_temporal_client
     _TEMPORAL_AVAILABLE = True
 except ImportError:
     _TEMPORAL_AVAILABLE = False

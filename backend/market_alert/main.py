@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 from market_alert.core.config_alert import settings
 from market_alert.infraestructure.logging_config import setup_api_logging
 from market_alert.infraestructure.startup_validation import validate_startup_dependencies
+from shared.exceptions import TemporalConnectionError
 
 #Rotas de usuários e administração
 from market_alert.users.routes.routes_account import router as account_router
@@ -65,11 +66,38 @@ def create_app() -> FastAPI:
         debug=getattr(settings, "debug", False)
     )
 
+    # -----------------------------------------------------------------
+    # Sequência de startup — ordem obrigatória
+    #
+    # 1. _validate_dependencies_on_startup  [BLOQUEANTE]
+    #    Verifica PostgreSQL, Redis e Temporal antes de aceitar qualquer
+    #    requisição. Temporal usa retry exponencial (TEMPORAL_HEALTH_MAX_ATTEMPTS,
+    #    default 10 tentativas). Se Temporal não responder: TemporalConnectionError
+    #    é logada como CRITICAL e o processo encerra — API nunca sobe sem Temporal.
+    #
+    # 2. _reconcile_temporal_workflows_on_startup  [NÃO-BLOQUEANTE]
+    #    Reconcilia workflows Temporal para produtos que ficaram sem workflow
+    #    ativo (reinício, falha de persistência, etc.). Falhas são logadas como
+    #    warning sem impedir a API de servir tráfego — reconciliação é idempotente.
+    # -----------------------------------------------------------------
+
     @app.on_event("startup")
     async def _validate_dependencies_on_startup() -> None:
-        """Executa validação de infraestrutura para falhar rápido no bootstrap."""
-        # Falha imediata evita aceitar tráfego com Redis/DB indisponível.
-        validate_startup_dependencies(strict=True)
+        """Executa validação de infraestrutura para falhar rápido no bootstrap.
+
+        Falha imediata evita aceitar tráfego com Redis/DB/Temporal indisponível.
+        TemporalConnectionError é relançada após log CRITICAL — API não sobe sem Temporal.
+        """
+        try:
+            validate_startup_dependencies(strict=True)
+        except TemporalConnectionError as exc:
+            logger.critical(
+                "startup_temporal_unavailable_aborting",
+                target=exc.target,
+                attempts=exc.attempts,
+                error=str(exc),
+            )
+            raise
 
     @app.on_event("startup")
     async def _reconcile_temporal_workflows_on_startup() -> None:

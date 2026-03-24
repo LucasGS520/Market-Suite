@@ -77,7 +77,7 @@ def health_check():
 
     #Verificação de conectividade com o Temporal Server (não-bloqueante)
     try:
-        from market_orchestrator.alert.alert_client import get_temporal_client
+        from shared.clients.orchestrator_client import get_temporal_client
         temporal_ok = get_temporal_client().probe_connectivity_sync()
         status["temporal"] = {"status": "ok" if temporal_ok else "degraded"}
         if not temporal_ok and status["overall"] == "ok":
@@ -100,7 +100,7 @@ def temporal_health():
     """
     checked_at = datetime.now(timezone.utc).isoformat()
     try:
-        from market_orchestrator.alert.alert_client import get_temporal_client
+        from shared.clients.orchestrator_client import get_temporal_client
         from market_orchestrator.core.config_orchestrator import settings as orchestrator_settings
         connected = get_temporal_client().probe_connectivity_sync()
         if connected:

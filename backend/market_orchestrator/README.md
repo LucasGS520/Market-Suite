@@ -54,7 +54,7 @@ Essa separação preserva o pipeline operacional existente e adiciona governanç
 - [`activities/`](activities/): camada de integração externa chamada pelo workflow.
 - [`worker.py`](worker.py): registra workflow + activities na task queue Temporal configurada.
 - [`reconciler.py`](reconciler.py): garante workflow para todo monitorado ativo (`paused=False`).
-- [`alert/alert_client.py`](alert/alert_client.py): API de consumo para `market_alert` (start/signal/query/probe).
+- [`alert/alert_client.py`](alert/alert_client.py): re-exportador de `shared.clients.orchestrator_client` (backward compat). Fonte canônica em [`../shared/clients/orchestrator_client.py`](../shared/clients/orchestrator_client.py).
 - [`core/config_orchestrator.py`](core/config_orchestrator.py): configuração central e validações de ambiente.
 
 ### Estados do Workflow
@@ -81,13 +81,18 @@ Essa separação preserva o pipeline operacional existente e adiciona governanç
 | Query | `get_state` | Retorna `WorkflowSnapshot` |
 
 ### Activities de Integração
-| Activity | Funcao | Integração principal |
-|----------|--------|----------------------|
-| `dispatch_collection` | Enfileira coleta do monitorado | `market_alert.collectors.orchestrator.enqueue_collect` |
-| `query_collection_status` | Infere conclusão da coleta | leitura de `MonitoredProduct.last_collected_at` |
-| `fetch_monitored_policy` | Calcula agendamento real do monitorado | `shared.scheduling.calculate_schedule()` + leitura de `next_check_at`, `paused`; retorna `interval_seconds`, `stability_score`, `scheduling_reason` |
-| `persist_workflow_snapshot` | Salva snapshot de estado no Redis | chave `workflow:snapshot:{monitored_id}` |
-| `cleanup_workflow_state` | Remove estado transitario | delete da chave de snapshot |
+
+Todas as activities retornam tipos tipados de `shared.schemas.shared_schemas_orchestrator` e acessam o banco de negócio via SQL direto (`sqlalchemy.text`), sem importar modelos ORM de `market_alert`.
+
+| Activity | Funcao | Retorno | Integração principal |
+|----------|--------|---------|----------------------|
+| `dispatch_collection` | Busca URL do monitorado no BD e enfileira coleta | `DispatchActivityOutput` | SQL direto em `monitored_products`; `market_alert.collectors.orchestrator.enqueue_collect` (acoplamento temporário — ver nota abaixo) |
+| `query_collection_status` | Infere conclusão da coleta comparando `last_scraped_at` com o timestamp de dispatch | `QueryStatusOutput` | SQL direto em `monitored_products`; timestamp de dispatch lido do Redis |
+| `fetch_monitored_policy` | Calcula agendamento real baseado em estabilidade | `PolicyActivityOutput` | SQL direto em `monitored_products`; `shared.scheduling.calculate_schedule()` |
+| `persist_workflow_snapshot` | Salva snapshot de estado no Redis | `None` | chave `workflow:snapshot:{monitored_id}` |
+| `cleanup_workflow_state` | Remove estado transitário | `None` | delete da chave de snapshot |
+
+> **Nota — acoplamento residual:** `dispatch_collection` ainda importa `enqueue_collect` de `market_alert` de forma lazy. Este é o único import de `market_alert` restante no módulo. A eliminação definitiva requer mover `CollectionEnqueuer` para `shared.infra.celery`.
 
 ---
 

@@ -1,132 +1,14 @@
-""" Contrato explícito de payload para coletas de produtos.
+"""Contrato explícito de payload para coletas de produtos.
 
-Define o schema canônico que circula entre o orquestrador, a fila Celery e a
-task de coleta. Qualquer código que produza ou consuma payloads de coleta deve
-usar ``CollectionPayload`` para garantir tipagem, validação e rastreamento.
+Re-exporta CollectionPayload e validate_payload de shared para manter
+backward compatibility com todos os importadores existentes.
 
-Versionamento:
-    version=1 — campo adicionado para compatibilidade futura. Payloads antigos
-    sem o campo recebem version=1 automaticamente durante validação.
-
-Fluxo esperado:
-    Builder → CollectionPayload → .model_dump() → Celery queue (dict)
-    Task recebe dict → validate_payload() → CollectionPayload → lógica da task
+Fonte canônica: shared.schemas.shared_schemas_orchestrator
 """
-
-from __future__ import annotations
-
-import logging
-from typing import Literal
-from uuid import UUID, uuid4
-
-from pydantic import BaseModel, Field, field_validator, model_validator
-
-
-logger = logging.getLogger(__name__)
-
-
-class CollectionPayload(BaseModel):
-    """ Payload tipado para coletas de monitorados e concorrentes.
-
-    Campos obrigatórios:
-        kind: tipo da coleta — 'monitored' ou 'competitor'.
-        monitored_id: UUID do produto monitorado raiz.
-        url: URL a ser coletada pelo scraper.
-        trace_id: identificador de rastreamento distribuído (sempre presente em formato UUID canônico).
-        user_id: UUID do usuário dono do monitorado.
-        
-    Campos opcionais:
-        version: versão do schema para compatibilidade futura (padrão: 1).
-        competitor_id: UUID do concorrente quando kind='competitor'.
-        enqueued_at: ISO timestamp de quando o item entrou na fila de prioridade.
-        force_compare: flag para forçar recomputação de comparação após coleta.
-        collected_at: ISO timestamp da coleta (preenchido pelo coletor após execução).
-        name: nome de identificação usado em logs e depuração.
-    """
-
-    version: int = Field(default=1, description="Versão do schema de payload")
-    kind: Literal["monitored", "competitor"] = Field(..., description="Tipo da coleta")
-    monitored_id: UUID = Field(..., description="UUID do produto monitorado raiz")
-    url: str = Field(..., description="URL a ser coletada")
-    trace_id: str = Field(default="", description="ID de rastreamento distribuído")
-    user_id: UUID = Field(..., description="UUID do usuário dono do monitorado")
-
-    competitor_id: UUID | None = Field(default=None, description="UUID do concorrente (apenas para kind=competitor)")
-    enqueued_at: str | None = Field(default=None, description="ISO timestamp de enfileiramento")
-    force_compare: str | None = Field(default=None, description="Flag para forçar comparação ('true'/'1')")
-    collected_at: str | None = Field(default=None, description="ISO timestamp da coleta")
-    name: str | None = Field(default=None, description="Nome para logs e depuração")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _ensure_trace_id(cls, data: dict) -> dict:
-        """ Garante trace_id sempre preenchido — gera UUID se ausente ou vazio """
-        if isinstance(data, dict) and not data.get("trace_id"):
-            data["trace_id"] = str(uuid4())
-        return data
-    
-    @field_validator("trace_id")
-    @classmethod
-    def _validate_trace_id_uuid_canonical(cls, trace_id: str) -> str:
-        """ Valida ``trace_id`` no fromato UUID canônico para manter correlação consistente """
-        normalized_trace_id = trace_id.strip()
-        try:
-            parsed_trace_id = UUID(normalized_trace_id)
-        except ValueError as exc:
-            raise ValueError("trace_id deve estar no formato UUID canônico.") from exc
-
-        #Exigimos o formato canônico textual para eliminar variantes legadas e facilitar filtros em logs
-        canonical_trace_id = str(parsed_trace_id)
-        if normalized_trace_id != canonical_trace_id:
-            raise ValueError("trace_id deve estar no formato UUID canônico.")
-        return canonical_trace_id
-    
-    @model_validator(mode="after")
-    def _validate_kind_specific_fields(self) -> CollectionPayload:
-        """ Aplica regras de consistência entre ``kind`` e campos específicos
-        
-        Regras:
-            - ``kind='competitor'`` exige ``competitor_id`` preenchido.
-            - ``kind='monitored'`` não permite ``competitor_id`` para evitar ambiguidade.
-        """
-        if self.kind == "competitor" and self.competitor_id is None:
-            raise ValueError("competitor_id é obrigatório quando kind='competitor'.")
-
-        if self.kind == "monitored" and self.competitor_id is not None:
-            raise ValueError("competitor_id deve ser omitido quando kind='monitored'.")
-
-        return self
-
-def validate_payload(payload: dict | None) -> CollectionPayload:
-    """ Valida dicionário de payload retornando CollectionPayload tipado.
-
-    Aceita payloads antigos sem ``version`` e atribui ``version=1`` como fallback.
-    Lança ``ValueError`` com mensagem descritiva se o payload for estruturalmente
-    inválido (ex.: faltando ``kind``, ``monitored_id`` ou ``url``).
-
-    Args:
-        payload: dicionário bruto recebido do Celery ou de builders antigos.
-
-    Returns:
-        CollectionPayload validado e tipado.
-
-    Raises:
-        ValueError: se o payload for None ou contiver campos inválidos/ausentes.
-
-    Exemplo::
-
-        payload_dict = {"kind": "monitored", "monitored_id": "...", "url": "..."}
-        typed = validate_payload(payload_dict)
-        print(typed.trace_id)  # UUID gerado automaticamente
-    """
-    if payload is None:
-        raise ValueError("Payload de coleta não pode ser None")
-
-    try:
-        return CollectionPayload.model_validate(payload)
-    except Exception as exc:
-        raise ValueError(f"Payload de coleta inválido: {exc}") from exc
-
+from shared.schemas.shared_schemas_orchestrator import (
+    CollectionPayload,
+    validate_payload,
+)
 
 __all__ = [
     "CollectionPayload",

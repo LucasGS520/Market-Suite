@@ -5,6 +5,43 @@ Serviço FastAPI responsável por orquestrar monitoramento de preços, persistir
 - Visão arquitetural da suite: [`../README.md`](../README.md)
 - Orquestrador responsável pelo controle durável: [`../market_orchestrator/README.md`](../market_orchestrator/README.md)
 - Serviço de scraping consumido pela API: [`../market_scraper/README.md`](../market_scraper/README.md)
+- Contratos e cliente Temporal compartilhados: [`../shared/README.md`](../shared/README.md)
+
+## Integração com o Orquestrador (via shared)
+
+`market_alert` se comunica com o Temporal **exclusivamente via contratos em `shared`**. Não há import direto de `market_orchestrator`.
+
+### Cliente Temporal
+```python
+from shared.clients.orchestrator_client import get_temporal_client
+
+client = get_temporal_client()
+client.start_monitoring(monitored_id, user_id)   # inicia workflow
+client.pause_monitoring(monitored_id)             # pausa
+client.resume_monitoring(monitored_id)            # retoma
+client.delete_monitoring(monitored_id)            # encerra
+client.notify_competitor_changed(...)             # sinaliza mudanca de concorrente
+client.probe_connectivity_sync()                  # health check
+```
+
+Localização canônica: [`../shared/clients/orchestrator_client.py`](../shared/clients/orchestrator_client.py)
+Re-exportado em: [`../market_orchestrator/alert/alert_client.py`](../market_orchestrator/alert/alert_client.py) (backward compat)
+
+### Payload de Coleta
+```python
+from shared.schemas.shared_schemas_orchestrator import CollectionPayload, validate_payload
+```
+
+`CollectionPayload` é o contrato tipado que transita entre o orquestrador, a fila Celery e a task de coleta. Re-exportado em [`schemas/schemas_collection_payload.py`](schemas/schemas_collection_payload.py) para backward compatibility.
+
+### Pontos de integração no código
+| Arquivo | Responsabilidade |
+|---------|-----------------|
+| [`products/services/services_monitored_lifecycle.py`](products/services/services_monitored_lifecycle.py) | `start_monitoring`, `pause_monitoring`, `resume_monitoring`, `delete_monitoring` |
+| [`products/services/services_competitor_lifecycle.py`](products/services/services_competitor_lifecycle.py) | `notify_competitor_changed` |
+| [`products/routes/routes_monitored.py`](products/routes/routes_monitored.py) | `query_sync` para consultar estado do workflow |
+| [`infraestructure/routes/routes_health.py`](infraestructure/routes/routes_health.py) | `probe_connectivity_sync` no health check |
+| [`infraestructure/startup_validation.py`](infraestructure/startup_validation.py) | probe de conectividade no startup |
 
 ## Principais Responsabilidades
 - **Expor a API principal do sistema** com CORS, rate limiting, autenticação JWT e health checks.

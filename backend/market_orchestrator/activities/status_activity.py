@@ -1,14 +1,13 @@
 """Activity Temporal para consultar o status de conclusão da coleta."""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import UUID
 
 import structlog
+from sqlalchemy import text
 from temporalio import activity
 
-from market_orchestrator.schemas.schemas_snapshot import CollectionStatusResult
+from shared.schemas.shared_schemas_orchestrator import QueryStatusOutput
 
 
 logger = structlog.get_logger("orchestrator.activities.status")
@@ -17,7 +16,7 @@ logger = structlog.get_logger("orchestrator.activities.status")
 _DISPATCH_KEY_PREFIX = "workflow:dispatch"
 
 def _read_dispatch_timestamp(monitored_id: str, correlation_id: str) -> datetime | None:
-    """ Lê o timestamp de dispatch armazenado pelo dispatch_collection no Redis.
+    """Lê o timestamp de dispatch armazenado pelo dispatch_collection no Redis.
 
     Retorna None se Redis estiver indisponível ou a chave expirou.
     """
@@ -38,46 +37,50 @@ def _read_dispatch_timestamp(monitored_id: str, correlation_id: str) -> datetime
 async def query_collection_status(
     monitored_id: str,
     correlation_id: str,
-) -> CollectionStatusResult:
-    """ Consulta o banco de negócio para inferir se a coleta foi concluída.
+) -> QueryStatusOutput:
+    """Consulta o banco para inferir se a coleta foi concluída.
 
-    Compara last_collected_at do monitorado com o timestamp de dispatch (lido do
+    Compara last_scraped_at do monitorado com o timestamp de dispatch (lido do
     Redis via correlation_id) para garantir que apenas coletas posteriores ao
     dispatch corrente contam como conclusão.
     """
     try:
         from shared.infra.db.database import SessionLocal
-        from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
 
         db = SessionLocal()
         try:
-            monitored = get_monitored_product_by_id(db, UUID(monitored_id))
-            if monitored is None:
-                return CollectionStatusResult(
-                    completed=True, last_error="monitored_not_found"
-                )
+            row = db.execute(
+                text(
+                    "SELECT last_scraped_at FROM monitored_products "
+                    "WHERE id = CAST(:id AS UUID)"
+                ),
+                {"id": monitored_id},
+            ).fetchone()
 
-            last_collected_at = monitored.last_collected_at
-            if last_collected_at is None:
-                return CollectionStatusResult(completed=False)
+            if row is None:
+                return QueryStatusOutput(completed=True, last_error="monitored_not_found")
+
+            last_scraped_at = row.last_scraped_at
+            if last_scraped_at is None:
+                return QueryStatusOutput(completed=False)
 
             dispatch_ts = _read_dispatch_timestamp(monitored_id, correlation_id)
             if dispatch_ts is None:
-                #Redis indisponível ou chave expirou: aceita qualquer last_collected_at
+                #Redis indisponível ou chave expirou: aceita qualquer last_scraped_at
                 #para evitar loop infinito após falha temporária de infra
                 logger.warning(
                     "query_collection_status_dispatch_ts_missing",
                     monitored_id=monitored_id,
                     correlation_id=correlation_id,
                 )
-                return CollectionStatusResult(completed=True)
+                return QueryStatusOutput(completed=True)
 
             #Normaliza timezone para comparação segura
-            if last_collected_at.tzinfo is None:
-                last_collected_at = last_collected_at.replace(tzinfo=timezone.utc)
+            if last_scraped_at.tzinfo is None:
+                last_scraped_at = last_scraped_at.replace(tzinfo=timezone.utc)
 
-            completed = last_collected_at >= dispatch_ts
-            return CollectionStatusResult(completed=completed)
+            completed = last_scraped_at >= dispatch_ts
+            return QueryStatusOutput(completed=completed)
 
         finally:
             db.close()
@@ -88,4 +91,4 @@ async def query_collection_status(
             monitored_id=monitored_id,
             error=str(exc),
         )
-        return CollectionStatusResult(completed=False, last_error=str(exc))
+        return QueryStatusOutput(completed=False, last_error=str(exc))

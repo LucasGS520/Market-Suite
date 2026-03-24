@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import structlog
 
-from market_orchestrator.alert.alert_client import TemporalOrchestrationClient
+from shared.clients.orchestrator_client import TemporalOrchestrationClient
 from market_orchestrator.schemas.schemas_policy import CollectionPolicy
 from market_orchestrator.schemas.schemas_workflow import WorkflowInput
 
@@ -29,26 +29,23 @@ class WorkflowReconciler:
         self._client = client or TemporalOrchestrationClient()
 
     def reconcile_all(self) -> dict[str, int]:
-        """ Reconcilia todos os monitorados ativos.
+        """Reconcilia todos os monitorados ativos.
 
         Retorna dict com contadores: total, started, alive, errors.
         """
         from shared.infra.db.database import SessionLocal
-        from market_alert.models.models_products import MonitoredProduct
+        from sqlalchemy import text
 
         counts = {"total": 0, "started": 0, "alive": 0, "errors": 0}
 
         db = SessionLocal()
         try:
-            actives = (
-                db.query(
-                    MonitoredProduct.id,
-                    MonitoredProduct.user_id,
-                    MonitoredProduct.check_interval,
+            actives = db.execute(
+                text(
+                    "SELECT id, user_id, check_interval "
+                    "FROM monitored_products WHERE paused = false"
                 )
-                .filter(MonitoredProduct.paused.is_(False))
-                .all()
-            )
+            ).fetchall()
         except Exception as exc:
             logger.error("reconciler_db_query_failed", error=str(exc))
             db.close()

@@ -1,4 +1,4 @@
-# Claude — Correção Orquestrador Contínuo com Temporal
+# Claude — Correção Camada de Inicialização
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -19,38 +19,30 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Objetivo e Problemas a ser Resolvido
 
-## Confirmação do Problema
+**Problema a Ser Resolvido:**  
+Os logs mostram três falhas centrais na camada de inicialização e integração:
+- O serviço da API falha por exaustão de tentativas de conexão com Temporal antes do Temporal atingir prontidão real.
+- Há desalinhamento de readiness entre serviços: alguns workers validam Temporal enquanto a API ainda recebe timeout.
+- Existe instabilidade de rede entre containers, com falhas intermitentes de resolução de hostname para db e redis.
 
-### **Problema Principal (Crítico)**
-**O Temporal Worker (orquestrador) conecta com sucesso, mas os clientes (API + Celery Workers) não conseguem atingir o servidor Temporal durante a inicialização, causando degradação do sistema para Celery-only e inativação da orquestração durável.**
-
-**Raiz:** Race condition de inicialização — clientes tentam conectar ao Temporal **antes dele estar pronto** (42 segundos de diferença: 15:09:53 vs 15:10:50).
-
-**Impacto:** 
-- ❌ Workflows duráveis não são iniciados
-- ❌ Signals de monitoramento não são entregues
-- ✅ Sistema cai back para Celery (funciona parcialmente, mas sem plano de controle durável)
-
-### **Problemas Secundários (Médio e Baixo Impacto)**
-
-| # | Problema | Severidade | Impacto |
-|---|----------|-----------|--------|
-| 2 | Health check Temporal é bloqueante e sem retry | ⚠️ Média | Torna inicialização lenta; não aproveita retry exponencial |
-| 3 | Clock drift de 18 segundos entre host e containers | ⚠️ Média | Falhas aleatórias na expiração de tokens/locks |
-| 4 | Workers rodando como superuser/root | 🔴 Baixa (Dev) | Anti-pattern de segurança; aceitável em dev, deve ser corrigido em produção |
+**Objetivo do Plano:**  
+Estabelecer uma inicialização determinística e resiliente para que:
+1. A API só suba quando a dependência crítica estiver realmente pronta.  
+2. Todos os serviços usem o mesmo critério de readiness para Temporal.  
+3. A malha de containers fique estável (sem erro de DNS/hostname durante bootstrap).  
 
 ---
 
-## Estratégia de Implementação
+## Análise de Riscos e Decisões Chave
 
-### **Objetivo Geral**
-Garantir que **clientes Temporal (API + Workers) consigam conectar ao servidor durante a inicialização**, eliminando a race condition e permitindo que workflows sejam orquestrados no momento de startup.
+**Decisão Técnica Principal:**  
+Adotar contrato único de prontidão para Temporal, com fail-fast controlado e janela de bootstrap compatível com o tempo real de subida do serviço.
 
-### **Abordagem em 3 Camadas**
+**Risco Principal:**  
+Aumentar robustez de startup pode elevar o tempo de inicialização total; mitigação via logs de progresso e health checks estritos e objetivos.
 
-1. **Camada de Orquestração (Temporal):** Garantir que o servidor está PRONTO antes de aceitar clientes
-2. **Camada de Cliente (API + Workers):** Implementar retry robusta e health check com backoff
-3. **Camada de Infraestrutura (Docker Compose):** Adicionar health checks e dependency ordering
+**Dependências Críticas:**  
+Temporal, db, redis, rede Docker interna, ordem de dependências no compose e política de restart.
 
 ---
 

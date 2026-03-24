@@ -4,6 +4,9 @@ from pydantic_settings import BaseSettings
 
 
 class OrchestratorSettings(BaseSettings):
+    # --- Banco de dados da aplicação (mesmo DB do market_alert) ---
+    DATABASE_URL: str = ""  # Deve ser definido em .env.market_orchestrator
+
     # --- Temporal ---
     TEMPORAL_HOST: str = "temporal"
     TEMPORAL_PORT: int = 7233

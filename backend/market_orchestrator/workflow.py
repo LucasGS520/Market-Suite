@@ -24,8 +24,9 @@ with workflow.unsafe.imports_passed_through():
         UpdatePolicySignalPayload,
         CompetitorChangedPayload,
     )
-    from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot, CollectionStatusResult
+    from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
     from market_orchestrator.schemas.schemas_workflow import WorkflowInput
+    from shared.schemas.shared_schemas_orchestrator import DispatchActivityOutput, QueryStatusOutput
     
 
 logger = structlog.get_logger("orchestrator.workflow")
@@ -192,7 +193,7 @@ class MonitoredProductWorkflow:
         trace_id = str(workflow.uuid4())
 
         try:
-            await workflow.execute_activity(
+            _result: DispatchActivityOutput = await workflow.execute_activity(
                 "dispatch_collection",
                 args=[self._monitored_id, self._user_id, correlation_id, trace_id, False],
                 start_to_close_timeout=_DISPATCH_TIMEOUT,
@@ -223,7 +224,7 @@ class MonitoredProductWorkflow:
                 self._state = WorkflowState.Paused
                 return
 
-            result: CollectionStatusResult = await workflow.execute_activity(
+            result: QueryStatusOutput = await workflow.execute_activity(
                 "query_collection_status",
                 args=[self._monitored_id, correlation_id],
                 start_to_close_timeout=_QUERY_STATUS_TIMEOUT,
