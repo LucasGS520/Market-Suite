@@ -19,20 +19,6 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Objetivo e Problemas a ser Resolvido
 
-- **Problema:** A validação do Temporal durante o startup da API bloqueia e gera `TimeoutError` porque `run_sync_coro` usa `asyncio.run_coroutine_threadsafe(...).result()` quando chamada do mesmo event loop do FastAPI, produzindo deadlock.  
-
-- **Objetivo:** Permitir que `market_alert` valide o Temporal sem bloquear o event loop do FastAPI, preservando comportamento síncrono para Celery e mantendo validação robusta de conectividade.
-
----
-
-**Análise de Riscos e Decisões Chave**
-
-- **Decisão técnica principal:** Executar a validação de startup da API fora do event loop (thread) é a correção imediata recomendada — mínimo impacto e resolve deadlock.  
-
-- **Risco principal:** Se variáveis `TEMPORAL_HOST`/`TEMPORAL_PORT`/`TEMPORAL_NAMESPACE` estiverem incorretas, a validação continuará falhando mesmo sem deadlock.  
-
-- **Dependências críticas:** Temporal server acessível na rede interna do Docker; envs corretos em `market_alert` (comparar com `market_orchestrator`).
-
 ---
 
 ## Regras e Instruções de Execução

@@ -125,13 +125,12 @@ def _validate_temporal() -> None:
     for attempt, delay in enumerate(delays, 1):
         try:
             #Conecta diretamente ao Temporal usando SDK oficial
-            client = run_sync_coro(
+            run_sync_coro(
                 Client.connect(
                     temporal_target,
                     namespace=namespace,
                 )
             )
-            client.close()
 
             logger.info(
                 "startup_temporal_ok",
