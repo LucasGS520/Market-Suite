@@ -1,10 +1,10 @@
 # Market Scraper
-Servico FastAPI responsavel por transformar URLs de produto em um `ParserResponse` enxuto (`name`, `current_price`, `currency`, `availability`, `last_status`, `url`, `source`, `payload`). O foco atual e estabilidade em HTML estatico, sem renderizacao de JavaScript. O `market_alert` consome este servico via HTTP e nao replica regras de parsing.
+Serviço FastAPI responsavel por transformar URLs de produto em um `ParserResponse` enxuto (`name`, `current_price`, `currency`, `availability`, `last_status`, `url`, `source`, `payload`). O foco atual e estabilidade em HTML estatico, sem renderizacao de JavaScript. O `market_alert` consome este servico via HTTP e não replica regras de parsing.
 
 ## Relacoes e Referencias
-- Visao arquitetural da suite: [`../README.md`](../README.md)
+- Visão arquitetural da suite: [`../README.md`](../README.md)
 - API orquestradora e consumo oficial: [`../market_alert/README.md`](../market_alert/README.md)
-- Guia operacional para agentes: [`../AGENTS.md`](../AGENTS.md)
+- Orquestrador responsável pelo controle durável: [`../market_orchestrator/README.md`](../market_orchestrator/README.md)
 
 ## Principais Responsabilidades
 - **Normalizar e validar URLs** (formato, esquema e host publico) antes de tentar scraping.
@@ -12,7 +12,7 @@ Servico FastAPI responsavel por transformar URLs de produto em um `ParserRespons
 - **Expor API REST sincrona** para parse (`POST /scraper/parse`) e health check (`GET /health/ping`).
 - **Aplicar cache HTTP condicional** com `ETag`/`Last-Modified` e suporte a `304 Not Modified`.
 
-## Estrutura do Diretorio
+## Estrutura do Diretório
 ```text
 market_scraper/
 |-- core/                     # Configuracao do servico
@@ -29,40 +29,41 @@ market_scraper/
 ---
 
 ## Endpoints e Fluxos HTTP
-As rotas publicas sao registradas em [`main.py`](main.py), com foco em um endpoint de parsing e um endpoint de saude. O fluxo principal da API combina validacao de URL, revalidacao condicional por cache e execucao do pipeline de scraping.
+As rotas publicas são registradas em [`main.py`](main.py), com foco em um endpoint de parsing e um endpoint de saude. O fluxo principal da API combina validação de URL, revalidação condicional por cache e execução do pipeline de scraping.
 
 ### Fluxos HTTP mais relevantes
 - Parse sincrono: `POST /scraper/parse` recebe `ParserRequest`, normaliza a URL e valida compatibilidade minima antes do pipeline.
-- Revalidacao condicional: se o cliente enviar `If-None-Match` e/ou `If-Modified-Since`, o endpoint pode responder `304` sem corpo.
+- Revalidação condicional: se o cliente enviar `If-None-Match` e/ou `If-Modified-Since`, o endpoint pode responder `304` sem corpo.
 - Bypass de cache por metadata: `metadata.force_refresh=true` ignora cache condicional e forca nova coleta.
-- Mapeamento de erros operacionais: `invalid_url`, `blocked_host`, `unsupported_by_robots`, `too_many_redirects`, `no_result` e `pipeline_timeout` sao traduzidos para status HTTP previsiveis.
+- Mapeamento de erros operacionais: `invalid_url`, `blocked_host`, `unsupported_by_robots`, `too_many_redirects`, `no_result` e `pipeline_timeout` são traduzidos para status HTTP previsiveis.
 - Contrato de resposta consistente: em `200`, retorna `ParserResponse` e inclui `ETag`, `Last-Modified`, `Cache-Control` e `X-MarketScraper-Cache-Status`.
 
 ## Dominios e Componentes Chave
 
 ### API HTTP e Contratos
 - [`main.py`](main.py) instancia o FastAPI e registra `routes_health` e `routes_scraper`.
-- [`routes/routes_scraper.py`](routes/routes_scraper.py) executa o fluxo HTTP completo: validacao, cache condicional, pipeline e resposta.
-- [`routes/response_helpers.py`](routes/response_helpers.py) padroniza respostas de erro/sucesso e converte problemas de pipeline para `error_code` estavel.
+- [`routes/routes_scraper.py`](routes/routes_scraper.py) executa o fluxo HTTP completo: validação, cache condicional, pipeline e resposta.
+- [`routes/response_helpers.py`](routes/response_helpers.py) padroniza respostas de erro/sucesso e converte problemas de pipeline para `error_code` estável.
 - [`shared/schemas/shared_schemas_scraper.py`](../shared/schemas/shared_schemas_scraper.py) define os contratos compartilhados (`ParserRequest`, `ParserResponse`, `ErrorResponse`).
 
 ### Orquestracao de Pipeline
 - [`services/pipeline_factory.py`](services/pipeline_factory.py) monta `PipelineContext`, cria pipeline padrao e oferece `run_pipeline`.
 - [`services/synergic_pipeline.py`](services/synergic_pipeline.py) executa as etapas em sequencia com timeout por etapa e timeout global.
 - [`services/pipeline_steps.py`](services/pipeline_steps.py) define as etapas concretas (`FetchHTMLStep`, `JsonLdParserStep`, `HtmlMetadataParserStep`, `DomainSpecificParserStep`, `GenericFallbackParserStep`).
-- [`services/parser_runner.py`](services/parser_runner.py) centraliza execucao/validacao de parser e sincronizacao dos dados no contexto.
+- [`services/parser_runner.py`](services/parser_runner.py) centraliza execução/validação de parser e sincronização dos dados no contexto.
 
 ### Parsers e Inferencia
-- [`parsers/domain_parsers.py`](parsers/domain_parsers.py) mapeia parsers por sufixo de dominio (`mercadolivre`, `amazon`, `magalu`).
-- [`parsers/extruct.py`](parsers/extruct.py), [`parsers/beautifulsoup.py`](parsers/beautifulsoup.py) e [`parsers/html_static.py`](parsers/html_static.py) cobrem estrategias de parsing estrutural e fallback generico.
+- [`parsers/domain_parsers.py`](parsers/domain_parsers.py) mapeia parsers por sufixo de domínio (`mercadolivre`, `amazon`, `magalu`).
+- [`parsers/extruct.py`](parsers/extruct.py), [`parsers/beautifulsoup.py`](parsers/beautifulsoup.py) e [`parsers/html_static.py`](parsers/html_static.py) cobrem estratégias de parsing estrutural e fallback generico.
 - [`services/availability_inference.py`](services/availability_inference.py) infere disponibilidade e `last_status` em cenarios HTTP sem payload de produto.
 
 ### Infraestrutura de Scraping e Cache
 - [`utils/http_download.py`](utils/http_download.py) faz download com `httpx`, retries, limite de redirects, limite de tamanho e headers controlados.
 - [`utils/http_retry.py`](utils/http_retry.py) aplica politicas de retry com backoff para alvos HTTP.
-- [`utils/http_utils.py`](utils/http_utils.py) resolve DNS com cache e bloqueia hosts/IPs nao publicos (protecao SSRF).
-- [`utils/robots.py`](utils/robots.py) valida `robots.txt` antes da coleta; fallback atual e restritivo (bloqueia quando nao consegue validar o parser).
-- [`utils/cache.py`](utils/cache.py), [`utils/singleflight.py`](utils/singleflight.py) e [`utils/conditional_payload.py`](utils/conditional_payload.py) suportam cache em memoria, coalescing e revalidacao condicional HTTP.
+- [`utils/http_utils.py`](utils/http_utils.py) resolve DNS com cache e bloqueia hosts/IPs não publicos (protecao SSRF).
+- [`utils/robots.py`](utils/robots.py) valida `robots.txt` antes da coleta via Redis operacional (db 2); fallback atual e restritivo (bloqueia quando não consegue validar o parser).
+- Rate limiting por host usa chaves com prefixo `rate:scraping:{host}` no Redis operacional (db 2), isolado do broker Celery (db 0) e do result backend (db 1).
+- [`utils/cache.py`](utils/cache.py), [`utils/singleflight.py`](utils/singleflight.py) e [`utils/conditional_payload.py`](utils/conditional_payload.py) suportam cache em memória, coalescing e revalidação condicional HTTP.
 
 #### Endpoints - Market Scraper
 | Metodo | Rota | Contrato principal | Codigos mais comuns |
@@ -72,12 +73,12 @@ As rotas publicas sao registradas em [`main.py`](main.py), com foco em um endpoi
 
 ### Integracao com market_alert
 - O cliente oficial vive em [`../market_alert/scraper/scraper_client.py`](../market_alert/scraper/scraper_client.py).
-- O cliente encapsula retries, rate limit por host, circuit breaker, cabecalhos condicionais e suporte opcional a header de autenticacao de servico (`SCRAPER_SERVICE_AUTH_*`).
+- O cliente encapsula retries, rate limit por host, circuit breaker, cabeçalhos condicionais e suporte opcional a header de autenticação de serviço (`SCRAPER_SERVICE_AUTH_*`).
 
 ---
 
 ## Pipeline de Parsing
-O pipeline sequencial e registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado por [`services/synergic_pipeline.py`](services/synergic_pipeline.py). A execucao para no primeiro `StepResult.success` com payload valido.
+O pipeline sequencial e registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado por [`services/synergic_pipeline.py`](services/synergic_pipeline.py). A execução para no primeiro `StepResult.success` com payload valido.
 
 1. **FetchHTMLStep**: valida `robots.txt`, consulta cache HTML, aplica singleflight para coalescer requests simultaneas e baixa HTML quando necessario.
 2. **JsonLdParserStep**: tenta extrair dados estruturados (`application/ld+json`) com `extruct`.
@@ -103,18 +104,18 @@ Tempo maximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline:
 ### Fluxo sincrono de parse (request -> response)
 1. Cliente envia `POST /scraper/parse` com `ParserRequest`.
 2. A rota normaliza URL e aplica validacoes de compatibilidade (`invalid_url`, `blocked_host`, etc.).
-3. Se nao houver `force_refresh`, o endpoint tenta usar metadados em cache para responder `304`.
+3. Se não houver `force_refresh`, o endpoint tenta usar metadados em cache para responder `304`.
 4. Sem `304`, o endpoint executa `run_pipeline(...)`.
 5. O pipeline percorre as etapas em ordem fixa ate encontrar payload valido.
 6. Em `success`, a rota monta `ParserResponse`, registra logs e persiste metadados condicionais (`ETag`/`Last-Modified`).
 7. Em `no_result` ou erros mapeados, retorna JSON de erro padronizado com `error_code` e `trace_id`.
 
 ### Fluxo de cache condicional HTTP
-1. Em resposta `200`, o endpoint gera hash estavel do payload e armazena metadados condicionais por URL.
+1. Em resposta `200`, o endpoint gera hash estável do payload e armazena metadados condicionais por URL.
 2. O cliente reaproveita `ETag` e `Last-Modified` em chamadas futuras.
 3. Se a condicao casar (`If-None-Match` ou `If-Modified-Since`), a resposta e `304 Not Modified`.
 4. Se houver `metadata.force_refresh=true`, a rota ignora cache condicional e executa coleta completa.
-5. O header `X-MarketScraper-Cache-Status` indica decisao (`hit`, `miss`, `revalidated`, `bypass`).
+5. O header `X-MarketScraper-Cache-Status` indica decisão (`hit`, `miss`, `revalidated`, `bypass`).
 
 ---
 
@@ -125,16 +126,16 @@ Tempo maximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline:
 2. O scraper valida URL/host publico e passa pelo pipeline.
 3. Uma etapa retorna payload valido (`name`, `current_price`, `availability`, etc.).
 4. A rota converte preco para decimal, normaliza resposta e devolve `200`.
-5. Metadados condicionais sao persistidos para reuso nas proximas coletas.
+5. Metadados condicionais são persistidos para reuso nas proximas coletas.
 
-### 2. Revalidacao condicional (`304 Not Modified`)
+### 2. Revalidação condicional (`304 Not Modified`)
 1. Cliente envia `If-None-Match`/`If-Modified-Since` com valores da coleta anterior.
 2. O scraper consulta metadados em cache da URL.
-3. Se nao houver mudanca, retorna `304` sem corpo.
+3. Se não houver mudança, retorna `304` sem corpo.
 4. `market_alert` interpreta como `not_modified` e evita persistencia redundante.
 
 ### 3. URL invalida ou bloqueada (`400`/`403`/`422`)
-1. URL malformada, protocolo invalido ou host nao publico retorna erro controlado.
+1. URL malformada, protocolo invalido ou host não publico retorna erro controlado.
 2. Bloqueio por `robots.txt` retorna `403` com `error_code=unsupported_by_robots`.
 3. Loop de redirecionamento ou URL invalida em download retorna `422`.
 4. Em todos os casos, a resposta inclui `trace_id` para correlacao com logs.
@@ -147,7 +148,7 @@ Tempo maximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline:
 ---
 
 ## Configuração
-As configuracoes combinam base compartilhada em [`../shared/core/config_base.py`](../shared/core/config_base.py) com overrides especificos em [`core/config_scraper.py`](core/config_scraper.py).
+As configurações combinam base compartilhada em [`../shared/core/config_base.py`](../shared/core/config_base.py) com overrides específicos em [`core/config_scraper.py`](core/config_scraper.py).
 
 ### Ordem de carregamento de ambiente
 1. `ConfigBase` carrega `.env.common` com `override=False` (preenche apenas variaveis ausentes).
@@ -163,7 +164,7 @@ As configuracoes combinam base compartilhada em [`../shared/core/config_base.py`
 | HTTP e rede | `SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, `SCRAPER_HTTP_MAX_*`, `SCRAPER_DNS_TIMEOUT`, `SCRAPER_DNS_CACHE_TTL` |
 | Headers e identidade | `SCRAPER_DEFAULT_USER_AGENT`, `SCRAPER_USER_AGENT_POOL`, `SCRAPER_HEADERS_*` |
 | Parsing e qualidade de dado | `SCRAPER_PRICE_TOLERANCE`, `SCRAPER_HTTP_DOMAIN_TIMEOUTS` |
-| Base compartilhada | `REDIS_*`, `LOG_LEVEL`, `LOG_FORMAT`, `ROBOTS_CACHE_*`, `CIRCUIT_*` |
+| Base compartilhada | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_OPERATIONAL_DB` (db 2 — locks, rate limiting e cache de robots), `LOG_LEVEL`, `LOG_FORMAT`, `ROBOTS_CACHE_*`, `CIRCUIT_*` |
 
 Exemplo minimo de `.env.market_scraper`:
 ```env
@@ -193,10 +194,10 @@ SCRAPER_PRICE_TOLERANCE=0.0
 
 ## Seguranca e Observabilidade
 - **Seguranca:**
-  - Validacao de URL e host publico em `shared/utils/url_validation.py` + `utils/http_utils.py` para reduzir risco de SSRF.
-  - Bloqueio por `robots.txt` antes do download (`utils/robots.py`), com fallback restritivo quando o parser nao pode ser validado.
+  - Validação de URL e host publico em `shared/utils/url_validation.py` + `utils/http_utils.py` para reduzir risco de SSRF.
+  - Bloqueio por `robots.txt` antes do download (`utils/robots.py`), com fallback restritivo quando o parser não pode ser validado.
   - Limites defensivos em download (`SCRAPER_HTTP_MAX_REDIRECTS`, `SCRAPER_HTTP_MAX_CONTENT_LENGTH`) e retries com backoff controlado.
-  - Erros de dominio sao retornados com `error_code` estavel para tratamento previsivel no cliente.
+  - Erros de dominio são retornados com `error_code` estável para tratamento previsivel no cliente.
 
 - **Observabilidade:**
   - Logs estruturados por `trace_id` em rota e pipeline (`routes_scraper`, `scraper_pipeline`), incluindo etapa, resultado e duracao.
@@ -205,4 +206,4 @@ SCRAPER_PRICE_TOLERANCE=0.0
 
 ---
 
-> Nota final: mantenha este README do `market_scraper` atualizado sempre que houver mudanca de endpoint, contrato HTTP, ordem do pipeline, regras de parser ou configuracao operacional do servico.
+> Nota final: mantenha este README do `market_scraper` atualizado sempre que houver mudança de endpoint, contrato HTTP, ordem do pipeline, regras de parser ou configuracao operacional do servico.

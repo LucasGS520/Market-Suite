@@ -6,10 +6,10 @@ sem alterar o código que as consome.
 
 Uso::
 
-    from shared.utils.redis_client import get_redis_client
+    from shared.utils.redis_client import get_redis_operational
     from shared.infra.rate_limiter import RedisRateLimiter
 
-    limiter = RedisRateLimiter(get_redis_client())
+    limiter = RedisRateLimiter(get_redis_operational())
 
     # Verifica antes de registrar tentativa (padrão para brute-force)
     if not limiter.check("bf:192.168.1.1", max_attempts=5, window_seconds=300):
@@ -71,7 +71,6 @@ class RateLimiter(Protocol):
     def reset(self, key: str) -> None:
         """ Zera o contador para a chave informada. """
         ...
-
 
 class RedisRateLimiter:
     """ Implementação de rate limiting baseada em contadores Redis.

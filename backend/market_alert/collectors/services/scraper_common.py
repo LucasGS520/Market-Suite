@@ -8,14 +8,16 @@ from typing import Any, Literal, Mapping
 from uuid import UUID
 
 from shared.schemas import ParserResponse, ScrapeResult
-from shared.utils import normalize_scraper_response, sanitize_text
-
-from market_alert.scraper.scraper_client import (
+from shared.clients.scraper_client import (
     ScraperClient,
     ScraperClientError,
     ScraperFetchResult,
 )
-from market_alert.products.utils.interval_calculator_products import EVENT_NOT_MODIFIED, calculate_schedule
+from shared.scheduling import EVENT_NOT_MODIFIED, calculate_schedule
+from shared.utils import normalize_scraper_response, sanitize_text
+
+
+from market_alert.products.domain.product_lifecycle import to_scheduling_context
 from market_alert.products.utils.price_decimal import to_decimal as _shared_to_decimal
 
 
@@ -225,7 +227,7 @@ def handle_not_modified_response(
 
         if entity_type == "monitored":
             schedule = calculate_schedule(
-                entity,
+                to_scheduling_context(entity),
                 reference_time=now,
                 event_type=EVENT_NOT_MODIFIED,
             )

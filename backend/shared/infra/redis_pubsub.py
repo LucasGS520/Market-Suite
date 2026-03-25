@@ -18,12 +18,11 @@ import redis
 import structlog
 
 from shared.core.config_base import ConfigBase
-from shared.utils.redis_client import get_redis_client
+from shared.utils.redis_client import get_redis_operational
 
 
 logger = structlog.get_logger("redis.pubsub")
 _settings = ConfigBase()
-
 
 def publish_message(channel: str, payload: dict[str, Any]) -> bool:
     """ Publica ``payload`` no canal informado usando Redis Pub/Sub.
@@ -35,7 +34,7 @@ def publish_message(channel: str, payload: dict[str, Any]) -> bool:
     consumidor final.
     """
 
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         logger.warning("redis_pubsub_publish_skipped", channel=channel, reason="client_unavailable")
         return False
@@ -48,7 +47,6 @@ def publish_message(channel: str, payload: dict[str, Any]) -> bool:
     except Exception as exc:  # pragma: no cover - falha inesperada de cliente
         logger.error("redis_pubsub_publish_failed", channel=channel, error=str(exc))
         return False
-
 
 class RedisChannelSubscriber:
     """ Mantém assinatura contínua em um canal Redis e repassa eventos.
@@ -93,7 +91,7 @@ class RedisChannelSubscriber:
         def _worker() -> None:
             while not self._stop_event.is_set():
                 try:
-                    client = redis.Redis.from_url(_settings.redis_url, decode_responses=True)
+                    client = redis.Redis.from_url(_settings.redis_operational_url, decode_responses=True)
                     pubsub = client.pubsub()
                     pubsub.subscribe(self.channel)
                     logger.info("redis_pubsub_subscribed", channel=self.channel)

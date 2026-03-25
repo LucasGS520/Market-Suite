@@ -1,14 +1,12 @@
-"""Cálculo de estabilidade para produtos monitorados.
+""" Cálculo de estabilidade para produtos monitorados.
 
-Re-exporta a implementação canônica de interval_calculator_products para
-centralizar imports na camada de domínio. A lógica de cálculo permanece em
-interval_calculator_products para preservar compatibilidade com código existente.
+Re-exporta a implementação canônica de shared.scheduling para centralizar
+imports na camada de domínio.
 
-Novo código deve importar daqui; código legado continua funcionando com
-o import direto de interval_calculator_products.
+Novo código deve importar diretamente de shared.scheduling.
 """
 
-from market_alert.products.utils.interval_calculator_products import (
+from shared.scheduling import (
     STABILITY_STABLE,
     STABILITY_UNSTABLE,
     STABILITY_VERY_STABLE,

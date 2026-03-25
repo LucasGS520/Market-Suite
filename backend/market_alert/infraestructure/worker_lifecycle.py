@@ -1,16 +1,8 @@
-""" Gerencia hooks de lifecycle do worker Celery.
+"""Hooks de lifecycle do worker Celery.
 
-Centraliza os sinais ``worker_ready`` e similares em um único lugar,
-mantendo ``celery_app.py`` livre de lógica operacional.
-
-Responsabilidade única:
-    Registrar handlers para eventos do worker (startup, shutdown, etc.)
-    e delegar para serviços especializados. Nenhuma lógica de negócio aqui.
-
-Uso::
-
-    from market_alert.infraestructure.worker_lifecycle import register_worker_signals
-    register_worker_signals(celery_app, process_start_monotonic)
+Ponto de extensão para registrar sinais Celery (worker_ready, worker_shutdown, etc.).
+O Temporal Worker é iniciado exclusivamente pelo container `market_orchestrator`
+dedicado no docker-compose — não há thread daemon aqui.
 """
 
 from __future__ import annotations
@@ -22,33 +14,21 @@ from celery.signals import worker_ready
 
 logger = structlog.get_logger("worker_lifecycle")
 
+
 def register_worker_signals(celery_app: Celery, process_start_monotonic: float) -> None:
-    """ Registra os sinais de lifecycle do worker.
+    """Registra sinais do worker Celery.
 
-    Deve ser chamada após a criação da instância ``celery_app``, antes de
-    qualquer worker ser iniciado. Em testes que não iniciam workers, esta
-    função pode ser ignorada sem efeitos colaterais.
+    Ponto central para adicionar hooks de startup/shutdown do processo Celery.
+    O Temporal Worker não é iniciado aqui — roda no container dedicado `market_orchestrator`.
 
-    Args:
-        celery_app: Instância da aplicação Celery.
-        process_start_monotonic: Timestamp monotônico de início do processo
-            (``time.monotonic()`` capturado no startup), usado para calcular
-            uptime e cooldowns de revalidação.
+    A validação de infraestrutura (PostgreSQL, Redis, Temporal) é registrada no
+    sinal ``worker_ready`` para garantir falha rápida quando o worker efetivamente
+    inicia — não em tempo de importação, o que causaria efeito colateral no Uvicorn.
     """
-
     @worker_ready.connect
-    def _on_worker_ready(**kwargs):
-        """ Inicia rotinas de suporte assim que o worker estiver pronto.
+    def _validate_on_worker_ready(sender, **kwargs) -> None:
+        """Valida infraestrutura assim que o worker está pronto para aceitar tasks."""
+        from market_alert.infraestructure.startup_validation import validate_startup_dependencies
+        validate_startup_dependencies(strict=True)
 
-        Delega inteiramente para ``continuous_collector_manager``, mantendo
-        este arquivo livre de detalhes de coleta.
-        """
-        from market_alert.collectors.services.continuous_collector_manager import (
-            request_start,
-            set_process_start_monotonic,
-            start_revalidation_loop,
-        )
-        logger.info("worker_ready_signal_received")
-        set_process_start_monotonic(process_start_monotonic)
-        request_start(celery_app)
-        start_revalidation_loop(celery_app)
+    logger.info("worker_lifecycle_registered")

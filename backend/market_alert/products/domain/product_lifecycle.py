@@ -1,11 +1,11 @@
-"""Regras de negócio puras para o ciclo de vida de produtos monitorados.
+""" Regras de negócio puras para o ciclo de vida de produtos monitorados.
 
 Esta camada é agnóstica a infraestrutura: não acessa banco, Redis ou filas.
 Recebe objetos de modelo ORM e retorna decisões sem efeitos colaterais externos.
 
 Responsabilidades:
 - Resolver evento de agendamento (preço, disponibilidade, padrão)
-- Calcular próximo check_at delegando para interval_calculator_products
+- Calcular próximo check_at delegando para shared.scheduling
 - Validar transições de status entre estados do monitorado
 - Atualizar rastreamento de preço nos objetos de produto (sem commit)
 
@@ -19,21 +19,36 @@ from decimal import Decimal
 
 import structlog
 
-from market_alert.enums.enums_products import MonitoredStatus
-from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
-from market_alert.products.utils.interval_calculator_products import (
+from shared.scheduling import (
     EVENT_AVAILABILITY_CHANGED,
     EVENT_PRICE_CHANGED,
     EVENT_STANDARD,
     STABILITY_UNSTABLE,
     RetryContext,
+    SchedulingContext,
     SchedulingDecision,
     calculate_schedule,
 )
+
+from market_alert.enums.enums_products import MonitoredStatus
+from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.products.utils.price_decimal import different_price
 
 
 logger = structlog.get_logger("domain.product_lifecycle")
+
+def to_scheduling_context(product: MonitoredProduct) -> SchedulingContext:
+    """ Converte MonitoredProduct ORM em SchedulingContext para shared.scheduling. """
+    return SchedulingContext(
+        status=product.status.value,
+        last_checked=getattr(product, "last_checked", None),
+        last_price_change_at=product.last_price_change_at,
+        group_collected_at=product.group_collected_at,
+        last_scraped_at=product.last_scraped_at,
+        created_at=product.created_at,
+        next_check_at=product.next_check_at,
+        stability_score=getattr(product, "stability_score", 0) or 0,
+    )
 
 #Transições de status explicitamente permitidas pelas regras de negócio.
 #Qualquer transição não listada aqui deve ser rejeitada pelo service.
@@ -73,7 +88,7 @@ def resolve_scheduling_event(
         availability_changed: True se o status de disponibilidade mudou.
 
     Returns:
-        Uma das constantes EVENT_* de interval_calculator_products.
+        Uma das constantes EVENT_* de shared.scheduling.
     """
     if price_changed:
         return EVENT_PRICE_CHANGED
@@ -91,7 +106,7 @@ def compute_next_check_at(
     """ Calcula a próxima janela de agendamento delegando para a política centralizada.
 
     Centraliza o acesso à política de agendamento de modo que CRUD e services
-    não precisem importar interval_calculator_products diretamente.
+    não precisem importar shared.scheduling diretamente.
 
     Args:
         product: Instância do monitorado a ser agendada.
@@ -103,7 +118,7 @@ def compute_next_check_at(
         SchedulingDecision com next_check_at, stability_score, intervalo e motivo.
     """
     return calculate_schedule(
-        product,
+        to_scheduling_context(product),
         reference_time=reference_time,
         event_type=event_type,
         retry_context=retry_context,

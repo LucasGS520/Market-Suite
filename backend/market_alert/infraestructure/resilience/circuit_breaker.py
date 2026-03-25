@@ -20,7 +20,7 @@ class CircuitBreaker:
         failure_threshold: int,
         failure_window: int,
         cooldown_seconds: int,
-        namespace: str = "scraper:circuit",
+        namespace: str = "circuit",
     ) -> None:
         self._client_factory = client_factory
         self._failure_threshold = max(1, failure_threshold)

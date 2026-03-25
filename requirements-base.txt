@@ -28,6 +28,9 @@ httpx==0.28.1
 requests==2.32.3
 structlog==25.3.0
 
+#  Orquestração de workflows (Temporal)
+temporalio>=1.7.0,<2.0.0
+
 # Fila de tarefas (Celery e dependências)
 celery==5.5.2
 billiard==4.2.1

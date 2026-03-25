@@ -5,7 +5,7 @@ Responsabilidade única: criar, pausar e deletar concorrentes.
 Fluxo de dependências:
     Routes → este service → CRUD (persistência)
     Routes → este service → Orchestrator (enfileiramento Celery)
-    Routes → este service → Orchestrator (fila Redis via CollectionQueue)
+    Routes → este service → Orchestrator (enfileiramento Celery)
 
 NÃO conhece: comparações, notificações, dashboards, rate limiting de monitorados.
 
@@ -26,6 +26,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping
+from shared.scheduling import EVENT_STANDARD
 from shared.utils.url_validation import normalize_and_validate_product_url
 
 from market_alert.core.config_alert import settings
@@ -38,17 +39,21 @@ from market_alert.products.crud.crud_competitor import (
     create_pending_competitor_product,
     get_competitor_by_monitored_and_url,
     get_competitor_by_id,
-    paginate_competitors,
     delete_competitor,
     delete_competitors_by_monitored_id,
 )
 from market_alert.products.services.services_products import build_competitor_response
 from market_alert.products.services.services_access_control import ensure_user_can_access_monitored
-from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
 from market_alert.products.domain.product_lifecycle import compute_next_check_at
-from market_alert.products.utils.interval_calculator_products import EVENT_STANDARD
 from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
+
+#Import condicional: protege testes unitários e ambientes sem Temporal disponível
+try:
+    from shared.clients.orchestrator_client import get_temporal_client
+    _TEMPORAL_AVAILABLE = True
+except ImportError:
+    _TEMPORAL_AVAILABLE = False
 
 
 logger = structlog.get_logger(__name__)
@@ -239,18 +244,19 @@ def create_competitor_scrape_request(
     db.commit()
     db.refresh(monitored_product)
 
-    enqueued = CollectionQueue().enqueue_for_collection(
-        monitored_product.id,
-        monitored_product.next_check_at,
-        source="competitor_create",
-    )
-    if not enqueued:
-        #Não bloqueia criação quando Redis estiver indisponível
-        logger.warning(
-            "monitored_priority_queue_enqueue_failed",
-            monitored_id=str(monitored_product.id),
-            source="competitor_create",
-        )
+    #Sinaliza o workflow do monitorado pai para acordar o ciclo de rechecagem
+    if _TEMPORAL_AVAILABLE:
+        try:
+            get_temporal_client().notify_competitor_changed(
+                monitored_product.id, event="added", competitor_id=pending.id
+            )
+        except Exception as exc:
+            logger.warning(
+                "temporal_signal_failed",
+                signal="competitor_changed",
+                monitored_id=str(monitored_product.id),
+                error=str(exc),
+            )
 
     #Flag explicita para indicar se a tentativa de coleta imediata foi enfileirada
     initial_enqueue_ok = False
@@ -349,14 +355,19 @@ def delete_competitor_entry(
         #Cascatas de relacionamento cuidam do histórico de preços e dependências
         logger.info("competitor_deleted", **log_context, monitored_id=str(monitored_id))
 
-        removed = CollectionQueue().remove_from_collection(competitor_id, source="competitor_delete")
-        if not removed:
-            #Não bloqueia remoção do banco quando houver falha de Redis
-            logger.warning(
-                "competitor_priority_queue_remove_failed",
-                competitor_id=str(competitor_id),
-                reason="competitor_delete",
-            )
+        #Sinaliza workflow do monitorado pai sobre remoção do concorrente
+        if _TEMPORAL_AVAILABLE:
+            try:
+                get_temporal_client().notify_competitor_changed(
+                    monitored_id, event="removed", competitor_id=competitor_id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "temporal_signal_failed",
+                    signal="competitor_changed",
+                    monitored_id=str(monitored_id),
+                    error=str(exc),
+                )
 
         request_comparison_recompute(monitored_id, "competitor_deleted")
         logger.info(
@@ -406,13 +417,21 @@ def clear_competitors_from_monitored(
         )
 
     deleted_ids = delete_competitors_by_monitored_id(db, monitored_product_id)
-    for competitor_id in deleted_ids:
-        removed = CollectionQueue().remove_from_collection(competitor_id, source="competitor_delete")
-        if not removed:
-            #Mantém remoção em banco mesmo quando Redis estiver indisponível
-            logger.warning(
-                "competitor_priority_queue_remove_failed",
-                competitor_id=str(competitor_id),
-                reason="competitor_delete",
-            )
+
+    #Sinaliza remoção de cada concorrente ao workflow do monitorado pai
+    if _TEMPORAL_AVAILABLE and deleted_ids:
+        client = get_temporal_client()
+        for cid in deleted_ids:
+            try:
+                client.notify_competitor_changed(
+                    monitored_product_id, event="removed", competitor_id=cid
+                )
+            except Exception as exc:
+                logger.warning(
+                    "temporal_signal_failed",
+                    signal="competitor_changed",
+                    monitored_id=str(monitored_product_id),
+                    error=str(exc),
+                )
+
     return deleted_ids

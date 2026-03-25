@@ -3,7 +3,7 @@
 Quando uma task Celery herda de ``DLQTask`` via ``base=DLQTask``, o método
 ``on_failure`` é chamado automaticamente pelo worker após a task falhar e
 não poder mais ser reexecutada (retries esgotados). A falha é então
-encaminhada para a fila ``dead_letter`` para registro e auditoria.
+gravada diretamente no Redis Stream configurado em ``CELERY_DLQ_STREAM_NAME``.
 
 Uso::
 
@@ -16,9 +16,6 @@ Uso::
     )
     def collect_product_task(self, payload):
         ...
-
-``self.app`` é usado em vez de importar ``celery_app`` diretamente para
-evitar importação circular (celery_app.py importa os módulos de tasks).
 """
 
 from __future__ import annotations
@@ -26,13 +23,13 @@ from __future__ import annotations
 import structlog
 from celery import Task
 
-from shared.utils import sanitize_exception_message
+from market_alert.infraestructure.celery.redis_dlq_handler import write_to_dlq
 
 logger = structlog.get_logger("dlq_base_task")
 
 
 class DLQTask(Task):
-    """ Task base que registra falhas permanentes na fila dead_letter.
+    """ Task base que registra falhas permanentes via Redis Streams.
 
     Apenas tasks com ``max_retries > 0`` utilizam a DLQ; tasks sem política
     de retry já tratam seus próprios erros e não precisam de DLQ.
@@ -48,7 +45,7 @@ class DLQTask(Task):
         kwargs: dict,
         einfo,
     ) -> None:
-        """ Envia task para a DLQ após falha permanente (retries esgotados). """
+        """ Grava falha permanente no Redis Stream DLQ. """
         max_retries = getattr(self, "max_retries", None)
         if not max_retries:
             #Tasks sem política de retry não usam DLQ
@@ -70,34 +67,18 @@ class DLQTask(Task):
             #Último fallback: usa o id da requisição Celery para não perder correlação.
             trace_id = getattr(self.request, "id", None)
 
-        try:
-            self.app.send_task(
-                "market_alert.infraestructure.celery.dlq_handler.handle_dead_letter",
-                kwargs={
-                    "task_name": self.name,
-                    "task_id": task_id,
-                    "exception_class": type(exc).__name__,
-                    "exception_message": sanitize_exception_message(str(exc), max_length=500),
-                    "retry_count": retry_count,
-                    "trace_id": trace_id,
-                },
-                queue="dead_letter",
-            )
-            logger.warning(
-                "task_sent_to_dlq",
-                task_name=self.name,
-                task_id=task_id,
-                exception=type(exc).__name__,
-                retry_count=retry_count,
-                trace_id=trace_id,
-            )
-        except Exception:
-            #Nunca deixa a DLQ propagar erro — a task já falhou
-            logger.exception(
-                "dlq_send_failed",
-                task_name=self.name,
-                task_id=task_id,
-            )
+        #Fila de destino da task (informativa no evento DLQ)
+        queue = getattr(self.request, "delivery_info", {}).get("routing_key", "unknown")
+
+        write_to_dlq(
+            task_id=task_id,
+            task_name=self.name,
+            queue=queue,
+            exception=exc,
+            trace_id=trace_id,
+            retry_count=retry_count,
+            max_retries=max_retries,
+        )
 
 
 __all__ = ["DLQTask"]

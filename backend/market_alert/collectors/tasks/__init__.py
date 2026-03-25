@@ -12,8 +12,6 @@ from importlib import import_module
 # Mapeia nomes públicos para seus submódulos e permite lazy loading controlado.
 _LAZY_SUBMODULES = {
     "collector_product_task": "market_alert.collectors.tasks.collector_product_task",
-    "continuous_collector_task": "market_alert.collectors.tasks.continuous_collector_task",
-    "priority_queue_tasks": "market_alert.collectors.tasks.priority_queue_tasks",
 }
 
 __all__ = list(_LAZY_SUBMODULES)

@@ -1,16 +1,19 @@
 """ Utilitário centralizado para respeito ao robots.txt antes de scraping
 
 O módulo valida o acesso com ``robots.txt`` de forma assíncrona reaproveitando
-limites de rede definidos nas configurações globais. O cache interno reduz
-round-trips desnecessários. A política de fallback é restritiva para impedir 
-acessos quando o arquivo não pode ser validado, privilegiando conformidade legal.
+limites de rede definidos nas configurações globais. O cache Redis compartilhado
+reduz round-trips desnecessários entre instâncias do scraper. A política de
+fallback é restritiva para impedir acessos quando o arquivo não pode ser
+validado, privilegiando conformidade legal.
+
+Cache:
+  Redis (chave ``robots:{host}``, TTL 3600s) — compartilhado entre workers.
+  Armazena o texto bruto do robots.txt; o parser é reconstruído em memória.
+  Fallback: se Redis indisponível, realiza download direto.
 """
 
 from __future__ import annotations
 
-import threading
-import time
-from dataclasses import dataclass
 from urllib import robotparser
 from urllib.parse import urlparse
 
@@ -18,6 +21,8 @@ import httpx
 import structlog
 
 from shared.utils.logging_utils import sanitize_log_data
+from shared.utils.redis_client import get_redis_operational
+from shared.enums.cache_keys import CacheKey
 
 from market_scraper.utils.http_retry import (
     RetryableHTTPError,
@@ -29,24 +34,14 @@ from market_scraper.core.config_scraper import settings
 
 logger = structlog.get_logger(__name__)
 
-#TTL padrão em segundos para reutilização de robots.txt por host
-_CACHE_TTL_SECONDS = 3600  #1 hora
+#TTL do cache Redis para robots.txt (1 hora, alinhado com REDIS_TTL_ROBOTS_CACHE_SECONDS)
+_ROBOTS_REDIS_TTL = 3600
 
 #Cabeçalho padrão para leitura de robots respeitando a identificação do serviço
 _ROBOTS_HEADERS = {
     "User-Agent": "marketsuite-scraper/1.0",
     "Accept": "text/plain",
 }
-
-@dataclass
-class _RobotsCacheEntry:
-    """ Representa um robots.txt carregado com expiração pré-definida """
-    parser: robotparser.RobotFileParser
-    expires_at: float
-
-#Cache protegido por lock para evitar leituras simultâneas redundantes
-_ROBOTS_CACHE: dict[str, _RobotsCacheEntry] = {}
-_CACHE_LOCK = threading.Lock()
 
 def _prepare_urls(url: str) -> tuple[str, str, str]:
     """ Normaliza a URL recebida e retorna informações úteis para o cache """
@@ -129,29 +124,16 @@ async def _download_robots(robots_url: str, *, timeout: float) -> str | None:
     
     return response.text
 
-async def _get_parser(
-    host: str,
+def _build_parser(
     robots_url: str,
+    text: str,
     *,
-    timeout: float,
+    host: str,
 ) -> robotparser.RobotFileParser | None:
-    """ Obtém parser do cache ou realiza download assíncrono do robots.txt """
-    now = time.monotonic()
-    with _CACHE_LOCK:
-        entry = _ROBOTS_CACHE.get(host)
-        if entry and entry.expires_at > now:
-            return entry.parser
-        if entry and entry.expires_at <= now:
-            _ROBOTS_CACHE.pop(host, None)
-
-    text = await _download_robots(robots_url, timeout=timeout)
-    if text is None:
-        return None
-
+    """ Constrói RobotFileParser a partir do texto bruto """
     parser = robotparser.RobotFileParser()
     parser.set_url(robots_url)
     try:
-        #Mantemos leitura direta pois urllib já lida com caching básico HTTP
         parser.parse(text.splitlines())
     except Exception as exc:
         logger.warning(
@@ -161,10 +143,50 @@ async def _get_parser(
             error=str(exc),
         )
         return None
-    
-    expires_at = time.monotonic() + _CACHE_TTL_SECONDS
-    with _CACHE_LOCK:
-        _ROBOTS_CACHE[host] = _RobotsCacheEntry(parser=parser, expires_at=expires_at)
+    return parser
+
+async def _get_parser(
+    host: str,
+    robots_url: str,
+    *,
+    timeout: float,
+) -> robotparser.RobotFileParser | None:
+    """ Obtém parser do cache Redis ou realiza download assíncrono do robots.txt.
+
+    Fluxo:
+      1. Tenta ler texto do Redis (chave ``robots:{host}``)
+      2. Se hit: reconstrói parser em memória (sem I/O de rede)
+      3. Se miss ou Redis indisponível: download HTTP → armazena no Redis → retorna parser
+    """
+    cache_key = CacheKey.robots_txt(host)
+
+    #Tentativa de cache Redis
+    try:
+        client = get_redis_operational()
+        cached_text = client.get(cache_key)
+        if cached_text is not None:
+            logger.debug("robots_cache_hit", host=host)
+            return _build_parser(robots_url, cached_text, host=host)
+    except Exception as exc:
+        logger.warning("robots_cache_get_failed", host=host, error=str(exc))
+
+    #Cache miss: download HTTP
+    text = await _download_robots(robots_url, timeout=timeout)
+    if text is None:
+        return None
+
+    parser = _build_parser(robots_url, text, host=host)
+    if parser is None:
+        return None
+
+    #Persiste no Redis com TTL
+    try:
+        client = get_redis_operational()
+        client.setex(cache_key, _ROBOTS_REDIS_TTL, text)
+        logger.debug("robots_cache_populated", host=host, ttl=_ROBOTS_REDIS_TTL)
+    except Exception as exc:
+        logger.warning("robots_cache_set_failed", host=host, error=str(exc))
+
     return parser
 
 async def is_allowed(
@@ -215,6 +237,4 @@ async def is_allowed(
     return allowed
 
 
-__all__ = [
-    "is_allowed",
-]
+__all__ = ["is_allowed"]

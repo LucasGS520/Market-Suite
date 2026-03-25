@@ -1,7 +1,7 @@
 """ Carrega variáveis de ambiente específicas do serviço `market_alert` """
 
 import os
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from shared.core.config_base import ConfigBase
 
@@ -32,9 +32,7 @@ class Settings(ConfigBase):
     ]
 
     #Configuração do banco de dados
-    DATABASE_URL: str = os.getenv("DATABASE_URL")  # URL de conexão do Postgres
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL não foi encontrada no arquivo .env.market_alert")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")  # URL de conexão do Postgres
 
     #Configurações de email SMTP
     SMTP_HOST: str | None = os.getenv("SMTP_HOST") #Endereço do servidor SMTP
@@ -54,12 +52,7 @@ class Settings(ConfigBase):
     FCM_SERVER_KEY: str | None = os.getenv("FCM_SERVER_KEY") #Autorização do FCM
 
     #Segurança e tokens
-    SECRET_KEY: str = os.getenv("SECRET_KEY") #Chave para asisnar JWTs
-    #Falha rápida evita tokens sem assinatura forte em ambientes mal configurados
-    if not SECRET_KEY:
-        raise ValueError(
-            "SECRET_KEY não foi encontrada no arquivo .env.market_alert; defina uma chave segura para assinar os JWTs"
-        )
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "")  #Chave para assinar JWTs
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256") #Algoritmo de assinatura
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60)
@@ -85,59 +78,38 @@ class Settings(ConfigBase):
         else "none"
     ) #Política SameSite do cookie de refresh
 
+    #Inicialização e health check do Temporal
+    # Sequência de startup: postgres → redis → temporal (com retry) → API aceita tráfego
+    # Todos os parâmetros abaixo são ajustáveis via variáveis de ambiente.
+    TEMPORAL_HEALTH_MAX_ATTEMPTS: int = int(
+        os.getenv("TEMPORAL_HEALTH_MAX_ATTEMPTS", "3")
+    ) #Número máximo de tentativas de health check do Temporal no startup
+    TEMPORAL_HEALTH_TIMEOUT: int = int(
+        os.getenv("TEMPORAL_HEALTH_TIMEOUT", "30")
+    ) #Timeout em segundos por tentativa de conexão ao Temporal (referência para _run_async)
+    TEMPORAL_HEALTH_CHECK_INTERVAL: int = int(
+        os.getenv("TEMPORAL_HEALTH_CHECK_INTERVAL", "30")
+    ) #Intervalo em segundos para re-verificações periódicas do Temporal em runtime (reservado)
+
     #Controles operacionais de coleta
-    PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "20")) #TTL padrão para lock de produto
+    # Invariante: PRODUCT_LOCK_TTL_SECONDS > TASK_GLOBAL_TIME_LIMIT_SECONDS (Decisão 4)
+    TASK_GLOBAL_TIME_LIMIT_SECONDS: int = int(
+        os.getenv("TASK_GLOBAL_TIME_LIMIT_SECONDS", "45")
+    ) #Limite global de execução de task (referência para TTL de locks)
+    PRODUCT_LOCK_TTL_SECONDS: int = int(os.getenv("PRODUCT_LOCK_TTL_SECONDS", "60")) #TTL padrão para lock de produto — deve ser > TASK_GLOBAL_TIME_LIMIT_SECONDS
     PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS: int = int(
-        os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "15")
+        os.getenv("PRODUCT_LOCK_TTL_MIN_SAFE_SECONDS", "50")
     ) #Margem mínima recomendada para evitar expiração prematura do lock
 
-    #Intervalos do agendamento contínuo (em segundos)
-    COLLECT_INTERVAL_UNSTABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_UNSTABLE_MIN", str(5 * 60))
-    ) #Intervalo mínimo para produtos instáveis
-    COLLECT_INTERVAL_UNSTABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_UNSTABLE_MAX", str(10 * 60))
-    ) #Intervalo máximo para produtos instáveis
-    COLLECT_INTERVAL_STABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_STABLE_MIN", str(10 * 60))
-    ) #Intervalo mínimo para produtos estáveis
-    COLLECT_INTERVAL_STABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_STABLE_MAX", str(20 * 60))
-    ) #Intervalo máximo para produtos estáveis
-    COLLECT_INTERVAL_VERY_STABLE_MIN: int = int(
-        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MIN", str(20 * 60))
-    ) #Intervalo mínimo para produtos muito estáveis
-    COLLECT_INTERVAL_VERY_STABLE_MAX: int = int(
-        os.getenv("COLLECT_INTERVAL_VERY_STABLE_MAX", str(30 * 60))
-    ) #Intervalo máximo para produtos muito estáveis
+    COLLECTION_TASK_TIMEOUT: int = int(
+        os.getenv("COLLECTION_TASK_TIMEOUT", "60")
+    ) #Timeout em segundos para tasks de coleta Celery
 
-    #Thresholds de estabilidade em dias
-    STABILITY_DAYS_UNSTABLE: int = int(
-        os.getenv("STABILITY_DAYS_UNSTABLE", "1")
-    ) #Janela para considerar produto instável
-    STABILITY_DAYS_STABLE: int = int(
-        os.getenv("STABILITY_DAYS_STABLE", "3")
-    ) #Janela para considerar produto estável
-    STABILITY_DAYS_VERY_STABLE: int = int(
-        os.getenv("STABILITY_DAYS_VERY_STABLE", "7")
-    ) #Janela para considerar produto muito estável
-
-    #Configuração do worker contínuo
-    CONTINUOUS_WORKER_POLL_INTERVAL: float = float(
-        os.getenv("CONTINUOUS_WORKER_POLL_INTERVAL", "1.0")
-    ) #Intervalo base entre verificações da fila
-    CONTINUOUS_WORKER_BATCH_SIZE: int = int(
-        os.getenv("CONTINUOUS_WORKER_BATCH_SIZE", "20")
-    ) #Quantidade de itens processados por ciclo
-    CONTINUOUS_WORKER_IDLE_SLEEP: float = float(
-        os.getenv("CONTINUOUS_WORKER_IDLE_SLEEP", "2.0")
-    ) #Pausa aplicada quando a fila está vazia
-    CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS: int = int(
-        os.getenv("CONTINUOUS_WORKER_PROCESSING_TTL_SECONDS", str(15 * 60))
-    ) #TTL para recuperar itens travados no conjunto de processamento
-    CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS: int = int(
-        os.getenv("CONTINUOUS_COLLECTOR_LOCK_TTL_SECONDS", "45")
-    ) #TTL do lock para garantir instância única do coletor contínuo
+    # Prefixos de namespacing para chaves Redis de rate limiting (Decisão 3)
+    # Formato: rate:{camada}:{identificador}
+    RATE_LIMIT_PREFIX_SCRAPING: str = "rate:scraping"   # coleta por domínio
+    RATE_LIMIT_PREFIX_BUSINESS: str = "rate:business"   # lógica de negócio
+    RATE_LIMIT_PREFIX_AUTH: str = "rate:auth"           # segurança/auth
 
     CLEANUP_CACHE_SCAN_COUNT: int = int(
         os.getenv("CLEANUP_CACHE_SCAN_COUNT", "200")
@@ -154,16 +126,6 @@ class Settings(ConfigBase):
     CLEANUP_CACHE_SLEEP_BETWEEN_BATCHES_MS: int = int(
         os.getenv("CLEANUP_CACHE_SLEEP_BETWEEN_BATCHES_MS", "0")
     ) #Pausa opcional entre lotes para reduzir pressão no Redis
-
-    #Chaves Redis do agendamento contínuo
-    PRIORITY_QUEUE_KEY: str = os.getenv(
-        "PRIORITY_QUEUE_KEY",
-        "market_alert:priority_queue",
-    ) #Sorted set principal de agendamento
-    PRIORITY_QUEUE_PROCESSING_KEY: str = os.getenv(
-        "PRIORITY_QUEUE_PROCESSING_KEY",
-        "market_alert:priority_queue:processing",
-    ) #Sorted set auxiliar para itens em processamento
 
     #URL base do serviço externo de scraping
     SCRAPER_SERVICE_URL: str = os.getenv(
@@ -232,9 +194,6 @@ class Settings(ConfigBase):
     SCRAPER_MAX_RETRY_DELAY_SECONDS: int = int(
         os.getenv("SCRAPER_MAX_RETRY_DELAY_SECONDS", str(5 * 60))
     ) #Limite superior para backoff de Celery
-    SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS: int = int(
-        os.getenv("SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS", str(10 * 60))
-    ) #Cooldown adicional após falhas de rate limit
     SCRAPER_INVALID_URL_MAX_ATTEMPTS: int = int(
         os.getenv("SCRAPER_INVALID_URL_MAX_ATTEMPTS", "3")
     ) #Tentativas antes de marcar URL como inválida
@@ -322,6 +281,21 @@ class Settings(ConfigBase):
     REGISTRATION_MAX_PER_HOUR: int = int(
         os.getenv("REGISTRATION_MAX_PER_HOUR", "5")
     ) #Limite de cadastros por hora por IP
+
+    @model_validator(mode="after")
+    def _validate_required_secrets(self) -> "Settings":
+        """Valida campos obrigatórios com falha em tempo de instanciação (não de importação)."""
+        if not self.DATABASE_URL:
+            raise ValueError(
+                "DATABASE_URL não configurada. "
+                "Defina em .env.market_alert (market_alert) ou .env.market_orchestrator (orchestrator)."
+            )
+        if not self.SECRET_KEY:
+            raise ValueError(
+                "SECRET_KEY não configurada. "
+                "Defina uma chave segura para assinar os JWTs em .env.common ou .env.market_alert."
+            )
+        return self
 
 #Instância única de settings para a aplicação
 settings = Settings()

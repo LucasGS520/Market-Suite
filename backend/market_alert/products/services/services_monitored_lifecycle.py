@@ -4,7 +4,7 @@ Responsabilidade única: criar, pausar, retomar e deletar monitorados.
 
 Fluxo de dependências:
     Routes → este service → CRUD (persistência) → Domain (decisões de estado)
-    Routes → este service → Orchestrator (enfileiramento)
+    Routes → este service → Orchestrator (enfileiramento Celery)
 
 NÃO conhece: comparações, notificações, dashboards, rate limiting de concorrentes.
 
@@ -26,6 +26,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, CompetitorProductCreateScraping
+from shared.scheduling import EVENT_STANDARD
 from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
@@ -51,11 +52,16 @@ from market_alert.products.crud.crud_monitored import (
 )
 from market_alert.comparisons.crud.crud_comparison import get_latest_summary
 from market_alert.products.services.services_products import build_monitored_response
-from market_alert.collectors.domain.collection_queue import CollectionQueue
 from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_collect
 from market_alert.collectors.orchestrator.payload_builders import build_monitored_payload
 from market_alert.products.domain.product_lifecycle import compute_next_check_at
-from market_alert.products.utils.interval_calculator_products import EVENT_STANDARD
+
+#Import condicional: protege testes unitários e ambientes sem Temporal disponível
+try:
+    from shared.clients.orchestrator_client import get_temporal_client
+    _TEMPORAL_AVAILABLE = True
+except ImportError:
+    _TEMPORAL_AVAILABLE = False
 
 
 logger = structlog.get_logger("services_monitored_lifecycle")
@@ -96,16 +102,21 @@ def _acquire_monitored_lock(monitored_id: UUID) -> str:
     return owner or ""
 
 def _remove_ids_from_priority_queue(product_ids: list[UUID], *, source: str) -> None:
-    """ Remove IDs da fila de prioridade fora do CRUD para manter separação de responsabilidades """
-    for product_id in product_ids:
+    """ Sinaliza o workflow Temporal para pausar ou encerrar cada monitorado """
+    if not _TEMPORAL_AVAILABLE:
+        return
+    client = get_temporal_client()
+    for pid in product_ids:
         try:
-            CollectionQueue().remove_from_collection(product_id, source=source)
+            if source == "user_paused":
+                client.pause_monitoring(pid)
+            else:
+                client.delete_monitoring(pid)
         except Exception as exc:
-            #Mantém o fluxo principal mesmo quando Redis estiver indisponível
             logger.warning(
-                "priority_queue_remove_failed",
-                product_id=str(product_id),
-                source=source,
+                "temporal_signal_failed",
+                signal="pause" if source == "user_paused" else "delete",
+                monitored_id=str(pid),
                 error=str(exc),
             )
 
@@ -127,31 +138,37 @@ def _enqueue_resume_collection(monitored: MonitoredProduct, user: User) -> None:
             user_id=str(user.id),
         )
 
+    #Registra retomada no workflow durável para manter estado consistente
+    if _TEMPORAL_AVAILABLE:
+        try:
+            get_temporal_client().resume_monitoring(monitored.id, immediate_collect=True)
+        except Exception as exc:
+            logger.warning(
+                "temporal_signal_failed",
+                signal="resume",
+                monitored_id=str(monitored.id),
+                error=str(exc),
+            )
+
 def _enqueue_monitored_at_priority_queue(
     monitored: MonitoredProduct,
     *,
     reference: datetime,
     source: str,
 ) -> None:
-    """ Reinsere monitorado na fila de prioridade Redis após retomada.
-
-    A fila de prioridade controla o ciclo de rechecagem contínua. O CRUD
-    atualiza o next_check_at; este service responsabiliza-se pelo enfileiramento.
-    """
+    """ Sinaliza o workflow Temporal para retomar o monitorado (sem coleta imediata) """
+    if not _TEMPORAL_AVAILABLE:
+        return
     try:
-        CollectionQueue().enqueue_for_collection(
-            monitored.id,
-            monitored.next_check_at or reference,
-            source=source,
-        )
+        get_temporal_client().resume_monitoring(monitored.id, immediate_collect=False)
     except Exception as exc:
-        #Mantém a retomada mesmo que o Redis não responda
         logger.warning(
-            "monitored_resume_priority_queue_enqueue_failed",
+            "temporal_signal_failed",
+            signal="resume",
             monitored_id=str(monitored.id),
+            source=source,
             error=str(exc),
         )
-
 
 # ---------------------------------------------------------------------------
 # Operações públicas de ciclo de vida
@@ -273,14 +290,21 @@ def create_monitored_product(
             monitored_id=str(pending.id),
             trace_id=immediate_trace_id,
         )
-        #Mantém monitorado na fila contínua para rechecagens subsequentes
-        enqueued = CollectionQueue().enqueue_now(pending.id, source="new_monitored")
-        if not enqueued:
-            logger.warning(
-                "monitored_enqueue_failed_fallback",
-                monitored_id=str(pending.id),
-                reason="priority_queue_unavailable",
-            )
+
+        #Inicia workflow durável de rechecagem contínua (não-bloqueante)
+        if _TEMPORAL_AVAILABLE:
+            try:
+                get_temporal_client().start_monitoring(
+                    pending.id,
+                    user.id,
+                    interval_seconds=getattr(pending, "check_interval", 3600) or 3600,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "temporal_signal_with_start_failed",
+                    monitored_id=str(pending.id),
+                    error=str(exc),
+                )
     except Exception:
         #Evita bloquear a criação quando Redis estiver indisponível
         logger.warning(

@@ -1,96 +1,35 @@
-# CLAUDE.md — market_alert
+# Claude — Correção Camada de Inicialização
 
-## Docker — Decisões e Aprendizados
+## Sobre o Projeto *Market Suite* (`market_suite`)
+**MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
 
-### Estrutura de requirements
-- `requirements-base.txt` na raiz do projeto: dependências compartilhadas entre `market_alert` e `market_scraper`
-- Cada módulo tem seu próprio `requirements-market-*.txt` com pacotes específicos
-- Dockerfiles usam `COPY --from=root` (via `additional_contexts` no docker-compose) para acessar a raiz
+O projeto é separado por responsabilidades, em diferentes módulos:
+**Backend**:
+- **API + Persistência** (market_alert): Gerencia estado de usuários, produtos, comparações
+- **Scraping especializado** (market_scraper): Extrai dados de e-commerce via HTTP
+- **Processamento em background** (Celery + Redis): Coleta, comparação e notificações assíncronas
+- **Orquestração durável** (market_orchestrator): Ciclo de vida contínuo de monitoramento por produto com Temporal.
 
-### Build com BuildKit
-- Todos os Dockerfiles usam `--mount=type=cache,target=/root/.cache/pip`
-- O `docker-compose.yml` declara `additional_contexts: root: .` nos 7 serviços que precisam de `requirements-base.txt`
-- Frontend usa Dockerfile multi-stage: `builder` (dev com Vite) e `production` (serve estático)
-- O stage `builder` instala dependências no build — restart do container não reinstala pacotes
+**Frontend**:
+- **SPA moderna**: consome API backend via HTTP (REST/JSON).
 
-### Scripts úteis
-- `.\scripts\docker-cleanup.ps1` — limpa volumes, imagens e cache de build (Windows)
-- `bash scripts/docker-monitor.sh` — monitora CPU/RAM dos containers em tempo real
-
-### O que NÃO mudar no docker-compose
-- Volumes `./frontend:/app` + `frontend-node-modules:/app/node_modules`: padrão necessário para hot-reload + node_modules do Dockerfile coexistirem
-- `additional_contexts: root: .` em todos os serviços que referenciam `requirements-base.txt`
-- `target: builder` no serviço `frontend`: garante que a etapa de produção (com `pnpm build`) não seja executada em dev
-
-## Desenvolvimento Local (Recomendado para Dev)
-
-Para máxima velocidade com hot-reload local:
-
-- **Docker rodando apenas infraestrutura** (PostgreSQL + Redis)
-- **API, Workers e Frontend rodando localmente** em Python/Node nativos
-- Veja [DEVELOPMENT.md](DEVELOPMENT.md) para setup completo
-
-**Quick start:**
-```bash
-# Terminal 1: Infraestrutura
-docker-compose -f docker-compose.infra-only.yml up
-
-# Setup uma vez
-bash scripts/dev-setup.sh
-
-# Terminais 2-6: Componentes locais
-bash scripts/dev-migrate.sh
-bash scripts/dev-start-api.sh
-bash scripts/dev-start-workers.sh scraping
-bash scripts/dev-start-workers.sh monitor
-bash scripts/dev-start-workers.sh beat
-bash scripts/dev-start-frontend.sh
-```
+> Informações sobre a Stack e Tecnologias existentes em [STACK_MARKET.md](STACK_MARKET.md)
 
 ---
 
-## Docker Profiles — Ligar/Desligar Blocos
+## Objetivo e Problemas a ser Resolvido
 
-O compose utiliza `profiles` para separar responsabilidades e permitir rodar subsets independentes:
+---
 
-### Perfis Disponíveis
-
-| Perfil | Serviços | Caso de Uso |
-|--------|----------|-----------|
-| `infra` | `db`, `redis`, `redis-init` | Database + cache (base obrigatória) |
-| `api` | `migrations`, `market_alert` | API principal + migrações |
-| `workers` | `celery-worker-{scraping,monitor,compare,notifications}` | Processamento assíncrono |
-| `scraper` | `market_scraper` | Serviço de scraping externo |
-| `ui` | `frontend` | Interface web (Vite) |
-
-### Exemplos de Uso
-
-```bash
-# Apenas infraestrutura (para setup inicial ou testes de conexão)
-docker-compose --profile infra up
-
-# API completa (infra é automático via depends_on)
-docker-compose --profile infra --profile api up
-
-# Full-stack em desenvolvimento
-docker-compose --profile infra --profile api --profile workers --profile ui up
-
-# Produção sem UI (API + workers + scraper, sem frontend)
-docker-compose --profile infra --profile api --profile workers --profile scraper up
-
-# Apenas workers (útil para escalar processamento separado)
-docker-compose --profile infra --profile workers up
-
-# Scraper isolado para testes
-docker-compose --profile infra --profile scraper up
-```
-
-### Ordem de Inicialização Garantida
-
-Mesmo com profiles, as dependências via `depends_on` com healthchecks/completion são respeitadas:
-
-1. **Infra**: `db` e `redis` iniciam em paralelo
-2. **Redis-init**: Aguarda `redis:healthy`, carrega scripts Lua, completa
-3. **API**: `migrations` espera `db:healthy`, depois `market_alert` espera `db:healthy` + `redis:healthy` + `redis-init:completed`
-4. **Workers/Scraper**: Aguardam `db:healthy` + `redis:healthy` + `redis-init:completed` (não bloqueados por API)
-5. **UI**: Aguarda `market_alert:healthy` (agora com healthcheck implementado)
+## Regras e Instruções de Execução
+**Regras obrigatórias de economia (NÃO IGNORAR)**
+1) NÃO liste árvore inteira do projeto (evite `tree`, `ls -R`, etc.). Se precisar, liste apenas pastas-alvo da FASE.
+2) NÃO leia arquivos completos. Leia no máximo 120 linhas por arquivo (ou trechos específicos). Se precisar de mais contextualização, peça antes.
+3) Priorize busca (rg/grep) para localizar pontos de mudança antes de abrir arquivos.
+5) Não cole conteúdo integral de arquivos na resposta. Mostre apenas:
+   - arquivos alterados
+   - resumo do diff (o que mudou e por quê)
+   - comandos executados e resultados
+6) Execute somente UMA FASE por vez. Ao terminar a FASE:
+   - pare e peça autorização para a próxima FASE
+7) Se detectar duplicação/overreach fora do escopo, interrompa e reporte.

@@ -4,6 +4,19 @@ O módulo atua como adaptador fino entre a fila de coleta e os serviços de
 scraping, garantindo que cada execução processe apenas um monitorado ou
 concorrente. Rechecagens e coletas manuais compartilham este mesmo fluxo e
 apenas o lock Redis aplicado aqui é utilizado para exclusão mútua.
+
+Semântica de entrega: **at-least-once**, idempotente por design.
+
+- Lock Redis por produto (``lock:{env}:product:{id}``, TTL=60s) garante
+  exclusão mútua dentro da janela de execução — evita coleta paralela do
+  mesmo produto, mas não garante exactly-once entre execuções distintas.
+- Duplicação inofensiva: recoleta resulta em sobrescrita com o mesmo valor
+  de preço/disponibilidade, sem efeito colateral observável.
+- Idempotência propagada: ``trace_id`` identificando cada execução para
+  correlação em logs e rastreamento de reprocessamentos.
+- Responsabilidade de retry: cliente HTTP absorve falhas HTTP transitórias
+  (≤3 tentativas internas). Celery trata falhas de task (max_retries=3).
+  O loop contínuo nunca é usado como mecanismo de retry.
 """
 from __future__ import annotations
 
@@ -19,12 +32,12 @@ from shared.infra.db import SessionLocal
 from shared.exceptions import ScraperError
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, MonitoredProductCreateScraping
 from shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.clients.scraper_client import ScraperClientError
 from shared.utils.trace_context import set_trace_id
 from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.config_alert import settings
-from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.infraestructure.celery.dlq_base_task import DLQTask
 from market_alert.infraestructure.celery.retry_policies import COLLECTION_RETRY

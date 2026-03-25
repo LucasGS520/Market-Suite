@@ -5,14 +5,16 @@ services:
     image: postgres:15
     profiles:
       - infra
+      - orchestrator
       - api
       - scraper
       - workers
     env_file:
       - .env.common
+      - ./backend/market_alert/.env.market_alert
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d marketalert"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
       retries: 3
     ports:
@@ -28,6 +30,7 @@ services:
     image: redis:7
     profiles:
       - infra
+      - orchestrator
       - api
       - scraper
       - workers
@@ -37,10 +40,16 @@ services:
       - sh
       - -c
       - |
-        exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes --save "900 1 300 10 60 10000"
+        exec redis-server \
+          --requirepass "$$REDIS_PASSWORD" \
+          --maxmemory 512mb \
+          --maxmemory-policy noeviction \
+          --save "900 1" \
+          --save "300 10" \
+          --appendonly no
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
       retries: 3
     ports:
@@ -58,6 +67,7 @@ services:
     image: redis:7
     profiles:
       - infra
+      - orchestrator
       - api
       - scraper
       - workers
@@ -70,9 +80,22 @@ services:
       - sh
       - -c
       - |
-        export REDISCLI_AUTH="$$REDIS_PASSWORD";
-        until redis-cli -h redis ping | grep -q PONG; do sleep 1; done;
-        redis-cli -h redis SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+        set -e
+        echo "redis-init: esperando redis..."
+        timeout=60
+        t=0
+        until redis-cli -h redis -a "$$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do
+          sleep 1
+          t=$$((t+1))
+          echo "redis-init: aguardando redis... $${t}s"
+          if [ "$$t" -ge "$${timeout}" ]; then
+            echo "redis-init: timeout esperando redis ($${timeout}s)" >&2
+            exit 1
+          fi
+        done
+        echo "redis-init: carregando script..."
+        redis-cli -h redis -a "$$REDIS_PASSWORD" SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+        echo "redis-init: script carregado com sucesso"
     volumes:
       - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
     restart: on-failure
@@ -98,9 +121,6 @@ services:
       - PYTHONPATH=/backend
     volumes:
       - ./backend/market_alert:/market_alert
-      # Monta o pacote `shared` inteiro para que imports como `import shared` funcionem
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend/shared/infra:/market_alert/infra
       - ./backend:/backend:ro   
     working_dir: /market_alert
     command:
@@ -142,7 +162,7 @@ services:
       - "8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 30s
+      interval: 20s
       timeout: 5s
       retries: 3
       start_period: 10s
@@ -155,12 +175,11 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
+      market_orchestrator:
+        condition: service_healthy
     volumes:
       - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro   
+      - ./backend:/backend:ro
     restart: unless-stopped
     networks:
       - monitoring-net
@@ -174,6 +193,43 @@ services:
           memory: 512M
 
 
+  #Worker Temporal — orquestração durável de workflows de monitoramento
+  market_orchestrator:
+    build:
+      context: ./backend/market_orchestrator
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+    profiles:
+      - orchestrator
+      - api
+    env_file:
+      - .env.common
+      - ./backend/market_orchestrator/.env.market_orchestrator
+    environment:
+      - PYTHONPATH=/backend
+    command: ["python", "-m", "market_orchestrator.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+        "import asyncio; from temporalio.client import Client; asyncio.run(Client.connect('temporal:7233', namespace='default'))"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      temporal-prober:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+
+
   #Serviço dedicado ao scraping de produtos
   market_scraper:
     build:
@@ -184,11 +240,13 @@ services:
     profiles:
       - scraper
     env_file:
+      - .env.common
       - ./backend/market_scraper/.env.market_scraper
     environment:
       - ENV_FILE=.env.market_scraper
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_OPERATIONAL_DB=2
       - PYTHONPATH=/app
     command:
       - uvicorn
@@ -245,7 +303,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=4"
+      - "--concurrency=10"
       - "-Q"
       - "celery,scraping"
     user:
@@ -259,10 +317,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro   
+      - ./backend:/backend:ro
     restart: on-failure
     networks:
       - monitoring-net
@@ -274,61 +329,6 @@ services:
         reservations:
           cpus: '0.5'
           memory: 256M
-
-
-  #Worker do Celery dedicado ao coletor contínuo (fila monitor)
-  celery-worker-monitor:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - workers
-    env_file:
-      - .env.common
-      - ./backend/market_alert/.env.market_alert
-    environment:
-      - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
-      - CONTINUOUS_COLLECTOR_AUTOSTART=1
-      - CONTINUOUS_COLLECTOR_AUTOSTART_TTL=60
-    command:
-      - celery
-      - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
-      - "worker"
-      - "--loglevel=info"
-      - "--pool=prefork"
-      - "--concurrency=1"
-      - "-Q"
-      - "monitor"
-    user:
-      "1000:1000"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      redis-init:
-        condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
-      - ./backend:/backend:ro
-    restart: on-failure
-    networks:
-      - monitoring-net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 384M
-        reservations:
-          cpus: '0.25'
-          memory: 192M
 
 
   #Worker do Celery dedicado às comparações de preço (fila compare)
@@ -353,7 +353,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=2"
+      - "--concurrency=4"
       - "-Q"
       - "compare"
     user:
@@ -367,9 +367,6 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
       - ./backend:/backend:ro
     restart: on-failure
     networks:
@@ -406,7 +403,7 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=2"
+      - "--concurrency=4"
       - "-Q"
       - "notifications"
     user:
@@ -420,9 +417,6 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./backend/market_alert:/market_alert
-      - audit-logs:/market_alert/logs/audit
-      - ./backend/shared/infra:/market_alert/infra
-      - ./backend/shared:/market_alert/shared:ro
       - ./backend:/backend:ro
     restart: on-failure
     networks:
@@ -456,6 +450,8 @@ services:
       - frontend-node-modules:/app/node_modules
       - frontend-pnpm-store:/root/.local/share/pnpm/store
     depends_on:
+      market_orchestrator:
+        condition: service_healthy
       market_alert:
         condition: service_healthy
     networks:
@@ -469,12 +465,74 @@ services:
           cpus: '0.25'
           memory: 256M
 
+
+  #Banco PostgreSQL exclusivo para persistência do Temporal (separado do banco de negócio)
+  temporal-db:
+    image: postgres:15
+    profiles:
+      - temporal
+      - orchestrator
+      - api
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal86
+      POSTGRES_DB: temporal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - temporal-db-data:/var/lib/postgresql/data
+    networks:
+      - monitoring-net
+
+
+  #Servidor Temporal (orquestrador de workflows duráveis)
+  temporal:
+    image: temporalio/auto-setup:1.25
+    profiles:
+      - temporal
+      - orchestrator
+      - api
+    environment:
+    - DB=postgres12
+    - DB_PORT=5432
+    - POSTGRES_SEEDS=temporal-db
+    - POSTGRES_USER=temporal
+    - POSTGRES_PWD=temporal86
+    - POSTGRES_DB=temporal
+    ports:
+      - "7233:7233"
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    networks:
+      - monitoring-net
+
+  #Prober dedicado ao bootstrap do Temporal: conclui com sucesso apenas quando a porta 7233 aceita conexões
+  temporal-prober:
+    image: alpine:3.18
+    profiles:
+      - temporal
+      - orchestrator
+      - api
+    depends_on:
+      temporal:
+        condition: service_started
+    command: ["sh","-c","apk add --no-cache netcat-openbsd >/dev/null 2>&1 || true; echo 'temporal-prober: aguardando temporal:7233 aceitar conexões...'; timeout=120; t=0; until nc -z temporal 7233 2>/dev/null; do sleep 1; t=$$((t+1)); if [ $$t -ge $$timeout ]; then echo 'temporal-prober: timeout' >&2; exit 1; fi; done; echo 'temporal-prober: pronto'"]
+    restart: 'no'
+    networks:
+      - monitoring-net
+
+
 volumes:
   db-data:
   redis-data:
   audit-logs:
   frontend-node-modules:
   frontend-pnpm-store:
+  temporal-db-data:
 
 networks:
   monitoring-net:

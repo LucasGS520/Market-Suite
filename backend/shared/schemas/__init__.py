@@ -14,6 +14,15 @@ from .shared_schemas_scraper import (
     ErrorResponse,
     ScrapeResult,
 )
+from .shared_schemas_orchestrator import (
+    CollectionPayload,
+    validate_payload,
+    DispatchActivityOutput,
+    QueryStatusOutput,
+    PolicyActivityOutput,
+    WorkflowStateSnapshot,
+    CollectionResult,
+)
 
 
 __all__ = [
@@ -27,4 +36,11 @@ __all__ = [
     "ParserResponse",
     "ErrorResponse",
     "ScrapeResult",
+    "CollectionPayload",
+    "validate_payload",
+    "DispatchActivityOutput",
+    "QueryStatusOutput",
+    "PolicyActivityOutput",
+    "WorkflowStateSnapshot",
+    "CollectionResult",
 ]

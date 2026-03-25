@@ -108,17 +108,10 @@ _registered_scripts: dict[int, Any] = {}
 _registered_token_bucket_scripts: dict[int, Any] = {}
 
 def get_redis_client() -> redis.Redis | None:
-    """ Retorna um cliente Redis isolado por thread
+    """ Retorna cliente Redis isolado por thread (usa REDIS_DB genérico).
 
-    Cria o cliente na primeira chamada da thread e o reutiliza nas
-    chamadas subsequentes, evitando o compartilhamento entre threads
-    ou processos diferentes. Caso a conexão com o Redis falhe, retorna ``None``.
-
-    Retorno
-    -------
-    redis.Redis | None
-        Instância de cliente Redis pronta para o uso ou ``None`` quando
-        não for possível inicializar a conexão.
+    Mantido para retrocompatibilidade. Para código de aplicação, prefira
+    ``get_redis_operational()`` que conecta explicitamente no db operacional.
     """
     client = getattr(_thread_local, "client", None)
     if client is None:
@@ -132,9 +125,28 @@ def get_redis_client() -> redis.Redis | None:
             return None
     return client
 
+def get_redis_operational() -> redis.Redis | None:
+    """ Retorna cliente Redis do db operacional, isolado por thread.
+
+    Conecta no ``REDIS_OPERATIONAL_DB`` (db 2 por padrão) — camada dedicada
+    a locks, rate limiting, cache, DLQ e filas operacionais. Separada do
+    broker Celery (db 0) e do result backend (db 1) para evitar interferência.
+    """
+    client = getattr(_thread_local, "operational_client", None)
+    if client is None:
+        try:
+            _thread_local.operational_client = redis.Redis.from_url(
+                _settings.redis_operational_url, decode_responses=True, socket_timeout=2.0
+            )
+            client = _thread_local.operational_client
+        except Exception as err:
+            logger.error("falha_inicializacao_redis_operacional", erro=str(err))
+            return None
+    return client
+
 def set_key_with_ttl(key: str, value: Any, ttl_seconds: int, *, only_if_absent: bool = False) -> bool | None:
-    """ Define uma chave no Redis com TTL controlado """
-    client = get_redis_client()
+    """ Define uma chave no Redis operacional com TTL controlado """
+    client = get_redis_operational()
     if client is None:
         return None
 
@@ -207,7 +219,7 @@ def consume_leaky_bucket(
         ``(permitido, tokens_atualizados)``. O segundo valor pode ser ``None``
         quando o Redis estiver indisponível.
     """
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         logger.warning("leaky_bucket_disabled", reason="redis_unavailable", key=key)
         return True, None
@@ -272,7 +284,7 @@ def consume_token_bucket(
     tuple[bool, float | None]
         ``(permitido, tokens_restantes)``. O segundo valor é ``None`` em falhas.
     """
-    redis_client = client or get_redis_client()
+    redis_client = client or get_redis_operational()
     if redis_client is None:
         logger.warning("token_bucket_disabled", reason="redis_unavailable", key=key)
         return True, None
@@ -304,8 +316,8 @@ def consume_token_bucket(
         return True, None
 
 def key_exists(key: str) -> bool:
-    """ Verifica de forma resiliente se uma chave existe no Redis """
-    client = get_redis_client()
+    """ Verifica de forma resiliente se uma chave existe no Redis operacional """
+    client = get_redis_operational()
     if client is None:
         return False
 
@@ -324,8 +336,8 @@ def key_exists(key: str) -> bool:
 
 
 def delete_key(key: str) -> None:
-    """ Remove uma chave específica, ignorando falhas de conexão """
-    client = get_redis_client()
+    """ Remove uma chave específica do Redis operacional, ignorando falhas de conexão """
+    client = get_redis_operational()
     if client is None:
         return
 
@@ -342,8 +354,8 @@ def delete_key(key: str) -> None:
         )
 
 def is_scraping_suspended() -> bool:
-    """ Verifica se a flag de suspensão de scraping está ativa """
-    client = get_redis_client()
+    """ Verifica se a flag de suspensão de scraping está ativa (db operacional) """
+    client = get_redis_operational()
     if client is None:
         return False
     exists = getattr(client, "exists", None)
@@ -352,7 +364,7 @@ def is_scraping_suspended() -> bool:
 
 def suspend_scraping(duration_seconds: int) -> None:
     """ Ativa a flag global de suspensão de scraping por ``duration_seconds`` segundos """
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return
     setter = getattr(client, "set", None)
@@ -361,7 +373,7 @@ def suspend_scraping(duration_seconds: int) -> None:
 
 def resume_scraping() -> None:
     """ Remove imediatamente a flag de suspensão, permitindo o scraping """
-    client = get_redis_client()
+    client = get_redis_operational()
     if client is None:
         return
     deleter = getattr(client, "delete", None)

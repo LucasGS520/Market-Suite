@@ -2,6 +2,21 @@
 
 Casca fina que delega toda a lógica de envio, retry e registro de tentativas
 para services_notifications.process_notification().
+
+Semântica de entrega (Decisão 6): **exactly-once** obrigatório.
+
+- Duplicação causa dano direto: notificação duplicada gera experiência ruim
+  para o usuário final (email/SMS/push redundante).
+- Mecanismo de proteção (em ``process_notification()``)::
+
+    1. dedup_hash (SHA-256 de user_id + product_id + preço + canal)
+    2. Marcador Redis SET NX: ``notifications:dedup:{hash}`` (TTL=cooldown_seconds)
+    3. Verificação no banco dentro da janela de deduplicação
+    4. Lock por hash: ``lock:{env}:notify:{hash}`` (TTL=60s) para proteção de race
+
+- Esta task é idempotente ao ser reenfileirada: se o marcador Redis ainda
+  estiver ativo, ``process_notification()`` suprime silenciosamente e retorna
+  False sem efeito colateral.
 """
 
 from __future__ import annotations

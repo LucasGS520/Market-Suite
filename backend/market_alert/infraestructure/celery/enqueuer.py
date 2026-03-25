@@ -210,13 +210,16 @@ class CollectionEnqueuer:
         countdown: float | None = None,
         on_complete: Signature | None = None,
         on_error: Signature | None = None,
-    ) -> None:
+    ) -> str:
         """ Serializa o payload e envia para a fila Celery.
 
         Este é o único método que chama ``celery_app.send_task()`` para coletas.
         Todos os métodos públicos delegam para cá.
+
+        Returns:
+            task_id (str) da AsyncResult gerada pelo Celery.
         """
-        celery_app.send_task(
+        result = celery_app.send_task(
             _COLLECT_TASK_NAME,
             kwargs={"payload": payload.model_dump(mode="json")},
             queue=_SCRAPING_QUEUE,
@@ -224,6 +227,7 @@ class CollectionEnqueuer:
             link=on_complete,
             link_error=on_error,
         )
+        return result.id
 
 
 __all__ = ["CollectionEnqueuer"]

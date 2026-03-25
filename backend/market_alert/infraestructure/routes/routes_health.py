@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from shared.infra.db import get_engine
 from market_alert.core.config_alert import settings
+from market_alert.infraestructure.redis_monitoring import get_redis_metrics
 
 
 logger = structlog.get_logger("health_check")
@@ -34,7 +35,7 @@ def health_check():
     #Verificação do Redis
     redis_client = None
     try:
-        redis_client = redis.from_url(settings.redis_url)
+        redis_client = redis.from_url(settings.redis_operational_url)
         redis_client.ping()
         status["redis"] = {"status": "ok"}
     except Exception:
@@ -67,12 +68,86 @@ def health_check():
         status["beat"] = {"status": "error", "detail": "Falha ao obter heartbeat"}
         status["overall"] = "error"
 
+    #Métricas operacionais Redis
+    try:
+        status["redis_metrics"] = get_redis_metrics()
+    except Exception:
+        logger.exception("redis_metrics_collection_failed")
+        status["redis_metrics"] = None
+
+    #Verificação de conectividade com o Temporal Server (não-bloqueante)
+    try:
+        from shared.clients.orchestrator_client import get_temporal_client
+        temporal_ok = get_temporal_client().probe_connectivity_sync()
+        status["temporal"] = {"status": "ok" if temporal_ok else "degraded"}
+        if not temporal_ok and status["overall"] == "ok":
+            status["overall"] = "degraded"
+    except ImportError:
+        status["temporal"] = {"status": "unavailable", "detail": "módulo não instalado"}
+    except Exception:
+        logger.exception("temporal_health_check_failed")
+        status["temporal"] = {"status": "degraded", "detail": "Falha ao verificar Temporal"}
+
     logger.info("health_check_result", status=status)
     return status
 
+@router.get("/temporal", tags=["Health"])
+def temporal_health():
+    """ Verifica conectividade com o Temporal Server.
+
+    Retorna HTTP 200 com status=healthy quando conectado,
+    HTTP 503 com status=unhealthy quando indisponível.
+    """
+    checked_at = datetime.now(timezone.utc).isoformat()
+    try:
+        from shared.clients.orchestrator_client import get_temporal_client
+        from market_orchestrator.core.config_orchestrator import settings as orchestrator_settings
+        connected = get_temporal_client().probe_connectivity_sync()
+        if connected:
+            return {
+                "status": "healthy",
+                "temporal_connected": True,
+                "namespace": orchestrator_settings.TEMPORAL_NAMESPACE,
+                "task_queue": orchestrator_settings.TEMPORAL_TASK_QUEUE,
+                "last_check_at": checked_at,
+            }
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "temporal_connected": False,
+                "namespace": orchestrator_settings.TEMPORAL_NAMESPACE,
+                "task_queue": orchestrator_settings.TEMPORAL_TASK_QUEUE,
+                "last_check_at": checked_at,
+            },
+        )
+    except HTTPException:
+        raise
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "temporal_connected": False,
+                "error": "módulo market_orchestrator não instalado",
+                "last_check_at": checked_at,
+            },
+        )
+    except Exception as exc:
+        logger.exception("temporal_health_endpoint_failed")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "temporal_connected": False,
+                "error": str(exc),
+                "last_check_at": checked_at,
+            },
+        )
+
 @router.get("/readiness", tags=["Health"])
 def readiness_check():
-    """Valida se as dependências principais estão prontas para uso."""
+    """ Valida se as dependências principais estão prontas para uso."""
     status = {"overall": "ok"}
 
     try:
@@ -85,7 +160,7 @@ def readiness_check():
         status["overall"] = "error"
 
     try:
-        redis_client = redis.from_url(settings.redis_url)
+        redis_client = redis.from_url(settings.redis_operational_url)
         redis_client.ping()
         status["redis"] = {"status": "ok"}
     except Exception:

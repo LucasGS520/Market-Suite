@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from market_alert.models.models_comparisons import PriceComparison, PriceComparisonSummary
+from shared.utils.cache_invalidator import invalidate_product_comparison
 
 
 def create_price_comparison(
@@ -28,6 +29,7 @@ def create_price_comparison(
     db.add(comparison)
     db.commit()
     db.refresh(comparison)
+    invalidate_product_comparison(monitored_product_id)
     return comparison
 
 def create_price_comparison_summary(
@@ -45,6 +47,7 @@ def create_price_comparison_summary(
     db.add(summary)
     db.commit()
     db.refresh(summary)
+    invalidate_product_comparison(monitored_product_id)
     return summary
 
 def upsert_price_comparison_summary(
@@ -75,6 +78,7 @@ def upsert_price_comparison_summary(
     db.add(summary)
     db.commit()
     db.refresh(summary)
+    invalidate_product_comparison(monitored_product_id)
     return summary
 
 def get_comparison_by_id(db: Session, comparison_id: UUID) -> Optional[PriceComparison]:

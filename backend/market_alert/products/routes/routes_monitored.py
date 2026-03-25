@@ -18,6 +18,7 @@ from market_alert.schemas.schemas_products import (
     MonitoredScrapeCreationResponse,
 )
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
+from market_alert.products.crud.crud_monitored import get_monitored_product_by_id
 from market_alert.products.services.services_monitored import (
     get_monitored_product,
     list_featured_monitored_products,
@@ -243,3 +244,39 @@ def delete_product(
         product_id=str(product_id)
     )
     return {"success": True, "product_id": str(product_id)}
+
+@router.get("/{product_id}/workflow-status")
+def get_workflow_status(
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """ Retorna o estado de orquestração Temporal do monitorado.
+
+    Aplica ownership check: somente o dono do monitorado pode consultar.
+    Retorna 404 se o workflow não existir ou o Temporal estiver indisponível.
+    """
+    monitored = get_monitored_product_by_id(db, product_id)
+    if monitored is None or monitored.user_id != user.id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Produto não encontrado.")
+
+    try:
+        from shared.clients.orchestrator_client import get_temporal_client
+        snapshot = get_temporal_client().query_sync(str(product_id))
+    except ImportError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Orquestrador indisponível.")
+
+    if snapshot is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Workflow não encontrado para este produto.")
+
+    return {
+        "monitored_id": snapshot.monitored_id,
+        "state": snapshot.state.value if hasattr(snapshot.state, "value") else str(snapshot.state),
+        "next_run_at": snapshot.next_run_at.isoformat() if snapshot.next_run_at else None,
+        "last_run_at": snapshot.last_run_at.isoformat() if snapshot.last_run_at else None,
+        "last_error": snapshot.last_error,
+        "attempt_count": snapshot.attempt_count,
+    }
