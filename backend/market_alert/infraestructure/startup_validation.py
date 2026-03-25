@@ -83,65 +83,88 @@ def _build_temporal_delays(max_attempts: int) -> list[float]:
 
 
 def _validate_temporal() -> None:
-    """Verifica Temporal com retry exponencial — falha levanta TemporalConnectionError.
+    """Valida Temporal tentando conectar diretamente — falha levanta TemporalConnectionError.
 
-    Número de tentativas configurável via TEMPORAL_HEALTH_MAX_ATTEMPTS (default 10).
-    Delays: backoff exponencial com cap de 30s entre tentativas.
+    Conecta ao namespace padrão com retry exponencial. Se consegue conectar e
+    desconectar cleanly, Temporal está pronto para uso.
 
     Raises:
         TemporalConnectionError: Temporal inacessível após todas as tentativas.
     """
+    import asyncio
     import time
     import uuid
+    from temporalio.client import Client
     from shared.exceptions import TemporalConnectionError
-
-    try:
-        from shared.clients.orchestrator_client import get_temporal_client
-    except ImportError:
-        logger.error("temporal_module_not_installed")
-        raise TemporalConnectionError(
-            "Módulo market_orchestrator não instalado",
-            attempts=0,
-            target="unknown",
-        )
 
     max_attempts = settings.TEMPORAL_HEALTH_MAX_ATTEMPTS
     delays = _build_temporal_delays(max_attempts)
-    client = get_temporal_client()
-    run_id = uuid.uuid4().hex[:8]  # Correlaciona tentativas desta sequência de boot
+    run_id = uuid.uuid4().hex[:8]
 
-    probe_timeout = settings.TEMPORAL_HEALTH_TIMEOUT
+    temporal_target = f"{os.getenv('TEMPORAL_HOST', 'temporal')}:{os.getenv('TEMPORAL_PORT', '7233')}"
+    namespace = os.getenv('TEMPORAL_NAMESPACE', 'default')
+
+    logger.info(
+        "startup_temporal_validation_starting",
+        target=temporal_target,
+        namespace=namespace,
+        max_attempts=max_attempts,
+        startup_run_id=run_id,
+    )
+
+    last_exc: Exception | None = None
     for attempt, delay in enumerate(delays, 1):
-        connected = client.probe_connectivity_sync(timeout=probe_timeout)
-        if connected:
+        try:
+            # Conecta diretamente ao Temporal usando SDK oficial
+            client = asyncio.run(
+                Client.connect(
+                    temporal_target,
+                    namespace=namespace,
+                )
+            )
+            client.close()
+
             logger.info(
                 "startup_temporal_ok",
                 attempt=attempt,
                 max_attempts=max_attempts,
+                target=temporal_target,
+                namespace=namespace,
                 startup_run_id=run_id,
             )
-            return
-        has_next = attempt < max_attempts
-        logger.info(
-            "temporal_health_check_attempt",
-            attempt=attempt,
-            max_attempts=max_attempts,
-            status="transient",
-            next_retry_in_seconds=round(delay, 1) if has_next else None,
-            startup_run_id=run_id,
-        )
-        if has_next:
-            time.sleep(delay)
+            return  # ✓ Sucesso — Temporal está pronto
 
+        except Exception as exc:
+            last_exc = exc
+            has_next = attempt < max_attempts
+            logger.warning(
+                "temporal_health_check_attempt",
+                attempt=attempt,
+                max_attempts=max_attempts,
+                target=temporal_target,
+                namespace=namespace,
+                status="transient",
+                next_retry_in_seconds=round(delay, 1) if has_next else None,
+                startup_run_id=run_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            if has_next:
+                time.sleep(delay)
+
+    # Todas as tentativas falharam
     logger.error(
         "temporal_health_check_failed",
         attempts_exhausted=max_attempts,
+        target=temporal_target,
+        namespace=namespace,
         startup_run_id=run_id,
+        last_error=str(last_exc),
     )
-    temporal_target = f"{os.getenv('TEMPORAL_HOST', 'temporal')}:{os.getenv('TEMPORAL_PORT', '7233')}"
+
     raise TemporalConnectionError(
-        f"Temporal inacessível após {max_attempts} tentativas de health check",
+        f"Temporal inacessível após {max_attempts} tentativas (target={temporal_target})",
         attempts=max_attempts,
         target=temporal_target,
-    )
+    ) from last_exc
     

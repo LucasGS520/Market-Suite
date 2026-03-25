@@ -5,10 +5,10 @@ services:
     image: postgres:15
     profiles:
       - infra
+      - orchestrator
       - api
       - scraper
       - workers
-      - temporal
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
@@ -30,10 +30,10 @@ services:
     image: redis:7
     profiles:
       - infra
+      - orchestrator
       - api
       - scraper
       - workers
-      - temporal
     env_file:
       - .env.common
     command:
@@ -67,10 +67,10 @@ services:
     image: redis:7
     profiles:
       - infra
+      - orchestrator
       - api
       - scraper
       - workers
-      - temporal
     env_file:
       - .env.common
     depends_on:
@@ -175,8 +175,6 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
-      temporal-prober:
-        condition: service_completed_successfully
       market_orchestrator:
         condition: service_healthy
     volumes:
@@ -203,7 +201,7 @@ services:
       additional_contexts:
         root: .
     profiles:
-      - temporal
+      - orchestrator
       - api
     env_file:
       - .env.common
@@ -452,6 +450,8 @@ services:
       - frontend-node-modules:/app/node_modules
       - frontend-pnpm-store:/root/.local/share/pnpm/store
     depends_on:
+      market_orchestrator:
+        condition: service_healthy
       market_alert:
         condition: service_healthy
     networks:
@@ -471,6 +471,8 @@ services:
     image: postgres:15
     profiles:
       - temporal
+      - orchestrator
+      - api
     environment:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: temporal86
@@ -491,6 +493,8 @@ services:
     image: temporalio/auto-setup:1.25
     profiles:
       - temporal
+      - orchestrator
+      - api
     environment:
     - DB=postgres12
     - DB_PORT=5432
@@ -506,15 +510,17 @@ services:
     networks:
       - monitoring-net
 
-  #Pequeno prober que aguarda temporariamente until Temporal esteja aceitando conexoes
+  #Prober dedicado ao bootstrap do Temporal: conclui com sucesso apenas quando a porta 7233 aceita conexões
   temporal-prober:
     image: alpine:3.18
     profiles:
       - temporal
+      - orchestrator
       - api
-      - workers
-      - scraper
-    command: ["sh","-c","apk add --no-cache netcat-openbsd bind-tools >/dev/null 2>&1 || true; echo 'temporal-prober: verificando presença de temporal...'; if ! nslookup temporal >/dev/null 2>&1; then echo 'temporal-prober: serviço temporal não presente — pulando probe'; exit 0; fi; echo 'temporal-prober: aguardando temporal:7233...'; timeout=120; t=0; until nc -z temporal 7233 2>/dev/null; do sleep 1; t=$$((t+1)); if [ $$t -ge $$timeout ]; then echo 'temporal-prober: timeout' >&2; exit 1; fi; done; echo 'temporal-prober: pronto'"]
+    depends_on:
+      temporal:
+        condition: service_started
+    command: ["sh","-c","apk add --no-cache netcat-openbsd >/dev/null 2>&1 || true; echo 'temporal-prober: aguardando temporal:7233 aceitar conexões...'; timeout=120; t=0; until nc -z temporal 7233 2>/dev/null; do sleep 1; t=$$((t+1)); if [ $$t -ge $$timeout ]; then echo 'temporal-prober: timeout' >&2; exit 1; fi; done; echo 'temporal-prober: pronto'"]
     restart: 'no'
     networks:
       - monitoring-net

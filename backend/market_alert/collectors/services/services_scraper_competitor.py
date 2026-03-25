@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.clients.scraper_client import ScraperClient, ScraperClientError
 from shared.utils import (
     sanitize_media_url,
     sanitize_text,
@@ -18,7 +19,6 @@ from shared.utils import (
 from shared.utils.url_validation import normalize_competitor_url
 
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.scraper.scraper_client import ScraperClient, ScraperClientError
 from market_alert.products.crud.crud_competitor import create_or_update_competitor_product_scraped, get_competitor_by_monitored_and_url
 from market_alert.collectors.services.scraper_common import (
     execute_scraper_fetch,

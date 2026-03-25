@@ -32,12 +32,12 @@ from shared.infra.db import SessionLocal
 from shared.exceptions import ScraperError
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, MonitoredProductCreateScraping
 from shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.clients.scraper_client import ScraperClientError
 from shared.utils.trace_context import set_trace_id
 from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.config_alert import settings
-from market_alert.scraper.scraper_client import ScraperClientError
 from market_alert.infraestructure.celery.celery_app import celery_app
 from market_alert.infraestructure.celery.dlq_base_task import DLQTask
 from market_alert.infraestructure.celery.retry_policies import COLLECTION_RETRY
