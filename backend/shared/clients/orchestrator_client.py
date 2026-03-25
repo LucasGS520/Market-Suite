@@ -11,7 +11,6 @@ circular em nível de módulo.
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -20,6 +19,7 @@ from temporalio.common import WorkflowIDReusePolicy
 from temporalio.service import RPCError
 
 from shared.exceptions import TemporalConnectionError
+from shared.utils.async_utils import run_sync_coro
 
 if TYPE_CHECKING:
     from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
@@ -221,18 +221,10 @@ class TemporalOrchestrationClient:
     # ------------------------------------------------------------------
 
     def _run_async(self, coro: Any, *, timeout: int = 30) -> Any:
-        """Executa coroutine reutilizando loop existente ou criando um novo.
-
-        Padrão seguro para contextos síncronos dentro de ambientes async:
-        - Loop rodando (FastAPI/AnyIO): usa run_coroutine_threadsafe
-        - Sem loop: asyncio.run()
-        """
+        """Executa coroutine reutilizando loop existente ou criando um novo."""
+        import concurrent.futures
         try:
-            loop = asyncio.get_running_loop()
-            future = asyncio.run_coroutine_threadsafe(coro, loop)
-            return future.result(timeout=timeout)
-        except RuntimeError:
-            return asyncio.run(coro)
+            return run_sync_coro(coro, timeout=timeout)
         except concurrent.futures.TimeoutError:
             logger.error("temporal_client_run_async_timeout", timeout_seconds=timeout)
             return None

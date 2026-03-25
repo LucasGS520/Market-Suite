@@ -11,13 +11,16 @@ Regra operacional:
 from __future__ import annotations
 
 import os
+
 import redis
 import structlog
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from market_alert.core.config_alert import settings
 from shared.infra.db import get_engine
+from shared.utils.async_utils import run_sync_coro
+
+from market_alert.core.config_alert import settings
 
 
 logger = structlog.get_logger("startup_validation")
@@ -81,9 +84,16 @@ def _build_temporal_delays(max_attempts: int) -> list[float]:
     base = [min(2 ** (i + 1), 30) for i in range(max_attempts)]
     return [d + random.uniform(0, d * 0.15) for d in base]
 
-
 def _validate_temporal() -> None:
     """Valida Temporal tentando conectar diretamente — falha levanta TemporalConnectionError.
+
+    Esta função é SÍNCRONA por design e deve ser invocada fora do event loop do
+    FastAPI. Em ``main.py``, o hook de startup usa ``asyncio.to_thread()`` para
+    executá-la em uma thread separada, evitando deadlock no event loop do uvicorn.
+
+    Internamente usa ``run_sync_coro`` (via ``asyncio.run()``) para conectar ao
+    Temporal SDK. Chamar esta função diretamente do event loop causaria deadlock
+    imediato — use sempre ``await asyncio.to_thread(validate_startup_dependencies)``.
 
     Conecta ao namespace padrão com retry exponencial. Se consegue conectar e
     desconectar cleanly, Temporal está pronto para uso.
@@ -91,7 +101,6 @@ def _validate_temporal() -> None:
     Raises:
         TemporalConnectionError: Temporal inacessível após todas as tentativas.
     """
-    import asyncio
     import time
     import uuid
     from temporalio.client import Client
@@ -115,8 +124,8 @@ def _validate_temporal() -> None:
     last_exc: Exception | None = None
     for attempt, delay in enumerate(delays, 1):
         try:
-            # Conecta diretamente ao Temporal usando SDK oficial
-            client = asyncio.run(
+            #Conecta diretamente ao Temporal usando SDK oficial
+            client = run_sync_coro(
                 Client.connect(
                     temporal_target,
                     namespace=namespace,
@@ -132,7 +141,7 @@ def _validate_temporal() -> None:
                 namespace=namespace,
                 startup_run_id=run_id,
             )
-            return  # ✓ Sucesso — Temporal está pronto
+            return  #Sucesso — Temporal está pronto
 
         except Exception as exc:
             last_exc = exc
@@ -152,7 +161,7 @@ def _validate_temporal() -> None:
             if has_next:
                 time.sleep(delay)
 
-    # Todas as tentativas falharam
+    #Todas as tentativas falharam
     logger.error(
         "temporal_health_check_failed",
         attempts_exhausted=max_attempts,

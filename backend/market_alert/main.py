@@ -1,5 +1,7 @@
 """ Aplicação principal FastAPI com configuração de rotas """
 
+import asyncio
+
 import structlog
 
 from fastapi import FastAPI, Request
@@ -89,7 +91,7 @@ def create_app() -> FastAPI:
         TemporalConnectionError é relançada após log CRITICAL — API não sobe sem Temporal.
         """
         try:
-            validate_startup_dependencies(strict=True)
+            await asyncio.to_thread(validate_startup_dependencies, strict=True)
         except TemporalConnectionError as exc:
             logger.critical(
                 "startup_temporal_unavailable_aborting",

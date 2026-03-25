@@ -19,30 +19,19 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Objetivo e Problemas a ser Resolvido
 
-**Problema a Ser Resolvido:**  
-Os logs mostram três falhas centrais na camada de inicialização e integração:
-- O serviço da API falha por exaustão de tentativas de conexão com Temporal antes do Temporal atingir prontidão real.
-- Há desalinhamento de readiness entre serviços: alguns workers validam Temporal enquanto a API ainda recebe timeout.
-- Existe instabilidade de rede entre containers, com falhas intermitentes de resolução de hostname para db e redis.
+- **Problema:** A validação do Temporal durante o startup da API bloqueia e gera `TimeoutError` porque `run_sync_coro` usa `asyncio.run_coroutine_threadsafe(...).result()` quando chamada do mesmo event loop do FastAPI, produzindo deadlock.  
 
-**Objetivo do Plano:**  
-Estabelecer uma inicialização determinística e resiliente para que:
-1. A API só suba quando a dependência crítica estiver realmente pronta.  
-2. Todos os serviços usem o mesmo critério de readiness para Temporal.  
-3. A malha de containers fique estável (sem erro de DNS/hostname durante bootstrap).  
+- **Objetivo:** Permitir que `market_alert` valide o Temporal sem bloquear o event loop do FastAPI, preservando comportamento síncrono para Celery e mantendo validação robusta de conectividade.
 
 ---
 
-## Análise de Riscos e Decisões Chave
+**Análise de Riscos e Decisões Chave**
 
-**Decisão Técnica Principal:**  
-Adotar contrato único de prontidão para Temporal, com fail-fast controlado e janela de bootstrap compatível com o tempo real de subida do serviço.
+- **Decisão técnica principal:** Executar a validação de startup da API fora do event loop (thread) é a correção imediata recomendada — mínimo impacto e resolve deadlock.  
 
-**Risco Principal:**  
-Aumentar robustez de startup pode elevar o tempo de inicialização total; mitigação via logs de progresso e health checks estritos e objetivos.
+- **Risco principal:** Se variáveis `TEMPORAL_HOST`/`TEMPORAL_PORT`/`TEMPORAL_NAMESPACE` estiverem incorretas, a validação continuará falhando mesmo sem deadlock.  
 
-**Dependências Críticas:**  
-Temporal, db, redis, rede Docker interna, ordem de dependências no compose e política de restart.
+- **Dependências críticas:** Temporal server acessível na rede interna do Docker; envs corretos em `market_alert` (comparar com `market_orchestrator`).
 
 ---
 

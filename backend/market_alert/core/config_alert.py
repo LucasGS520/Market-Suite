@@ -82,13 +82,13 @@ class Settings(ConfigBase):
     # Sequência de startup: postgres → redis → temporal (com retry) → API aceita tráfego
     # Todos os parâmetros abaixo são ajustáveis via variáveis de ambiente.
     TEMPORAL_HEALTH_MAX_ATTEMPTS: int = int(
-        os.getenv("TEMPORAL_HEALTH_MAX_ATTEMPTS", "10")
+        os.getenv("TEMPORAL_HEALTH_MAX_ATTEMPTS", "3")
     ) #Número máximo de tentativas de health check do Temporal no startup
     TEMPORAL_HEALTH_TIMEOUT: int = int(
-        os.getenv("TEMPORAL_HEALTH_TIMEOUT", "60")
+        os.getenv("TEMPORAL_HEALTH_TIMEOUT", "30")
     ) #Timeout em segundos por tentativa de conexão ao Temporal (referência para _run_async)
     TEMPORAL_HEALTH_CHECK_INTERVAL: int = int(
-        os.getenv("TEMPORAL_HEALTH_CHECK_INTERVAL", "60")
+        os.getenv("TEMPORAL_HEALTH_CHECK_INTERVAL", "30")
     ) #Intervalo em segundos para re-verificações periódicas do Temporal em runtime (reservado)
 
     #Controles operacionais de coleta
