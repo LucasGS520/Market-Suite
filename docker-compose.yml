@@ -136,6 +136,63 @@ services:
     networks:
       - monitoring-net
 
+  
+  #Banco PostgreSQL exclusivo para persistência do Temporal (separado do banco de negócio)
+  temporal-db:
+    image: postgres:15
+    profiles:
+      - temporal
+      - orchestrator
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal86
+      POSTGRES_DB: temporal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - temporal-db-data:/var/lib/postgresql/data
+    networks:
+      - monitoring-net
+
+
+  #Servidor Temporal (orquestrador de workflows duráveis)
+  temporal:
+    image: temporalio/auto-setup:1.25
+    profiles:
+      - temporal
+      - orchestrator
+    environment:
+    - DB=postgres12
+    - DB_PORT=5432
+    - POSTGRES_SEEDS=temporal-db
+    - POSTGRES_USER=temporal
+    - POSTGRES_PWD=temporal86
+    - POSTGRES_DB=temporal
+    ports:
+      - "7233:7233"
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    networks:
+      - monitoring-net
+
+  #Prober dedicado ao bootstrap do Temporal: conclui com sucesso apenas quando a porta 7233 aceita conexões
+  temporal-prober:
+    image: alpine:3.18
+    profiles:
+      - temporal
+      - orchestrator
+    depends_on:
+      temporal:
+        condition: service_started
+    command: ["sh","-c","apk add --no-cache netcat-openbsd >/dev/null 2>&1 || true; echo 'temporal-prober: aguardando temporal:7233 aceitar conexões...'; timeout=120; t=0; until nc -z temporal 7233 2>/dev/null; do sleep 1; t=$$((t+1)); if [ $$t -ge $$timeout ]; then echo 'temporal-prober: timeout' >&2; exit 1; fi; done; echo 'temporal-prober: pronto'"]
+    restart: 'no'
+    networks:
+      - monitoring-net      
+
 
 #API principal do MarketAlert
   market_alert:
@@ -175,8 +232,6 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
-      market_orchestrator:
-        condition: service_healthy
     volumes:
       - ./backend/market_alert:/market_alert
       - ./backend:/backend:ro
@@ -202,7 +257,6 @@ services:
         root: .
     profiles:
       - orchestrator
-      - api
     env_file:
       - .env.common
       - ./backend/market_orchestrator/.env.market_orchestrator
@@ -217,9 +271,7 @@ services:
       retries: 5
       start_period: 30s
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
+      temporal-db:
         condition: service_healthy
       temporal-prober:
         condition: service_completed_successfully
@@ -450,8 +502,6 @@ services:
       - frontend-node-modules:/app/node_modules
       - frontend-pnpm-store:/root/.local/share/pnpm/store
     depends_on:
-      market_orchestrator:
-        condition: service_healthy
       market_alert:
         condition: service_healthy
     networks:
@@ -464,66 +514,6 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
-
-
-  #Banco PostgreSQL exclusivo para persistência do Temporal (separado do banco de negócio)
-  temporal-db:
-    image: postgres:15
-    profiles:
-      - temporal
-      - orchestrator
-      - api
-    environment:
-      POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: temporal86
-      POSTGRES_DB: temporal
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    volumes:
-      - temporal-db-data:/var/lib/postgresql/data
-    networks:
-      - monitoring-net
-
-
-  #Servidor Temporal (orquestrador de workflows duráveis)
-  temporal:
-    image: temporalio/auto-setup:1.25
-    profiles:
-      - temporal
-      - orchestrator
-      - api
-    environment:
-    - DB=postgres12
-    - DB_PORT=5432
-    - POSTGRES_SEEDS=temporal-db
-    - POSTGRES_USER=temporal
-    - POSTGRES_PWD=temporal86
-    - POSTGRES_DB=temporal
-    ports:
-      - "7233:7233"
-    depends_on:
-      temporal-db:
-        condition: service_healthy
-    networks:
-      - monitoring-net
-
-  #Prober dedicado ao bootstrap do Temporal: conclui com sucesso apenas quando a porta 7233 aceita conexões
-  temporal-prober:
-    image: alpine:3.18
-    profiles:
-      - temporal
-      - orchestrator
-      - api
-    depends_on:
-      temporal:
-        condition: service_started
-    command: ["sh","-c","apk add --no-cache netcat-openbsd >/dev/null 2>&1 || true; echo 'temporal-prober: aguardando temporal:7233 aceitar conexões...'; timeout=120; t=0; until nc -z temporal 7233 2>/dev/null; do sleep 1; t=$$((t+1)); if [ $$t -ge $$timeout ]; then echo 'temporal-prober: timeout' >&2; exit 1; fi; done; echo 'temporal-prober: pronto'"]
-    restart: 'no'
-    networks:
-      - monitoring-net
 
 
 volumes:
