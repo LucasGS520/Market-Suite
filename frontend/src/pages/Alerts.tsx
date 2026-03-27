@@ -6,28 +6,33 @@ import React from 'react';
 import { Box, Typography, Alert } from '@mui/material';
 import Layout from '../components/Layout';
 
-/**
- * Componente Alerts
- * Renderiza a página de alertas e notificações do frontend. 
- * Atualmente exibe um cabeçalho descritivo e um Alert informativo indicando que a funcionalidade está em desenvolvimento.
- */
 const Alerts: React.FC = () => {
   return (
-    // Layout padrão da aplicação (header, nav, footer)
     <Layout>
-      {/* Container superior com título e descrição resumida da página */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom>
+        <Typography
+          variant="h4"
+          gutterBottom
+          sx={{ fontSize: '1.375rem', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--color-text-primary)' }}
+        >
           Alertas e Notificações
         </Typography>
-        <Typography variant="body1" color="text.secondary">
+        <Typography variant="body1" sx={{ color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>
           Histórico de alertas e notificações enviadas
         </Typography>
       </Box>
 
-      {/* Mensagem informativa temporária enquanto a página está em desenvolvimento.
-          Substituir por lista de alertas, notificações e controles de gerenciamento quando implementado. */}
-      <Alert severity="info">
+      <Alert
+        severity="info"
+        sx={{
+          backgroundColor: 'var(--color-semantic-info-bg)',
+          color: 'var(--color-text-primary)',
+          border: '1px solid rgba(59,130,246,0.3)',
+          borderLeft: '4px solid var(--color-semantic-info)',
+          borderRadius: 'var(--radius-md)',
+          '& .MuiAlert-icon': { color: 'var(--color-semantic-info)' },
+        }}
+      >
         Página de alertas em desenvolvimento. Em breve você poderá visualizar e gerenciar seus alertas de preço.
       </Alert>
     </Layout>

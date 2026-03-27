@@ -93,7 +93,6 @@ const Login: React.FC = () => {
 
   return (
     <Container maxWidth="sm">
-      {/* Box centralizador para layout vertical com espaçamento */}
       <Box
         sx={{
           marginTop: 8,
@@ -102,18 +101,51 @@ const Login: React.FC = () => {
           alignItems: 'center',
         }}
       >
-        {/* Paper que contém o card do formulário */}
-        <Paper elevation={3} sx={{ padding: 4, width: '100%' }}>
-          <Typography component="h1" variant="h4" align="center" gutterBottom>
+        <Paper
+          elevation={0}
+          className="card-enter"
+          sx={{
+            padding: 4,
+            width: '100%',
+            backgroundColor: 'var(--color-surface-card)',
+            border: '1px solid var(--color-border-subtle)',
+            borderRadius: 'var(--radius-xl)',
+            backdropFilter: 'blur(12px)',
+            boxShadow: 'var(--shadow-lg)',
+          }}
+        >
+          <Typography
+            component="h1"
+            variant="h4"
+            align="center"
+            gutterBottom
+            sx={{ fontWeight: 700, color: 'var(--color-accent-primary)', letterSpacing: '-0.02em', fontSize: '1.5rem' }}
+          >
             Market Suite
           </Typography>
-          <Typography component="h2" variant="h6" align="center" gutterBottom>
-            Login
+          <Typography
+            component="h2"
+            variant="h6"
+            align="center"
+            gutterBottom
+            sx={{ color: 'var(--color-text-muted)', fontSize: '0.875rem', fontWeight: 400, mb: 3 }}
+          >
+            Acesse sua conta
           </Typography>
 
-          {/* Mostra erro caso exista */}
           {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
+            <Alert
+              severity="error"
+              sx={{
+                mb: 2,
+                backgroundColor: 'var(--color-semantic-danger-bg)',
+                color: 'var(--color-text-primary)',
+                border: '1px solid rgba(239,68,68,0.3)',
+                borderLeft: '4px solid var(--color-semantic-danger)',
+                borderRadius: 'var(--radius-md)',
+                '& .MuiAlert-icon': { color: 'var(--color-semantic-danger)' },
+              }}
+            >
               {error}
             </Alert>
           )}
@@ -171,17 +203,31 @@ const Login: React.FC = () => {
                 type="submit"
                 fullWidth
                 variant="contained"
-                sx={{ mt: 3, mb: 2 }}
+                sx={{
+                  mt: 3,
+                  mb: 2,
+                  py: 1.25,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                  fontSize: '0.9375rem',
+                  borderRadius: 'var(--radius-md)',
+                }}
                 disabled={isLoading}
               >
-                {/* Mostra spinner durante operação de login */}
-                {isLoading ? <CircularProgress size={24} /> : 'Entrar'}
+                {isLoading ? <CircularProgress size={22} sx={{ color: 'inherit' }} /> : 'Entrar'}
               </Button>
 
-              {/* Link para a tela de registro */}
               <Box sx={{ textAlign: 'center' }}>
                 <Link to="/register" style={{ textDecoration: 'none' }}>
-                  <Typography variant="body2" color="primary">
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      color: 'var(--color-text-muted)',
+                      fontSize: '0.875rem',
+                      transition: `color var(--motion-fast) var(--motion-easing)`,
+                      '&:hover': { color: 'var(--color-accent-primary)' },
+                    }}
+                  >
                     Não tem uma conta? Registre-se
                   </Typography>
                 </Link>

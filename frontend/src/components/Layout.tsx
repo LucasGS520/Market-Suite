@@ -36,13 +36,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <Header />
 
       {/* Área principal do conteúdo */}
-      <Box component="main" sx={{ flexGrow: 1, py: 3, backgroundColor: 'background.default' }}>
+      <Box component="main" sx={{ flexGrow: 1, py: 3, backgroundColor: 'transparent' }}>
         {/* Container centralizado para limitar a largura do conteúdo e manter responsividade */}
-        <Container maxWidth="xl">
+        <Container maxWidth="xl" className="page-enter">
           {shouldShowPendingBanner && (
             <Alert
               severity="warning"
-              sx={{ mb: 3 }}
+              sx={{
+                mb: 3,
+                backgroundColor: 'var(--color-semantic-warning-bg)',
+                color: 'var(--color-text-primary)',
+                border: '1px solid rgba(245,158,11,0.3)',
+                borderLeft: '4px solid var(--color-semantic-warning)',
+                borderRadius: 'var(--radius-md)',
+                '& .MuiAlert-icon': { color: 'var(--color-semantic-warning)' },
+                '& .MuiAlert-action': { color: 'var(--color-text-muted)', alignItems: 'center' },
+              }}
               action={
                 <Stack direction="row" spacing={1}>
                   <Button

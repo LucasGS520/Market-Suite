@@ -17,7 +17,30 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Objetivo e Problemas a ser Resolvido
+## Objetivo e Estratégias
+
+**Objetivo:** 
+Alinhar o frontend atual do `market_suite` ao DNA visual do design ideal, criando um design system oficial original, consistente e implementável com React + TypeScript + MUI + Tailwind, sem alterar estrutura funcional, conexão com APIs, autenticação e integrações já existentes.
+
+**Estratégia de Implementação:** 
+Executar em fases incrementais, começando por fundação de design tokens e tema unificado, depois migrar componentes e páginas prioritárias, e por fim validar qualidade (UX, acessibilidade, performance e regressão visual). O rollout será progressivo, com baixo risco e sem refatoração de arquitetura de aplicação.
+
+---
+
+## Análise de Riscos e Decisões Chave
+**Decisão Técnica Principal:** adotar uma camada única de tokens como “fonte da verdade” e propagar para:
+- tema MUI (`createTheme`),
+- configuração Tailwind (`theme.extend`),
+- variáveis globais CSS.
+
+**Risco Principal:** inconsistência visual por dupla fonte de estilo (MUI + Tailwind) e legado de estilos globais.
+- Mitigação: definir matriz de precedência de estilos, checklist de migração por componente e auditoria de classes utilitárias versus props de tema MUI.
+
+**Dependências:**
+- Stack atual confirmada: React + TypeScript + Vite + MUI + Tailwind.
+- Compatibilidade com estrutura atual de páginas, componentes e providers.
+- Ambiente de build/lint existente do frontend.
+- Documento de stack (STACK_MARKET.md) como referência de limites técnicos.
 
 ---
 

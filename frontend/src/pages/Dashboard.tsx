@@ -1,6 +1,6 @@
 /**
  * Componente de apresentação do Dashboard principal da aplicação frontend.
- * 
+ *
  * Contém cards de estatísticas resumidas, lista de produtos em destaque e
  * navegação para listas/detalhes de produtos.
  */
@@ -13,7 +13,6 @@ import {
   CardContent,
   Typography,
   Box,
-  CircularProgress,
   Alert,
   Button,
 } from '@mui/material';
@@ -33,10 +32,6 @@ import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 import type { MonitoredProduct } from '../types';
 
-/**
- * Tipagens locais para maior clareza e manutenção.
- * Ajustar conforme contrato real da API se necessário.
- */
 interface DashboardStats {
   total_monitored?: number;
   active_alerts?: number;
@@ -44,108 +39,139 @@ interface DashboardStats {
   total_competitors?: number;
 }
 
-/**
- * Componente Dashboard
- *
- * Responsável por:
- * - Buscar estatísticas do dashboard (total de produtos, alertas, etc.)
- * - Buscar produtos em destaque (produtos que requerem atenção)
- * - Renderizar cards de estatísticas e lista de produtos em destaque
- */
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
 
-  // Query para obter estatísticas do dashboard
   const { data: stats, isLoading: statsLoading, error: statsError } = useQuery<DashboardStats>({
     queryKey: ['dashboardStats'],
     queryFn: () => productsService.getDashboardStats(),
   });
 
-  // Query para obter produtos em destaque
   const { data: featuredProducts, isLoading: featuredLoading } = useQuery<MonitoredProduct[]>({
     queryKey: ['featuredProducts'],
     queryFn: () => productsService.getFeaturedProducts(),
   });
 
-  // Estado de carregamento inicial das estatísticas
+  // Estado de carregamento: esqueletos no lugar dos cards
   if (statsLoading) {
     return (
       <Layout>
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-          <CircularProgress />
+        <Box role="status" aria-label="Carregando dashboard..." sx={{ mb: 4 }}>
+          <Box className="skeleton" sx={{ width: 160, height: 32, mb: 1 }} />
+          <Box className="skeleton" sx={{ width: 280, height: 20 }} />
         </Box>
+        <Grid container spacing={3} sx={{ mb: 4 }}>
+          {[0, 1, 2, 3].map((i) => (
+            <Grid item xs={12} sm={6} md={3} key={i}>
+              <Box className="skeleton" sx={{ height: 100 }} />
+            </Grid>
+          ))}
+        </Grid>
       </Layout>
     );
   }
 
-  // Tratamento de erro ao carregar estatísticas
   if (statsError) {
     return (
       <Layout>
-        <Alert severity="error">
+        <Alert
+          severity="error"
+          sx={{
+            backgroundColor: 'var(--color-semantic-danger-bg)',
+            color: 'var(--color-text-primary)',
+            border: '1px solid rgba(239,68,68,0.3)',
+            borderLeft: '4px solid var(--color-semantic-danger)',
+            borderRadius: 'var(--radius-md)',
+            '& .MuiAlert-icon': { color: 'var(--color-semantic-danger)' },
+          }}
+        >
           Erro ao carregar dados do dashboard. Tente novamente.
         </Alert>
       </Layout>
     );
   }
 
-  // Configuração dos cards de estatísticas exibidos no topo do dashboard
   const statCards = [
     {
       title: 'Produtos Monitorados',
       value: stats?.total_monitored || 0,
-      icon: <InventoryIcon fontSize="large" />,
-      color: '#1976d2',
+      icon: <InventoryIcon />,
+      color: 'var(--color-accent-primary)',
     },
     {
       title: 'Alertas Ativos',
       value: stats?.active_alerts || 0,
-      icon: <NotificationsIcon fontSize="large" />,
-      color: '#ed6c02',
+      icon: <NotificationsIcon />,
+      color: 'var(--color-semantic-danger)',
     },
     {
       title: 'Preços Competitivos',
       value: stats?.ok_prices || 0,
-      icon: <CheckCircleIcon fontSize="large" />,
-      color: '#2e7d32',
+      icon: <CheckCircleIcon />,
+      color: 'var(--color-semantic-success)',
     },
     {
       title: 'Total de Concorrentes',
       value: stats?.total_competitors || 0,
-      icon: <PeopleIcon fontSize="large" />,
-      color: '#9c27b0',
+      icon: <PeopleIcon />,
+      color: 'var(--color-accent-secondary)',
     },
   ];
 
   return (
     <Layout>
-      {/* Cabeçalho do Dashboard */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom>
+        <Typography
+          variant="h4"
+          gutterBottom
+          sx={{ fontSize: '1.375rem', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--color-text-primary)' }}
+        >
           Dashboard
         </Typography>
-        <Typography variant="body1" color="text.secondary">
+        <Typography variant="body1" sx={{ color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>
           Visão geral do monitoramento de preços
         </Typography>
       </Box>
 
-      {/* Cards de Estatísticas */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         {statCards.map((card, index) => (
           <Grid item xs={12} sm={6} md={3} key={index}>
-            <Card elevation={2}>
+            <Card
+              elevation={0}
+              className="card-enter"
+              style={{ animationDelay: `calc(var(--motion-stagger) * ${index})` }}
+              sx={{
+                backgroundColor: 'var(--color-surface-card)',
+                border: '1px solid var(--color-border-subtle)',
+                borderRadius: 'var(--radius-lg)',
+                backdropFilter: 'blur(8px)',
+                boxShadow: 'var(--shadow-sm)',
+                transition: `box-shadow var(--motion-fast) var(--motion-easing), border-color var(--motion-fast) var(--motion-easing)`,
+                '&:hover': {
+                  boxShadow: 'var(--shadow-md)',
+                  borderColor: 'var(--color-border-default)',
+                },
+              }}
+            >
               <CardContent>
                 <Box display="flex" alignItems="center" justifyContent="space-between">
                   <Box>
-                    <Typography color="text.secondary" gutterBottom variant="body2">
+                    <Typography
+                      variant="body2"
+                      gutterBottom
+                      sx={{ color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em' }}
+                    >
                       {card.title}
                     </Typography>
-                    <Typography variant="h4" component="div">
+                    <Typography
+                      variant="h4"
+                      component="div"
+                      sx={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1 }}
+                    >
                       {card.value}
                     </Typography>
                   </Box>
-                  {/* Ícone com cor destacada conforme o card */}
-                  <Box sx={{ color: card.color }}>
+                  <Box sx={{ color: card.color, opacity: 0.85 }}>
                     {card.icon}
                   </Box>
                 </Box>
@@ -155,52 +181,59 @@ const Dashboard: React.FC = () => {
         ))}
       </Grid>
 
-      {/* Seção: Produtos em Destaque */}
       <Box sx={{ mb: 2 }}>
-        <Typography variant="h5" gutterBottom>
+        <Typography
+          variant="h5"
+          gutterBottom
+          sx={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text-primary)' }}
+        >
           Produtos em Destaque
         </Typography>
-        <Typography variant="body2" color="text.secondary" gutterBottom>
+        <Typography variant="body2" sx={{ color: 'var(--color-text-muted)', fontSize: '0.875rem', mb: 2 }}>
           Produtos que requerem mais atenção
         </Typography>
       </Box>
 
-      {/* Loader enquanto os produtos em destaque são carregados */}
       {featuredLoading ? (
-        <Box display="flex" justifyContent="center" py={4}>
-          <CircularProgress />
-        </Box>
+        <Grid container spacing={3} role="status" aria-label="Carregando produtos em destaque...">
+          {[0, 1, 2].map((i) => (
+            <Grid item xs={12} md={6} lg={4} key={i}>
+              <Box className="skeleton" sx={{ height: 160 }} />
+            </Grid>
+          ))}
+        </Grid>
       ) : featuredProducts && featuredProducts.length > 0 ? (
         <Grid container spacing={3}>
           {featuredProducts.map((product) => {
             const productStatus = resolveMonitoredStatus(product);
+            const isInactive = productStatus === 'inactive';
 
             return (
               <Grid item xs={12} md={6} lg={4} key={product.id}>
                 <Card
-                  elevation={productStatus === 'inactive' ? 0 : 2}
+                  elevation={0}
+                  className="card-interactive card-enter"
+                  onClick={() => navigate(`/product/${product.id}`)}
                   sx={{
-                    opacity: productStatus === 'inactive' ? 0.75 : 1,
-                    backgroundColor: productStatus === 'inactive' ? 'grey.50' : 'background.paper',
+                    cursor: 'pointer',
+                    backgroundColor: 'var(--color-surface-card)',
+                    border: '1px solid var(--color-border-subtle)',
+                    borderRadius: 'var(--radius-lg)',
+                    backdropFilter: 'blur(8px)',
+                    opacity: isInactive ? 0.6 : 1,
                   }}
                 >
                   <CardContent>
                     <Box display="flex" gap={2}>
-                      {/* Thumbnail do produto (se existir) */}
                       {product.thumbnail && (
                         <Box
                           component="img"
                           src={product.thumbnail}
                           alt={product.name}
-                          sx={{
-                            width: 80,
-                            height: 80,
-                            objectFit: 'cover',
-                            borderRadius: 1,
-                          }}  
+                          sx={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 'var(--radius-md)', flexShrink: 0 }}
                         />
                       )}
-                      <Box flex={1}>
+                      <Box flex={1} minWidth={0}>
                         <TruncatedText text={product.name} variant="h6" lines={2} maxWidth="100%" tooltip={false} />
                         <TruncatedText text={product.url || ''} variant="body2" color="text.secondary" maxWidth="100%" tooltip={true} />
                         <Box display="flex" alignItems="center" gap={1} mt={1}>
@@ -210,14 +243,27 @@ const Dashboard: React.FC = () => {
                       </Box>
                     </Box>
 
-                    {/* Botão para navegar aos detalhes do produto */}
                     <Button
-                      variant="contained"
+                      variant="outlined"
                       size="small"
                       fullWidth
-                      sx={{ mt: 2 }}
-                      onClick={() => navigate(`/product/${product.id}`)}
-                      startIcon={<TrendingUpIcon />}
+                      sx={{
+                        mt: 2,
+                        color: 'var(--color-accent-primary)',
+                        borderColor: 'var(--color-border-accent)',
+                        borderRadius: 'var(--radius-md)',
+                        fontSize: '0.8125rem',
+                        textTransform: 'none',
+                        '&:hover': {
+                          backgroundColor: 'var(--color-surface-active)',
+                          borderColor: 'var(--color-accent-primary)',
+                        },
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/product/${product.id}`);
+                      }}
+                      startIcon={<TrendingUpIcon fontSize="small" />}
                     >
                       Ver Detalhes
                     </Button>
@@ -228,19 +274,39 @@ const Dashboard: React.FC = () => {
           })}
         </Grid>
       ) : (
-        // Caso não existam produtos em destaque, informar ao usuário
-        <Alert severity="info">
+        <Alert
+          severity="info"
+          sx={{
+            backgroundColor: 'var(--color-semantic-info-bg)',
+            color: 'var(--color-text-primary)',
+            border: '1px solid rgba(59,130,246,0.3)',
+            borderLeft: '4px solid var(--color-semantic-info)',
+            borderRadius: 'var(--radius-md)',
+            '& .MuiAlert-icon': { color: 'var(--color-semantic-info)' },
+          }}
+        >
           Nenhum produto em destaque no momento. Adicione produtos para monitorar.
         </Alert>
       )}
 
-      {/* Ações globais, ex.: navegar para lista completa de produtos */}
       <Box sx={{ mt: 4, textAlign: 'center' }}>
         <Button
           variant="outlined"
-          color="secondary"
           size="large"
           onClick={() => navigate('/products')}
+          sx={{
+            color: 'var(--color-text-muted)',
+            borderColor: 'var(--color-border-default)',
+            borderRadius: 'var(--radius-md)',
+            textTransform: 'none',
+            fontWeight: 500,
+            px: 4,
+            '&:hover': {
+              color: 'var(--color-text-primary)',
+              borderColor: 'var(--color-border-accent)',
+              backgroundColor: 'var(--color-surface-hover)',
+            },
+          }}
         >
           Ver Todos os Produtos
         </Button>
