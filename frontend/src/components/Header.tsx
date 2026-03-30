@@ -1,10 +1,10 @@
 /**
- * Componente de cabeçalho principal da aplicação (Market Alert).
- * Este arquivo contém o AppBar com navegação principal (Desktop e Mobile) e o menu de perfil do usuário.
+ * Componente de cabeçalho principal da aplicação (Market Suite).
+ * AppBar com navegação principal (Desktop e Mobile) e menu de perfil do usuário.
  */
 
 import React, { useState } from 'react';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
+import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
@@ -27,75 +27,80 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../hooks/useAuth';
 
-/**
- * Header
- * Componente funcional que exibe a barra de navegação superior.
- *
- * - Mostra links principais (Dashboard, Produtos, Comparação, Alertas).
- * - Em dispositivos móveis apresenta um menu "hamburger".
- * - Exibe menu de perfil com email do usuário, link para configurações e logout.
- *
- * Retorna JSX do AppBar com comportamento responsivo.
- */
 const Header: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout } = useAuth();
 
-  // Obtém tema e detector de tamanho de tela para alternar entre Desktop/Mobile.
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
-  // Estado do menu de perfil (desktop) e menu móvel (hamburger).
+
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [mobileMenuAnchor, setMobileMenuAnchor] = useState<null | HTMLElement>(null);
 
-  /**
-   * handleProfileMenuOpen
-   * Abre o menu de perfil (desktop) posicionando-o no elemento clicado.
-   */
   const handleProfileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
   };
 
-  /**
-   * handleMobileMenuOpen
-   * Abre o menu móvel (hamburger) posicionando-o no elemento clicado.
-   */
   const handleMobileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setMobileMenuAnchor(event.currentTarget);
   };
 
-  /**
-   * handleMenuClose
-   * Fecha ambos menus (perfil e móvel). Útil para reutilizar ao navegar/efetuar logout.
-   */
   const handleMenuClose = () => {
     setAnchorEl(null);
     setMobileMenuAnchor(null);
   };
 
-  /**
-   * handleLogout
-   * Realiza logout assíncrono via contexto de autenticação, fecha menus e redireciona para a tela de login.
-   */
   const handleLogout = async () => {
     await logout();
     handleMenuClose();
     navigate('/login');
   };
 
-  // Itens exibidos no menu principal (usar ícones e rotas consistentes com o frontend).
   const menuItems = [
-    { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
-    { label: 'Produtos', path: '/products', icon: <InventoryIcon /> },
-    { label: 'Comparação', path: '/compare', icon: <CompareIcon /> },
-    { label: 'Alertas', path: '/alerts', icon: <NotificationsIcon /> },
+    { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon fontSize="small" /> },
+    { label: 'Produtos', path: '/products', icon: <InventoryIcon fontSize="small" /> },
+    { label: 'Comparação', path: '/compare', icon: <CompareIcon fontSize="small" /> },
+    { label: 'Alertas', path: '/alerts', icon: <NotificationsIcon fontSize="small" /> },
   ];
 
+  // Estilos compartilhados para menus dropdown (perfil e mobile)
+  const menuPaperSx = {
+    backgroundColor: 'var(--color-surface-popover)',
+    border: '1px solid var(--color-border-contextual)',
+    boxShadow: 'var(--shadow-contextual)',
+    borderRadius: 'var(--radius-lg)',
+    mt: 0.75,
+    '& .MuiMenuItem-root': {
+      fontSize: '0.875rem',
+      color: 'var(--color-text-secondary)',
+      borderRadius: 'var(--radius-md)',
+      mx: 0.5,
+      my: 0.25,
+      transition: `background-color var(--motion-fast) var(--motion-easing), color var(--motion-fast) var(--motion-easing)`,
+      '&:hover': {
+        backgroundColor: 'var(--color-surface-hover)',
+        color: 'var(--color-text-primary)',
+      },
+      '&.Mui-disabled': {
+        opacity: 1,
+        color: 'var(--color-text-muted)',
+      },
+    },
+  };
+
   return (
-    <AppBar position="sticky" elevation={1}>
-      <Toolbar>
-        {/* Logo / título que navega para o dashboard */}
+    <AppBar
+      position="sticky"
+      elevation={0}
+      sx={{
+        backgroundColor: 'var(--color-bg-sidebar)',
+        borderBottom: '1px solid var(--color-border-default)',
+        backdropFilter: 'blur(8px)',
+      }}
+    >
+      <Toolbar sx={{ gap: 1 }}>
+        {/* Logo */}
         <Typography
           variant="h6"
           component={RouterLink}
@@ -103,40 +108,74 @@ const Header: React.FC = () => {
           sx={{
             flexGrow: 0,
             textDecoration: 'none',
-            color: 'inherit',
-            fontWeight: 'bold',
-            mr: 4,
+            display: 'inline-block',
+            color: 'transparent',
+            backgroundImage: 'linear-gradient(90deg, var(--color-accent-primary), var(--color-accent-secondary))',
+            backgroundClip: 'text',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            fontWeight: 700,
+            fontSize: '1.125rem',
+            letterSpacing: '-0.02em',
+            mr: 3,
           }}
         >
-          Market Alert
+          Market Suite
         </Typography>
 
-        {/* Menu Desktop: botões visíveis quando não é dispositivo móvel */}
+        {/* Navegação Desktop */}
         {!isMobile && (
-          <Box sx={{ flexGrow: 1, display: 'flex', gap: 1 }}>
-            {menuItems.map((item) => (
-              <Button
-                key={item.path}
-                component={RouterLink}
-                to={item.path}
-                color="inherit"
-                startIcon={item.icon}
-              >
-                {item.label}
-              </Button>
-            ))}
+          <Box sx={{ flexGrow: 1, display: 'flex', gap: 0.5 }}>
+            {menuItems.map((item) => {
+              const isActive = location.pathname === item.path;
+              return (
+                <Button
+                  key={item.path}
+                  component={RouterLink}
+                  to={item.path}
+                  startIcon={item.icon}
+                  sx={{
+                    color: isActive ? 'var(--color-accent-primary)' : 'var(--color-text-muted)',
+                    backgroundColor: isActive ? 'var(--color-surface-active)' : 'transparent',
+                    borderRadius: 'var(--radius-md)',
+                    px: 1.5,
+                    py: 0.75,
+                    fontSize: '0.875rem',
+                    fontWeight: isActive ? 600 : 400,
+                    textTransform: 'none',
+                    transition: `color var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing)`,
+                    '&:hover': {
+                      color: 'var(--color-text-primary)',
+                      backgroundColor: 'var(--color-surface-hover)',
+                    },
+                  }}
+                >
+                  {item.label}
+                </Button>
+              );
+            })}
           </Box>
         )}
 
-        {/* Menu Mobile: ícone de menu que abre um Menu com MenuItems */}
+        {/* Espaço flex para empurrar ações para a direita em mobile */}
+        {isMobile && <Box sx={{ flexGrow: 1 }} />}
+
+        {/* Menu Mobile (hamburger) */}
         {isMobile && (
           <>
-            {/* Espaço flexível para empurrar o botão do menu para a direita */}
-            <Box sx={{ flexGrow: 1 }} />
             <IconButton
-              color="inherit"
               onClick={handleMobileMenuOpen}
               edge="start"
+              aria-label="Abrir menu de navegação"
+              aria-expanded={Boolean(mobileMenuAnchor)}
+              aria-haspopup="true"
+              sx={{
+                color: 'var(--color-text-muted)',
+                '&:hover': {
+                  color: 'var(--color-text-primary)',
+                  backgroundColor: 'var(--color-surface-hover)',
+                },
+              }}
             >
               <MenuIcon />
             </IconButton>
@@ -144,6 +183,7 @@ const Header: React.FC = () => {
               anchorEl={mobileMenuAnchor}
               open={Boolean(mobileMenuAnchor)}
               onClose={handleMenuClose}
+              slotProps={{ paper: { sx: menuPaperSx } }}
             >
               {menuItems.map((item) => (
                 <MenuItem
@@ -154,19 +194,29 @@ const Header: React.FC = () => {
                   }}
                 >
                   {item.icon}
-                  <Typography sx={{ ml: 1 }}>{item.label}</Typography>
+                  <Typography sx={{ ml: 1, fontSize: '0.875rem' }}>{item.label}</Typography>
                 </MenuItem>
               ))}
             </Menu>
           </>
         )}
 
-        {/* Perfil do Usuário: mostra email, configurações e botão de sair */}
+        {/* Perfil do usuário */}
         {!isMobile && <Box sx={{ flexGrow: 1 }} />}
         <IconButton
-          color="inherit"
           onClick={handleProfileMenuOpen}
           edge="end"
+          aria-label="Menu do usuário"
+          aria-expanded={Boolean(anchorEl)}
+          aria-haspopup="true"
+          sx={{
+            color: 'var(--color-text-muted)',
+            transition: `color var(--motion-fast) var(--motion-easing), background-color var(--motion-fast) var(--motion-easing)`,
+            '&:hover': {
+              color: 'var(--color-accent-primary)',
+              backgroundColor: 'var(--color-surface-hover)',
+            },
+          }}
         >
           <AccountCircle />
         </IconButton>
@@ -174,13 +224,13 @@ const Header: React.FC = () => {
           anchorEl={anchorEl}
           open={Boolean(anchorEl)}
           onClose={handleMenuClose}
+          slotProps={{ paper: { sx: menuPaperSx } }}
         >
-          {/* Email do usuário exibido como item desabilitado */}
           <MenuItem disabled>
-            <Typography variant="body2">{user?.email}</Typography>
+            <Typography variant="body2" sx={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+              {user?.email}
+            </Typography>
           </MenuItem>
-
-          {/* Link para configurações do usuário */}
           <MenuItem
             onClick={() => {
               navigate('/settings');
@@ -189,8 +239,6 @@ const Header: React.FC = () => {
           >
             Configurações
           </MenuItem>
-
-          {/* Ação de logout */}
           <MenuItem onClick={handleLogout}>Sair</MenuItem>
         </Menu>
       </Toolbar>

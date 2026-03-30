@@ -467,16 +467,16 @@ const Products: React.FC = () => {
     const isPaused = (product.paused ?? product.is_paused) ?? false;
 
     const borderColorMap: Record<string, string> = {
-      success: 'success.light',
-      warning: 'warning.light',
-      error: 'error.light',
-      default: 'divider',
-      info: 'info.light',
+      success: 'var(--color-semantic-success)',
+      warning: 'var(--color-semantic-warning)',
+      error: 'var(--color-semantic-danger)',
+      default: 'var(--color-border-default)',
+      info: 'var(--color-semantic-info)',
     };
 
     const colorKey = badgeMeta.color ?? 'default';
-    const borderColor = isPaused ? 'warning.light' : borderColorMap[colorKey] || 'divider';
-    const backgroundColor = isInactive ? 'grey.50' : 'background.paper';
+    const borderColor = isPaused ? 'var(--color-semantic-warning)' : borderColorMap[colorKey] || 'var(--color-border-default)';
+    const backgroundColor = isInactive ? 'rgba(255,255,255,0.02)' : 'var(--color-surface-card)';
 
     return {
       chipColor: badgeMeta.color,
@@ -492,10 +492,14 @@ const Products: React.FC = () => {
     <Layout>
       {/* Cabeçalho */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom>
+        <Typography
+          variant="h4"
+          gutterBottom
+          sx={{ fontSize: '1.375rem', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--color-text-primary)' }}
+        >
           Produtos Monitorados
         </Typography>
-        <Typography variant="body1" color="text.secondary">
+        <Typography variant="body1" sx={{ color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>
           Gerencie e visualize todos os seus produtos monitorados
         </Typography>
       </Box>
@@ -515,7 +519,14 @@ const Products: React.FC = () => {
           placeholder="Buscar Produtos..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          sx={{ minWidth: 200 }}
+          sx={{
+            minWidth: 200,
+            '& .MuiOutlinedInput-root': {
+              borderRadius: 'var(--radius-md)',
+              transition: `border-color var(--motion-fast) var(--motion-easing), box-shadow var(--motion-fast) var(--motion-easing)`,
+              '&.Mui-focused fieldset': { borderColor: 'var(--color-accent-primary)', boxShadow: 'var(--shadow-glow-subtle)' },
+            },
+          }}
         />
 
         <FormControl size="small" sx={{ minWidth: 150 }}>
@@ -524,6 +535,7 @@ const Products: React.FC = () => {
             value={statusFilter}
             label="Status"
             onChange={(e) => setStatusFilter(e.target.value)}
+            sx={{ borderRadius: 'var(--radius-md)' }}
           >
             <MenuItem value="">Todos</MenuItem>
             <MenuItem value="competitivo">Competitivo</MenuItem>
@@ -541,6 +553,20 @@ const Products: React.FC = () => {
           exclusive
           onChange={handleViewModeChange}
           size="small"
+          sx={{
+            '& .MuiToggleButton-root': {
+              border: '1px solid var(--color-border-default)',
+              color: 'var(--color-text-muted)',
+              borderRadius: 'var(--radius-md)',
+              transition: `all var(--motion-fast) var(--motion-easing)`,
+              '&.Mui-selected': {
+                backgroundColor: 'var(--color-surface-active)',
+                color: 'var(--color-accent-primary)',
+                borderColor: 'var(--color-border-accent)',
+              },
+              '&:hover': { backgroundColor: 'var(--color-surface-hover)', color: 'var(--color-text-primary)' },
+            },
+          }}
         >
           <ToggleButton value="list">
             <ViewListIcon />
@@ -553,10 +579,14 @@ const Products: React.FC = () => {
 
       {/* Conteúdo */}
       {isLoading ? (
-        // Estado de carregamento
-        <Box display="flex" justifyContent="center" py={4}>
-          <CircularProgress />
-        </Box>
+        // Estado de carregamento — esqueletos de produto
+        <Grid container spacing={3} role="status" aria-label="Carregando produtos...">
+          {[0, 1, 2, 3].map((i) => (
+            <Grid item xs={12} key={i}>
+              <Box className="skeleton" sx={{ height: 140, borderRadius: 'var(--radius-lg)' }} />
+            </Grid>
+          ))}
+        </Grid>
       ) : error ? (
         // Estado de erro ao buscar produtos
         <Typography color="error">Erro ao carregar produtos. Tente novamente.</Typography>
@@ -614,12 +644,15 @@ const Products: React.FC = () => {
               return (
                 <Grid item xs={12} key={product.id}>
                   <Card
-                    elevation={visualEmphasis.isInactive ? 0 : 2}
+                    elevation={0}
+                    className="card-interactive"
                     sx={{
                       border: '1px solid',
-                      borderColor: viewMode === 'list' ? visualEmphasis.borderColor : 'divider',
+                      borderColor: viewMode === 'list' ? visualEmphasis.borderColor : 'var(--color-border-subtle)',
                       backgroundColor: visualEmphasis.backgroundColor,
-                      opacity: visualEmphasis.isPaused ? 0.5 : visualEmphasis.isInactive ? 0.7 : 1,
+                      backdropFilter: 'blur(8px)',
+                      borderRadius: 'var(--radius-lg)',
+                      opacity: visualEmphasis.isPaused ? 0.55 : visualEmphasis.isInactive ? 0.65 : 1,
                     }}
                   >
                     <CardContent>

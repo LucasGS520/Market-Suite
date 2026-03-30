@@ -167,9 +167,29 @@ export const ToastProvider: React.FC<React.PropsWithChildren> = ({ children }) =
         {currentToast ? (
           <Alert
             severity={currentToast.severity}
-            elevation={3}
+            elevation={0}
             onClose={() => handleClose(undefined)}
-            sx={{ width: '100%' }}
+            sx={{
+              width: '100%',
+              minWidth: 280,
+              backgroundColor: 'var(--color-bg-sidebar)',
+              color: 'var(--color-text-primary)',
+              border: '1px solid var(--color-border-default)',
+              borderRadius: 'var(--radius-md)',
+              boxShadow: 'var(--shadow-lg)',
+              fontSize: '0.875rem',
+              '& .MuiAlert-icon': {
+                color:
+                  currentToast.severity === 'success' ? 'var(--color-semantic-success)' :
+                  currentToast.severity === 'error'   ? 'var(--color-semantic-danger)'  :
+                  currentToast.severity === 'warning' ? 'var(--color-semantic-warning)' :
+                                                        'var(--color-semantic-info)',
+              },
+              '& .MuiAlert-action': {
+                color: 'var(--color-text-muted)',
+                alignItems: 'center',
+              },
+            }}
           >
             {currentToast.message}
           </Alert>

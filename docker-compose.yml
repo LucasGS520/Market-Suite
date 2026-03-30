@@ -203,7 +203,6 @@ services:
         root: .
     profiles:
       - api
-      - ui
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
@@ -498,12 +497,10 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      - ./frontend:/app
-      - frontend-node-modules:/app/node_modules
-      - frontend-pnpm-store:/root/.local/share/pnpm/store
-    depends_on:
-      market_alert:
-        condition: service_healthy
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./frontend/postcss.config.js:/app/postcss.config.js
     networks:
       - monitoring-net
     deploy:
@@ -520,8 +517,6 @@ volumes:
   db-data:
   redis-data:
   audit-logs:
-  frontend-node-modules:
-  frontend-pnpm-store:
   temporal-db-data:
 
 networks:

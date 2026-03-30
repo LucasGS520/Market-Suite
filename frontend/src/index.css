@@ -1,54 +1,280 @@
 /*
-  Estilos globais (Market Alert)
-  - Contém as diretivas do Tailwind e regras globais mínimas utilizadas pela aplicação.
+  Estilos globais - Market Suite Design System
+  Camadas: Tailwind base -> CSS vars (tokens) -> keyframes -> body/reset
 */
 
-/* Diretivas do Tailwind: importa reset/base, componentes e utilitários */
 @import "tailwindcss/base";
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
-/* Variáveis e configurações de raiz do documento
-   - Definem tipografia básica, comportamento de renderização e suporte a tema escuro.
-*/
 :root {
-  /* Pilha de fontes: prioriza Inter, depois fontes do sistema e alternativas seguras */
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-
-  /* Altura de linha padrão para melhorar legibilidade */
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
-
-  /* Peso de fonte padrão da aplicação */
   font-weight: 400;
-
-  /* Indica que a interface suporta modos claro e escuro para o navegador */
-  color-scheme: light dark;
-
-  /* Evita síntese automática exagerada de fontes (ligaduras, etc.) */
   font-synthesis: none;
-
-  /* Otimizações de renderização de texto para melhor legibilidade */
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-  /* Cores principais do design system (usadas por regras CSS personalizadas) */
-  --color-primary: #fb8c00; /* laranja */
-  --color-secondary: #fdd835; /* amarelo */
+  color-scheme: dark;
 
-/* Regras básicas do elemento <body>
-   - Remove margem padrão e define dimensões mínimas para evitar layout quebrado em telas pequenas.
-*/
+  --color-bg-canvas:          #0a0a0a;
+  --color-bg-sidebar:         #111111;
+  --color-bg-ambient-warm:    rgba(254, 123, 2, 0.10);
+  --color-bg-ambient-gold:    rgba(253, 216, 53, 0.07);
+  --color-bg-ambient-shadow:  rgba(0, 0, 0, 0.38);
+  --ambient-blob-size-lg:     720px;
+  --ambient-blob-size-md:     560px;
+
+  --color-surface-card:       rgba(255, 255, 255, 0.04);
+  --color-surface-overlay:    rgba(255, 255, 255, 0.07);
+  --color-surface-hover:      rgba(255, 255, 255, 0.06);
+  --color-surface-active:     rgba(254, 123, 2, 0.12);
+  --color-surface-modal:      rgba(17, 17, 17, 0.98);
+  --color-surface-popover:    #111111;
+  --color-overlay-backdrop:   rgba(10, 10, 10, 0.76);
+
+  --color-border-default:     rgba(255, 255, 255, 0.10);
+  --color-border-subtle:      rgba(255, 255, 255, 0.05);
+  --color-border-accent:      rgba(254, 123, 2, 0.40);
+  --color-border-overlay:     rgba(255, 255, 255, 0.08);
+  --color-border-contextual:  rgba(255, 255, 255, 0.06);
+
+  --color-text-primary:       #FFFFFF;
+  --color-text-secondary:     #E4E4E7;
+  --color-text-muted:         #A1A1AA;
+  --color-text-disabled:      #52525B;
+  --color-text-inverse:       #0a0a0a;
+
+  --color-accent-primary:     #FE7B02;
+  --color-accent-secondary:   #FDD835;
+  --color-accent-gradient:    linear-gradient(135deg, #FE7B02, #FDD835);
+
+  --color-semantic-success:     #10B981;
+  --color-semantic-success-bg:  rgba(16, 185, 129, 0.12);
+  --color-semantic-danger:      #EF4444;
+  --color-semantic-danger-bg:   rgba(239, 68, 68, 0.12);
+  --color-semantic-warning:     #F59E0B;
+  --color-semantic-warning-bg:  rgba(245, 158, 11, 0.12);
+  --color-semantic-info:        #3B82F6;
+  --color-semantic-info-bg:     rgba(59, 130, 246, 0.12);
+
+  --space-xs:   4px;
+  --space-sm:   8px;
+  --space-md:   16px;
+  --space-lg:   24px;
+  --space-xl:   32px;
+  --space-2xl:  48px;
+
+  --radius-sm:    4px;
+  --radius-md:    8px;
+  --radius-lg:    12px;
+  --radius-xl:    16px;
+  --radius-full:  9999px;
+
+  --shadow-sm:         0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md:         0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg:         0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-contextual: 0 12px 32px rgba(0, 0, 0, 0.32);
+  --shadow-overlay:    0 24px 80px rgba(0, 0, 0, 0.55);
+  --shadow-glow:       0 0 16px rgba(254, 123, 2, 0.35);
+  --shadow-glow-subtle: 0 0 8px rgba(254, 123, 2, 0.18);
+
+  --motion-fast:          150ms;
+  --motion-normal:        250ms;
+  --motion-slow:          350ms;
+  --motion-easing:        cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-easing-out:    cubic-bezier(0, 0, 0.2, 1);
+  --motion-easing-in:     cubic-bezier(0.4, 0, 1, 1);
+  --motion-easing-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-stagger:       60ms;
+
+  --opacity-subtle:   0.05;
+  --opacity-muted:    0.40;
+  --opacity-disabled: 0.38;
+}
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes card-enter {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  from { background-position: -200% center; }
+  to   { background-position: 200% center; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: var(--shadow-glow); }
+  50% { box-shadow: var(--shadow-glow-subtle); }
+}
+
+@keyframes badge-pop {
+  from { opacity: 0; transform: scale(0.5); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes sidebar-enter {
+  from { transform: translateX(-100%); opacity: 0.5; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-exit {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-16px); }
+}
+
+@keyframes price-flash-up {
+  0%   { color: var(--color-semantic-success); }
+  100% { color: inherit; }
+}
+
+@keyframes price-flash-down {
+  0%   { color: var(--color-semantic-danger); }
+  100% { color: inherit; }
+}
+
+.page-enter {
+  animation: page-enter var(--motion-slow) var(--motion-easing-out) both;
+}
+
+.card-enter {
+  animation: card-enter var(--motion-normal) var(--motion-easing-out) both;
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-card) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    var(--color-surface-card) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s linear infinite;
+  border-radius: var(--radius-md);
+}
+
+.badge-enter {
+  animation: badge-pop var(--motion-normal) var(--motion-easing-bounce) both;
+}
+
+.sidebar-mobile-open {
+  animation: sidebar-enter var(--motion-slow) var(--motion-easing-out) both;
+}
+
+.toast-enter {
+  animation: toast-enter var(--motion-normal) var(--motion-easing-out) both;
+}
+
+.toast-exit {
+  animation: toast-exit var(--motion-fast) var(--motion-easing-in) both;
+}
+
+.app-ambient-background {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 0% 0%, var(--color-bg-ambient-warm) 0, rgba(254, 123, 2, 0.04) 22%, transparent 54%),
+    radial-gradient(circle at 100% 0%, var(--color-bg-ambient-gold) 0, rgba(253, 216, 53, 0.035) 20%, transparent 48%),
+    radial-gradient(circle at 0% 100%, rgba(254, 123, 2, 0.06) 0, rgba(254, 123, 2, 0.025) 18%, transparent 42%),
+    radial-gradient(circle at 50% 100%, rgba(253, 216, 53, 0.03) 0, transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, transparent 18%, transparent 82%, var(--color-bg-ambient-shadow) 100%);
+}
+
+.app-ambient-background::before,
+.app-ambient-background::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.45;
+}
+
+.app-ambient-background::before {
+  top: calc(var(--ambient-blob-size-lg) * -0.42);
+  left: calc(var(--ambient-blob-size-lg) * -0.34);
+  width: var(--ambient-blob-size-lg);
+  height: var(--ambient-blob-size-lg);
+  background: radial-gradient(circle, var(--color-bg-ambient-warm) 0, transparent 68%);
+}
+
+.app-ambient-background::after {
+  right: calc(var(--ambient-blob-size-md) * -0.38);
+  bottom: calc(var(--ambient-blob-size-md) * -0.5);
+  width: var(--ambient-blob-size-md);
+  height: var(--ambient-blob-size-md);
+  background: radial-gradient(circle, var(--color-bg-ambient-gold) 0, transparent 70%);
+}
+
+.app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.price-flash-up {
+  animation: price-flash-up 600ms var(--motion-easing-out) both;
+}
+
+.price-flash-down {
+  animation: price-flash-down 600ms var(--motion-easing-out) both;
+}
+
+.card-interactive {
+  transition:
+    transform var(--motion-fast) var(--motion-easing),
+    box-shadow var(--motion-fast) var(--motion-easing),
+    border-color var(--motion-fast) var(--motion-easing);
+}
+
+.card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-border-accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 body {
   margin: 0;
-  min-width: 320px; /* largura mínima suportada para responsividade */
-  min-height: 100vh; /* garante que o body ocupe a altura total da viewport */
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--color-bg-canvas);
+  color: var(--color-text-primary);
 }
 
-/* Box sizing global
-   - Facilita cálculo de largura/altura ao incluir padding/border no tamanho total do elemento.
-   - Recomenda-se aplicar globalmente para evitar surpresas em layouts.
-*/
 * {
   box-sizing: border-box;
+}
+
+#root {
+  min-height: 100vh;
 }
