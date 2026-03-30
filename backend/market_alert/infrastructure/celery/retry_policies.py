@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from market_alert.infraestructure.resilience.rate_limiter import _compute_lock_retry_delay, _compute_scrape_retry_delay
+from market_alert.infrastructure.resilience.rate_limiter import _compute_lock_retry_delay, _compute_scrape_retry_delay
 
 
 # ---------------------------------------------------------------------------

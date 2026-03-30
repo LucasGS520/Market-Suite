@@ -14,7 +14,7 @@ from market_alert.core.tokens import (
     generate_reset_token,
     token_expiry,
 )
-from market_alert.infraestructure.security.bruteforce import (
+from market_alert.infrastructure.security.bruteforce import (
     block_ip,
     reset_failed_attempts,
     record_failed_attempt,

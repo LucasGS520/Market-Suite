@@ -39,11 +39,11 @@ from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.config_alert import settings
-from market_alert.infraestructure.celery.celery_app import celery_app
-from market_alert.infraestructure.celery.dlq_base_task import DLQTask
-from market_alert.infraestructure.celery.retry_policies import COLLECTION_RETRY
-from market_alert.infraestructure.celery.retry_policies import RetryPolicy
-from market_alert.infraestructure.resilience.rate_limiter import (
+from market_alert.infrastructure.celery.celery_app import celery_app
+from market_alert.infrastructure.celery.dlq_base_task import DLQTask
+from market_alert.infrastructure.celery.retry_policies import COLLECTION_RETRY
+from market_alert.infrastructure.celery.retry_policies import RetryPolicy
+from market_alert.infrastructure.resilience.rate_limiter import (
     _increment_invalid_url_attempt,
     _increment_temporary_failure_attempt,
     _register_scrape_cooldown,

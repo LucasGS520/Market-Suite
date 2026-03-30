@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from shared.infra.db import get_engine
 
 from market_alert.core.config_alert import settings
-from market_alert.infraestructure.redis_monitoring import get_redis_metrics
+from market_alert.infrastructure.redis_monitoring import get_redis_metrics
 
 
 logger = structlog.get_logger("health_check")

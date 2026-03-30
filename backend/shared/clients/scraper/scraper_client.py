@@ -45,8 +45,8 @@ from shared.utils import normalize_scraper_response
 from shared.utils.redis_client import get_redis_operational
 
 from market_alert.core.config_alert import settings
-from market_alert.infraestructure.resilience.circuit_breaker import CircuitBreaker
-from market_alert.infraestructure.resilience.rate_limiter import RateLimiter
+from market_alert.infrastructure.resilience.circuit_breaker import CircuitBreaker
+from market_alert.infrastructure.resilience.rate_limiter import RateLimiter
 
 
 logger = structlog.get_logger(__name__)

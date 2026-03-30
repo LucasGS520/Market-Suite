@@ -24,7 +24,7 @@ def reconcile_workflows_task(self) -> None:
     operando sem o orquestrador (fallback não-bloqueante do cliente).
     """
     try:
-        from market_alert.infraestructure.temporal.reconciler import WorkflowReconciler
+        from market_alert.infrastructure.temporal.reconciler import WorkflowReconciler
 
         reconciler = WorkflowReconciler()
         counts = reconciler.reconcile_all()

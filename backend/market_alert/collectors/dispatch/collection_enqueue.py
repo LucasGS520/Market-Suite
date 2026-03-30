@@ -27,7 +27,7 @@ from market_alert.products.crud.crud_competitor import get_competitors_by_monito
 from market_alert.collectors.dispatch.payload_builders import build_competitor_payload, build_monitored_payload
 
 if TYPE_CHECKING:
-    from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
+    from market_alert.infrastructure.celery.enqueuer import CollectionEnqueuer
 
 
 logger = structlog.get_logger("collector_service")
@@ -42,7 +42,7 @@ def _get_enqueuer() -> CollectionEnqueuer:
     global _enqueuer
     if _enqueuer is None:
         #Import local para quebrar ciclo entre dispatch e enqueuer
-        from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
+        from market_alert.infrastructure.celery.enqueuer import CollectionEnqueuer
 
         _enqueuer = CollectionEnqueuer()
     return _enqueuer

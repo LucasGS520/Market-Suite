@@ -27,7 +27,7 @@ def register_worker_signals(celery_app: Celery, process_start_monotonic: float) 
     @worker_ready.connect
     def _validate_on_worker_ready(sender, **kwargs) -> None:
         """Valida infraestrutura assim que o worker está pronto para aceitar tasks."""
-        from market_alert.infraestructure.startup_validation import validate_startup_dependencies
+        from market_alert.infrastructure.startup_validation import validate_startup_dependencies
         validate_startup_dependencies(strict=True)
 
     logger.info("worker_lifecycle_registered")

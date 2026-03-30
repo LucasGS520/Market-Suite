@@ -12,8 +12,8 @@ from uuid import UUID
 from shared.infra.db import SessionLocal
 from shared.utils.trace_context import set_trace_id
 
-from market_alert.infraestructure.celery.celery_app import celery_app
-from market_alert.infraestructure.celery.retry_policies import VERIFICATION_RETRY
+from market_alert.infrastructure.celery.celery_app import celery_app
+from market_alert.infrastructure.celery.retry_policies import VERIFICATION_RETRY
 from market_alert.users.services.services_delivery import (
     send_email_verification_message as _svc_send_email,
     send_phone_otp_message as _svc_send_phone_otp,

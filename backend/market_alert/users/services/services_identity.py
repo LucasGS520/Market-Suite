@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from market_alert.infraestructure.security.bruteforce import enforce_rate_limit
+from market_alert.infrastructure.security.bruteforce import enforce_rate_limit
 from market_alert.core.config_alert import settings
 from market_alert.core.tokens import generate_phone_otp, generate_verification_token, token_expiry
 from market_alert.models.models_users import User

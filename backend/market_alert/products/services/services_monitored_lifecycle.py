@@ -31,7 +31,7 @@ from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.config_alert import settings
-from market_alert.infraestructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
+from market_alert.infrastructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import MonitoredProduct, User
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,

@@ -23,7 +23,7 @@ from __future__ import annotations
 import structlog
 from celery import Task
 
-from market_alert.infraestructure.celery.redis_dlq_handler import write_to_dlq
+from market_alert.infrastructure.celery.redis_dlq_handler import write_to_dlq
 
 logger = structlog.get_logger("dlq_base_task")
 
