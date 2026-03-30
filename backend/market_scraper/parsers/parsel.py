@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """ Funções auxiliares para parsing com Parsel
 
 A biblioteca ``Parsel`` oferece recursos poderosos de seleção via XPath
@@ -17,6 +15,8 @@ Exemplo
 >>> parse_with_parsel(html, url="https://loja.test/produto")
 {'name': 'Console XYZ', 'current_price': '2999.00', 'url': 'https://loja.test/produto'}
 """
+
+from __future__ import annotations
 
 import json
 import re

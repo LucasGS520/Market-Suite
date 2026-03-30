@@ -1,4 +1,4 @@
-"""Hooks de lifecycle do worker Celery.
+""" Hooks de lifecycle do worker Celery.
 
 Ponto de extensão para registrar sinais Celery (worker_ready, worker_shutdown, etc.).
 O Temporal Worker é iniciado exclusivamente pelo container `market_orchestrator`
@@ -13,7 +13,6 @@ from celery.signals import worker_ready
 
 
 logger = structlog.get_logger("worker_lifecycle")
-
 
 def register_worker_signals(celery_app: Celery, process_start_monotonic: float) -> None:
     """Registra sinais do worker Celery.

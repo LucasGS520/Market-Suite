@@ -17,7 +17,7 @@ from typing import Any
 
 
 def run_sync_coro(coro: Any, *, timeout: int = 30) -> Any:
-    """Executa uma coroutine de forma segura em contextos síncronos (sem event loop).
+    """ Executa uma coroutine de forma segura em contextos síncronos (sem event loop).
 
     Deve ser chamada APENAS de threads sem event loop ativo (workers Celery,
     scripts, ou threads delegadas via ``asyncio.to_thread``). Chamar do event
@@ -36,7 +36,7 @@ def run_sync_coro(coro: Any, *, timeout: int = 30) -> Any:
     """
     try:
         asyncio.get_running_loop()
-        # Se chegou aqui, estamos na thread do event loop — bloquear causaria deadlock.
+        #Se chegou aqui, estamos na thread do event loop — bloquear causaria deadlock.
         raise RuntimeError(
             "run_sync_coro() chamado de dentro do event loop ativo. "
             "Use 'await coro' diretamente, ou delegue para thread com "
@@ -45,6 +45,6 @@ def run_sync_coro(coro: Any, *, timeout: int = 30) -> Any:
     except RuntimeError as exc:
         if "run_sync_coro()" in str(exc):
             raise
-        # asyncio.get_running_loop() lançou RuntimeError — nenhum loop na thread atual.
-        # Seguro criar um novo loop com asyncio.run().
+        #asyncio.get_running_loop() lançou RuntimeError — nenhum loop na thread atual.
+        #Seguro criar um novo loop com asyncio.run().
         return asyncio.run(coro)

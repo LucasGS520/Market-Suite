@@ -26,7 +26,7 @@ from market_alert.core.config_alert import settings
 logger = structlog.get_logger("startup_validation")
 
 def validate_startup_dependencies(*, strict: bool = True) -> bool:
-    """Valida PostgreSQL, Redis e Temporal antes de liberar o serviço.
+    """ Valida PostgreSQL, Redis e Temporal antes de liberar o serviço.
 
     Executa consultas mínimas (``SELECT 1`` e ``PING``) para garantir
     conectividade básica. Temporal é verificado com retry robusto — falha
@@ -79,13 +79,13 @@ def _validate_redis() -> bool:
         return False
 
 def _build_temporal_delays(max_attempts: int) -> list[float]:
-    """Backoff exponencial (cap 30s) com jitter ±15% para evitar sincronização entre containers."""
+    """ Backoff exponencial (cap 30s) com jitter ±15% para evitar sincronização entre containers."""
     import random
     base = [min(2 ** (i + 1), 30) for i in range(max_attempts)]
     return [d + random.uniform(0, d * 0.15) for d in base]
 
 def _validate_temporal() -> None:
-    """Valida Temporal tentando conectar diretamente — falha levanta TemporalConnectionError.
+    """ Valida Temporal tentando conectar diretamente — falha levanta TemporalConnectionError.
 
     Esta função é SÍNCRONA por design e deve ser invocada fora do event loop do
     FastAPI. Em ``main.py``, o hook de startup usa ``asyncio.to_thread()`` para

@@ -61,7 +61,6 @@ def drop_repeated_events(
         raise structlog.DropEvent
     return event_dict
 
-
 def setup_api_logging(log_level: str = "INFO") -> None:
     """ Configura logging estruturado JSON para o processo FastAPI.
 
@@ -73,7 +72,6 @@ def setup_api_logging(log_level: str = "INFO") -> None:
         log_level: Nível de log (ex.: "INFO", "DEBUG"). Padrão: "INFO".
     """
     configure_structlog(log_level=log_level)
-
 
 def setup_worker_logging(log_level: str = "INFO") -> None:
     """ Configura logging estruturado JSON para workers Celery.

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """ Utilitários de parsing baseados em extruct
 
 O módulo encapsula o uso da ``extruct`` para ler metadados estruturados
@@ -26,6 +24,8 @@ Exemplo
 >>> parse_with_extruct(html, url="https://exemplo.com/produto")
 {'name': 'Câmera', 'current_price': '3500.00', 'url': 'https://exemplo.com/produto'}
 """
+
+from __future__ import annotations
 
 import re
 from collections.abc import Iterable

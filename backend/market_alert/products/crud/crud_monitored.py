@@ -45,13 +45,13 @@ def _ensure_monitored_access(db: Session, monitored_id: UUID, user: User) -> Mon
     return product
 
 class MonitoredOwnershipError(PermissionError):
-    """Erro lançado quando o usuário não possui acesso ao monitorado"""
+    """ Erro lançado quando o usuário não possui acesso ao monitorado"""
 
 class MonitoredNotFoundError(LookupError):
-    """Erro lançado quando o monitorado não é localizado"""
+    """ Erro lançado quando o monitorado não é localizado"""
 
 class MonitoredLockError(RuntimeError):
-    """Erro lançado quando o lock exclusivo não pode ser adquirido"""
+    """ Erro lançado quando o lock exclusivo não pode ser adquirido"""
 
 def _resolve_availability(
     scraped_availability: bool | None, last_status: str | None

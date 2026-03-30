@@ -38,7 +38,7 @@ def _ensure_price(
     *,
     allow_missing_price: bool = False
 ) -> Decimal | None:
-    """Garante presença do preço antes de expor o produto ao frontend.
+    """ Garante presença do preço antes de expor o produto ao frontend.
 
     Quando o preço ainda não foi coletado e a chamada tolera itens pendentes,
     o valor é propagado como ``None`` para que a camada superior indique o
@@ -109,7 +109,7 @@ def build_monitored_response(
     last_price_change_at: datetime | None = None,
     global_last_price_change_at: datetime | None = None,
 ) -> MonitoredProductResponse:
-    """Converte um monitorado em contrato simplificado com preço obrigatório.
+    """ Converte um monitorado em contrato simplificado com preço obrigatório.
 
     Quando disponível, inclui status de competitividade calculado a partir do
     último resumo armazenado para o produto. A data da última mudança de preço

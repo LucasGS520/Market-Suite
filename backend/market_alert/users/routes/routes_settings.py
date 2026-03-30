@@ -39,7 +39,6 @@ def get_settings_summary(
     logger.info("route_completed", path = request.url.path, method=request.method, status="success", user_id=str(current_user.id))
     return response
 
-
 @router.get("/profile", response_model=SettingsProfileResponse)
 def get_profile(
     request: Request,

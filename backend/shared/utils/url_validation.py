@@ -67,7 +67,7 @@ def normalize_product_url(url: str) -> str:
     return _ensure_scheme(raw)
 
 def canonicalize_product_url(url: str) -> str:
-    """Produz uma representação canônica estável para URLs de produto."""
+    """ Produz uma representação canônica estável para URLs de produto."""
 
     normalized = normalize_product_url(url)
     parsed = urlparse(normalized)

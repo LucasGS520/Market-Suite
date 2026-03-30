@@ -190,7 +190,7 @@ def consume_leaky_bucket(
     ttl_seconds: int | None = None,
     now: float | None = None,
 ) -> Tuple[bool, float | None]:
-    """Consome um *token* do balde vazante controlando limites de requisições.
+    """ Consome um *token* do balde vazante controlando limites de requisições.
 
     A função aplica um algoritmo de *leaky bucket* no Redis. Em cada chamada,
     calculamos a quantidade de *tokens* que deveriam ter vazado desde o último
@@ -333,7 +333,6 @@ def key_exists(key: str) -> bool:
             extra={"chave": key, "erro": str(err)},
         )
         return False
-
 
 def delete_key(key: str) -> None:
     """ Remove uma chave específica do Redis operacional, ignorando falhas de conexão """

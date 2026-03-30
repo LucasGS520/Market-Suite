@@ -16,6 +16,7 @@ import hashlib
 
 import yaml
 
+
 __all__ = [
     "TRUTHY_ENV_VALUES",
     "parse_env_flag",

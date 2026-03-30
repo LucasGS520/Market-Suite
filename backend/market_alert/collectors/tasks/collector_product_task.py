@@ -55,10 +55,7 @@ from market_alert.products.crud.crud_monitored import (
     get_monitored_product_by_id,
     mark_monitored_product_failed,
 )
-from market_alert.products.crud.crud_competitor import (
-    get_competitor_by_id,
-    update_competitor_pause_state,
-)
+from market_alert.products.crud.crud_competitor import get_competitor_by_id, update_competitor_pause_state
 from market_alert.collectors.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.collectors.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.collectors.utils.collector_result import (

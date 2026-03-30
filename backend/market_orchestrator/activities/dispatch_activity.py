@@ -1,4 +1,4 @@
-"""Activity Temporal para disparar uma coleta."""
+""" Activity Temporal para disparar uma coleta. """
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -19,7 +19,7 @@ _DISPATCH_KEY_PREFIX = "workflow:dispatch"
 _DISPATCH_TTL_SECONDS = 7200  # 2h — tempo máximo esperado para conclusão de coleta
 
 def _fetch_monitored_url(monitored_id: str) -> str | None:
-    """Lê normalized_url (ou product_url como fallback) de monitored_products via SQL direto."""
+    """ Lê normalized_url (ou product_url como fallback) de monitored_products via SQL direto."""
     db = SessionLocal()
     try:
         row = db.execute(
@@ -43,7 +43,7 @@ async def dispatch_collection(
     trace_id: str,
     force_compare: bool = False,
 ) -> DispatchActivityOutput:
-    """Enfileira a coleta do monitorado via Celery.
+    """ Enfileira a coleta do monitorado via Celery.
 
     Busca a URL do produto no BD, constrói o CollectionPayload completo e
     delega o enfileiramento ao enqueuer. Persiste o timestamp de dispatch no

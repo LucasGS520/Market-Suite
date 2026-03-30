@@ -20,6 +20,7 @@ Redis). Mudanças devem seguir estas regras para não quebrar execuções em voo
 4. Nunca recriar `CollectionPayload` ou qualquer DTO deste módulo em outro
    serviço — sempre importar daqui.
 """
+
 from __future__ import annotations
 
 import logging

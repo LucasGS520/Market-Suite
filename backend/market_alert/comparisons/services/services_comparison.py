@@ -32,10 +32,7 @@ from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.models.models_products import CompetitorProduct
-from market_alert.schemas.schemas_comparisons import (
-    PriceComparisonResponse,
-    PriceComparisonSummaryResponse,
-)
+from market_alert.schemas.schemas_comparisons import PriceComparisonResponse, PriceComparisonSummaryResponse
 from market_alert.comparisons.crud.crud_comparison import (
     create_price_comparison,
     get_comparison_by_id,
@@ -56,7 +53,6 @@ from market_alert.comparisons.utils.snapshot_comparator import extract_material_
 
 
 logger = structlog.get_logger("comparison_service")
-
 
 #Re-exporta summarize_comparison para consumidores legados
 #(services_products.py e outros que importam daqui)

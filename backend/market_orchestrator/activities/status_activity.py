@@ -1,4 +1,4 @@
-"""Activity Temporal para consultar o status de conclusão da coleta."""
+""" Activity Temporal para consultar o status de conclusão da coleta. """
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -16,7 +16,7 @@ logger = structlog.get_logger("orchestrator.activities.status")
 _DISPATCH_KEY_PREFIX = "workflow:dispatch"
 
 def _read_dispatch_timestamp(monitored_id: str, correlation_id: str) -> datetime | None:
-    """Lê o timestamp de dispatch armazenado pelo dispatch_collection no Redis.
+    """ Lê o timestamp de dispatch armazenado pelo dispatch_collection no Redis.
 
     Retorna None se Redis estiver indisponível ou a chave expirou.
     """
@@ -38,7 +38,7 @@ async def query_collection_status(
     monitored_id: str,
     correlation_id: str,
 ) -> QueryStatusOutput:
-    """Consulta o banco para inferir se a coleta foi concluída.
+    """ Consulta o banco para inferir se a coleta foi concluída.
 
     Compara last_scraped_at do monitorado com o timestamp de dispatch (lido do
     Redis via correlation_id) para garantir que apenas coletas posteriores ao

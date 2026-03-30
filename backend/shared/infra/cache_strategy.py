@@ -1,4 +1,4 @@
-"""Padrão Cache-Aside para leitura de dados de negócio
+""" Padrão Cache-Aside para leitura de dados de negócio
 
 Estratégia:
   1. Tenta ler do Redis (hit → retorna imediatamente)
@@ -40,7 +40,7 @@ def get_with_cache(
     ttl: int,
     fetch_fn: Callable[[], T | None],
 ) -> T | None:
-    """Cache-aside genérico.
+    """ Cache-aside genérico.
 
     Args:
         key: Chave Redis (ex: ``CacheKey.product_price(id)``).
@@ -79,7 +79,7 @@ def get_with_cache(
     return result
 
 def invalidate(key: str) -> None:
-    """Remove uma chave de cache do Redis.
+    """ Remove uma chave de cache do Redis.
 
     Fallback silencioso: se o Redis estiver indisponível, o dado
     simplesmente não é invalidado — expirará via TTL.
@@ -92,7 +92,7 @@ def invalidate(key: str) -> None:
         logger.warning("cache_invalidate_failed", key=key, error=str(exc))
 
 def invalidate_pattern(pattern: str) -> None:
-    """Invalida todas as chaves Redis que casam com o padrão (via SCAN).
+    """ Invalida todas as chaves Redis que casam com o padrão (via SCAN).
 
     Usa SCAN incremental para evitar bloqueio em bases grandes.
     Exemplo de padrão: ``cache:product:123:*``

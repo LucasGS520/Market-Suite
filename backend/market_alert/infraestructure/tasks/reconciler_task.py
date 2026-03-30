@@ -8,8 +8,8 @@ from __future__ import annotations
 import structlog
 from celery import shared_task
 
-logger = structlog.get_logger("reconciler_task")
 
+logger = structlog.get_logger("reconciler_task")
 
 @shared_task(
     name="market_alert.infraestructure.tasks.reconciler_task.reconcile_workflows_task",
