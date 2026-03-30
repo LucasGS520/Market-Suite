@@ -1,4 +1,4 @@
-"""Cliente adaptador Temporal — ponto único de integração com o orquestrador.
+""" Cliente Temporal — ponto único de integração com o orquestrador.
 
 É o único módulo que os services de domínio devem importar para interagir
 com o Temporal. Encapsula toda a complexidade do SDK e implementa fallback
@@ -28,9 +28,8 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("orchestrator.client")
 
-
 def _config():
-    """Lazy accessor para OrchestratorSettings — evita import no nível de módulo.
+    """ Lazy accessor para OrchestratorSettings — evita import no nível de módulo.
 
     O import em nível de módulo acionaria Path.expanduser() durante carregamento,
     proibido pelo sandbox determinístico do Temporal SDK.
@@ -38,17 +37,14 @@ def _config():
     from market_orchestrator.core.config_orchestrator import settings
     return settings
 
-
 # Política de reutilização de ID: permite novo workflow se o anterior terminou/falhou
 _WORKFLOW_ID_REUSE = WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
-
 
 def _workflow_id(monitored_id: str) -> str:
     return f"monitored:{monitored_id}"
 
-
 class TemporalOrchestrationClient:
-    """Adaptador assíncrono entre o domínio e o Temporal SDK.
+    """ Adaptador assíncrono entre o domínio e o Temporal SDK.
 
     Uso típico (código síncrono de services):
         client = TemporalOrchestrationClient()
@@ -113,7 +109,7 @@ class TemporalOrchestrationClient:
         signal_name: str | None = None,
         signal_arg: Any = None,
     ) -> bool:
-        """Cria ou sinaliza o workflow de forma idempotente.
+        """ Cria ou sinaliza o workflow de forma idempotente.
 
         Retorna True em sucesso, False em falha não-bloqueante.
         """
@@ -152,7 +148,7 @@ class TemporalOrchestrationClient:
         monitored_id: str,
         payload: Any = None,
     ) -> bool:
-        """Envia signal a um workflow existente.
+        """ Envia signal a um workflow existente.
 
         WorkflowNotFound é logado como warning — reconciliador resolverá.
         """
@@ -191,7 +187,7 @@ class TemporalOrchestrationClient:
             return False
 
     async def query(self, monitored_id: str) -> WorkflowSnapshot | None:
-        """Consulta get_state de um workflow por monitored_id."""
+        """ Consulta get_state de um workflow por monitored_id."""
         try:
             client = await self._get_client()
             handle = client.get_workflow_handle(_workflow_id(monitored_id))
@@ -221,7 +217,7 @@ class TemporalOrchestrationClient:
     # ------------------------------------------------------------------
 
     def _run_async(self, coro: Any, *, timeout: int = 30) -> Any:
-        """Executa coroutine reutilizando loop existente ou criando um novo."""
+        """ Executa coroutine reutilizando loop existente ou criando um novo."""
         import concurrent.futures
         try:
             return run_sync_coro(coro, timeout=timeout)
@@ -268,7 +264,7 @@ class TemporalOrchestrationClient:
         return self._run_async(self.query(monitored_id))
 
     async def probe_connectivity(self) -> bool:
-        """Verifica conectividade com o Temporal Server (sem retry com sleep)."""
+        """ Verifica conectividade com o Temporal Server (sem retry com sleep)."""
         if self._client is not None:
             return True
         try:
@@ -282,7 +278,7 @@ class TemporalOrchestrationClient:
             return False
 
     def probe_connectivity_sync(self, *, timeout: int = 30) -> bool:
-        """Versão síncrona de probe_connectivity para endpoints FastAPI síncronos."""
+        """ Versão síncrona de probe_connectivity para endpoints FastAPI síncronos."""
         result = self._run_async(self.probe_connectivity(), timeout=timeout)
         return bool(result)
 
@@ -297,7 +293,7 @@ class TemporalOrchestrationClient:
         user_id: Any,
         interval_seconds: int = 3600,
     ) -> bool:
-        """Inicia (ou idempotentemente retoma) o workflow de monitoramento."""
+        """ Inicia (ou idempotentemente retoma) o workflow de monitoramento."""
         from market_orchestrator.schemas.schemas_workflow import WorkflowInput
         from market_orchestrator.schemas.schemas_policy import CollectionPolicy
         return self.signal_with_start_sync(WorkflowInput(
@@ -307,7 +303,7 @@ class TemporalOrchestrationClient:
         ))
 
     def pause_monitoring(self, monitored_id: Any) -> bool:
-        """Envia signal de pausa para o workflow do monitorado."""
+        """ Envia signal de pausa para o workflow do monitorado."""
         return self.signal_sync("pause", str(monitored_id))
 
     def resume_monitoring(
@@ -316,7 +312,7 @@ class TemporalOrchestrationClient:
         *,
         immediate_collect: bool = True,
     ) -> bool:
-        """Envia signal de retomada, com opção de coleta imediata."""
+        """ Envia signal de retomada, com opção de coleta imediata."""
         from market_orchestrator.schemas.schemas_signals import ResumeSignalPayload
         return self.signal_sync(
             "resume",
@@ -325,7 +321,7 @@ class TemporalOrchestrationClient:
         )
 
     def delete_monitoring(self, monitored_id: Any) -> bool:
-        """Envia signal de deleção para encerrar o workflow do monitorado."""
+        """ Envia signal de deleção para encerrar o workflow do monitorado."""
         return self.signal_sync("delete", str(monitored_id))
 
     def notify_competitor_changed(
@@ -335,7 +331,7 @@ class TemporalOrchestrationClient:
         event: str,
         competitor_id: Any,
     ) -> bool:
-        """Notifica o workflow que um concorrente foi adicionado ou removido."""
+        """ Notifica o workflow que um concorrente foi adicionado ou removido."""
         from market_orchestrator.schemas.schemas_signals import CompetitorChangedPayload
         return self.signal_sync(
             "competitor_changed",
@@ -347,10 +343,21 @@ class TemporalOrchestrationClient:
 # Instância singleton lazy — inicializada na primeira chamada
 _client_instance: TemporalOrchestrationClient | None = None
 
-
 def get_temporal_client() -> TemporalOrchestrationClient:
-    """Retorna instância singleton de TemporalOrchestrationClient."""
+    """ Retorna instância singleton de TemporalOrchestrationClient."""
     global _client_instance
     if _client_instance is None:
         _client_instance = TemporalOrchestrationClient()
     return _client_instance
+
+def get_temporal_connection_info() -> dict:
+    """ Retorna namespace e task_queue configurados para o Temporal.
+
+    Evita que consumidores (ex: health route) importem diretamente
+    market_orchestrator.core.config_orchestrator.
+    """
+    cfg = _config()
+    return {
+        "namespace": cfg.TEMPORAL_NAMESPACE,
+        "task_queue": cfg.TEMPORAL_TASK_QUEUE,
+    }

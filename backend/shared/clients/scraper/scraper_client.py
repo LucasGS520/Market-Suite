@@ -6,6 +6,24 @@ final da chamada. Dessa forma o worker permanece previsível e livre de
 erros como "event loop is closed".
 """
 
+# EXCEÇÃO ARQUITETURAL DOCUMENTADA
+# ==================================
+# Este módulo reside em ``shared`` mas importa de ``market_alert`` — violação
+# intencional e aprovada das regras de separação de domínio:
+#
+#   from market_alert.core.config_alert import settings
+#   from market_alert.infraestructure.resilience.circuit_breaker import CircuitBreaker
+#   from market_alert.infraestructure.resilience.rate_limiter import RateLimiter
+#
+# Motivação: o ScraperClient depende de configuração de timeouts, rate limit
+# e circuit breaker específicos do domínio market_alert. Todos os seus
+# consumidores também estão em market_alert (collectors/services/).
+# Ele foi centralizado aqui para ser o ponto único de import de scraper client
+# no projeto, mesmo que isso gere a dependência inversa shared→market_alert.
+#
+# Restrição: NUNCA importar este módulo de market_orchestrator ou market_scraper.
+# Consumidores válidos: apenas módulos dentro de market_alert.
+
 from __future__ import annotations
 
 import random
@@ -108,7 +126,7 @@ def _build_sync_client(
     )
 
 def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
-    """Reduz o payload retornado pelo scraper apenas ao que é essencial.
+    """ Reduz o payload retornado pelo scraper apenas ao que é essencial.
 
     O scraper pode enviar campos auxiliares diversos no atributo ``payload``.
     Para manter previsibilidade e evitar ruído no frontend, filtramos os
@@ -178,7 +196,7 @@ class ScraperClient:
                 "Circuito aberto para host solicitado",
                 status_code=503,
             )
-        
+
         headers: dict[str, str] = {}
         if not force_refresh and etag:
             headers["If-None-Match"] = etag
@@ -307,7 +325,7 @@ class ScraperClient:
                     headers=response.headers,
                     error_code=error_code,
                 )
-            
+
             if status_code in {400, 403}:
                 try:
                     body = response.json()
@@ -402,16 +420,16 @@ class ScraperClient:
 
         if result.status_code == 200 and result.payload:
             return result.payload
-        
+
         if result.status_code == 304:
             return None
-        
+
         if result.error_code:
             raise ScraperClientError(
                 f"Erro retornado pelo scraper: {result.error_code}",
                 status_code=result.status_code,
             )
-        
+
         raise ScraperClientError(
             "Resposta sem payload válida retornada pelo scraper",
             status_code=result.status_code,
@@ -423,14 +441,14 @@ class ScraperClient:
         exp = min(settings.SCRAPER_RETRY_BACKOFF_MAX, base * (2 ** (attempt - 1)))
         jitter = random.uniform(0, base)
         return exp + jitter
-    
+
     @staticmethod
     def _calculate_retry_delay(base: float, attempt: int, retry_after: int | None) -> float:
         """ Seleciona entre ``Retry-After`` e backoff exponencial com jitter"""
         if retry_after is not None:
             return float(retry_after) + random.uniform(0, base)
         return ScraperClient._compute_backoff(base, attempt)
-    
+
     @staticmethod
     def _extract_retry_after(response: httpx.Response) -> int | None:
         """ Extrai valor numérico do cabeçalho ``Retry-After`` quando presente """
@@ -448,7 +466,7 @@ class ScraperClient:
             except (TypeError, ValueError):
                 logger.warning("invalid_retry_after_header", value=header)
                 return None
-            
+
             if retry_at.tzinfo is None:
                 retry_at = retry_at.replace(tzinfo=timezone.utc)
             else:
@@ -457,7 +475,7 @@ class ScraperClient:
             now = datetime.now(timezone.utc)
             delay_seconds = (retry_at - now).total_seconds()
             return max(0, int(delay_seconds))
-        
+
     @staticmethod
     def _register_host_retry_window(host: str) -> int | None:
         """ Registra tentativa por host para limiar backoffs em janelas curtas """
@@ -473,11 +491,10 @@ class ScraperClient:
             return int(current)
         except Exception:
             return None
-        
+
     @staticmethod
     def _host_retry_exhausted(counter: int | None) -> bool:
         """ Indica se o limite de tentativas por host foi atingido """
         if counter is None:
             return False
         return counter >= settings.SCRAPER_HOST_RETRY_MAX_ATTEMPTS
-        

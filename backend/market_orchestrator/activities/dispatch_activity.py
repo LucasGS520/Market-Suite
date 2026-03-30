@@ -78,9 +78,8 @@ async def dispatch_collection(
             force_compare="true" if force_compare else None,
         )
 
-        # TODO Fase 4: substituir por shared.infra.celery.enqueuer (sem import de market_alert)
-        from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_collect
-        enqueue_collect(payload)
+        from shared.clients.celery.task_dispatcher import send_collection_task
+        send_collection_task(payload.model_dump(mode="json"))
 
         #Salva timestamp de dispatch para correlação em query_collection_status
         try:

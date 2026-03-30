@@ -10,10 +10,7 @@ from market_orchestrator.schemas.schemas_signals import (
     ResumeSignalPayload,
     UpdatePolicySignalPayload,
 )
-from market_orchestrator.schemas.schemas_snapshot import (
-    CollectionStatusResult,
-    WorkflowSnapshot,
-)
+from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -37,5 +34,4 @@ __all__ = [
     "UpdatePolicySignalPayload",
     "CompetitorChangedPayload",
     "WorkflowSnapshot",
-    "CollectionStatusResult",
 ]

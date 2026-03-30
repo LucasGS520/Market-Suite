@@ -44,13 +44,13 @@ from market_alert.products.crud.crud_competitor import (
 )
 from market_alert.products.services.services_products import build_competitor_response
 from market_alert.products.services.services_access_control import ensure_user_can_access_monitored
-from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
+from market_alert.collectors.dispatch.collection_enqueue import enqueue_competitor_collection
 from market_alert.products.domain.product_lifecycle import compute_next_check_at
 from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
 
 #Import condicional: protege testes unitários e ambientes sem Temporal disponível
 try:
-    from shared.clients.orchestrator_client import get_temporal_client
+    from shared.clients.temporal.orchestrator_client import get_temporal_client
     _TEMPORAL_AVAILABLE = True
 except ImportError:
     _TEMPORAL_AVAILABLE = False

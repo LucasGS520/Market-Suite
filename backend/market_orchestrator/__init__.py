@@ -16,7 +16,7 @@ Componentes:
 A camada de execucao existente nao foi alterada:
   - Celery workers e tasks (market_alert/tasks/)
   - CollectionEnqueuer (market_alert/infraestructure/celery/enqueuer.py)
-  - payload_builders (market_alert/collectors/orchestrator/payload_builders.py)
+  - payload_builders (market_alert/collectors/dispatch/payload_builders.py)
 """
 from market_orchestrator.enums.enums_workflow import WorkflowState
 from market_orchestrator.schemas.schemas_policy import CollectionPolicy

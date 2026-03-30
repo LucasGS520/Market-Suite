@@ -32,7 +32,8 @@ from shared.infra.db import SessionLocal
 from shared.exceptions import ScraperError
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, MonitoredProductCreateScraping
 from shared.schemas.shared_schemas_scraper import ScrapeResult
-from shared.clients.scraper_client import ScraperClientError
+from shared.schemas.shared_schemas_orchestrator import validate_payload as validate_collection_payload
+from shared.clients.scraper.scraper_client import ScraperClientError
 from shared.utils.trace_context import set_trace_id
 from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
@@ -49,7 +50,6 @@ from market_alert.infraestructure.resilience.rate_limiter import (
     _reset_invalid_url_attempt,
     _reset_temporary_failure_attempt,
 )
-from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
 from market_alert.products.crud.crud_monitored import (
     activate_pending_monitored,
     get_monitored_product_by_id,

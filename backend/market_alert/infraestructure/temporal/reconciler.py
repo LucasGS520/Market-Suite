@@ -6,14 +6,18 @@ sem workflow após boot, falha de infra ou lacuna de estado.
 Idempotência garantida: chamar reconcile_all() duas vezes não cria
 workflows duplicados — o Temporal impede via workflow_id estável +
 id_reuse_policy=ALLOW_DUPLICATE_FAILED_ONLY.
+
+Movido de market_orchestrator.reconciler para cá porque a lógica de
+reconciliação é acionada pelo domínio de negócio (market_alert startup e
+task Celery), não pelo worker Temporal. O reconciler usa apenas
+shared.clients.orchestrator_client e SQL direto — sem import de market_alert
+ou de market_orchestrator além dos schemas de contrato.
 """
 from __future__ import annotations
 
 import structlog
 
-from shared.clients.orchestrator_client import TemporalOrchestrationClient
-from market_orchestrator.schemas.schemas_policy import CollectionPolicy
-from market_orchestrator.schemas.schemas_workflow import WorkflowInput
+from shared.clients.temporal.orchestrator_client import TemporalOrchestrationClient
 
 
 logger = structlog.get_logger("orchestrator.reconciler")
@@ -29,7 +33,7 @@ class WorkflowReconciler:
         self._client = client or TemporalOrchestrationClient()
 
     def reconcile_all(self) -> dict[str, int]:
-        """Reconcilia todos os monitorados ativos.
+        """ Reconcilia todos os monitorados ativos.
 
         Retorna dict com contadores: total, started, alive, errors.
         """
@@ -68,7 +72,10 @@ class WorkflowReconciler:
                     counts["alive"] += 1
                     continue
 
-                #Workflow não encontrado — cria via signal_with_start
+                # Workflow não encontrado — cria via signal_with_start
+                from market_orchestrator.schemas.schemas_policy import CollectionPolicy
+                from market_orchestrator.schemas.schemas_workflow import WorkflowInput
+
                 workflow_input = WorkflowInput(
                     monitored_id=monitored_id,
                     user_id=user_id,

@@ -1,7 +1,7 @@
 """ Builders de payload para coleta de monitorados e concorrentes
 
 Este módulo foi extraído da orquestração para evitar dependência circular
-entre ``collector_service_orchestrator`` e ``CollectionEnqueuer``.
+entre ``collection_enqueue`` e ``CollectionEnqueuer``.
 """
 
 from __future__ import annotations
@@ -10,10 +10,10 @@ from uuid import UUID
 
 import structlog
 
+from shared.schemas.shared_schemas_orchestrator import CollectionPayload
 from shared.utils.url_validation import normalize_competitor_url
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
-from market_alert.schemas.schemas_collection_payload import CollectionPayload
 
 
 logger = structlog.get_logger("payload_builders")
@@ -45,7 +45,7 @@ def build_competitor_payload(
     enqueued_at: str | None = None,
     trace_id: str | None = None,
 ) -> CollectionPayload:
-    """Monta o payload de coleta de concorrente para envio à fila.
+    """ Monta o payload de coleta de concorrente para envio à fila.
 
     Objetivo:
         Padronizar os dados do ``CompetitorProduct`` no contrato

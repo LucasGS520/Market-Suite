@@ -1,4 +1,4 @@
-""" Orquestração e enfileiramento de coletas de produtos.
+""" Dispatch/enfileiramento de coletas de produtos.
 
 O módulo centraliza helpers para construir payloads consistentes e enfileirar
 coletas na ``collect_product_task``. O mesmo fluxo atende rechecagens e
@@ -19,11 +19,12 @@ from uuid import UUID
 import structlog
 from sqlalchemy.orm import Session
 
+from shared.schemas.shared_schemas_orchestrator import CollectionPayload
+
 from market_alert.core.config_alert import settings
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
-from market_alert.schemas.schemas_collection_payload import CollectionPayload
 from market_alert.products.crud.crud_competitor import get_competitors_by_monitored_id
-from market_alert.collectors.orchestrator.payload_builders import build_competitor_payload, build_monitored_payload
+from market_alert.collectors.dispatch.payload_builders import build_competitor_payload, build_monitored_payload
 
 if TYPE_CHECKING:
     from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
@@ -40,7 +41,7 @@ def _get_enqueuer() -> CollectionEnqueuer:
     """
     global _enqueuer
     if _enqueuer is None:
-        #Import local para quebrar ciclo entre orquestrador e enqueuer
+        #Import local para quebrar ciclo entre dispatch e enqueuer
         from market_alert.infraestructure.celery.enqueuer import CollectionEnqueuer
 
         _enqueuer = CollectionEnqueuer()
@@ -68,7 +69,7 @@ def enqueue_monitored_collection(
     user_id: UUID,
     trace_id: str | None = None,
 ) -> None:
-    """ Abstrai o enfileiramento de monitorados e registra contexto em log """
+    """ Abstrai o enfileiramento de monitorados e registra contexto em log."""
     #Se o monitorado estiver pausado, não enfileira para preservar o contrato de pausa
     if getattr(monitored, "paused", False):
         logger.info(
@@ -94,7 +95,7 @@ def enqueue_competitor_collection(
     countdown: float | None = None,
     trace_id: str | None = None,
 ) -> None:
-    """ Enfileira coleta de concorrente mantendo padrão de payload tipado """
+    """ Enfileira coleta de concorrente mantendo padrão de payload tipado."""
     payload = build_competitor_payload(competitor, user_id=user_id, trace_id=trace_id)
     logger.info(
         "enqueue_competitor_collection",
@@ -114,9 +115,9 @@ def enqueue_competitors_for_monitored(
     batch_size: int | None = None,
     base_delay: float | None = None,
 ) -> None:
-    """ Agenda coleta para concorrentes vinculados aplicando batching e jitter """
+    """ Agenda coleta para concorrentes vinculados aplicando batching e jitter."""
     try:
-        resolved_batch_size = batch_size or 20  # TODO: mover para config quando Temporal for implementado
+        resolved_batch_size = batch_size or 20
         resolved_base_delay = base_delay or settings.ONBOARDING_ENQUEUE_STAGGER_SECONDS
 
         if resolved_batch_size <= 0:
@@ -171,8 +172,6 @@ def enqueue_competitors_for_monitored(
 
 
 __all__ = [
-    "build_monitored_payload",
-    "build_competitor_payload",
     "enqueue_collect",
     "enqueue_monitored_collection",
     "enqueue_competitor_collection",

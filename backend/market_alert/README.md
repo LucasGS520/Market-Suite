@@ -7,41 +7,7 @@ Serviço FastAPI responsável por orquestrar monitoramento de preços, persistir
 - Serviço de scraping consumido pela API: [`../market_scraper/README.md`](../market_scraper/README.md)
 - Contratos e cliente Temporal compartilhados: [`../shared/README.md`](../shared/README.md)
 
-## Integração com o Orquestrador (via shared)
-
-`market_alert` se comunica com o Temporal **exclusivamente via contratos em `shared`**. Não há import direto de `market_orchestrator`.
-
-### Cliente Temporal
-```python
-from shared.clients.orchestrator_client import get_temporal_client
-
-client = get_temporal_client()
-client.start_monitoring(monitored_id, user_id)   # inicia workflow
-client.pause_monitoring(monitored_id)             # pausa
-client.resume_monitoring(monitored_id)            # retoma
-client.delete_monitoring(monitored_id)            # encerra
-client.notify_competitor_changed(...)             # sinaliza mudanca de concorrente
-client.probe_connectivity_sync()                  # health check
-```
-
-Localização canônica: [`../shared/clients/orchestrator_client.py`](../shared/clients/orchestrator_client.py)
-Re-exportado em: [`../market_orchestrator/alert/alert_client.py`](../market_orchestrator/alert/alert_client.py) (backward compat)
-
-### Payload de Coleta
-```python
-from shared.schemas.shared_schemas_orchestrator import CollectionPayload, validate_payload
-```
-
-`CollectionPayload` é o contrato tipado que transita entre o orquestrador, a fila Celery e a task de coleta. Re-exportado em [`schemas/schemas_collection_payload.py`](schemas/schemas_collection_payload.py) para backward compatibility.
-
-### Pontos de integração no código
-| Arquivo | Responsabilidade |
-|---------|-----------------|
-| [`products/services/services_monitored_lifecycle.py`](products/services/services_monitored_lifecycle.py) | `start_monitoring`, `pause_monitoring`, `resume_monitoring`, `delete_monitoring` |
-| [`products/services/services_competitor_lifecycle.py`](products/services/services_competitor_lifecycle.py) | `notify_competitor_changed` |
-| [`products/routes/routes_monitored.py`](products/routes/routes_monitored.py) | `query_sync` para consultar estado do workflow |
-| [`infraestructure/routes/routes_health.py`](infraestructure/routes/routes_health.py) | `probe_connectivity_sync` no health check |
-| [`infraestructure/startup_validation.py`](infraestructure/startup_validation.py) | probe de conectividade no startup |
+---
 
 ## Principais Responsabilidades
 - **Expor a API principal do sistema** com CORS, rate limiting, autenticação JWT e health checks.
@@ -135,7 +101,7 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 
 ### Collectors
 - O pacote [`collectors/`](collectors/) e a camada de orquestração de coleta: recebe pedidos de scraping, monta payloads, aplica locks e gerencia a fila continua.
-- [`collectors/orchestrator/collector_service_orchestrator.py`](collectors/orchestrator/collector_service_orchestrator.py) encapsula o enfileiramento de monitorados e concorrentes na `collect_product_task`, incluindo batching e jitter para concorrentes.
+- [`collectors/dispatch/collection_enqueue.py`](collectors/dispatch/collection_enqueue.py) encapsula o enfileiramento de monitorados e concorrentes na `collect_product_task`, incluindo batching e jitter para concorrentes. (Movido de `collectors/orchestrator/` — Fase 3)
 - [`collectors/tasks/collector_product_task.py`](collectors/tasks/collector_product_task.py) e a task unitaria de scraping: valida payload, aplica lock Redis por produto, delega para o service correto e agenda recomputacao de comparações apos commit.
 - [`collectors/domain/collection_queue.py`](collectors/domain/collection_queue.py) abstrai a fila de prioridade Redis (`queue` + `processing`) com operações de enqueue, pop, reclaim e remocao.
 - [`collectors/services/continuous_collector_manager.py`](collectors/services/continuous_collector_manager.py) executa o loop continuo, garante singleton via lock Redis, revalida autostart e reencaminha itens presos em processamento.
@@ -188,16 +154,35 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 - [`core/tokens.py`](core/tokens.py) gera tokens de verificação, tokens de reset, OTP telefonico, hash de token e calculo de expiracao.
 
 ### Contratos e Enumeracoes
-- O pacote [`schemas/`](schemas/) define os contratos Pydantic de entrada/saida por dominio: autenticação (`schemas_auth.py`), usuários (`schemas_users.py`), configuracoes (`schemas_settings.py`), produtos (`schemas_products.py`), comparações (`schemas_comparisons.py`), notificações (`schemas_notifications.py`) e payload de coleta (`schemas_collection_payload.py`).
+- O pacote [`schemas/`](schemas/) define os contratos Pydantic de entrada/saida por dominio: autenticação (`schemas_auth.py`), usuários (`schemas_users.py`), configuracoes (`schemas_settings.py`), produtos (`schemas_products.py`), comparações (`schemas_comparisons.py`) e notificações (`schemas_notifications.py`). O payload de coleta agora é importado de `shared.schemas.shared_schemas_orchestrator`.
 - O pacote [`enums/`](enums/) concentra estados e classificacoes compartilhadas: status de usuário e verificação, estados de produto, status de competitividade, tipos de evento/alerta, canais de notificacao e estados de entrega.
 - Esses contratos estabilizam a fronteira entre API, tasks Celery e regras internas, reduzindo divergencia entre payload HTTP, persistencia e fila.
 
 ### Integracao com o market_scraper
-- O `market_alert` nao expoe um endpoint publico para parsing; a integracao acontece internamente via [`scraper/scraper_client.py`](scraper/scraper_client.py).
+- O `market_alert` nao expoe um endpoint publico para parsing; a integracao acontece internamente via [`../shared/clients/scraper/scraper_client.py`](../shared/clients/scraper/scraper_client.py), consumido pelos fluxos de coleta de `market_alert`.
 - O cliente envia `POST /scraper/parse` para o `market_scraper`, serializando `ParserRequest` com `url`, `product_type`, `user_id` e `metadata` opcional.
 - Headers condicionais `If-None-Match` e `If-Modified-Since` sao suportados para aproveitar `304 Not Modified` e reduzir coleta desnecessaria.
 - O cliente aplica rate limit por host, circuit breaker, retries com backoff e suporte a `Retry-After` antes de devolver `ParserResponse` normalizado para a camada de coleta.
 - Respostas `422`, `400` e `403` com `error_code` sao preservadas como sinal operacional para bloquear URLs invalidas, respeitar robots ou tratar payloads incorretos.
+
+---
+
+## Integração com o Orquestrador (via shared)
+
+`market_alert` se comunica com o Temporal **exclusivamente via contratos em `shared`**. Não há import direto de `market_orchestrator`.
+
+### Payload de Coleta
+
+`CollectionPayload` é o contrato tipado que transita entre o orquestrador, a fila Celery e a task de coleta.
+
+### Pontos de integração no código
+| Arquivo | Responsabilidade |
+|---------|-----------------|
+| [`products/services/services_monitored_lifecycle.py`](products/services/services_monitored_lifecycle.py) | `start_monitoring`, `pause_monitoring`, `resume_monitoring`, `delete_monitoring` |
+| [`products/services/services_competitor_lifecycle.py`](products/services/services_competitor_lifecycle.py) | `notify_competitor_changed` |
+| [`products/routes/routes_monitored.py`](products/routes/routes_monitored.py) | `query_sync` para consultar estado do workflow |
+| [`infraestructure/routes/routes_health.py`](infraestructure/routes/routes_health.py) | `probe_connectivity_sync` no health check |
+| [`infraestructure/startup_validation.py`](infraestructure/startup_validation.py) | probe de conectividade no startup |
 
 ---
 
@@ -208,6 +193,16 @@ As rotas publicas sao registradas em [`main.py`](main.py) e divididas por domini
 - A configuracao operacional fixa serializacao JSON, timezone `America/Sao_Paulo`, `worker_prefetch_multiplier`, `worker_concurrency` e prioridade maxima por fila.
 - O catalogo de filas e rotas vive em [`infraestructure/celery/config.py`](infraestructure/celery/config.py), com separacao explicita entre `scraping`, `monitor`, `compare`, `notifications` e `dead_letter`.
 - O bootstrap do worker repete a validacao de infraestrutura, registra signals de lifecycle e carrega os modulos de tasks explicitamente para evitar workers "saudaveis" sem tasks registradas.
+
+**Separação de responsabilidades no startup (regra de domínio):**
+
+| Hook | Tipo | Responsabilidade |
+|------|------|-----------------|
+| `_validate_dependencies_on_startup` (main.py) | [BLOQUEANTE] Infra | Verifica PostgreSQL, Redis e Temporal — não contém lógica de domínio |
+| `_reconcile_temporal_workflows_on_startup` (main.py) | [NÃO-BLOQUEANTE] Domínio | Reconcilia workflows Temporal — usa `market_alert.infraestructure.temporal.reconciler.WorkflowReconciler` |
+| `_validate_on_worker_ready` (worker_lifecycle.py) | [BLOQUEANTE] Infra | Valida infra no worker — não chama reconciliação |
+
+Regra: **reconciliação de domínio nunca mistura com validação de engine**. O worker Celery não reconcilia workflows — essa responsabilidade fica exclusivamente no startup da API.
 - O signal `worker_ready` delega para `continuous_collector_manager`, iniciando o coletor continuo e o loop de revalidacao assim que o processo fica pronto.
 - O mesmo signal `worker_ready` tambem inicia o **Temporal Worker** em thread daemon via [`infraestructure/worker_lifecycle.py`](infraestructure/worker_lifecycle.py), registrando `MonitoredProductWorkflow` e todas as activities na task queue `market-orchestrator`. Importação condicional (`try/except ImportError`) garante que workers sem o módulo `market_orchestrator` instalado continuem funcionando normalmente.
 - Os agendamentos periodicos registrados no Beat sao `cleanup-cache-daily` (diario as `03:00`) e `reconcile-workflows-periodic` (a cada 5 minutos).
@@ -413,6 +408,32 @@ PRIORITY_QUEUE_PROCESSING_KEY=market_alert:priority_queue:processing
 
 SCRAPER_SERVICE_URL=http://market_scraper:8000
 ```
+
+---
+
+## Fronteiras de Domínio
+
+### Matriz de Responsabilidade
+
+| Módulo | Pode depender de | NÃO pode depender de |
+|--------|-----------------|----------------------|
+| `market_alert` | `shared` (contratos, infra, utils) | internals de `market_orchestrator` fora de adaptador/contrato; `market_scraper` (apenas via HTTP) |
+| `market_orchestrator` | `shared` (contratos, infra, utils) | `market_alert` (acoplamento proibido); `market_scraper` |
+| `market_scraper` | `shared` (contratos neutros) | `market_alert`; `market_orchestrator` |
+| `shared` | bibliotecas externas | `market_alert`; `market_orchestrator`; `market_scraper` |
+
+### Regras Obrigatórias
+
+- **`market_orchestrator` não importa `market_alert`** — toda integração é mediada por contratos em `shared` ou por injeção de dependência explícita.
+- **`shared` é biblioteca neutra de infraestrutura e contratos como regra geral** — a exceção documentada é `shared.clients.scraper.scraper_client`, que importa `market_alert`.
+- **`market_alert` não usa internals do orquestrador** — integração exclusivamente via `shared.clients.temporal.orchestrator_client` (adaptador canônico).
+- **`market_scraper` não importa `market_alert` nem `market_orchestrator`** — comunica-se apenas por contratos em `shared.schemas.shared_schemas_scraper`.
+
+### Ponto de Integração Permitido
+
+`market_alert` → `shared.clients.temporal.orchestrator_client` → Temporal → `market_orchestrator`
+
+Nunca inverter esse sentido. O orquestrador não deve conhecer `market_alert`.
 
 ---
 

@@ -14,10 +14,11 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from shared.exceptions import TemporalConnectionError
+
 from market_alert.core.config_alert import settings
 from market_alert.infraestructure.logging_config import setup_api_logging
 from market_alert.infraestructure.startup_validation import validate_startup_dependencies
-from shared.exceptions import TemporalConnectionError
 
 #Rotas de usuários e administração
 from market_alert.users.routes.routes_account import router as account_router
@@ -113,7 +114,7 @@ def create_app() -> FastAPI:
 
         def _run_reconcile() -> None:
             try:
-                from market_orchestrator.reconciler import WorkflowReconciler
+                from market_alert.infraestructure.temporal.reconciler import WorkflowReconciler
                 counts = WorkflowReconciler().reconcile_all()
                 logger.info("startup_temporal_reconciliation_done", **counts)
             except Exception as exc:

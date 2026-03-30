@@ -16,10 +16,5 @@ class WorkflowSnapshot:
     attempt_count: int = 0
     monitored_id: str = ""
 
-@dataclass
-class CollectionStatusResult:
-    completed: bool = False
-    last_error: str | None = None
 
-
-__all__ = ["WorkflowSnapshot", "CollectionStatusResult"]
+__all__ = ["WorkflowSnapshot"]

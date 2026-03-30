@@ -18,7 +18,7 @@ from temporalio.exceptions import ActivityError
 with workflow.unsafe.imports_passed_through():
     from market_orchestrator.core.config_orchestrator import settings
     from market_orchestrator.enums.enums_workflow import WorkflowState
-    from market_orchestrator.schemas.schemas_policy import CollectionPolicy, PolicyActivityResponse
+    from market_orchestrator.schemas.schemas_policy import CollectionPolicy
     from market_orchestrator.schemas.schemas_signals import (
         ResumeSignalPayload,
         UpdatePolicySignalPayload,
@@ -26,7 +26,7 @@ with workflow.unsafe.imports_passed_through():
     )
     from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
     from market_orchestrator.schemas.schemas_workflow import WorkflowInput
-    from shared.schemas.shared_schemas_orchestrator import DispatchActivityOutput, QueryStatusOutput
+    from shared.schemas.shared_schemas_orchestrator import DispatchActivityOutput, PolicyActivityOutput, QueryStatusOutput
     
 
 logger = structlog.get_logger("orchestrator.workflow")
@@ -149,7 +149,7 @@ class MonitoredProductWorkflow:
             start_to_close_timeout=_FETCH_POLICY_TIMEOUT,
             retry_policy=_DEFAULT_RETRY,
         )
-        resp = PolicyActivityResponse.from_dict(policy_data)
+        resp = PolicyActivityOutput.from_dict(policy_data)
 
         #Se pausado externamente, transicionar
         if resp.paused:

@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from shared.infra.db import get_engine
+
 from market_alert.core.config_alert import settings
 from market_alert.infraestructure.redis_monitoring import get_redis_metrics
 
@@ -77,7 +78,7 @@ def health_check():
 
     #Verificação de conectividade com o Temporal Server (não-bloqueante)
     try:
-        from shared.clients.orchestrator_client import get_temporal_client
+        from shared.clients.temporal.orchestrator_client import get_temporal_client
         temporal_ok = get_temporal_client().probe_connectivity_sync()
         status["temporal"] = {"status": "ok" if temporal_ok else "degraded"}
         if not temporal_ok and status["overall"] == "ok":
@@ -100,15 +101,15 @@ def temporal_health():
     """
     checked_at = datetime.now(timezone.utc).isoformat()
     try:
-        from shared.clients.orchestrator_client import get_temporal_client
-        from market_orchestrator.core.config_orchestrator import settings as orchestrator_settings
+        from shared.clients.temporal.orchestrator_client import get_temporal_client, get_temporal_connection_info
         connected = get_temporal_client().probe_connectivity_sync()
+        conn_info = get_temporal_connection_info()
         if connected:
             return {
                 "status": "healthy",
                 "temporal_connected": True,
-                "namespace": orchestrator_settings.TEMPORAL_NAMESPACE,
-                "task_queue": orchestrator_settings.TEMPORAL_TASK_QUEUE,
+                "namespace": conn_info["namespace"],
+                "task_queue": conn_info["task_queue"],
                 "last_check_at": checked_at,
             }
         raise HTTPException(
@@ -116,8 +117,8 @@ def temporal_health():
             detail={
                 "status": "unhealthy",
                 "temporal_connected": False,
-                "namespace": orchestrator_settings.TEMPORAL_NAMESPACE,
-                "task_queue": orchestrator_settings.TEMPORAL_TASK_QUEUE,
+                "namespace": conn_info["namespace"],
+                "task_queue": conn_info["task_queue"],
                 "last_check_at": checked_at,
             },
         )

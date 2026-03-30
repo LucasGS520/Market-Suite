@@ -1,4 +1,4 @@
-# Claude — Correção Camada de Inicialização
+# Contexto Codex — Organização e Separação Modular (`market_orchestrator`)
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -17,17 +17,12 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Objetivo e Estratégias
-
-**Problema a Ser Resolvido:**  
-Há acoplamento cruzado entre os domínios: componentes de orquestração dependem de `market_alert`, componentes de negócio dependem de internals de `market_orchestrator`, e `shared` contém itens que já carregam regra de domínio (não neutros).
-
-**Objetivo do Plano:**  
-Restaurar a separação de responsabilidades para que:
-- `market_alert` seja dono do domínio de negócio.
-- `market_orchestrator` seja dono do workflow/activities e execução Temporal.
-- `shared` contenha apenas contratos e utilitários neutros.
-
+## Resumo e Estratégia do Plano
+ 
+- **`market_alert` (domínio de negócio):** está claramente responsável por API, ciclo de vida de monitorados/concorrentes, coleta e notificações; integra Temporal via client compartilhado em múltiplos pontos, como `services_monitored_lifecycle.py`, `services_competitor_lifecycle.py`.
+- **`market_orchestrator` (workflow/activities):** está mais limpo, sem dependência direta de `market_alert` para dispatch; activity usa dispatcher neutro em `dispatch_activity.py`.
+- **`shared` (contratos/utilitários/clientes):** consolidou clients canônicos de Temporal, Celery e Scraper, e contratos em `shared.schemas`; porém mantém a exceção de acoplamento do ScraperClient com `market_alert`.
+- **Resultado prático:** a reorganização foi **bem-sucedida em grande parte** (tombstones removidos e imports canônicos adotados), mas ainda há **drift de documentação**.
 ---
 
 ## Regras e Instruções de Execução
