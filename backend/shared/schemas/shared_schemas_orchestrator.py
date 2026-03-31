@@ -24,7 +24,7 @@ Redis). Mudanças devem seguir estas regras para não quebrar execuções em voo
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -168,6 +168,44 @@ class CollectionResult(BaseModel):
     collected_at: str | None = None
 
 
+# ─────────────────────── Contratos de Orquestração (neutros) ──────────────────
+# Migrados de market_orchestrator.schemas.* para eliminar inversão de dependência.
+# market_orchestrator re-exporta daqui para backward compat interno.
+
+@dataclass
+class CollectionPolicy:
+    """ Política de coleta para o workflow de monitoramento."""
+    interval_seconds: int = 3600
+    backoff_max_attempts: int = 5
+    backoff_base_seconds: int = 60
+    stability_score: int = 0
+    scheduling_reason: str = ""
+
+@dataclass
+class WorkflowInput:
+    """ Payload de entrada para início do workflow e Continue-As-New."""
+    monitored_id: str
+    user_id: str
+    policy: CollectionPolicy = field(default_factory=CollectionPolicy)
+    bootstrap_flags: dict = field(default_factory=dict)
+
+@dataclass
+class ResumeSignalPayload:
+    """ Payload do signal de retomada."""
+    immediate_collect: bool = False
+
+@dataclass
+class UpdatePolicySignalPayload:
+    """ Payload do signal de atualização de política."""
+    policy: CollectionPolicy = field(default_factory=CollectionPolicy)
+
+@dataclass
+class CompetitorChangedPayload:
+    """ Payload do signal de mudança de concorrente."""
+    event: Literal["added", "removed"] = "added"
+    competitor_id: str = ""
+
+
 __all__ = [
     "CollectionPayload",
     "validate_payload",
@@ -176,4 +214,9 @@ __all__ = [
     "PolicyActivityOutput",
     "WorkflowStateSnapshot",
     "CollectionResult",
+    "CollectionPolicy",
+    "WorkflowInput",
+    "ResumeSignalPayload",
+    "UpdatePolicySignalPayload",
+    "CompetitorChangedPayload",
 ]

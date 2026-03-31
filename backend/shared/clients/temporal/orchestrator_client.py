@@ -23,7 +23,7 @@ from shared.utils.async_utils import run_sync_coro
 
 if TYPE_CHECKING:
     from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
-    from market_orchestrator.schemas.schemas_workflow import WorkflowInput
+    from shared.schemas.shared_schemas_orchestrator import WorkflowInput
 
 
 logger = structlog.get_logger("orchestrator.client")
@@ -294,8 +294,7 @@ class TemporalOrchestrationClient:
         interval_seconds: int = 3600,
     ) -> bool:
         """ Inicia (ou idempotentemente retoma) o workflow de monitoramento."""
-        from market_orchestrator.schemas.schemas_workflow import WorkflowInput
-        from market_orchestrator.schemas.schemas_policy import CollectionPolicy
+        from shared.schemas.shared_schemas_orchestrator import CollectionPolicy, WorkflowInput
         return self.signal_with_start_sync(WorkflowInput(
             monitored_id=str(monitored_id),
             user_id=str(user_id),
@@ -313,7 +312,7 @@ class TemporalOrchestrationClient:
         immediate_collect: bool = True,
     ) -> bool:
         """ Envia signal de retomada, com opção de coleta imediata."""
-        from market_orchestrator.schemas.schemas_signals import ResumeSignalPayload
+        from shared.schemas.shared_schemas_orchestrator import ResumeSignalPayload
         return self.signal_sync(
             "resume",
             str(monitored_id),
@@ -332,7 +331,7 @@ class TemporalOrchestrationClient:
         competitor_id: Any,
     ) -> bool:
         """ Notifica o workflow que um concorrente foi adicionado ou removido."""
-        from market_orchestrator.schemas.schemas_signals import CompetitorChangedPayload
+        from shared.schemas.shared_schemas_orchestrator import CompetitorChangedPayload
         return self.signal_sync(
             "competitor_changed",
             str(monitored_id),

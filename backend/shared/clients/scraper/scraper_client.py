@@ -6,23 +6,6 @@ final da chamada. Dessa forma o worker permanece previsível e livre de
 erros como "event loop is closed".
 """
 
-# EXCEÇÃO ARQUITETURAL DOCUMENTADA
-# ==================================
-# Este módulo reside em ``shared`` mas importa de ``market_alert`` — violação
-# intencional e aprovada das regras de separação de domínio:
-#
-#   from market_alert.core.config_alert import settings
-#   from market_alert.infraestructure.resilience.circuit_breaker import CircuitBreaker
-#   from market_alert.infraestructure.resilience.rate_limiter import RateLimiter
-#
-# Motivação: o ScraperClient depende de configuração de timeouts, rate limit
-# e circuit breaker específicos do domínio market_alert. Todos os seus
-# consumidores também estão em market_alert (collectors/services/).
-# Ele foi centralizado aqui para ser o ponto único de import de scraper client
-# no projeto, mesmo que isso gere a dependência inversa shared→market_alert.
-#
-# Restrição: NUNCA importar este módulo de market_orchestrator ou market_scraper.
-# Consumidores válidos: apenas módulos dentro de market_alert.
 
 from __future__ import annotations
 
@@ -40,13 +23,43 @@ import structlog
 
 from pydantic import ValidationError
 
+from shared.infra.circuit_breaker import CircuitBreaker
+from shared.infra.rate_limiter import ScrapingRateLimiter
 from shared.schemas import ParserRequest, ParserResponse
 from shared.utils import normalize_scraper_response
 from shared.utils.redis_client import get_redis_operational
 
-from market_alert.core.config_alert import settings
-from market_alert.infrastructure.resilience.circuit_breaker import CircuitBreaker
-from market_alert.infrastructure.resilience.rate_limiter import RateLimiter
+
+def _scraper_settings():
+    """ Lazy accessor para config de market_alert — evita import no nível de módulo. """
+    from market_alert.core.config_alert import settings
+    return settings
+
+_rate_limiter_inst: ScrapingRateLimiter | None = None
+_circuit_breaker_inst: CircuitBreaker | None = None
+
+def _rate_limiter() -> ScrapingRateLimiter:
+    global _rate_limiter_inst
+    if _rate_limiter_inst is None:
+        cfg = _scraper_settings()
+        _rate_limiter_inst = ScrapingRateLimiter(
+            get_redis_operational,
+            max_requests=cfg.SCRAPER_HOST_RATE_LIMIT,
+            window_seconds=cfg.SCRAPER_HOST_RATE_WINDOW_SECONDS,
+        )
+    return _rate_limiter_inst
+
+def _circuit_breaker() -> CircuitBreaker:
+    global _circuit_breaker_inst
+    if _circuit_breaker_inst is None:
+        cfg = _scraper_settings()
+        _circuit_breaker_inst = CircuitBreaker(
+            get_redis_operational,
+            failure_threshold=cfg.SCRAPER_CIRCUIT_FAILURE_THRESHOLD,
+            failure_window=cfg.SCRAPER_CIRCUIT_WINDOW_SECONDS,
+            cooldown_seconds=cfg.SCRAPER_CIRCUIT_COOLDOWN_SECONDS,
+        )
+    return _circuit_breaker_inst
 
 
 logger = structlog.get_logger(__name__)
@@ -100,12 +113,12 @@ def _build_timeout() -> httpx.Timeout:
     total para o mínimo coerente, privilegiando estabilidade quando variáveis
     de ambiente estiverem descalibradas
     """
-    minimal_total = settings.SCRAPER_CONNECT_TIMEOUT + settings.SCRAPER_READ_TIMEOUT
-    total = max(settings.SCRAPER_TOTAL_TIMEOUT, minimal_total)
+    minimal_total = _scraper_settings().SCRAPER_CONNECT_TIMEOUT + _scraper_settings().SCRAPER_READ_TIMEOUT
+    total = max(_scraper_settings().SCRAPER_TOTAL_TIMEOUT, minimal_total)
     return httpx.Timeout(
         timeout=total,
-        connect=settings.SCRAPER_CONNECT_TIMEOUT,
-        read=settings.SCRAPER_READ_TIMEOUT,
+        connect=_scraper_settings().SCRAPER_CONNECT_TIMEOUT,
+        read=_scraper_settings().SCRAPER_READ_TIMEOUT,
     )
 
 def _build_sync_client(
@@ -114,9 +127,9 @@ def _build_sync_client(
 ) -> httpx.Client:
     """ Cria ``Client`` síncrono com limites de conexão configurados """
     limits = httpx.Limits(
-        max_connections=getattr(settings, "SCRAPER_HTTP_MAX_CONNECTIONS", 100),
-        max_keepalive_connections=getattr(settings, "SCRAPER_HTTP_MAX_KEEPALIVE", 20),
-        keepalive_expiry=getattr(settings, "SCRAPER_HTTP_KEEPALIVE_EXPIRY", 30.0),
+        max_connections=getattr(_scraper_settings(), "SCRAPER_HTTP_MAX_CONNECTIONS", 100),
+        max_keepalive_connections=getattr(_scraper_settings(), "SCRAPER_HTTP_MAX_KEEPALIVE", 20),
+        keepalive_expiry=getattr(_scraper_settings(), "SCRAPER_HTTP_KEEPALIVE_EXPIRY", 30.0),
     )
     return httpx.Client(
         base_url=base_url,
@@ -148,30 +161,17 @@ def _sanitize_parser_response(response: ParserResponse) -> ParserResponse:
         )
     return sanitized
 
-#Definição global para reaproveitar o bucket entre instâncias e evitar picos
-rate_limiter = RateLimiter(
-    get_redis_operational,
-    max_requests=settings.SCRAPER_HOST_RATE_LIMIT,
-    window_seconds=settings.SCRAPER_HOST_RATE_WINDOW_SECONDS,
-)
-
-circuit_breaker = CircuitBreaker(
-    get_redis_operational,
-    failure_threshold=settings.SCRAPER_CIRCUIT_FAILURE_THRESHOLD,
-    failure_window=settings.SCRAPER_CIRCUIT_WINDOW_SECONDS,
-    cooldown_seconds=settings.SCRAPER_CIRCUIT_COOLDOWN_SECONDS,
-)
 
 @dataclass
 class ScraperClient:
     """ Cliente HTTP síncrono com retries, rate limit e circuit breaker """
-    base_url: str = settings.SCRAPER_SERVICE_URL
+    base_url: str = field(default_factory=lambda: _scraper_settings().SCRAPER_SERVICE_URL)
     client: httpx.Client = field(init=False)
     _closed: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         """ Inicializa o ``Client`` com parâmetros de timeout configurados """
-        user_agent = getattr(settings, "HTTP_USER_AGENT", None)
+        user_agent = getattr(_scraper_settings(), "HTTP_USER_AGENT", None)
         default_headers = {"User-Agent": user_agent} if user_agent else None
         self.client = _build_sync_client(self.base_url, default_headers)
 
@@ -191,7 +191,7 @@ class ScraperClient:
         parsed = urlparse(url)
         host = parsed.netloc or "unknown"
 
-        if circuit_breaker.is_open(host):
+        if _circuit_breaker().is_open(host):
             raise ScraperClientError(
                 "Circuito aberto para host solicitado",
                 status_code=503,
@@ -203,8 +203,8 @@ class ScraperClient:
         if not force_refresh and last_modified:
             headers["If-Modified-Since"] = format_datetime(last_modified, usegmt=True)
 
-        if settings.SCRAPER_SERVICE_AUTH_HEADER and settings.SCRAPER_SERVICE_AUTH_TOKEN:
-            headers[settings.SCRAPER_SERVICE_AUTH_HEADER] = settings.SCRAPER_SERVICE_AUTH_TOKEN
+        if _scraper_settings().SCRAPER_SERVICE_AUTH_HEADER and _scraper_settings().SCRAPER_SERVICE_AUTH_TOKEN:
+            headers[_scraper_settings().SCRAPER_SERVICE_AUTH_HEADER] = _scraper_settings().SCRAPER_SERVICE_AUTH_TOKEN
 
         request_model = ParserRequest(
             url=url,
@@ -226,19 +226,19 @@ class ScraperClient:
             request_payload["metadata"] = extra_metadata
 
         attempt = 0
-        backoff = settings.SCRAPER_RETRY_BACKOFF_MIN
+        backoff = _scraper_settings().SCRAPER_RETRY_BACKOFF_MIN
 
         while True:
             attempt += 1
-            if not rate_limiter.allow(host):
+            if not _rate_limiter().allow(host):
                 retry_count = self._register_host_retry_window(host)
                 if self._host_retry_exhausted(retry_count):
                     raise ScraperClientError(
                         "Limite de tentativas por host excedido",
                         status_code=429,
-                        retry_after=settings.SCRAPER_HOST_RETRY_WINDOW_SECONDS,
+                        retry_after=_scraper_settings().SCRAPER_HOST_RETRY_WINDOW_SECONDS,
                     )
-                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
+                if attempt >= _scraper_settings().SCRAPER_RETRY_ATTEMPTS:
                     raise ScraperClientError(
                         "Limite de requisições para host excedido",
                         status_code=429,
@@ -252,8 +252,8 @@ class ScraperClient:
                     headers=headers or None,
                 )
             except httpx.TimeoutException as exc:
-                circuit_breaker.record_failure(host)
-                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
+                _circuit_breaker().record_failure(host)
+                if attempt >= _scraper_settings().SCRAPER_RETRY_ATTEMPTS:
                     raise ScraperClientError(
                         "Tempo limite ao consultar o serviço de scraping",
                         status_code=504,
@@ -261,7 +261,7 @@ class ScraperClient:
                 time.sleep(self._compute_backoff(backoff, attempt))
                 continue
             except httpx.RequestError as exc:
-                circuit_breaker.record_failure(host)
+                _circuit_breaker().record_failure(host)
                 raise ScraperClientError(
                     f"Falha de transporte ao consultar o scraper: {exc}",
                     status_code=503,
@@ -273,7 +273,7 @@ class ScraperClient:
                 try:
                     raw_body = response.json()
                 except ValueError as exc:
-                    circuit_breaker.record_failure(host)
+                    _circuit_breaker().record_failure(host)
                     raise ScraperClientError(
                         "Corpo JSON inválido retornado pelo serviço de scraping",
                         status_code=500,
@@ -288,12 +288,12 @@ class ScraperClient:
                     )
                     parsed_payload = _sanitize_parser_response(parsed_payload)
                 except ValidationError as exc:
-                    circuit_breaker.record_failure(host)
+                    _circuit_breaker().record_failure(host)
                     raise ScraperClientError(
                         "Resposta inválida recebida do serviço de scraping",
                         status_code=500,
                     ) from exc
-                circuit_breaker.record_success(host)
+                _circuit_breaker().record_success(host)
                 return ScraperFetchResult(
                     status_code=status_code,
                     payload=parsed_payload,
@@ -301,7 +301,7 @@ class ScraperClient:
                 )
 
             if status_code == 304:
-                circuit_breaker.record_success(host)
+                _circuit_breaker().record_success(host)
                 return ScraperFetchResult(
                     status_code=status_code,
                     payload=None,
@@ -312,13 +312,13 @@ class ScraperClient:
                 try:
                     body = response.json()
                 except ValueError as exc:
-                    circuit_breaker.record_failure(host)
+                    _circuit_breaker().record_failure(host)
                     raise ScraperClientError(
                         "Corpo JSON inválido retornado pelo serviço de scraping",
                         status_code=500,
                     ) from exc
                 error_code = body.get("error_code")
-                circuit_breaker.record_success(host)
+                _circuit_breaker().record_success(host)
                 return ScraperFetchResult(
                     status_code=status_code,
                     payload=None,
@@ -330,13 +330,13 @@ class ScraperClient:
                 try:
                     body = response.json()
                 except ValueError as exc:
-                    circuit_breaker.record_failure(host)
+                    _circuit_breaker().record_failure(host)
                     raise ScraperClientError(
                         "Corpo JSON inválido retornado pelo serviço de scraping",
                         status_code=500,
                     ) from exc
                 error_code = body.get("error_code")
-                circuit_breaker.record_success(host)
+                _circuit_breaker().record_success(host)
                 return ScraperFetchResult(
                     status_code=status_code,
                     payload=None,
@@ -345,7 +345,7 @@ class ScraperClient:
                 )
 
             if status_code in {429}:
-                circuit_breaker.record_failure(host)
+                _circuit_breaker().record_failure(host)
                 retry_after = self._extract_retry_after(response)
                 retry_count = self._register_host_retry_window(host)
                 if self._host_retry_exhausted(retry_count):
@@ -354,7 +354,7 @@ class ScraperClient:
                         status_code=status_code,
                         retry_after=retry_after,
                     )
-                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
+                if attempt >= _scraper_settings().SCRAPER_RETRY_ATTEMPTS:
                     raise ScraperClientError(
                         "Serviço de scraping respondeu com 429",
                         status_code=status_code,
@@ -364,8 +364,8 @@ class ScraperClient:
                 continue
 
             if 500 <= status_code < 600:
-                circuit_breaker.record_failure(host)
-                if attempt >= settings.SCRAPER_RETRY_ATTEMPTS:
+                _circuit_breaker().record_failure(host)
+                if attempt >= _scraper_settings().SCRAPER_RETRY_ATTEMPTS:
                     raise ScraperClientError(
                         "Erro 5xx ao consultar o serviço de scraping",
                         status_code=status_code,
@@ -373,7 +373,7 @@ class ScraperClient:
                 time.sleep(self._compute_backoff(backoff, attempt))
                 continue
 
-            circuit_breaker.record_failure(host)
+            _circuit_breaker().record_failure(host)
             raise ScraperClientError(
                 f"Resposta inesperada do scraper: {status_code}",
                 status_code=status_code,
@@ -438,7 +438,7 @@ class ScraperClient:
     @staticmethod
     def _compute_backoff(base: float, attempt: int) -> float:
         """ Calcula backoff exponencial com jitter aleatório """
-        exp = min(settings.SCRAPER_RETRY_BACKOFF_MAX, base * (2 ** (attempt - 1)))
+        exp = min(_scraper_settings().SCRAPER_RETRY_BACKOFF_MAX, base * (2 ** (attempt - 1)))
         jitter = random.uniform(0, base)
         return exp + jitter
 
@@ -486,7 +486,7 @@ class ScraperClient:
             key = f"scraper:host-retry:{host}"
             pipeline = client.pipeline(True)
             pipeline.incr(key)
-            pipeline.expire(key, settings.SCRAPER_HOST_RETRY_WINDOW_SECONDS)
+            pipeline.expire(key, _scraper_settings().SCRAPER_HOST_RETRY_WINDOW_SECONDS)
             current, _ = pipeline.execute()
             return int(current)
         except Exception:
@@ -497,4 +497,4 @@ class ScraperClient:
         """ Indica se o limite de tentativas por host foi atingido """
         if counter is None:
             return False
-        return counter >= settings.SCRAPER_HOST_RETRY_MAX_ATTEMPTS
+        return counter >= _scraper_settings().SCRAPER_HOST_RETRY_MAX_ATTEMPTS

@@ -12,7 +12,7 @@ from celery import shared_task
 logger = structlog.get_logger("reconciler_task")
 
 @shared_task(
-    name="market_alert.infraestructure.tasks.reconciler_task.reconcile_workflows_task",
+    name="market_alert.infrastructure.tasks.reconciler_task.reconcile_workflows_task",
     bind=True,
     max_retries=0, #Não retentar — próxima execução do Beat resolve
     ignore_result=True,

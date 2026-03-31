@@ -1,4 +1,9 @@
-""" Circuit breaker baseado em Redis para proteger integrações externas """
+""" Circuit breaker baseado em Redis para proteger integrações externas.
+
+Implementação neutra — sem dependência de nenhum domínio específico.
+Consumidores: shared.clients.scraper.scraper_client e qualquer módulo
+que precise proteger chamadas externas com circuit breaker.
+"""
 
 from __future__ import annotations
 
@@ -35,13 +40,13 @@ class CircuitBreaker:
         except Exception as exc:
             logger.warning("circuit_breaker_client_error: %s", exc)
             return None
-        
+
     def _failures_key(self, host: str) -> str:
         return f"{self._namespace}:failures:{host}"
-    
+
     def _open_key(self, host: str) -> str:
         return f"{self._namespace}:open:{host}"
-    
+
     def is_open(self, host: str) -> bool:
         """ Verifica se o circuito está aberto para o host """
         client = self._client()
@@ -53,7 +58,7 @@ class CircuitBreaker:
             logger.warning("circuit_breaker_ttl_error: %s", exc)
             return False
         return ttl is not None and ttl > 0
-    
+
     def record_success(self, host: str) -> None:
         """ Zera contadores após uma chamada bem-sucedida """
         client = self._client()
@@ -74,7 +79,7 @@ class CircuitBreaker:
         client = self._client()
         if client is None:
             return
-        
+
         failures_key = self._failures_key(host)
         open_key = self._open_key(host)
         try:
@@ -99,4 +104,6 @@ class CircuitBreaker:
                 )
             except Exception as exc:  # pragma: no cover
                 logger.warning("circuit_breaker_open_error: %s", exc)
-                
+
+
+__all__ = ["CircuitBreaker"]

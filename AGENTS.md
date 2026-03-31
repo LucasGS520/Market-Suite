@@ -18,11 +18,10 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 ---
 
 ## Resumo e Estratégia do Plano
- 
-- **`market_alert` (domínio de negócio):** está claramente responsável por API, ciclo de vida de monitorados/concorrentes, coleta e notificações; integra Temporal via client compartilhado em múltiplos pontos, como `services_monitored_lifecycle.py`, `services_competitor_lifecycle.py`.
-- **`market_orchestrator` (workflow/activities):** está mais limpo, sem dependência direta de `market_alert` para dispatch; activity usa dispatcher neutro em `dispatch_activity.py`.
-- **`shared` (contratos/utilitários/clientes):** consolidou clients canônicos de Temporal, Celery e Scraper, e contratos em `shared.schemas`; porém mantém a exceção de acoplamento do ScraperClient com `market_alert`.
-- **Resultado prático:** a reorganização foi **bem-sucedida em grande parte** (tombstones removidos e imports canônicos adotados), mas ainda há **drift de documentação**.
+
+- Eliminar Re-exports sobre arquivos identificados apenas para compatibilidade de imports
+- Executar ações após realização da fase de otimização arquitetural, e elimininação de dívida de fronteira entre domínios e shared.
+
 ---
 
 ## Regras e Instruções de Execução

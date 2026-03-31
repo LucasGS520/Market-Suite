@@ -16,17 +16,20 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
-    from market_orchestrator.core.config_orchestrator import settings
-    from market_orchestrator.enums.enums_workflow import WorkflowState
-    from market_orchestrator.schemas.schemas_policy import CollectionPolicy
-    from market_orchestrator.schemas.schemas_signals import (
+    from shared.schemas.shared_schemas_orchestrator import (
+        CollectionPolicy,
         ResumeSignalPayload,
         UpdatePolicySignalPayload,
         CompetitorChangedPayload,
+        DispatchActivityOutput,
+        PolicyActivityOutput,
+        QueryStatusOutput,
     )
+
+    from market_orchestrator.core.config_orchestrator import settings
+    from market_orchestrator.enums.enums_workflow import WorkflowState
     from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
     from market_orchestrator.schemas.schemas_workflow import WorkflowInput
-    from shared.schemas.shared_schemas_orchestrator import DispatchActivityOutput, PolicyActivityOutput, QueryStatusOutput
     
 
 logger = structlog.get_logger("orchestrator.workflow")

@@ -350,7 +350,7 @@ services:
     command:
       - celery
       - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
+      - "market_alert.infrastructure.celery.celery_app:celery_app"
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
@@ -400,7 +400,7 @@ services:
     command:
       - celery
       - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
+      - "market_alert.infrastructure.celery.celery_app:celery_app"
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
@@ -450,7 +450,7 @@ services:
     command:
       - celery
       - "-A"
-      - "market_alert.infraestructure.celery.celery_app:celery_app"
+      - "market_alert.infrastructure.celery.celery_app:celery_app"
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"

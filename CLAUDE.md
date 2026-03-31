@@ -19,14 +19,10 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Objetivo e Estratégias
 
-**Problema a Ser Resolvido:**  
-Há acoplamento cruzado entre os domínios: componentes de orquestração dependem de `market_alert`, componentes de negócio dependem de internals de `market_orchestrator`, e `shared` contém itens que já carregam regra de domínio (não neutros).
+O backend está estruturado como um ecossistema modular com separação funcional clara entre domínio de negócio, orquestração durável, scraping e camada compartilhada.
+O desenho predominante está alinhado ao modelo ideal declarado no projeto, com integração entre módulos baseada em contratos e clientes comuns.
 
-**Objetivo do Plano:**  
-Restaurar a separação de responsabilidades para que:
-- `market_alert` seja dono do domínio de negócio.
-- `market_orchestrator` seja dono do workflow/activities e execução Temporal.
-- `shared` contenha apenas contratos e utilitários neutros.
+O estado atual mostra um acoplamento geral controlado, com algumas exceções explícitas e documentadas de dependência cruzada (principalmente envolvendo shared, market_alert e market_orchestrator), mantendo o funcionamento conjunto do sistema em uma arquitetura distribuída por responsabilidades.
 
 ---
 

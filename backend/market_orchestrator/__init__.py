@@ -18,13 +18,15 @@ A camada de execucao existente nao foi alterada:
   - CollectionEnqueuer (market_alert/infraestructure/celery/enqueuer.py)
   - payload_builders (market_alert/collectors/dispatch/payload_builders.py)
 """
-from market_orchestrator.enums.enums_workflow import WorkflowState
-from market_orchestrator.schemas.schemas_policy import CollectionPolicy
-from market_orchestrator.schemas.schemas_signals import (
+
+from shared.schemas.shared_schemas_orchestrator import (
+    CollectionPolicy,
     CompetitorChangedPayload,
     ResumeSignalPayload,
     UpdatePolicySignalPayload,
 )
+
+from market_orchestrator.enums.enums_workflow import WorkflowState
 from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
 from market_orchestrator.schemas.schemas_workflow import WorkflowInput
 

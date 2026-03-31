@@ -8,6 +8,7 @@ from typing import Callable, Tuple
 
 from redis import Redis
 
+from shared.infra.rate_limiter import ScrapingRateLimiter
 from shared.utils.redis_client import (
     consume_leaky_bucket,
     consume_token_bucket,
@@ -25,44 +26,9 @@ SCRAPE_RETRY_BASE_SECONDS = 30
 SCRAPE_RETRY_MAX_SECONDS = 15 * 60
 SCRAPE_RETRY_JITTER_RATIO = 0.3
 
-class RateLimiter:
-    """ Controla volume de chamadas para um host específico """
-    def __init__(
-        self,
-        client_factory: Callable[[], Redis | None],
-        *,
-        max_requests: int,
-        window_seconds: int,
-        namespace: str = "rate:scraping",
-    ) -> None:
-        self._client_factory = client_factory
-        self._max_requests = max_requests
-        self._window_seconds = window_seconds
-        self._namespace = namespace
+#RateLimiter movida para shared.infra — re-exportada aqui para backward compat
+RateLimiter = ScrapingRateLimiter
 
-    def _client(self) -> Redis | None:
-        """ Obtém cliente Redis mantendo tolerância a falhas """
-        try:
-            return self._client_factory()
-        except Exception as exc:
-            logger.warning("rate_limiter_client_error: %s", exc)
-            return None
-        
-    def allow(self, host: str) -> bool:
-        """ Avalia o limite por host usando *token bucket* em Redis """
-        client = self._client()
-        if client is None:
-            return True
-        
-        key = f"{self._namespace}:{host}"
-        allowed, _ = consume_token_bucket(
-            key,
-            capacity=self._max_requests,
-            refill_rate_per_second=self._max_requests / self._window_seconds,
-            client=client,
-        )
-        return allowed
-    
 def parse_rate_limit_config(rate_limit: str) -> Tuple[int, int] | None:
     """ Interpreta configurações no formato ``valor/unidade`` retornando capacidade e janela 
     

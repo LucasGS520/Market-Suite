@@ -72,9 +72,8 @@ class WorkflowReconciler:
                     counts["alive"] += 1
                     continue
 
-                # Workflow não encontrado — cria via signal_with_start
-                from market_orchestrator.schemas.schemas_policy import CollectionPolicy
-                from market_orchestrator.schemas.schemas_workflow import WorkflowInput
+                #Workflow não encontrado — cria via signal_with_start
+                from shared.schemas.shared_schemas_orchestrator import CollectionPolicy, WorkflowInput
 
                 workflow_input = WorkflowInput(
                     monitored_id=monitored_id,

@@ -22,8 +22,8 @@ TASK_MODULES = [
     "market_alert.notifications.tasks.notifications_enqueue_task",
     "market_alert.notifications.tasks.send_notification_task",
     "market_alert.users.tasks.verification_tasks",
-    "market_alert.infraestructure.tasks.maintenance_tasks",
-    "market_alert.infraestructure.tasks.reconciler_task",
+    "market_alert.infrastructure.tasks.maintenance_tasks",
+    "market_alert.infrastructure.tasks.reconciler_task",
 ]
 
 #Exchanges separados por domínio funcional (3 workers: scraping, compare, notifications)
@@ -84,12 +84,12 @@ def _schedule_entry(
 #Mantidos aqui para simplificar auditoria e evitar divergências
 BEAT_SCHEDULE = {
     "cleanup-cache-daily": _schedule_entry(
-        "market_alert.infraestructure.tasks.maintenance_tasks.cleanup_cache",
+        "market_alert.infrastructure.tasks.maintenance_tasks.cleanup_cache",
         crontab(hour=3, minute=0),
         queue="scraping",
     ),
     "reconcile-workflows-periodic": _schedule_entry(
-        "market_alert.infraestructure.tasks.reconciler_task.reconcile_workflows_task",
+        "market_alert.infrastructure.tasks.reconciler_task.reconcile_workflows_task",
         600,  #10 minutos para garantir que falhas sejam detectadas
         queue="scraping",
     ),
