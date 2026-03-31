@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, CompetitorScrapedInfo
 from shared.schemas.shared_schemas_scraper import ScrapeResult
-from shared.clients.scraper_client import ScraperClient, ScraperClientError
+from shared.clients.scraper.scraper_client import ScraperClient, ScraperClientError
 from shared.utils import (
     sanitize_media_url,
     sanitize_text,

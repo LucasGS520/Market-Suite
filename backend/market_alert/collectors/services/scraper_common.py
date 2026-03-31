@@ -8,14 +8,13 @@ from typing import Any, Literal, Mapping
 from uuid import UUID
 
 from shared.schemas import ParserResponse, ScrapeResult
-from shared.clients.scraper_client import (
+from shared.clients.scraper.scraper_client import (
     ScraperClient,
     ScraperClientError,
     ScraperFetchResult,
 )
 from shared.scheduling import EVENT_NOT_MODIFIED, calculate_schedule
 from shared.utils import normalize_scraper_response, sanitize_text
-
 
 from market_alert.products.domain.product_lifecycle import to_scheduling_context
 from market_alert.products.utils.price_decimal import to_decimal as _shared_to_decimal
@@ -207,7 +206,6 @@ def resolve_availability(
         return False
     return availability_flag is True
 
-
 def handle_not_modified_response(
     entity: Any,
     db: Any,
@@ -240,7 +238,7 @@ def handle_not_modified_response(
         if entity_type == "monitored":
             try:
                 #Import local evita acoplamento forte entre serviços durante bootstrap.
-                from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+                from market_alert.collectors.dispatch.collection_enqueue import enqueue_competitors_for_monitored
 
                 enqueue_competitors_for_monitored(db, monitored_id=entity.id)
             except Exception:

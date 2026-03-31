@@ -30,7 +30,7 @@ from shared.scheduling import EVENT_STANDARD
 from shared.utils.url_validation import normalize_and_validate_product_url
 
 from market_alert.core.config_alert import settings
-from market_alert.infraestructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
+from market_alert.infrastructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import User
 from market_alert.models.models_products import CompetitorProduct
 from market_alert.schemas.schemas_products import CompetitorScrapeCreationResponse
@@ -44,13 +44,13 @@ from market_alert.products.crud.crud_competitor import (
 )
 from market_alert.products.services.services_products import build_competitor_response
 from market_alert.products.services.services_access_control import ensure_user_can_access_monitored
-from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitor_collection
+from market_alert.collectors.dispatch.collection_enqueue import enqueue_competitor_collection
 from market_alert.products.domain.product_lifecycle import compute_next_check_at
 from market_alert.comparisons.utils.price_comparator import request_comparison_recompute
 
 #Import condicional: protege testes unitários e ambientes sem Temporal disponível
 try:
-    from shared.clients.orchestrator_client import get_temporal_client
+    from shared.clients.temporal.orchestrator_client import get_temporal_client
     _TEMPORAL_AVAILABLE = True
 except ImportError:
     _TEMPORAL_AVAILABLE = False

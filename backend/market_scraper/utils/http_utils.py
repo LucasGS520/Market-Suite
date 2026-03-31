@@ -235,7 +235,7 @@ def _resolve_with_socket(host: str, timeout: float) -> list[str]:
 def _classify_non_public(
     ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> str | None:
-    """Identifica a razão do bloqueio quando o IP não é global"""
+    """ Identifica a razão do bloqueio quando o IP não é global"""
     if ip_obj.is_loopback:
         return "loopback"
     if ip_obj.is_link_local:

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from shared.infra.db import get_db
 from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping
 
-from market_alert.infraestructure.security.auth_context import get_current_user
+from market_alert.infrastructure.security.auth_context import get_current_user
 from market_alert.models import User
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
@@ -262,7 +262,7 @@ def get_workflow_status(
         raise HTTPException(status_code=404, detail="Produto não encontrado.")
 
     try:
-        from shared.clients.orchestrator_client import get_temporal_client
+        from shared.clients.temporal.orchestrator_client import get_temporal_client
         snapshot = get_temporal_client().query_sync(str(product_id))
     except ImportError:
         from fastapi import HTTPException

@@ -1,8 +1,9 @@
-# shared — Infraestrutura e Contratos Compartilhados
+# Shared — Infraestrutura e Contratos Compartilhados
 
 Biblioteca interna sem servidor próprio. Importada por todos os serviços
 (`market_alert`, `market_orchestrator`, `market_scraper`) como dependência de
-pacote. Nenhum módulo daqui importa de qualquer serviço específico.
+pacote. Como regra, nenhum módulo daqui importa de qualquer serviço específico;
+a única exceção documentada é `shared/clients/scraper/scraper_client.py`.
 
 ---
 
@@ -11,7 +12,6 @@ pacote. Nenhum módulo daqui importa de qualquer serviço específico.
 ```
 shared/
 ├── clients/                    # Clientes de serviços externos
-│   └── orchestrator_client.py  # TemporalOrchestrationClient (canônico)
 ├── core/
 │   └── config_base.py          # ConfigBase — BaseSettings compartilhada
 ├── enums/                      # Enums e constantes globais
@@ -31,7 +31,7 @@ shared/
 │   ├── rate_limiter.py         # Protocol RateLimiter + RedisRateLimiter
 │   └── redis_pubsub.py         # RedisPubSub
 ├── schemas/                    # Contratos de dados compartilhados
-│   ├── shared_schemas_orchestrator.py  # DTOs de orquestração (canônico)
+│   ├── shared_schemas_orchestrator.py  # DTOs de orquestração (canônico) — versão 1
 │   ├── shared_schemas_products.py
 │   └── shared_schemas_scraper.py
 ├── scheduling/                 # Agendamento periódico
@@ -45,7 +45,7 @@ shared/
 │   ├── trace_context.py
 │   └── url_validation.py
 ├── exceptions.py               # Exceções base compartilhadas
-└── orchestrator_contracts.py   # Factory methods para DTOs de orquestração
+└── __init__.py
 ```
 
 ---
@@ -77,84 +77,62 @@ Tipos canônicos usados pela cadeia `API → Temporal → Activity → Celery`:
 **Regra:** nenhum desses tipos importa de `market_alert`, `market_orchestrator`
 ou qualquer infraestrutura. São dataclasses/Pydantic puros.
 
-### `shared/orchestrator_contracts.py`
-
-Factory methods para construir os DTOs de forma padronizada:
-
-```python
-from shared.orchestrator_contracts import (
-    create_collection_payload,
-    build_activity_result,
-    build_dispatch_output,
-)
-```
-
-### `shared/clients/orchestrator_client.py`
-
-Cliente Temporal de alto nível. Ponto canônico de interação com o workflow
-`MonitoredProductWorkflow`:
-
-```python
-from shared.clients.orchestrator_client import TemporalOrchestrationClient, get_temporal_client
-
-# Singleton assíncrono (para uso em contexto async/FastAPI)
-client = await get_temporal_client()
-
-# Fachada síncrona (para uso em workers Celery)
-orchestrator = TemporalOrchestrationClient()
-orchestrator.signal_with_start_sync(workflow_input)
-orchestrator.pause_sync(monitored_id)
-orchestrator.resume_sync(monitored_id, immediate_collect=True)
-orchestrator.query_sync(monitored_id)          # → WorkflowSnapshot | None
-orchestrator.notify_competitor_changed_sync(monitored_id, competitor_id)
-```
-
-**Compatibilidade retroativa:** `market_orchestrator/alert/alert_client.py` e
-(se presente) `market_alert/orchestrator/alert_client.py` são re-exportadores
-que apontam para este módulo.
-
 ---
 
-## Infraestrutura
+## Clientes de Integração entre Serviços
 
-### `shared/infra/logging.py`
+Os clientes em `shared/clients` padronizam a comunicação entre módulos e evitam duplicação de lógica de transporte (HTTP, Temporal, enqueue de tasks). A ideia é centralizar configuração, contratos e tratamento básico de erros no ponto canônico.
 
-```python
-from shared.infra.logging import configure_structlog
+### `shared/clients/celery/task_dispatcher.py`
 
-configure_structlog(log_level="INFO", log_format="json")
-```
+Cliente responsável por **disparar tarefas assíncronas no Celery** de forma padronizada.
 
-Configura structlog para JSON em produção e console em desenvolvimento.
-Chamado no startup de cada serviço via `logging_config.py` local.
+- **Objetivo:** encapsular `send_task/apply_async`, filas, roteamento e metadados comuns.
+- **Responsabilidades principais:**
+   - enviar payloads já serializáveis;
+   - aplicar configuração de fila/prioridade/retry conforme convenção do projeto;
+   - devolver identificadores de task para rastreabilidade.
+- **Por que centralizar:** evita que cada serviço implemente seu próprio envio de task com variações de nome de fila, headers e política de retry.
+- **Boas práticas de uso:**
+   - enviar somente dados de contrato (DTOs de `shared.schemas`);
+   - registrar correlation/trace id quando disponível;
+   - manter idempotência no consumidor, não no dispatcher.
 
-### `shared/infra/rate_limiter.py`
+### `shared/clients/scraper/scraper_client.py`
 
-```python
-from shared.infra.rate_limiter import RedisRateLimiter
+Cliente canônico para **consumo da capacidade de scraping** usada pelo ecossistema.
 
-limiter = RedisRateLimiter(redis_client, key="scraper", max_calls=10, window=60)
-allowed = await limiter.is_allowed()
-```
+- **Objetivo:** oferecer interface única para solicitar coleta/extração de dados de produto.
+- **Responsabilidades principais:**
+   - montar requisições para o serviço/componente de scraping;
+   - normalizar respostas para contratos compartilhados;
+   - tratar falhas de integração (timeout, indisponibilidade, resposta inválida).
+- **Exceção arquitetural documentada:** este cliente pode ter acoplamento específico já registrado na arquitetura do projeto.
+- **Boas práticas de uso:**
+   - validar entrada antes de chamar scraping;
+   - aplicar timeout explícito e fallback seguro;
+   - nunca embutir regra de negócio de `market_alert` no cliente.
 
-### `shared/infra/db/database.py`
+### `shared/clients/temporal/orchestrator_client.py`
 
-```python
-from shared.infra.db.database import SessionLocal
+Cliente oficial para **interação com Temporal** (workflows de orquestração).
 
-db = SessionLocal()
-try:
-    result = db.execute(text("SELECT ..."))
-finally:
-    db.close()
-```
+- **Objetivo:** centralizar criação/configuração do client Temporal e operações de workflow.
+- **Responsabilidades principais:**
+   - iniciar workflows com `workflow_id` e `task_queue` padronizados;
+   - enviar sinais/queries para workflows em execução;
+   - encapsular detalhes de conexão, namespace e políticas de retry.
+- **Por que é canônico:** impede múltiplas implementações locais de acesso ao Temporal e reduz drift entre serviços.
+- **Boas práticas de uso:**
+   - usar sempre contratos de `shared.schemas.shared_schemas_orchestrator`;
+   - manter nomes de workflow/signal/query versionados e estáveis;
+   - registrar contexto de observabilidade (trace/correlation id) nas chamadas.
 
-### `shared/core/config_base.py`
+### Diretriz Geral para os três clientes
 
-`ConfigBase` herda de `pydantic_settings.BaseSettings`. Lê variáveis de
-ambiente + arquivo `.env.<SERVICE_NAME>` determinado pela variável de ambiente
-`SERVICE_NAME`. Cada serviço define sua própria classe de configuração
-herdando de `ConfigBase`.
+- São pontos de **integração técnica**, não de regra de negócio.
+- Devem expor APIs pequenas e previsíveis, orientadas a contrato.
+- Mudanças de transporte/protocolo devem ocorrer aqui, preservando os chamadores.
 
 ---
 
@@ -166,6 +144,25 @@ herdando de `ConfigBase`.
    sem estado.
 3. **Tipos de orquestração sempre via `shared.schemas.shared_schemas_orchestrator`.**
    Nunca recriar `CollectionPayload` ou `DispatchActivityOutput` em outro módulo.
-4. **Cliente Temporal sempre via `shared.clients.orchestrator_client`.**
-   Os re-exportadores locais existem apenas para retrocompatibilidade de imports
-   já consolidados.
+4. **Cliente Temporal sempre via `shared.clients.temporal.orchestrator_client`.**
+   Os caminhos legados foram removidos; não reintroduzir shims locais.
+
+---
+
+## Fronteiras de Domínio
+
+### Matriz de Responsabilidade
+
+| Módulo | Pode depender de | NÃO pode depender de |
+|--------|-----------------|----------------------|
+| `shared` | bibliotecas externas (SQLAlchemy, Redis, Pydantic, structlog) | `market_orchestrator`; `market_scraper`; `market_alert` (exceto algumas exceções quando documentadas) |
+| `market_alert` | `shared` | — (via `shared` acessa Temporal, Redis, DB) |
+| `market_orchestrator` | `shared` | `market_alert`; `market_scraper` |
+| `market_scraper` | `shared` (schemas neutros) | `market_alert`; `market_orchestrator` |
+
+### Regras Obrigatórias
+
+- **`shared` não importa serviços específicos como regra geral**.
+- **`shared/clients/scraper/scraper_client.py` importa `market_alert`** — exceção arquitetural consciente, isolada no cliente canônico de scraping.
+- **Contratos de orquestração** ficam em `shared/schemas/shared_schemas_orchestrator.py` como dataclasses/Pydantic puros sem I/O.
+- **Utilitários** só entram em `shared` se forem verdadeiramente neutros (sem regra de negócio de nenhum domínio).

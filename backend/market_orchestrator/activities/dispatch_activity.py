@@ -1,4 +1,4 @@
-"""Activity Temporal para disparar uma coleta."""
+""" Activity Temporal para disparar uma coleta. """
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -19,7 +19,7 @@ _DISPATCH_KEY_PREFIX = "workflow:dispatch"
 _DISPATCH_TTL_SECONDS = 7200  # 2h — tempo máximo esperado para conclusão de coleta
 
 def _fetch_monitored_url(monitored_id: str) -> str | None:
-    """Lê normalized_url (ou product_url como fallback) de monitored_products via SQL direto."""
+    """ Lê normalized_url (ou product_url como fallback) de monitored_products via SQL direto."""
     db = SessionLocal()
     try:
         row = db.execute(
@@ -43,7 +43,7 @@ async def dispatch_collection(
     trace_id: str,
     force_compare: bool = False,
 ) -> DispatchActivityOutput:
-    """Enfileira a coleta do monitorado via Celery.
+    """ Enfileira a coleta do monitorado via Celery.
 
     Busca a URL do produto no BD, constrói o CollectionPayload completo e
     delega o enfileiramento ao enqueuer. Persiste o timestamp de dispatch no
@@ -78,9 +78,8 @@ async def dispatch_collection(
             force_compare="true" if force_compare else None,
         )
 
-        # TODO Fase 4: substituir por shared.infra.celery.enqueuer (sem import de market_alert)
-        from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_collect
-        enqueue_collect(payload)
+        from shared.clients.celery.task_dispatcher import send_collection_task
+        send_collection_task(payload.model_dump(mode="json"))
 
         #Salva timestamp de dispatch para correlação em query_collection_status
         try:

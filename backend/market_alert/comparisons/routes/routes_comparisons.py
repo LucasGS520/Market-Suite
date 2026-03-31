@@ -8,15 +8,9 @@ from uuid import UUID
 from shared.infra.db import get_db
 
 from market_alert.models import User
-from market_alert.schemas.schemas_comparisons import (
-    PriceComparisonResponse,
-    PriceComparisonSummaryResponse,
-)
-from market_alert.infraestructure.security.auth_context import get_current_user
-from market_alert.comparisons.services.services_comparison import (
-    get_comparison_detail_for_user,
-    get_comparison_summary_for_user,
-)
+from market_alert.schemas.schemas_comparisons import PriceComparisonResponse, PriceComparisonSummaryResponse
+from market_alert.infrastructure.security.auth_context import get_current_user
+from market_alert.comparisons.services.services_comparison import get_comparison_detail_for_user, get_comparison_summary_for_user
 
 
 router = APIRouter(prefix="/comparisons", tags=["Comparações"])

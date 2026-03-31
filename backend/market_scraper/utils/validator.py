@@ -278,4 +278,5 @@ class DataQualityValidator:
             except (InvalidOperation, ValueError):
                 yield None
 
+
 __all__ = ["DataQualityValidator", "ValidationResult"]

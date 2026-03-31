@@ -72,7 +72,7 @@ As rotas publicas são registradas em [`main.py`](main.py), com foco em um endpo
 | `GET` | `/health/ping` | sem payload -> `{ "status": "ok" }` | `200` |
 
 ### Integracao com market_alert
-- O cliente oficial vive em [`../market_alert/scraper/scraper_client.py`](../market_alert/scraper/scraper_client.py).
+- O cliente oficial vive em [`../shared/clients/scraper/scraper_client.py`](../shared/clients/scraper/scraper_client.py).
 - O cliente encapsula retries, rate limit por host, circuit breaker, cabeçalhos condicionais e suporte opcional a header de autenticação de serviço (`SCRAPER_SERVICE_AUTH_*`).
 
 ---
@@ -203,6 +203,25 @@ SCRAPER_PRICE_TOLERANCE=0.0
   - Logs estruturados por `trace_id` em rota e pipeline (`routes_scraper`, `scraper_pipeline`), incluindo etapa, resultado e duracao.
   - `X-MarketScraper-Cache-Status` facilita diagnostico de decisoes de cache condicional.
   - Health check simples em `/health/ping` para probes de orquestracao.
+
+---
+
+## Fronteiras de Domínio
+
+### Matriz de Responsabilidade
+
+| Módulo | Pode depender de | NÃO pode depender de |
+|--------|-----------------|----------------------|
+| `market_scraper` | `shared` (contratos neutros) | `market_alert`; `market_orchestrator` |
+| `market_alert` | `market_scraper` via HTTP apenas | — |
+| `shared` | bibliotecas externas | `market_scraper`; `market_alert`; `market_orchestrator` |
+
+### Regras Obrigatórias
+
+- **`market_scraper` NÃO importa `market_alert`** — é um microserviço independente consumido via HTTP.
+- **`market_scraper` NÃO importa `market_orchestrator`** — não tem conhecimento do ciclo de orquestração.
+- **Contratos de entrada/saída** são definidos exclusivamente em `shared/schemas/shared_schemas_scraper.py` (`ParserRequest`, `ParserResponse`, `ErrorResponse`).
+- **Configuração interna** (`core/`) é isolada; sem uso de `shared.core.config_base` que carregue segredos de outros serviços.
 
 ---
 

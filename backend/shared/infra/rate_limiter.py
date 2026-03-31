@@ -167,3 +167,50 @@ class RedisRateLimiter:
             logger.debug("redis_rate_limiter_reset", key=key)
         except Exception:
             logger.warning("redis_rate_limiter_reset_failed", key=key, exc_info=True)
+
+
+# ──────────────────────── Token-bucket para scraping ────────────────────────
+
+class ScrapingRateLimiter:
+    """ Controla volume de chamadas para um host via token bucket em Redis.
+
+    Implementação neutra sem dependência de domínio — movida de
+    market_alert.infrastructure.resilience.rate_limiter para shared.infra
+    a fim de remover a inversão shared → market_alert.
+    """
+
+    def __init__(
+        self,
+        client_factory,
+        *,
+        max_requests: int,
+        window_seconds: int,
+        namespace: str = "rate:scraping",
+    ) -> None:
+        self._client_factory = client_factory
+        self._max_requests = max_requests
+        self._window_seconds = window_seconds
+        self._namespace = namespace
+
+    def _client(self):
+        """ Obtém cliente Redis mantendo tolerância a falhas """
+        try:
+            return self._client_factory()
+        except Exception as exc:
+            logger.warning("scraping_rate_limiter_client_error: %s", exc)
+            return None
+
+    def allow(self, host: str) -> bool:
+        """ Avalia o limite por host usando token bucket em Redis """
+        from shared.utils.redis_client import consume_token_bucket
+        client = self._client()
+        if client is None:
+            return True
+        key = f"{self._namespace}:{host}"
+        allowed, _ = consume_token_bucket(
+            key,
+            capacity=self._max_requests,
+            refill_rate_per_second=self._max_requests / self._window_seconds,
+            client=client,
+        )
+        return allowed

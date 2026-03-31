@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """ Parser simples para páginas HTML estáticas
 
 O módulo oferece utilitários focados em coletar nome e preço a partir
@@ -8,6 +6,8 @@ Todas as funções expõem a mesma interface, retornando um dicionário com
 ``name```, ``current_price`` e ``url``. Não existem fallbacks, ou orquestrações
 adicionais; o retorno é pensado para ser validado pelo ``DataQualityValidator``.
 """
+
+from __future__ import annotations
 
 import re
 from decimal import Decimal, InvalidOperation

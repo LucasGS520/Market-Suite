@@ -542,7 +542,7 @@ def enqueue_pending_notifications(
     now = datetime.now(timezone.utc)
     ids = [UUID(nid) for nid in notification_ids] if notification_ids else None
 
-    from market_alert.infraestructure.celery.domain_task_enqueuer import DomainTaskEnqueuer
+    from market_alert.infrastructure.celery.domain_task_enqueuer import DomainTaskEnqueuer
     enqueuer = DomainTaskEnqueuer()
 
     pending = get_pending_notifications(db, limit=limit, now=now, notification_ids=ids)

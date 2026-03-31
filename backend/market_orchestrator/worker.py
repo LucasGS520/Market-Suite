@@ -30,9 +30,8 @@ from market_orchestrator.workflow import MonitoredProductWorkflow
 
 logger = structlog.get_logger("orchestrator.worker")
 
-
 def _validate_infra() -> None:
-    """Valida conectividade com DB e Redis antes de iniciar o worker.
+    """ Valida conectividade com DB e Redis antes de iniciar o worker.
 
     Cobre a janela de DNS após restart (on-failure): o depends_on não é
     re-verificado pelo Docker em reinicializações — esta função garante que
@@ -179,7 +178,7 @@ async def start_temporal_worker() -> None:
     logger.info("temporal_worker_stopped")
 
 def run_worker() -> None:
-    """Ponto de entrada síncrono para execução via subprocess ou thread."""
+    """ Ponto de entrada síncrono para execução via subprocess ou thread."""
     _validate_infra()
     asyncio.run(start_temporal_worker())
 

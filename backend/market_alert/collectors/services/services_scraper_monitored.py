@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_products import MonitoredProductCreateScraping, MonitoredScrapedInfo
 from shared.schemas.shared_schemas_scraper import ScrapeResult
-from shared.clients.scraper_client import (
+from shared.clients.scraper.scraper_client import (
     ScraperClient,
     ScraperClientError,
     ScraperFetchResult,
@@ -24,7 +24,7 @@ from shared.utils.url_validation import normalize_product_url
 
 from market_alert.core.config_alert import settings
 from market_alert.products.crud.crud_monitored import create_or_update_monitored_product_scraped, get_monitored_product_by_user_and_url
-from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_competitors_for_monitored
+from market_alert.collectors.dispatch.collection_enqueue import enqueue_competitors_for_monitored
 from market_alert.collectors.services.scraper_common import (
     compute_force_refresh,
     ensure_price,

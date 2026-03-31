@@ -23,7 +23,7 @@ class CollectionIntervalContract:
 
 @dataclass(frozen=True)
 class LifecycleStatsContract:
-    """Representa estatísticas agregadas do ciclo de vida."""
+    """ Representa estatísticas agregadas do ciclo de vida."""
 
     total_checks: int
     total_failures: int
@@ -31,7 +31,7 @@ class LifecycleStatsContract:
 
 @runtime_checkable
 class ActivationLifecycleContract(Protocol):
-    """Capacidade de ativar ou desativar uma entidade monitorada."""
+    """ Capacidade de ativar ou desativar uma entidade monitorada."""
 
     def activate(self, product_id: UUID) -> None:
         """Ativa o monitoramento para o produto informado."""
@@ -41,7 +41,7 @@ class ActivationLifecycleContract(Protocol):
 
 @runtime_checkable
 class ProductLifecycleContract(Protocol):
-    """Contrato mínimo de lifecycle para monitorados e concorrentes."""
+    """ Contrato mínimo de lifecycle para monitorados e concorrentes."""
 
     def resolve_interval(self, product_id: UUID) -> CollectionIntervalContract:
         """Calcula o próximo intervalo de coleta para o produto."""

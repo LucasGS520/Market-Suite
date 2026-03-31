@@ -32,33 +32,30 @@ from shared.infra.db import SessionLocal
 from shared.exceptions import ScraperError
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, MonitoredProductCreateScraping
 from shared.schemas.shared_schemas_scraper import ScrapeResult
-from shared.clients.scraper_client import ScraperClientError
+from shared.schemas.shared_schemas_orchestrator import validate_payload as validate_collection_payload
+from shared.clients.scraper.scraper_client import ScraperClientError
 from shared.utils.trace_context import set_trace_id
 from shared.utils.redis_client import is_scraping_suspended
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.config_alert import settings
-from market_alert.infraestructure.celery.celery_app import celery_app
-from market_alert.infraestructure.celery.dlq_base_task import DLQTask
-from market_alert.infraestructure.celery.retry_policies import COLLECTION_RETRY
-from market_alert.infraestructure.celery.retry_policies import RetryPolicy
-from market_alert.infraestructure.resilience.rate_limiter import (
+from market_alert.infrastructure.celery.celery_app import celery_app
+from market_alert.infrastructure.celery.dlq_base_task import DLQTask
+from market_alert.infrastructure.celery.retry_policies import COLLECTION_RETRY
+from market_alert.infrastructure.celery.retry_policies import RetryPolicy
+from market_alert.infrastructure.resilience.rate_limiter import (
     _increment_invalid_url_attempt,
     _increment_temporary_failure_attempt,
     _register_scrape_cooldown,
     _reset_invalid_url_attempt,
     _reset_temporary_failure_attempt,
 )
-from market_alert.schemas.schemas_collection_payload import validate_payload as validate_collection_payload
 from market_alert.products.crud.crud_monitored import (
     activate_pending_monitored,
     get_monitored_product_by_id,
     mark_monitored_product_failed,
 )
-from market_alert.products.crud.crud_competitor import (
-    get_competitor_by_id,
-    update_competitor_pause_state,
-)
+from market_alert.products.crud.crud_competitor import get_competitor_by_id, update_competitor_pause_state
 from market_alert.collectors.services.services_scraper_competitor import scrape_competitor_product
 from market_alert.collectors.services.services_scraper_monitored import scrape_monitored_product
 from market_alert.collectors.utils.collector_result import (

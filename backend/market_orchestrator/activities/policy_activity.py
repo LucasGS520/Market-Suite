@@ -1,4 +1,4 @@
-"""Activity Temporal para buscar a política atual do monitoramento."""
+""" Activity Temporal para buscar a política atual do monitoramento. """
 from __future__ import annotations
 
 import structlog
@@ -25,7 +25,7 @@ _FALLBACK_OUTPUT = PolicyActivityOutput(
 
 @activity.defn(name="fetch_monitored_policy")
 async def fetch_monitored_policy(monitored_id: str) -> PolicyActivityOutput:
-    """Lê política/estado do monitorado no banco e computa o agendamento real.
+    """ Lê política/estado do monitorado no banco e computa o agendamento real.
 
     Retorna intervalo calculado pela lógica de estabilidade (shared.scheduling),
     sem fallback hardcoded de 3600s. Inclui stability_score e scheduling_reason

@@ -31,7 +31,7 @@ from shared.utils.url_validation import normalize_and_validate_product_url
 from shared.utils.redis_locks import acquire_product_lock, release_product_lock
 
 from market_alert.core.config_alert import settings
-from market_alert.infraestructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
+from market_alert.infrastructure.resilience.rate_limiter import allow_with_leaky_bucket, parse_rate_limit_config
 from market_alert.models import MonitoredProduct, User
 from market_alert.schemas.schemas_products import (
     MonitoredPausedUpdateRequest,
@@ -52,13 +52,13 @@ from market_alert.products.crud.crud_monitored import (
 )
 from market_alert.comparisons.crud.crud_comparison import get_latest_summary
 from market_alert.products.services.services_products import build_monitored_response
-from market_alert.collectors.orchestrator.collector_service_orchestrator import enqueue_collect
-from market_alert.collectors.orchestrator.payload_builders import build_monitored_payload
+from market_alert.collectors.dispatch.collection_enqueue import enqueue_collect
+from market_alert.collectors.dispatch.payload_builders import build_monitored_payload
 from market_alert.products.domain.product_lifecycle import compute_next_check_at
 
 #Import condicional: protege testes unitários e ambientes sem Temporal disponível
 try:
-    from shared.clients.orchestrator_client import get_temporal_client
+    from shared.clients.temporal.orchestrator_client import get_temporal_client
     _TEMPORAL_AVAILABLE = True
 except ImportError:
     _TEMPORAL_AVAILABLE = False

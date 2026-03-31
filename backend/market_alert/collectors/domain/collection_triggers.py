@@ -31,12 +31,9 @@ import logging
 from uuid import UUID
 
 from shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.schemas.shared_schemas_orchestrator import CollectionPayload
 
-from market_alert.schemas.schemas_collection_payload import CollectionPayload
-from market_alert.comparisons.utils.price_comparator import (
-    _parse_force_compare_,
-    dispatch_comparison_for_scrape_result,
-)
+from market_alert.comparisons.utils.price_comparator import _parse_force_compare_, dispatch_comparison_for_scrape_result
 
 
 logger = logging.getLogger(__name__)

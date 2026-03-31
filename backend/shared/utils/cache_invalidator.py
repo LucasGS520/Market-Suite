@@ -24,7 +24,7 @@ from shared.infra.cache_strategy import invalidate, invalidate_pattern
 logger = structlog.get_logger(__name__)
 
 def invalidate_product_cache(product_id: int | str) -> None:
-    """Invalida todo o cache de um produto monitorado.
+    """ Invalida todo o cache de um produto monitorado.
 
     Deve ser chamado após qualquer escrita que afete:
       - current_price em MonitoredProduct
@@ -39,15 +39,15 @@ def invalidate_product_cache(product_id: int | str) -> None:
     invalidate_pattern(pattern)
 
 def invalidate_product_price(product_id: int | str) -> None:
-    """Invalida apenas o cache de preço de um produto monitorado."""
+    """ Invalida apenas o cache de preço de um produto monitorado."""
     invalidate(CacheKey.product_price(product_id))
 
 def invalidate_product_comparison(product_id: int | str) -> None:
-    """Invalida o cache de resumo de comparação de um produto monitorado."""
+    """ Invalida o cache de resumo de comparação de um produto monitorado."""
     invalidate(CacheKey.product_comparison(product_id))
 
 def invalidate_robots(host: str) -> None:
-    """Invalida o cache de robots.txt de um host específico."""
+    """  Invalida o cache de robots.txt de um host específico."""
     invalidate(CacheKey.robots_txt(host))
 
 

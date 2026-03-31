@@ -18,7 +18,11 @@ from shared.utils.url_validation import (
     check_url_compatibility as shared_check_url_compatibility,
     normalize_product_url as shared_normalize_product_url,
 )
-from shared.schemas import ErrorResponse, ParserRequest, ParserResponse
+from shared.schemas.shared_schemas_scraper import (
+    ErrorResponse,
+    ParserRequest,
+    ParserResponse,
+)
 
 from market_scraper.routes.response_helpers import (
     _http_error,

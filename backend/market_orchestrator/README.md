@@ -13,8 +13,7 @@ O módulo não expõe API HTTP propria. Ele funciona como camada de orquestraç�
 - **Separar decisao de execucao**: workflow decide estados e temporização; activities fazem I/O (DB, Redis, enqueue Celery).
 - **Garantir reação a eventos de ciclo de vida** via signals (`pause`, `resume`, `delete`, `competitor_changed`, `update_policy`).
 - **Persistir snapshot operacional** do estado do workflow no Redis para observabilidade.
-- **Reconciliar monitorados ativos com workflows vivos** para reduzir gaps apos restart/falhas.
-- **Fornecer cliente adaptador para o dominio** (`TemporalOrchestrationClient`) com wrappers sincronos e fallback não bloqueante.
+- **Expor contracts, workflow e activities para execucao do worker Temporal** sem depender de `market_alert`.
 
 ## Estrutura do Diretório
 ```text
@@ -25,8 +24,6 @@ market_orchestrator/
 |   |-- snapshot_activity.py    # Persiste/limpa snapshot no Redis
 |   |-- policy_activity.py      # Le politica atual do monitorado
 |   `-- __init__.py             # Exporta activities para registro no worker
-|-- alert/
-|   `-- alert_client.py         # TemporalOrchestrationClient + singleton
 |-- core/
 |   `-- config_orchestrator.py  # OrchestratorSettings e variaveis de ambiente
 |-- enums/
@@ -34,7 +31,6 @@ market_orchestrator/
 |-- schemas/                    # Dataclasses de input/signals/snapshot/policy
 |-- workflow.py                 # MonitoredProductWorkflow (deterministico)
 |-- worker.py                   # Bootstrap do Temporal Worker
-|-- reconciler.py               # WorkflowReconciler para convergencia
 |-- requirements-orchestrator.txt
 `-- .env.market_orchestrator
 ```
@@ -53,9 +49,9 @@ Essa separação preserva o pipeline operacional existente e adiciona governanç
 - [`workflow.py`](workflow.py): implementa `MonitoredProductWorkflow` com loop de estados e regras de determinismo (sem I/O direto).
 - [`activities/`](activities/): camada de integração externa chamada pelo workflow.
 - [`worker.py`](worker.py): registra workflow + activities na task queue Temporal configurada.
-- [`reconciler.py`](reconciler.py): garante workflow para todo monitorado ativo (`paused=False`).
-- [`alert/alert_client.py`](alert/alert_client.py): re-exportador de `shared.clients.orchestrator_client` (backward compat). Fonte canônica em [`../shared/clients/orchestrator_client.py`](../shared/clients/orchestrator_client.py).
 - [`core/config_orchestrator.py`](core/config_orchestrator.py): configuração central e validações de ambiente.
+- Cliente Temporal canônico consumido pelo domínio: [`../shared/clients/temporal/orchestrator_client.py`](../shared/clients/temporal/orchestrator_client.py).
+- Reconciliação de workflows: [`../market_alert/infraestructure/temporal/reconciler.py`](../market_alert/infraestructure/temporal/reconciler.py), acionada pelo startup da API e pela task periódica de `market_alert`.
 
 ### Estados do Workflow
 | Estado | Papel | Transições principais |
@@ -86,13 +82,25 @@ Todas as activities retornam tipos tipados de `shared.schemas.shared_schemas_orc
 
 | Activity | Funcao | Retorno | Integração principal |
 |----------|--------|---------|----------------------|
-| `dispatch_collection` | Busca URL do monitorado no BD e enfileira coleta | `DispatchActivityOutput` | SQL direto em `monitored_products`; `market_alert.collectors.orchestrator.enqueue_collect` (acoplamento temporário — ver nota abaixo) |
+| `dispatch_collection` | Busca URL do monitorado no BD e enfileira coleta | `DispatchActivityOutput` | SQL direto em `monitored_products`; `shared.clients.celery.task_dispatcher.send_collection_task()` — sem import de `market_alert` |
 | `query_collection_status` | Infere conclusão da coleta comparando `last_scraped_at` com o timestamp de dispatch | `QueryStatusOutput` | SQL direto em `monitored_products`; timestamp de dispatch lido do Redis |
 | `fetch_monitored_policy` | Calcula agendamento real baseado em estabilidade | `PolicyActivityOutput` | SQL direto em `monitored_products`; `shared.scheduling.calculate_schedule()` |
 | `persist_workflow_snapshot` | Salva snapshot de estado no Redis | `None` | chave `workflow:snapshot:{monitored_id}` |
 | `cleanup_workflow_state` | Remove estado transitário | `None` | delete da chave de snapshot |
 
-> **Nota — acoplamento residual:** `dispatch_collection` ainda importa `enqueue_collect` de `market_alert` de forma lazy. Este é o único import de `market_alert` restante no módulo. A eliminação definitiva requer mover `CollectionEnqueuer` para `shared.infra.celery`.
+**Timeouts e retries das activities** (configurados em `core/config_orchestrator.py`):
+
+| Activity | Timeout | Retry |
+|----------|---------|-------|
+| `dispatch_collection` | 30s (`ACTIVITY_DISPATCH_TIMEOUT_SECONDS`) | 5 tentativas, backoff 10s→5min |
+| `query_collection_status` | 15s | 5 tentativas |
+| `fetch_monitored_policy` | 15s | 5 tentativas |
+| `persist_workflow_snapshot` | 10s | 5 tentativas |
+| `cleanup_workflow_state` | 10s | 5 tentativas |
+
+**Responsabilidade de retry por camada (não misturar):**
+- **Temporal** (`_DEFAULT_RETRY` em `workflow.py`): retentar falhas de *activity* (Redis temporariamente indisponível, timeout de DB).
+- **Celery** (`COLLECTION_RETRY` em `retry_policies.py`): retentar falhas de *execução de scraping* (lock concorrente, I/O HTTP).
 
 ---
 
@@ -228,56 +236,29 @@ As definicoes estao em [`../../docker-compose.yml`](../../docker-compose.yml).
 
 ---
 
-## Troubleshooting
+## Fronteiras de Domínio
 
-### Erro: "There is no current event loop in thread"
+### Matriz de Responsabilidade
 
-**Sintoma:** `RuntimeError: There is no current event loop in thread 'AnyIO worker thread'` nos logs da API ao chamar `signal_with_start_sync()`, `signal_sync()` ou `query_sync()`. As coroutines podem aparecer como "never awaited" no mesmo log.
+| Módulo | Pode depender de | NÃO pode depender de |
+|--------|-----------------|----------------------|
+| `market_orchestrator` | `shared` (contratos, infra, utils) | `market_alert` (acoplamento proibido); `market_scraper` |
+| `market_alert` | `shared` | internals de `market_orchestrator` fora de adaptador |
+| `market_scraper` | `shared` | `market_alert`; `market_orchestrator` |
+| `shared` | bibliotecas externas | qualquer serviço específico |
 
-**Causa raiz:** `asyncio.get_event_loop()` (versão anterior) levantava `RuntimeError` em threads AnyIO porque essas threads não têm event loop padrão configurado. A tentativa de fallback com `asyncio.run()` dentro de uma `ThreadPoolExecutor` criava um novo loop isolado em vez de reutilizar o loop principal do FastAPI.
+### Regras Obrigatórias
 
-**Solução aplicada** em `alert/alert_client.py`, método `_run_async()`:
-```python
-try:
-    loop = asyncio.get_running_loop()          # seguro: retorna o loop existente ou levanta RuntimeError
-    future = asyncio.run_coroutine_threadsafe(coro, loop)  # submete ao loop existente
-    return future.result(timeout=30)
-except RuntimeError:
-    return asyncio.run(coro)                   # fallback: contexto puramente síncrono
-except concurrent.futures.TimeoutError:
-    logger.error("temporal_client_run_async_timeout", timeout_seconds=30)
-    return None
-```
+- **`market_orchestrator` NÃO importa `market_alert`** — esta é a regra mais crítica do domínio. Toda integração com lógica de negócio é feita via contrato neutro ou injeção.
+- **Activities acessam banco via SQL direto** (`sqlalchemy.text`) sem importar modelos ORM de `market_alert`.
+- **Enqueue de coleta** deve ser feito via interface injetável neutra, não via import direto de `market_alert.collectors`.
+- **`shared` não importa nenhum serviço específico** — é infraestrutura neutra.
 
-**Como verificar que foi resolvido:** após reiniciar os serviços, buscar `temporal_workflow_signal_succeeded` nos logs da API — presença desse evento confirma que os sinais estão chegando ao Temporal sem erro.
+### Estado Atual de Acoplamentos Documentados
 
-**Atenção:** `future.result(timeout=30)` bloqueia a thread AnyIO chamante. Em carga muito alta com muitas chamadas simultâneas ao cliente Temporal, isso pode gerar contenção no pool de threads do FastAPI. Monitorar latência de endpoints que disparam sinais (`POST /monitored/scrape`, `PUT /monitored/{id}/paused`, etc.) em produção.
-
-### Erro: "Connection refused" ao conectar ao Temporal (127.0.0.1:7233)
-
-**Sintoma:** `temporal_client_unreachable` ou `temporal_client_connect_attempt_failed` nos logs com `error: "Connection refused"` apontando para `127.0.0.1:7233` ou `localhost:7233`.
-
-**Causa raiz:** `TEMPORAL_HOST` não foi carregado do ambiente do processo — o valor default `"localhost"` foi usado. Em Docker, containers não se alcançam via `localhost`; o hostname deve ser o nome do serviço no compose (`temporal`).
-
-**Checklist de diagnóstico:**
-1. Verificar se `TEMPORAL_HOST=temporal` está em `.env.common` (linha obrigatória para Docker).
-2. Confirmar que o serviço `temporal` está no mesmo network (`monitoring-net`) que API e workers.
-3. Validar que o profile `temporal` está ativo no `docker-compose up` (`--profile temporal`).
-4. Testar o endpoint `GET /health/temporal` — retorna `{ "status": "healthy" }` quando conectado.
-5. Nos logs do worker Celery, buscar `temporal_worker_thread_started` seguido de `temporal_worker_connecting` e depois `temporal_worker_started`. Ausência de `temporal_worker_started` indica falha de conexão; o worker tentará novamente com backoff `[2, 4, 8, 16, 30]s`.
-
-**Como confirmar resolução:** evento `temporal_worker_started` nos logs do worker + `temporal_signal_with_start_attempt` seguido de `temporal_workflow_signal_succeeded` nos logs da API ao criar um monitoramento.
-
-### Worker Temporal não inicia (thread daemon morre silenciosamente)
-
-**Sintoma:** `temporal_worker_thread_started` aparece nos logs, mas `temporal_worker_started` nunca aparece. Workflows nunca chegam ao Temporal UI.
-
-**Causa:** falha na conexão inicial de `start_temporal_worker()`. O worker tentará até 5 vezes com backoff exponencial antes de desistir (log final: `temporal_worker_connect_failed_giving_up`).
-
-**Ações:**
-1. Verificar `TEMPORAL_HOST` conforme checklist acima.
-2. Confirmar que o container `temporal` está `healthy` antes dos workers subirem (considere `depends_on: temporal: condition: service_healthy` para workers em dev).
-3. Após corrigir, reiniciar o container do worker Celery — a thread daemon não é reiniciada automaticamente após falha.
+| Arquivo | Acoplamento existente | Ação necessária |
+|---------|-----------------------|----------------|
+| ~~`activities/dispatch_activity.py:82`~~ | ~~`from market_alert...enqueue_collect`~~ | **Resolvido** — usa `shared.clients.celery.task_dispatcher.send_collection_task` |
 
 ---
 

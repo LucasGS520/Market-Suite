@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
 
-from market_alert.infraestructure.security.auth_context import get_current_user
+from market_alert.infrastructure.security.auth_context import get_current_user
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_users import UserCreate, UserResponse, UserUpdate
 from market_alert.users.services import (

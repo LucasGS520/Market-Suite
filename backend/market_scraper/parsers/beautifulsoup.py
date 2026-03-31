@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """ Funções de parsing utilizando BeautifulSoup
 
 O objetivo do módulo é oferecer um ponto único para extração simples
@@ -17,6 +15,8 @@ Exemplo
 >>> parse_with_beautifulsoup(html, url="https://loja.test/notebook")
 {'name': 'Notebook ABC', 'current_price': 'R$ 5.999,90', 'url': 'https://loja.test/notebook'}
 """
+
+from __future__ import annotations
 
 import re
 

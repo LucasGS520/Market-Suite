@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from shared.infra.db import get_db
 
-from market_alert.infraestructure.security.auth_context import get_current_user
+from market_alert.infrastructure.security.auth_context import get_current_user
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_settings import (
     NotificationSettings,
@@ -38,7 +38,6 @@ def get_settings_summary(
     response = get_settings_overview(db, current_user)
     logger.info("route_completed", path = request.url.path, method=request.method, status="success", user_id=str(current_user.id))
     return response
-
 
 @router.get("/profile", response_model=SettingsProfileResponse)
 def get_profile(

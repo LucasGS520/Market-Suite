@@ -27,9 +27,9 @@ import structlog
 from shared.infra.db import SessionLocal
 from shared.utils.trace_context import set_trace_id
 
-from market_alert.infraestructure.celery.celery_app import celery_app
-from market_alert.infraestructure.celery.dlq_base_task import DLQTask
-from market_alert.infraestructure.celery.retry_policies import NOTIFICATION_RETRY
+from market_alert.infrastructure.celery.celery_app import celery_app
+from market_alert.infrastructure.celery.dlq_base_task import DLQTask
+from market_alert.infrastructure.celery.retry_policies import NOTIFICATION_RETRY
 from market_alert.notifications.services.services_notifications import process_notification
 
 

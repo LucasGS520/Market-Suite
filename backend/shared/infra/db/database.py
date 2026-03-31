@@ -1,4 +1,4 @@
-"""Configuração de engine e sessões com SQLAlchemy.
+""" Configuração de engine e sessões com SQLAlchemy.
 
 Este módulo cria o engine do SQLAlchemy e a fábrica de sessões que será
 utilizada por toda a aplicação. também define funções utilitárias e eventos

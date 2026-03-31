@@ -1,4 +1,4 @@
-"""Ferramenta de diagnóstico para investigar respostas ``no_result`` do scraper.
+""" Ferramenta de diagnóstico para investigar respostas ``no_result`` do scraper.
 
 O script reproduz a identidade HTTP do serviço oficial, baixa o HTML bruto
 recebido para cada URL, executa os parsers principais e registra os motivos
@@ -27,10 +27,9 @@ from market_scraper.services.pipeline_factory import build_context, create_pipel
 
 ParserFn = Callable[[str, str], dict[str, Any] | None]
 
-
 @dataclass(slots=True)
 class ParserReport:
-    """Representa o estado final de um parser após validação de qualidade."""
+    """ Representa o estado final de um parser após validação de qualidade."""
 
     status: str
     raw_payload: dict[str, Any] | None
@@ -39,7 +38,7 @@ class ParserReport:
     error: str | None
 
     def to_dict(self) -> dict[str, Any]:
-        """Converte o relatório para dicionário serializável em JSON."""
+        """ Converte o relatório para dicionário serializável em JSON."""
 
         payload: dict[str, Any] = {"status": self.status}
         if self.raw_payload is not None:
@@ -52,12 +51,11 @@ class ParserReport:
             payload["error"] = self.error
         return payload
 
-
 class DiagnosticValidator(DataQualityValidator):
-    """Extensão do validador que registra o último motivo de rejeição."""
+    """ Extensão do validador que registra o último motivo de rejeição."""
 
     def __init__(self) -> None:
-        """Inicializa estado interno para registrar rejeições detectadas."""
+        """ Inicializa estado interno para registrar rejeições detectadas."""
 
         super().__init__()
         self._last_issue: dict[str, str] | None = None
@@ -70,7 +68,7 @@ class DiagnosticValidator(DataQualityValidator):
         url: str,
         source: str,
     ) -> dict[str, str] | None:
-        """Limpa o estado anterior e delega validação à implementação base."""
+        """ Limpa o estado anterior e delega validação à implementação base."""
 
         #Zeramos o cache para garantir que o próximo relatório corresponda ao parser atual
         self._last_issue = None
@@ -94,7 +92,7 @@ class DiagnosticValidator(DataQualityValidator):
         parser_name: str | None = None,
         dump_path: str | None = None,
         ) -> None:  # type: ignore[override]
-        """Salva o motivo de rejeição antes de propagar o registro padrão."""
+        """ Salva o motivo de rejeição antes de propagar o registro padrão."""
 
         #Capturamos dados mínimos para explicar a decisão sem precisar inspecionar logs
         self._last_issue = {
@@ -116,15 +114,14 @@ class DiagnosticValidator(DataQualityValidator):
         )
 
     def consume_issue(self) -> dict[str, str] | None:
-        """Devolve o último motivo registrado e limpa o estado interno."""
+        """ Devolve o último motivo registrado e limpa o estado interno."""
 
         issue = self._last_issue
         self._last_issue = None
         return issue
 
-
 def _build_timeout() -> httpx.Timeout:
-    """Replica timeouts configurados no serviço para aproximar o cenário real."""
+    """ Replica timeouts configurados no serviço para aproximar o cenário real."""
 
     #Utilizamos a mesma granularidade de tempo para evitar falsos negativos em diagnósticos
     return httpx.Timeout(
@@ -134,9 +131,8 @@ def _build_timeout() -> httpx.Timeout:
         pool=settings.SCRAPER_HTTP_TIMEOUT_POOL,
     )
 
-
 def _build_limits() -> httpx.Limits:
-    """Retorna limites de conexão equivalentes aos do scraper oficial."""
+    """ Retorna limites de conexão equivalentes aos do scraper oficial."""
 
     #Limitamos conexões simultâneas para manter a carga próxima da produção
     return httpx.Limits(
@@ -144,9 +140,8 @@ def _build_limits() -> httpx.Limits:
         max_keepalive_connections=settings.SCRAPER_HTTP_MAX_KEEPALIVE,
     )
 
-
 def _build_referer(url: str) -> str | None:
-    """Monta o header Referer seguindo o template configurado via ambiente."""
+    """ Monta o header Referer seguindo o template configurado via ambiente."""
 
     template = settings.SCRAPER_HEADERS_REFERER_TEMPLATE
     if not template:
@@ -163,26 +158,23 @@ def _build_referer(url: str) -> str | None:
         #Mantemos tolerância: templates inválidos não devem interromper o diagnóstico
         return None
 
-
 def _compose_headers(url: str) -> dict[str, str]:
-    """Reproduz o conjunto de headers oficiais do serviço."""
+    """ Reproduz o conjunto de headers oficiais do serviço."""
 
     user_agent = get_user_agent(url)
     #Incluímos Referer apenas quando configurado, reproduzindo o comportamento do pipeline
     referer = _build_referer(url)
     return compose_headers(user_agent, referer=referer)
 
-
 def _format_excerpt(html: str, length: int = 2048) -> str:
-    """Gera trecho compacto do HTML para inspeção manual em logs."""
+    """ Gera trecho compacto do HTML para inspeção manual em logs."""
 
     #Removemos quebras de linha para facilitar visualização em ferramentas de log
     excerpt = html[:length]
     return excerpt.replace("\n", " ").replace("\r", " ")
 
-
 def _save_dump(content: bytes, output_dir: Path, url: str) -> Path:
-    """Persiste o HTML bruto em disco utilizando hash para rastreabilidade."""
+    """ Persiste o HTML bruto em disco utilizando hash para rastreabilidade."""
 
     digest = hashlib.sha256(content).hexdigest()
     parsed = urlparse(url)
@@ -196,7 +188,7 @@ def _save_dump(content: bytes, output_dir: Path, url: str) -> Path:
     return target_path
 
 def _prepare_output_dir(output_dir: Path) -> None:
-    """Garante que o diretório de saída esteja limpo antes de um novo diagnóstico."""
+    """ Garante que o diretório de saída esteja limpo antes de um novo diagnóstico."""
 
     if output_dir.exists():
         for item in output_dir.iterdir():
@@ -214,7 +206,7 @@ def _run_parsers(
     *,
     parsers: dict[str, ParserFn] | None = None,
 ) -> dict[str, Any]:
-    """Executa parsers configurados e aplica validação de qualidade."""
+    """ Executa parsers configurados e aplica validação de qualidade."""
 
     if parsers is None:
         try:
@@ -285,7 +277,6 @@ def _run_parsers(
 
     return results
 
-
 def _build_response_summary(
     url: str,
     response: httpx.Response,
@@ -293,7 +284,7 @@ def _build_response_summary(
     *,
     validator: DiagnosticValidator,
 ) -> dict[str, Any]:
-    """Cria dicionário consolidado com metadados e resultados de parsing."""
+    """ Cria dicionário consolidado com metadados e resultados de parsing."""
 
     html = response.text
     excerpt = _format_excerpt(html)
@@ -310,9 +301,8 @@ def _build_response_summary(
         "parsers": parsers_summary,
     }
 
-
 def _load_urls(urls: Iterable[str], *, input_file: Path | None) -> list[str]:
-    """Combina URLs passadas por CLI com entradas lidas de arquivo."""
+    """ Combina URLs passadas por CLI com entradas lidas de arquivo."""
 
     collected = [item.strip() for item in urls if item.strip()]
     if input_file is not None and input_file.exists():
@@ -327,9 +317,8 @@ def _load_urls(urls: Iterable[str], *, input_file: Path | None) -> list[str]:
             seen.add(item)
     return deduplicated
 
-
 def _parse_args() -> argparse.Namespace:
-    """Interpreta parâmetros CLI e prepara objetos auxiliares."""
+    """ Interpreta parâmetros CLI e prepara objetos auxiliares."""
 
     parser = argparse.ArgumentParser(
         description=(
@@ -355,9 +344,8 @@ def _parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
-
 def _build_client() -> httpx.AsyncClient:
-    """Cria cliente HTTPx configurado com limites e timeouts oficiais."""
+    """ Cria cliente HTTPx configurado com limites e timeouts oficiais."""
 
     #Ativamos follow_redirects para reproduzir o comportamento do pipeline de produção
     return httpx.AsyncClient(
@@ -367,9 +355,8 @@ def _build_client() -> httpx.AsyncClient:
         max_redirects=settings.SCRAPER_HTTP_MAX_REDIRECTS,
     )
 
-
 def _response_error_summary(url: str, error: Exception) -> dict[str, Any]:
-    """Gera resumo padronizado quando o download da página falha."""
+    """ Gera resumo padronizado quando o download da página falha."""
 
     return {
         "url": url,
@@ -377,7 +364,7 @@ def _response_error_summary(url: str, error: Exception) -> dict[str, Any]:
     }
 
 async def _run_pipeline_with_html(url: str, html: str) -> dict[str, Any]:
-    """Executa o pipeline oficial reutilizando um HTML já capturado."""
+    """ Executa o pipeline oficial reutilizando um HTML já capturado."""
 
     pipeline = create_pipeline()
     context = build_context(url)
@@ -411,7 +398,7 @@ async def diagnose_url(
     *,
     validator: DiagnosticValidator,
 ) -> dict[str, Any]:
-    """Executa diagnóstico completo para uma URL e retorna o relatório."""
+    """ Executa diagnóstico completo para uma URL e retorna o relatório."""
 
     headers = _compose_headers(url)
     try:
@@ -423,9 +410,8 @@ async def diagnose_url(
     dump_path = _save_dump(response.content, output_dir, url)
     return _build_response_summary(url, response, dump_path, validator=validator)
 
-
 async def run_diagnostics(urls: list[str], output_dir: Path) -> list[dict[str, Any]]:
-    """Orquestra diagnósticos para todas as URLs informadas."""
+    """ Orquestra diagnósticos para todas as URLs informadas."""
 
     if not urls:
         return []
@@ -439,9 +425,8 @@ async def run_diagnostics(urls: list[str], output_dir: Path) -> list[dict[str, A
             reports.append(report)
     return reports
 
-
 def main() -> None:
-    """Ponto de entrada CLI para geração dos relatórios de diagnóstico."""
+    """ Ponto de entrada CLI para geração dos relatórios de diagnóstico."""
 
     args = _parse_args()
     _prepare_output_dir(args.output_dir)
