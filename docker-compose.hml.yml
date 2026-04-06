@@ -197,7 +197,7 @@ services:
       - PYTHONPATH=/market_alert
     command:
       - uvicorn
-      - "main:app"
+      - "market_alert.main:app"
       - "--host"
       - "0.0.0.0"
       - "--port"

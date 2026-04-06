@@ -23,8 +23,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY --from=shared_ctx . ./shared/
 
 # ETAPA 3: Copiar código (mudanças aqui não afetam layer anterior)
-COPY backend/market_alert .
+COPY backend/market_alert ./market_alert/
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "market_alert.main:app", "--host", "0.0.0.0", "--port", "8000"]
