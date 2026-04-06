@@ -2,7 +2,7 @@
 
 import json as _json
 import os
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from shared.core.config_base import ConfigBase
 
@@ -26,7 +26,16 @@ class Settings(ConfigBase):
     """ Configurações específicas do serviço market_alert """
 
     #Origens permitidas para CORS — obrigatório definir FRONTEND_ORIGINS no ambiente
-    FRONTEND_ORIGINS: list[str] = _parse_origins(os.getenv("FRONTEND_ORIGINS", ""))
+    FRONTEND_ORIGINS: list[str] = Field(default_factory=list)
+
+    @field_validator("FRONTEND_ORIGINS", mode="before")
+    @classmethod
+    def _parse_frontend_origins(cls, v: object) -> list[str]:
+        if isinstance(v, list):
+            return [str(i) for i in v if i]
+        if isinstance(v, str):
+            return _parse_origins(v)
+        return []
 
     @model_validator(mode="after")
     def _require_frontend_origins(self) -> "Settings":
