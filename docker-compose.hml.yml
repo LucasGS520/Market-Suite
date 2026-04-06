@@ -420,7 +420,7 @@ services:
     expose:
       - "5173"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-check-certificate -qO- http://localhost:5173 >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "nginx -t && wget --no-check-certificate -qO- https://127.0.0.1/health"]
       interval: 10s
       timeout: 5s
       retries: 3
