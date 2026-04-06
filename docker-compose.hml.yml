@@ -119,7 +119,7 @@ services:
     environment:
       - ENV_FILE=.env.market_alert
       - PYTHONPATH=/market_alert
-    working_dir: /market_alert
+    working_dir: /market_alert/market_alert
     command:
       - alembic
       - "-c"
