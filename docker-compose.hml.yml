@@ -203,11 +203,11 @@ services:
       - "--port"
       - "8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
       interval: 20s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     expose:
       - "8000"
     depends_on:
@@ -216,6 +216,8 @@ services:
       redis:
         condition: service_healthy
       redis-init:
+        condition: service_completed_successfully
+      migrations:
         condition: service_completed_successfully
     restart: unless-stopped
     networks:
