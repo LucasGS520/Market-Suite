@@ -32,7 +32,7 @@ RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./
 
-RUN pnpm add -g serve
+RUN npm install -g serve
 EXPOSE 5173
 
 CMD ["serve", "-s", "dist", "-l", "5173"]
