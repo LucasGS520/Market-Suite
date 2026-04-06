@@ -23,7 +23,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # ETAPA 2: Instalar dependências Python (cacheado)
-COPY --from=root requirements-base.txt ./
+COPY requirements-base.txt ./
 COPY requirements-market-scraper.txt ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \

@@ -11,7 +11,7 @@ ENV PYTHONPATH=/market_alert \
 
 # ETAPA 1: Instalar dependências (este layer é cacheado)
 # Mudanças em código não invalidam este cache
-COPY --from=root requirements-base.txt ./
+COPY requirements-base.txt ./
 COPY requirements-market-alert.txt ./
 
 # Usar BuildKit cache para pip (evita redownload)
