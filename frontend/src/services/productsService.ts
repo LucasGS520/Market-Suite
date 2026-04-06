@@ -80,8 +80,8 @@ const normalizeCompetitorProduct = (
   })();
 
   const displayName = competitor.display_name || competitor.name || competitor.title || fallbackName;
-  const normalizedLastChecked = competitor.last_checked ?? competitor.last_scraped_at ?? null;
-  const normalizedLastScrapedAt = competitor.last_scraped_at ?? competitor.last_checked ?? null;
+  const normalizedLastChecked = competitor.last_checked ?? competitor.last_scraped_at ?? undefined;
+  const normalizedLastScrapedAt = competitor.last_scraped_at ?? competitor.last_checked ?? undefined;
   // Mantém disponibilidade coerente mesmo quando o backend retorna apenas status textual
   const inferredAvailability =
     competitor.availability === false || isUnavailableFromLastStatus(competitor.last_status)

@@ -548,7 +548,7 @@ const ProductDetail: React.FC = () => {
   /**
    * Exibe a data da última coleta com indicação de mudança de preço no ciclo mais recente
    */
-  const renderLastCollection = (): JSX.Element => {
+  const renderLastCollection = (): React.JSX.Element => {
     const formatted = renderDateTime(lastCollectedAt);
     if (!formatted || formatted === '—') {
       return <Typography variant="body1">—</Typography>;

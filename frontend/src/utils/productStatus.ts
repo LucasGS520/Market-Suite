@@ -132,7 +132,6 @@ export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStat
   if (displayStatus) {
     if (['competitive', 'attention', 'urgent'].includes(displayStatus)) {
       if (competitorsWithPrice <= 0) return 'no_competitors';
-      if (availability === false) return 'inactive';
     }
     return displayStatus as MonitoredStatusKey;
   }

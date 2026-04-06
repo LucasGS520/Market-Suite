@@ -329,8 +329,8 @@ services:
   # Frontend — dev server Vite com hot-reload
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
       target: builder
     profiles:
       - ui
