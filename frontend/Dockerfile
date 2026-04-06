@@ -6,13 +6,13 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
 #Copiar arquivos de dependências
-COPY package.json pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
 
 #Instalar dependências (cacheado enquanto package.json não mudar)
 RUN pnpm install --frozen-lockfile
 
 #Copiar código fonte
-COPY . .
+COPY frontend ./
 
 # Build de produção — VITE_API_URL obrigatório; falha explicitamente se ausente
 ARG VITE_API_URL
