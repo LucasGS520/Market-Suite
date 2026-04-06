@@ -1,6 +1,5 @@
 """ Carrega variáveis de ambiente específicas do serviço `market_alert` """
 
-import json as _json
 import os
 from pydantic import Field, field_validator, model_validator
 
@@ -9,41 +8,31 @@ from shared.core.config_base import ConfigBase
 
 __all__ = ["Settings", "settings"]
 
-def _parse_origins(raw: str) -> list[str]:
-    """Aceita JSON array ou CSV: '["a","b"]' ou 'a,b'."""
-    raw = raw.strip()
-    if raw.startswith("["):
-        try:
-            parsed = _json.loads(raw)
-            if isinstance(parsed, list):
-                return [o for o in parsed if isinstance(o, str) and o]
-        except _json.JSONDecodeError:
-            pass
-    return [o.strip() for o in raw.split(",") if o.strip()]
-
 
 class Settings(ConfigBase):
     """ Configurações específicas do serviço market_alert """
 
-    #Origens permitidas para CORS — obrigatório definir FRONTEND_ORIGINS no ambiente
-    FRONTEND_ORIGINS: list[str] = Field(default_factory=list)
+    #Origem permitida para CORS — URL única sem barra final (ex.: https://app.exemplo.com)
+    FRONTEND_ORIGINS: str = ""
 
     @field_validator("FRONTEND_ORIGINS", mode="before")
     @classmethod
-    def _parse_frontend_origins(cls, v: object) -> list[str]:
-        if isinstance(v, list):
-            return [str(i) for i in v if i]
-        if isinstance(v, str):
-            return _parse_origins(v)
-        return []
+    def _strip_origin(cls, v: object) -> str:
+        return str(v).strip().rstrip("/") if v else ""
 
     @model_validator(mode="after")
     def _require_frontend_origins(self) -> "Settings":
-        if not self.FRONTEND_ORIGINS:
+        origin = self.FRONTEND_ORIGINS
+        if not origin:
             raise ValueError(
                 "FRONTEND_ORIGINS não definido ou vazio. "
                 "Defina a variável de ambiente antes de iniciar o serviço. "
-                "Exemplo: FRONTEND_ORIGINS='[\"https://app.seudominio.com\"]'"
+                "Exemplo: FRONTEND_ORIGINS=https://app.seudominio.com"
+            )
+        if not (origin.startswith("http://") or origin.startswith("https://")):
+            raise ValueError(
+                f"FRONTEND_ORIGINS deve ser uma URL com esquema http:// ou https://. "
+                f"Valor recebido: '{origin}'"
             )
         return self
 
