@@ -1,4 +1,4 @@
-# Claude — Correção Camada de Inicialização
+# Claude — Preparação e Alinhamento de Configurações
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -17,12 +17,30 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Objetivo e Estratégias
+## Objetivo e Problemas Identificados
 
-O backend está estruturado como um ecossistema modular com separação funcional clara entre domínio de negócio, orquestração durável, scraping e camada compartilhada.
-O desenho predominante está alinhado ao modelo ideal declarado no projeto, com integração entre módulos baseada em contratos e clientes comuns.
+---
 
-O estado atual mostra um acoplamento geral controlado, com algumas exceções explícitas e documentadas de dependência cruzada (principalmente envolvendo shared, market_alert e market_orchestrator), mantendo o funcionamento conjunto do sistema em uma arquitetura distribuída por responsabilidades.
+## Análise de Riscos e Decisões Chave
+
+### Risco Principal
+**Imagens build sem shared causam falha silenciosa em homologação**
+
+*Mitigação*:
+- Refatorar Dockerfiles para copiar `shared/` explicitamente.
+
+### Risco Secundário
+**Nginx roteia para localhost dentro container → 502 Bad Gateway**
+
+*Mitigação*:
+- Usar nomes de serviço Docker como upstream (market_alert, frontend).
+
+### Risco Terceiro
+**Scripts não versionados geram reprodutibilidade fraca**
+
+*Mitigação*:
+- Mover scripts críticos para pasta versionada.
+- Adicionar documentação de execução no repositório.
 
 ---
 

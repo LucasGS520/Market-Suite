@@ -7,37 +7,23 @@ import {
 
 /**
  * Cliente HTTP centralizado para a aplicação frontend.
- * - Configura baseURL a partir da variável de ambiente VITE_API_URL (com fallback).
+ * - Configura baseURL a partir de VITE_API_URL (obrigatório em staging/prod).
  * - Adiciona interceptor de request para injetar o token de acesso (Authorization: Bearer ...).
  * - Adiciona interceptor de response para tratar 401 (tentar renovar token via /auth/refresh).
  */
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  (typeof location !== 'undefined' ? `${location.protocol}//${location.hostname}:8000` : 'http://localhost:8000');
+const API_BASE_URL: string = import.meta.env.VITE_API_URL;
 
-// Ajuste resiliente: se a base configurada apontar para localhost, mas o usuário
-// está acessando o frontend por outro host (ex: 192.168.15.150), substituir
-// automaticamente o hostname para evitar que o browser tente se conectar ao
-// `localhost` da máquina remota.
-let RESOLVED_API_BASE = API_BASE_URL;
-if (typeof location !== 'undefined') {
-  try {
-    const parsed = new URL(API_BASE_URL);
-    const isLocalHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
-    const clientHostIsRemote = location.hostname && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
-    if (isLocalHost && clientHostIsRemote) {
-      parsed.hostname = location.hostname;
-      RESOLVED_API_BASE = parsed.toString().replace(/\/$/, '');
-    }
-  } catch {
-    // se não for uma URL válida, manter o valor original
-  }
+if (!API_BASE_URL) {
+  throw new Error(
+    '[api] VITE_API_URL não definido. ' +
+    'Configure a variável no arquivo .env adequado antes de executar o build.'
+  );
 }
 
 // Cliente HTTP Axios configurado com baseURL e cabeçalho padrão
 export const apiClient = axios.create({
-  baseURL: RESOLVED_API_BASE,
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -45,9 +31,9 @@ export const apiClient = axios.create({
   withCredentials: true,
 });
 
-// Em dev, logar a baseURL utilizada para facilitar diagnóstico remoto
+// Em dev, logar a baseURL utilizada para facilitar diagnóstico
 if (import.meta.env.DEV) {
-  console.debug('[api] API_BASE_URL =', API_BASE_URL, '=> RESOLVED_API_BASE =', RESOLVED_API_BASE);
+  console.debug('[api] VITE_API_URL =', API_BASE_URL);
 }
 
 /**

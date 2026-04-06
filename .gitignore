@@ -109,14 +109,17 @@ env/
 env.bak/
 venv.bak/
 
-# Environment variables — ignore real env files
+# Environment variables — TODOS ignorados, nenhum versionado
 .env
-.env.local
-.env.*.local
 .env.*
-!.env.*.example
-!.env.common  # Keep shared config
-!.env.common.example
+.env.*.local
+.env.local
+
+# Certificados TLS (nunca versionar chaves privadas)
+certs/
+*.key
+*.crt
+*.pem
 
 # Diagnostics
 diagnostics_output/
@@ -169,9 +172,8 @@ lerna-debug.log*
 *.swp
 *.swo
 
-# Backups and local scripts (do not version)
+# Backups locais (nunca versionar)
 /backups/
-/scripts/
 
 # Documentos auxiliares
 .auxiliares_documentos/

@@ -1,0 +1,349 @@
+# docker-compose.dev.yml — Serviços de aplicação para desenvolvimento local
+#
+# Requer: docker-compose.base.yml (infraestrutura: db, redis, temporal)
+#
+# Comandos oficiais de desenvolvimento:
+#   1. Carregar ambiente: `bash scripts/load_env.sh development`
+#   2. Infraestrutura + API:
+#      `docker compose -f docker-compose.base.yml -f docker-compose.dev.yml --profile api up -d`
+#   3. Infraestrutura + Workers:
+#      `docker compose -f docker-compose.base.yml -f docker-compose.dev.yml --profile workers up -d`
+#   4. Infraestrutura + Orchestrator:
+#      `docker compose -f docker-compose.base.yml -f docker-compose.dev.yml --profile orchestrator up -d`
+#   5. Dev completo:
+#      `docker compose -f docker-compose.base.yml -f docker-compose.dev.yml --profile api --profile workers --profile scraper --profile orchestrator --profile ui up -d`
+#   6. Prod: reservado para definição futura, sem compose oficial neste repositório
+#
+# Contrato operacional:
+#   - Requer docker-compose.base.yml para a infraestrutura comum.
+#   - Existe apenas para desenvolvimento local.
+#   - Pode conter build local, bind mounts, portas locais e profiles.
+#   - Não pode duplicar infraestrutura já definida na base.
+#   - Não deve carregar tuning operacional de homologação/produção.
+#   - Os `env_file` devem apontar para os ativos gerados por `scripts/load_env.sh development`.
+#   - Precedência no runtime: `.env.common` -> `.env` específico do serviço -> variáveis declaradas em `environment`.
+#
+# Profiles disponíveis: infra | api | workers | scraper | orchestrator | ui
+# O profile `infra` existe apenas para acoplar serviços auxiliares de dev, como migrações.
+
+services:
+
+  # Executa migrações Alembic (perfil infra ou api)
+  migrations:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+        shared_ctx: ./backend/shared
+    profiles:
+      - infra
+      - api
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - ./backend:/backend:ro
+    working_dir: /market_alert
+    command:
+      - alembic
+      - "-c"
+      - "alembic.ini"
+      - "upgrade"
+      - "head"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - monitoring-net
+  
+  # Mailpit — dev SMTP + UI (perfil infra)
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles:
+      - infra
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    restart: unless-stopped
+    networks:
+      - monitoring-net
+
+
+  # API principal do MarketAlert
+  market_alert:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+        shared_ctx: ./backend/shared
+    profiles:
+      - api
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+    command:
+      - uvicorn
+      - "main:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--reload"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - ./backend:/backend:ro
+    restart: unless-stopped
+    networks:
+      - monitoring-net
+  
+  
+  # Worker Temporal — orquestração durável de workflows
+  market_orchestrator:
+    build:
+      context: ./backend/market_orchestrator
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+        shared_ctx: ./backend/shared
+    profiles:
+      - orchestrator
+    env_file:
+      - .env.common
+      - ./backend/market_orchestrator/.env.market_orchestrator
+    environment:
+      - PYTHONPATH=/backend
+    command: ["python", "-m", "market_orchestrator.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+        "import asyncio; from temporalio.client import Client; asyncio.run(Client.connect('temporal:7233', namespace='default'))"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+      temporal-prober:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+
+
+  # Microserviço de scraping
+  market_scraper:
+    build:
+      context: ./backend/market_scraper
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+        shared_ctx: ./backend/shared
+    profiles:
+      - scraper
+    env_file:
+      - .env.common
+      - ./backend/market_scraper/.env.market_scraper
+    environment:
+      - ENV_FILE=.env.market_scraper
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_OPERATIONAL_DB=2
+      - PYTHONPATH=/app
+    command:
+      - uvicorn
+      - "market_scraper.main:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--reload"
+    ports:
+      - "8010:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_scraper:/app/market_scraper
+      - ./backend/shared:/app/shared:ro
+      - ./backend:/backend:ro
+    restart: unless-stopped
+    networks:
+      - monitoring-net
+  
+  
+  # Celery worker — fila scraping
+  celery-worker-scraping:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+        shared_ctx: ./backend/shared
+    profiles:
+      - workers
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+    command:
+      - celery
+      - "-A"
+      - "market_alert.infrastructure.celery.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=10"
+      - "-Q"
+      - "celery,scraping"
+    user: "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+  
+  # Celery worker — fila compare
+  celery-worker-compare:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+        shared_ctx: ./backend/shared
+    profiles:
+      - workers
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+    command:
+      - celery
+      - "-A"
+      - "market_alert.infrastructure.celery.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=4"
+      - "-Q"
+      - "compare"
+    user: "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+  
+  # Celery worker — fila notifications
+  celery-worker-notifications:
+    build:
+      context: ./backend/market_alert
+      dockerfile: Dockerfile
+      additional_contexts:
+        root: .
+        shared_ctx: ./backend/shared
+    profiles:
+      - workers
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    environment:
+      - ENV_FILE=.env.market_alert
+      - PYTHONPATH=/backend
+    command:
+      - celery
+      - "-A"
+      - "market_alert.infrastructure.celery.celery_app:celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--pool=prefork"
+      - "--concurrency=4"
+      - "-Q"
+      - "notifications"
+    user: "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./backend/market_alert:/market_alert
+      - ./backend:/backend:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+  
+  
+  # Frontend — dev server Vite com hot-reload
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: builder
+    profiles:
+      - ui
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - FRONTEND_PORT=5173
+    command: pnpm exec vite --host 0.0.0.0 --port 5173
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js
+      - ./frontend/postcss.config.js:/app/postcss.config.js
+    networks:
+      - monitoring-net
