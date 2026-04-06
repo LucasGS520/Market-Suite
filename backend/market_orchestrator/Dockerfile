@@ -8,7 +8,7 @@ ENV PYTHONPATH=/backend \
     PIP_NO_INPUT=1
 
 # Instalar dependências (layer cacheado separado do código)
-COPY requirements-orchestrator.txt ./
+COPY backend/market_orchestrator/requirements-orchestrator.txt requirements-orchestrator.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-orchestrator.txt

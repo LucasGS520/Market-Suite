@@ -24,7 +24,7 @@ RUN apt-get update && \
 
 # ETAPA 2: Instalar dependências Python (cacheado)
 COPY requirements-base.txt ./
-COPY requirements-market-scraper.txt ./
+COPY backend/market_scraper/requirements-market-scraper.txt .
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-base.txt -r requirements-market-scraper.txt
