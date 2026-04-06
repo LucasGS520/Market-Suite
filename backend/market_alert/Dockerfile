@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY --from=shared_ctx . ./shared/
 
 # ETAPA 3: Copiar código (mudanças aqui não afetam layer anterior)
-COPY . .
+COPY backend/market_alert .
 
 EXPOSE 8000
 

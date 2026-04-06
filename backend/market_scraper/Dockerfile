@@ -34,7 +34,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY --from=shared_ctx . /app/shared/
 
 # ETAPA 4: Copiar código (mudanças aqui não invalidam cache anterior)
-COPY . /app/market_scraper
+COPY backend/market_scraper .
+RUN mv requirements-market-scraper.txt /tmp/ 2>/dev/null || true
 
 EXPOSE 8000
 

@@ -18,6 +18,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY --from=shared_ctx . ./shared/
 
 # Copiar código do módulo
-COPY . ./market_orchestrator/
+COPY backend/market_orchestrator ./market_orchestrator/
 
 CMD ["python", "-m", "market_orchestrator.worker"]
