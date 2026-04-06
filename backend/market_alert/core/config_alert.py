@@ -1,5 +1,6 @@
 """ Carrega variáveis de ambiente específicas do serviço `market_alert` """
 
+import json as _json
 import os
 from pydantic import Field, model_validator
 
@@ -8,28 +9,34 @@ from shared.core.config_base import ConfigBase
 
 __all__ = ["Settings", "settings"]
 
+def _parse_origins(raw: str) -> list[str]:
+    """Aceita JSON array ou CSV: '["a","b"]' ou 'a,b'."""
+    raw = raw.strip()
+    if raw.startswith("["):
+        try:
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list):
+                return [o for o in parsed if isinstance(o, str) and o]
+        except _json.JSONDecodeError:
+            pass
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 class Settings(ConfigBase):
     """ Configurações específicas do serviço market_alert """
 
-    #Origens permitidas para CORS no frontend
-    _frontend_origins_env = os.getenv("FRONTEND_ORIGINS", "")
-    FRONTEND_ORIGINS: list[str] = [
-        origin.strip()
-        for origin in _frontend_origins_env.split(",")
-        if origin.strip()
-    ] or [
-        #Fallback para ambiente local quando nenhuma origem foi declarada
-        #URL do servidor Vite em modo desenvolvimento
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        # IP da máquina que serve o frontend na rede local (ex.: seu servidor)
-        "http://192.168.15.150:5173",
-        #URL do servidor Express utilizado no build de produção local
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        # Frontend servido a partir do IP (possível variação de porta)
-        "http://192.168.15.150:3000",
-    ]
+    #Origens permitidas para CORS — obrigatório definir FRONTEND_ORIGINS no ambiente
+    FRONTEND_ORIGINS: list[str] = _parse_origins(os.getenv("FRONTEND_ORIGINS", ""))
+
+    @model_validator(mode="after")
+    def _require_frontend_origins(self) -> "Settings":
+        if not self.FRONTEND_ORIGINS:
+            raise ValueError(
+                "FRONTEND_ORIGINS não definido ou vazio. "
+                "Defina a variável de ambiente antes de iniciar o serviço. "
+                "Exemplo: FRONTEND_ORIGINS='[\"https://app.seudominio.com\"]'"
+            )
+        return self
 
     #Configuração do banco de dados
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")  # URL de conexão do Postgres
@@ -55,9 +62,11 @@ class Settings(ConfigBase):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")  #Chave para assinar JWTs
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256") #Algoritmo de assinatura
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60)
+        default=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     )
-    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7)) #Validade do refresh Token
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(
+        default=int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+    ) #Validade do refresh Token
     REFRESH_TOKEN_COOKIE_NAME: str = os.getenv(
         "REFRESH_TOKEN_COOKIE_NAME",
         "refresh_token",

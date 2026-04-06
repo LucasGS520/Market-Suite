@@ -18,7 +18,11 @@ COPY requirements-market-alert.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-base.txt -r requirements-market-alert.txt
 
-# ETAPA 2: Copiar código (mudanças aqui não afetam layer anterior)
+# ETAPA 2: Copiar shared/ (dependência compartilhada entre serviços)
+# Requer additional_contexts: shared_ctx: ./backend/shared no compose
+COPY --from=shared_ctx . ./shared/
+
+# ETAPA 3: Copiar código (mudanças aqui não afetam layer anterior)
 COPY . .
 
 EXPOSE 8000

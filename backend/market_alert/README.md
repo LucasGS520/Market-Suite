@@ -212,7 +212,7 @@ Regra: **reconciliação de domínio nunca mistura com validação de engine**. 
 - [`infraestructure/celery/config.py`](infraestructure/celery/config.py) define cinco filas logicas: `scraping`, `monitor`, `compare`, `notifications` e `dead_letter`.
 - Cada fila usa sua propria `Exchange` direta (`scraping`, `monitor`, `compare`, `notifications`, `dead_letter`) para manter separacao operacional entre coleta, monitoramento continuo, comparações, entregas e falhas permanentes.
 - [`infraestructure/celery/celery_app.py`](infraestructure/celery/celery_app.py) instancia o worker com broker/backend Redis, serializacao JSON, `task_queue_max_priority=10` e timezone `America/Sao_Paulo`.
-- No `docker-compose.yml`, o modulo sobe workers dedicados por papel: `celery-worker-scraping`, `celery-worker-monitor`, `celery-worker-compare` e `celery-worker-notifications`.
+- Nos compose ativos, o modulo sobe workers dedicados por papel: `celery-worker-scraping`, `celery-worker-compare` e `celery-worker-notifications`.
 - O worker de scraping escuta `celery,scraping`; isso permite processar tasks sem roteamento explicito que caiam na fila padrao `celery`.
 - O `worker_ready` chama [`infraestructure/worker_lifecycle.py`](infraestructure/worker_lifecycle.py), que delega para o coletor continuo iniciar o autostart e o loop de revalidacao.
 
@@ -256,7 +256,7 @@ Regra: **reconciliação de domínio nunca mistura com validação de engine**. 
   - `reconcile-workflows-periodic`: reconciliação de workflows Temporal, executada a cada 10 minutos (600s) na fila `scraping`, chamando [`infraestructure/tasks/reconciler_task.py`](infraestructure/tasks/reconciler_task.py).
 - [`infraestructure/tasks/maintenance_tasks.py`](infraestructure/tasks/maintenance_tasks.py) implementa a limpeza de cache de forma incremental, com limites de tempo, volume e tamanho de lote para nao monopolizar o Redis.
 - [`collectors/tasks/priority_queue_tasks.py`](collectors/tasks/priority_queue_tasks.py) disponibiliza `reconcile_priority_queue` para recarregar a fila de prioridade, mas essa task nao está no `BEAT_SCHEDULE` atual; hoje ela serve como rotina manual/emergencial.
-- Na configuracao atual do repositorio, o `docker-compose.yml` nao declara um serviço dedicado de `celery beat`, embora o codigo esteja pronto para receber esse scheduler.
+- Na configuracao atual do repositorio, os compose ativos nao declaram um serviço dedicado de `celery beat`, embora o codigo esteja pronto para receber esse scheduler.
 - O endpoint `/health/` consulta `beat:last_success`, mas nao ha um produtor desse heartbeat dentro dos modulos carregados atualmente; se o scheduler for operado externamente, ele precisa atualizar essa chave para que o health reflita o estado real do Beat.
 
 ### Workers Celery
@@ -342,7 +342,7 @@ As configuracoes combinam a base compartilhada em `shared/core/config_base.py` c
 ### Ordem de carregamento de ambiente
 1. `.env.common` fornece parametros compartilhados da suite.
 2. O arquivo indicado por `ENV_FILE` sobrescreve os defaults compartilhados.
-3. No `docker-compose.yml`, o `market_alert` monta `./backend/market_alert/.env.market_alert` e define `ENV_FILE=.env.market_alert`, de modo que o modulo resolve seu arquivo local de serviço dentro do container.
+3. Nos compose ativos, o `market_alert` monta `./backend/market_alert/.env.market_alert` e define `ENV_FILE=.env.market_alert`, de modo que o modulo resolve seu arquivo local de serviço dentro do container.
 4. Variaveis de ambiente exportadas diretamente continuam tendo precedencia no processo.
 
 ### Categorias de variaveis

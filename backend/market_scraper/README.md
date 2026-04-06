@@ -155,7 +155,7 @@ As configurações combinam base compartilhada em [`../shared/core/config_base.p
 2. Se `SERVICE_NAME` estiver definido, carrega `.env.<SERVICE_NAME>` com `override=True`.
 3. Caso contrario, usa `ENV_FILE` (ou `.env`) e carrega com `override=True`.
 4. Depois disso, `Settings` do scraper aplica defaults de codigo para chaves ainda ausentes.
-5. No `docker-compose.yml`, `market_scraper` sobe com `env_file: ./backend/market_scraper/.env.market_scraper` e `ENV_FILE=.env.market_scraper`, mantendo o arquivo local do servico como fonte principal de override.
+5. Nos compose ativos (`docker-compose.dev.yml` e `docker-compose.hml.yml`), `market_scraper` sobe com `env_file: ./backend/market_scraper/.env.market_scraper` e `ENV_FILE=.env.market_scraper`, mantendo o arquivo local do servico como fonte principal de override.
 
 ### Categorias de variaveis
 | Categoria | Variaveis relevantes |

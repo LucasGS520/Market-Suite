@@ -1,0 +1,175 @@
+# docker-compose.base.yml — Infraestrutura base reutilizada na composição local
+#
+# Comandos oficiais:
+#   - Preparar ambiente local: `bash scripts/load_env.sh development`
+#   - Dev: subir infraestrutura + apps locais: `docker compose -f docker-compose.base.yml -f docker-compose.dev.yml --profile <perfil> up -d`
+#   - Hml: usar somente `docker-compose.hml.yml` (este arquivo não participa da stack de homologação)
+#   - Prod: reservado para definição futura, sem compose oficial neste repositório
+#
+# Responsabilidade deste arquivo:
+#   - Fornecer apenas infraestrutura comum do fluxo local (DB, Redis e Temporal).
+#   - Ser combinado com `docker-compose.*.yml` para subir aplicações em determinados ambientes.
+#   - Não servir como compose standalone de homologação.
+#
+# Contrato operacional:
+#   - Contém apenas infraestrutura comum (DB, Redis e Temporal).
+#   - Não pode carregar serviços de aplicação.
+#   - Não pode definir bind mount de código, profile de app ou porta pública de app.
+#   - Não pode embutir estratégia específica de dev, hml ou prod.
+#
+# Não subir este arquivo isoladamente.
+# Contrato de ambiente:
+#   - `env_file` aponta para os ativos sem sufixo gerados por `scripts/load_env.sh`.
+#   - Ordem de precedência no runtime: `.env.common` -> arquivo específico declarado em `env_file` -> variáveis declaradas em `environment`.
+#   - Homologação usa `docker-compose.hml.yml` standalone, com infraestrutura própria.
+
+services:
+
+  # Banco de dados PostgreSQL
+  db:
+    image: postgres:15
+    env_file:
+      - .env.common
+      - ./backend/market_alert/.env.market_alert
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - monitoring-net
+
+
+  # Redis — broker Celery, cache operacional e locks
+  redis:
+    image: redis:7
+    env_file:
+      - .env.common
+    command:
+      - sh
+      - -c
+      - |
+        exec redis-server \
+          --requirepass "$$REDIS_PASSWORD" \
+          --maxmemory 512mb \
+          --maxmemory-policy noeviction \
+          --save "900 1" \
+          --save "300 10" \
+          --appendonly no
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - monitoring-net
+
+
+  # Carrega script Lua de rate limiting no Redis na inicialização
+  redis-init:
+    image: redis:7
+    env_file:
+      - .env.common
+    depends_on:
+      redis:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        echo "redis-init: esperando redis..."
+        timeout=60
+        t=0
+        until redis-cli -h redis -a "$$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do
+          sleep 1
+          t=$$((t+1))
+          echo "redis-init: aguardando redis... $${t}s"
+          if [ "$$t" -ge "$${timeout}" ]; then
+            echo "redis-init: timeout esperando redis ($${timeout}s)" >&2
+            exit 1
+          fi
+        done
+        echo "redis-init: carregando script..."
+        redis-cli -h redis -a "$$REDIS_PASSWORD" SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+        echo "redis-init: script carregado com sucesso"
+    volumes:
+      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
+    restart: on-failure
+    networks:
+      - monitoring-net
+
+
+  # Banco PostgreSQL exclusivo para o Temporal
+  temporal-db:
+    image: postgres:15
+    env_file:
+      - .env.common
+      - .env.temporal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - temporal-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - monitoring-net
+
+
+  # Servidor Temporal (orquestrador de workflows duráveis)
+  temporal:
+    image: temporalio/auto-setup:1.25
+    env_file:
+      - .env.common
+      - .env.temporal
+    environment:
+      - DB=postgres12
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - monitoring-net
+
+
+  # Prober de conectividade do Temporal
+  temporal-prober:
+    image: alpine:3.18
+    depends_on:
+      temporal:
+        condition: service_started
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache netcat-openbsd >/dev/null 2>&1 || true
+        echo "temporal-prober: aguardando temporal:7233..."
+        timeout=120; t=0
+        until nc -z temporal 7233 2>/dev/null; do
+          sleep 1; t=$$((t+1))
+          if [ $$t -ge $$timeout ]; then echo "temporal-prober: timeout" >&2; exit 1; fi
+        done
+        echo "temporal-prober: pronto"
+    restart: "no"
+    networks:
+      - monitoring-net
+
+
+volumes:
+  db-data:
+  redis-data:
+  audit-logs:
+  temporal-db-data:
+
+networks:
+  monitoring-net:
+    driver: bridge

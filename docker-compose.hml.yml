@@ -1,14 +1,44 @@
+# docker-compose.hml.yml — Compose de Homologação (market_suite)
+#
+# Comandos oficiais de homologação:
+#   1. Carregar ambiente: `bash scripts/load_env.sh staging`
+#   2. Validar segredos: `bash scripts/check_secrets_hml.sh`
+#   3. Subir stack: `docker compose -f docker-compose.hml.yml up -d`
+#   4. Prod: reservado para definição futura, sem compose oficial neste repositório
+#
+# Características operacionais de homologação:
+#   - Usa somente imagens prontas (image:) — sem build local neste arquivo.
+#   - Sem bind mounts de código-fonte; apenas volumes nomeados de dados.
+#   - Sem profiles — todos os serviços sobem juntos.
+#   - Portas de serviços internos não são publicadas no host.
+#   - Exposição externa ocorre apenas pelo Nginx.
+#
+# Pré-requisitos na VPS:
+#   1. Garantir que as imagens já estejam disponíveis no host
+#      (via registry, docker pull ou docker load).
+#   2. Preencher os templates `.env.common.staging`, `.env.temporal.staging`,
+#      `backend/market_alert/.env.market_alert.staging`,
+#      `backend/market_orchestrator/.env.market_orchestrator.staging`,
+#      `backend/market_scraper/.env.market_scraper.staging`
+#      e `frontend/.env.frontend.staging` com valores reais.
+#   3. Executar: bash scripts/load_env.sh staging
+#   4. Executar: bash scripts/check_secrets_hml.sh
+#   5. Subir: docker compose -f docker-compose.hml.yml up -d
+#
+# Contrato operacional:
+#   - Arquivo standalone de homologação.
+#   - Usa somente imagens prontas; não é arquivo de build local.
+#   - Não usa bind mount de código-fonte; apenas volumes de dados.
+#   - Sobe o conjunto fechado de serviços, sem profiles.
+#   - A exposição externa deve ocorrer apenas pelo Nginx.
+#   - Os `env_file` consomem apenas os ativos sem sufixo gerados por `scripts/load_env.sh staging`.
+#   - Precedência no runtime: `.env.common` -> `.env` específico do serviço -> variáveis declaradas em `environment`.
+
 services:
 
-  #Banco de dados PostgreSQL utilizado pela aplicação
+  # --- Infraestrutura: banco de dados ---
   db:
     image: postgres:15
-    profiles:
-      - infra
-      - orchestrator
-      - api
-      - scraper
-      - workers
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
@@ -17,23 +47,16 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-    ports:
-      - "5432:5432"
+    # Porta 5432 NÃO exposta — acesso apenas pela rede interna
     volumes:
       - db-data:/var/lib/postgresql/data
+    restart: unless-stopped
     networks:
       - monitoring-net
 
-
-  #Instância Redis utilizada para cache e filas
+  # --- Infraestrutura: Redis ---
   redis:
     image: redis:7
-    profiles:
-      - infra
-      - orchestrator
-      - api
-      - scraper
-      - workers
     env_file:
       - .env.common
     command:
@@ -52,25 +75,16 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-    ports:
-      - "6379:6379"
+    # Porta 6379 NÃO exposta — acesso apenas pela rede interna
     volumes:
-      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
       - redis-data:/data
     restart: unless-stopped
     networks:
       - monitoring-net
 
-
-  #Carrega scripts lua no Redis na inicialização
+  # --- Infraestrutura: carrega script Lua no Redis ---
   redis-init:
     image: redis:7
-    profiles:
-      - infra
-      - orchestrator
-      - api
-      - scraper
-      - workers
     env_file:
       - .env.common
     depends_on:
@@ -81,47 +95,30 @@ services:
       - -c
       - |
         set -e
-        echo "redis-init: esperando redis..."
-        timeout=60
-        t=0
+        echo "redis-init: aguardando redis..."
+        timeout=60; t=0
         until redis-cli -h redis -a "$$REDIS_PASSWORD" ping 2>/dev/null | grep -q PONG; do
-          sleep 1
-          t=$$((t+1))
-          echo "redis-init: aguardando redis... $${t}s"
+          sleep 1; t=$$((t+1))
           if [ "$$t" -ge "$${timeout}" ]; then
-            echo "redis-init: timeout esperando redis ($${timeout}s)" >&2
-            exit 1
+            echo "redis-init: timeout" >&2; exit 1
           fi
         done
-        echo "redis-init: carregando script..."
-        redis-cli -h redis -a "$$REDIS_PASSWORD" SCRIPT LOAD "$(cat /etc/redis/scripts/sliding_window.lua)"
+        SCRIPT='local key=KEYS[1];local now_ms=tonumber(ARGV[1]);local window_ms=tonumber(ARGV[2]);local limit=tonumber(ARGV[3]);local window_start=now_ms-window_ms;redis.call("ZREMRANGEBYSCORE",key,0,window_start);redis.call("ZADD",key,now_ms,now_ms);local count=tonumber(redis.call("ZCARD",key));local window_sec=math.floor(window_ms/1000)+1;redis.call("EXPIRE",key,window_sec);if count<=limit then return 1 else return 0 end'
+        redis-cli -h redis -a "$$REDIS_PASSWORD" SCRIPT LOAD "$$SCRIPT"
         echo "redis-init: script carregado com sucesso"
-    volumes:
-      - ./backend/shared/infra/redis-scripts:/etc/redis/scripts:ro
-    restart: on-failure
+    restart: "no"
     networks:
       - monitoring-net
 
-
-#Executa migrações de banco de dados com Alembic (perfil infra)
+  # --- Migrações Alembic ---
   migrations:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - infra
-      - api
+    image: market-suite/market_alert:latest
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - ./backend:/backend:ro   
+      - PYTHONPATH=/market_alert
     working_dir: /market_alert
     command:
       - alembic
@@ -136,17 +133,11 @@ services:
     networks:
       - monitoring-net
 
-  
-  #Banco PostgreSQL exclusivo para persistência do Temporal (separado do banco de negócio)
+  # --- Temporal: banco dedicado ---
   temporal-db:
     image: postgres:15
-    profiles:
-      - temporal
-      - orchestrator
-    environment:
-      POSTGRES_USER: temporal
-      POSTGRES_PASSWORD: temporal86
-      POSTGRES_DB: temporal
+    env_file:
+      - ./.env.temporal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
       interval: 15s
@@ -154,61 +145,56 @@ services:
       retries: 3
     volumes:
       - temporal-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
     networks:
       - monitoring-net
 
-
-  #Servidor Temporal (orquestrador de workflows duráveis)
+  # --- Temporal server ---
   temporal:
     image: temporalio/auto-setup:1.25
-    profiles:
-      - temporal
-      - orchestrator
     environment:
-    - DB=postgres12
-    - DB_PORT=5432
-    - POSTGRES_SEEDS=temporal-db
-    - POSTGRES_USER=temporal
-    - POSTGRES_PWD=temporal86
-    - POSTGRES_DB=temporal
-    ports:
-      - "7233:7233"
+      - DB=postgres12
+    env_file:
+      - ./.env.temporal
+    # Porta 7233 NÃO exposta — acesso apenas pela rede interna
     depends_on:
       temporal-db:
         condition: service_healthy
+    restart: unless-stopped
     networks:
       - monitoring-net
 
-  #Prober dedicado ao bootstrap do Temporal: conclui com sucesso apenas quando a porta 7233 aceita conexões
+  # --- Temporal: prober de conectividade ---
   temporal-prober:
     image: alpine:3.18
-    profiles:
-      - temporal
-      - orchestrator
     depends_on:
       temporal:
         condition: service_started
-    command: ["sh","-c","apk add --no-cache netcat-openbsd >/dev/null 2>&1 || true; echo 'temporal-prober: aguardando temporal:7233 aceitar conexões...'; timeout=120; t=0; until nc -z temporal 7233 2>/dev/null; do sleep 1; t=$$((t+1)); if [ $$t -ge $$timeout ]; then echo 'temporal-prober: timeout' >&2; exit 1; fi; done; echo 'temporal-prober: pronto'"]
-    restart: 'no'
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache netcat-openbsd >/dev/null 2>&1 || true
+        echo "temporal-prober: aguardando temporal:7233..."
+        timeout=120; t=0
+        until nc -z temporal 7233 2>/dev/null; do
+          sleep 1; t=$$((t+1))
+          if [ $$t -ge $$timeout ]; then echo "temporal-prober: timeout" >&2; exit 1; fi
+        done
+        echo "temporal-prober: pronto"
+    restart: "no"
     networks:
-      - monitoring-net      
+      - monitoring-net
 
-
-#API principal do MarketAlert
+  # --- API principal ---
   market_alert:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - api
+    image: market-suite/market_alert:latest
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
+      - PYTHONPATH=/market_alert
     command:
       - uvicorn
       - "main:app"
@@ -222,8 +208,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     depends_on:
       db:
         condition: service_healthy
@@ -231,9 +217,6 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - ./backend:/backend:ro
     restart: unless-stopped
     networks:
       - monitoring-net
@@ -246,16 +229,9 @@ services:
           cpus: '0.5'
           memory: 512M
 
-
-  #Worker Temporal — orquestração durável de workflows de monitoramento
+  # --- Orquestrador Temporal ---
   market_orchestrator:
-    build:
-      context: ./backend/market_orchestrator
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - orchestrator
+    image: market-suite/market_orchestrator:latest
     env_file:
       - .env.common
       - ./backend/market_orchestrator/.env.market_orchestrator
@@ -274,22 +250,13 @@ services:
         condition: service_healthy
       temporal-prober:
         condition: service_completed_successfully
-    volumes:
-      - ./backend:/backend:ro
     restart: on-failure
     networks:
       - monitoring-net
 
-
-  #Serviço dedicado ao scraping de produtos
+  # --- Microserviço de scraping ---
   market_scraper:
-    build:
-      context: ./backend/market_scraper
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - scraper
+    image: market-suite/market_scraper:latest
     env_file:
       - .env.common
       - ./backend/market_scraper/.env.market_scraper
@@ -306,8 +273,8 @@ services:
       - "0.0.0.0"
       - "--port"
       - "8000"
-    ports:
-      - "8010:8000"
+    expose:
+      - "8000"
     depends_on:
       db:
         condition: service_healthy
@@ -315,10 +282,6 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
-    volumes:
-      - ./backend/market_scraper:/app/market_scraper
-      - ./backend/shared:/app/shared:ro
-      - ./backend:/backend:ro
     restart: unless-stopped
     networks:
       - monitoring-net
@@ -331,22 +294,15 @@ services:
           cpus: '0.3'
           memory: 384M
 
-
-  #Worker do Celery para tarefas assíncronas gerais (scraping)
+  # --- Celery worker: scraping ---
   celery-worker-scraping:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - workers
+    image: market-suite/market_alert:latest
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
+      - PYTHONPATH=/market_alert
     command:
       - celery
       - "-A"
@@ -357,8 +313,7 @@ services:
       - "--concurrency=10"
       - "-Q"
       - "celery,scraping"
-    user:
-      "1000:1000"
+    user: "1000:1000"
     depends_on:
       db:
         condition: service_healthy
@@ -366,9 +321,6 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - ./backend:/backend:ro
     restart: on-failure
     networks:
       - monitoring-net
@@ -381,22 +333,15 @@ services:
           cpus: '0.5'
           memory: 256M
 
-
-  #Worker do Celery dedicado às comparações de preço (fila compare)
+  # --- Celery worker: comparação de preços ---
   celery-worker-compare:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - workers
+    image: market-suite/market_alert:latest
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
+      - PYTHONPATH=/market_alert
     command:
       - celery
       - "-A"
@@ -407,8 +352,7 @@ services:
       - "--concurrency=4"
       - "-Q"
       - "compare"
-    user:
-      "1000:1000"
+    user: "1000:1000"
     depends_on:
       db:
         condition: service_healthy
@@ -416,9 +360,6 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - ./backend:/backend:ro
     restart: on-failure
     networks:
       - monitoring-net
@@ -431,22 +372,15 @@ services:
           cpus: '0.4'
           memory: 256M
 
-
-  #Worker do Celery dedicado ao envio de notificações
+  # --- Celery worker: notificações ---
   celery-worker-notifications:
-    build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
-      additional_contexts:
-        root: .
-    profiles:
-      - workers
+    image: market-suite/market_alert:latest
     env_file:
       - .env.common
       - ./backend/market_alert/.env.market_alert
     environment:
       - ENV_FILE=.env.market_alert
-      - PYTHONPATH=/backend
+      - PYTHONPATH=/market_alert
     command:
       - celery
       - "-A"
@@ -457,8 +391,7 @@ services:
       - "--concurrency=4"
       - "-Q"
       - "notifications"
-    user:
-      "1000:1000"
+    user: "1000:1000"
     depends_on:
       db:
         condition: service_healthy
@@ -466,9 +399,6 @@ services:
         condition: service_healthy
       redis-init:
         condition: service_completed_successfully
-    volumes:
-      - ./backend/market_alert:/market_alert
-      - ./backend:/backend:ro
     restart: on-failure
     networks:
       - monitoring-net
@@ -481,42 +411,53 @@ services:
           cpus: '0.25'
           memory: 192M
 
-
-  #Interface web do MarketAlert executada com Vite para testes locais rápidos.
+  # --- Frontend (estático, build de produção) ---
+  # Imagem deve ser construída com: --target production --build-arg VITE_API_URL=https://api-hml.seudominio.com
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      target: builder
-    profiles:
-      - ui
-    environment:
-      - VITE_API_URL=http://localhost:8000
-      - FRONTEND_PORT=5173
-    command: pnpm exec vite --host 0.0.0.0 --port 5173
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/index.html:/app/index.html
-      - ./frontend/tailwind.config.js:/app/tailwind.config.js
-      - ./frontend/postcss.config.js:/app/postcss.config.js
+    image: market-suite/frontend:latest
+    expose:
+      - "5173"
+    restart: unless-stopped
     networks:
       - monitoring-net
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.3'
+          memory: 128M
         reservations:
-          cpus: '0.25'
-          memory: 256M
+          cpus: '0.1'
+          memory: 64M
+
+  # --- Proxy reverso Nginx (entrada pública HTTPS) ---
+  # Requer: ./nginx/nginx.hml.conf e ./certs/hml.{crt,key} presentes na VPS
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.hml.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t && wget --no-check-certificate --header='Host: api-hml.seudominio.com' -qO- https://127.0.0.1/health >/dev/null && wget --no-check-certificate --header='Host: app-hml.seudominio.com' -qO- https://127.0.0.1/ >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      market_alert:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - monitoring-net
 
 
 volumes:
   db-data:
   redis-data:
-  audit-logs:
   temporal-db-data:
 
 networks:

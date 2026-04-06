@@ -29,7 +29,11 @@ COPY requirements-market-scraper.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-base.txt -r requirements-market-scraper.txt
 
-# ETAPA 3: Copiar código (mudanças aqui não invalidam cache anterior)
+# ETAPA 3: Copiar shared/ (dependência compartilhada entre serviços)
+# Requer additional_contexts: shared_ctx: ./backend/shared no compose
+COPY --from=shared_ctx . /app/shared/
+
+# ETAPA 4: Copiar código (mudanças aqui não invalidam cache anterior)
 COPY . /app/market_scraper
 
 EXPOSE 8000

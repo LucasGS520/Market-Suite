@@ -13,6 +13,10 @@ COPY requirements-orchestrator.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-orchestrator.txt
 
+# Copiar shared/ (dependência compartilhada entre serviços)
+# Requer additional_contexts: shared_ctx: ./backend/shared no compose
+COPY --from=shared_ctx . ./shared/
+
 # Copiar código do módulo
 COPY . ./market_orchestrator/
 

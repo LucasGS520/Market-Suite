@@ -217,7 +217,7 @@ O compose possui perfil `temporal` com servicos dedicados:
 - `temporal` (`temporalio/auto-setup`)
 - `temporal-ui` (`temporalio/ui`, porta `8088`)
 
-As definicoes estao em [`../../docker-compose.yml`](../../docker-compose.yml).
+As definicoes operacionais ativas estao em [`../../docker-compose.base.yml`](../../docker-compose.base.yml), [`../../docker-compose.dev.yml`](../../docker-compose.dev.yml) e [`../../docker-compose.hml.yml`](../../docker-compose.hml.yml).
 
 ---
 
