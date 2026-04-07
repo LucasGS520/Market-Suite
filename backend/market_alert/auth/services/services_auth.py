@@ -21,6 +21,7 @@ from market_alert.infrastructure.security.bruteforce import (
     enforce_rate_limit,
 )
 from market_alert.infrastructure.security.client_identity import resolve_client_ip
+from market_alert.infrastructure.security.device_fingerprint import compute_device_fingerprint
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_auth import (
     ResetPasswordRequest,
@@ -79,30 +80,32 @@ def login_user(
 ) -> TokenPairResponse:
     """ Organiza o fluxo de login: Bloqueio por IP, Autenticação, Registro de falhas ou sucesso, Geração de JWT """
     ip = resolve_client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
+    fingerprint = compute_device_fingerprint(ip, user_agent)
     email = username
 
-    #Bloqueio de IP antes de autenticar (chave composta: IP + alvo)
-    block_ip(request, identifier=email)
+    #Três políticas independentes: (IP, conta), conta global e dispositivo
+    block_ip(request, identifier=email, fingerprint=fingerprint)
 
     user = authenticate_user(db, email, password)
     if not user:
-        logger.warning("login_failed", ip=ip, email=email)
-        record_failed_attempt(request, identifier=email)
+        logger.warning("login_failed", ip=ip, email=email, fingerprint=fingerprint)
+        record_failed_attempt(request, identifier=email, fingerprint=fingerprint)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail ou senha inválidos", headers={"WWW-Authenticate": "Bearer"})
 
     if not user.is_active or user.status == UserStatus.suspended:
-        logger.warning("login_inactive", ip=ip, email=email)
-        record_failed_attempt(request, identifier=email)
+        logger.warning("login_inactive", ip=ip, email=email, fingerprint=fingerprint)
+        record_failed_attempt(request, identifier=email, fingerprint=fingerprint)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário desativado. Contate o administrador")
 
-    #Login bem-sucedido
-    reset_failed_attempts(request, identifier=email)
+    #Login bem-sucedido — limpa os três contadores
+    reset_failed_attempts(request, identifier=email, fingerprint=fingerprint)
     #Atualiza last_login
     user.last_login = datetime.now(timezone.utc)
 
     db.commit()
 
-    logger.info("login_success", user_id=str(user.id), ip=ip)
+    logger.info("login_success", user_id=str(user.id), ip=ip, fingerprint=fingerprint)
 
     token = create_access_token(
         {
@@ -115,9 +118,9 @@ def login_user(
         }
     )
     raw_refresh, refresh = create_refresh_token(
-        db, str(user.id), ip, request.headers.get("user-agent", "")
+        db, str(user.id), ip, user_agent
     )
-    logger.info("refresh_token_issued_on_login", refresh_id=str(refresh.id), user_id=str(user.id))
+    logger.info("refresh_token_issued_on_login", refresh_id=str(refresh.id), user_id=str(user.id), fingerprint=fingerprint)
     return TokenPairResponse(access_token=token, refresh_token=raw_refresh, token_type="bearer")
 
 def send_verification_email_service(
@@ -151,9 +154,17 @@ def confirm_email_verification_service(
 def request_password_reset_service(
     db: Session,
     request_model: ResetPasswordRequest,
+    request: Request,
 ) -> None:
     """ Inicia o fluxo de reset de senha gerando um token sem envio automático """
     email = request_model.email
+    ip = resolve_client_ip(request)
+    enforce_rate_limit(
+        key=f"rate:auth:reset-request:{ip}:{email}",
+        max_attempts=settings.PASSWORD_RESET_REQUEST_MAX_PER_HOUR,
+        window_seconds=3600,
+        error_message="Muitas solicitações de reset. Tente novamente mais tarde.",
+    )
     user = get_user_by_email(db, email)
     if not user:
         logger.warning("reset_request_failed", email=email)
@@ -169,8 +180,16 @@ def request_password_reset_service(
 def confirm_password_service(
     db: Session,
     request_model: ResetPasswordConfirmRequest,
+    request: Request,
 ) -> None:
     """ Confirma reset de senha usando token e define nova senha """
+    ip = resolve_client_ip(request)
+    enforce_rate_limit(
+        key=f"rate:auth:reset-confirm:{ip}",
+        max_attempts=settings.PASSWORD_RESET_CONFIRM_MAX_ATTEMPTS,
+        window_seconds=settings.PASSWORD_RESET_CONFIRM_WINDOW_SECONDS,
+        error_message="Muitas tentativas de confirmação. Tente novamente mais tarde.",
+    )
     token = request_model.token
     new_password = request_model.new_password
     user = db.query(User).filter(User.reset_token == token).first()
@@ -191,6 +210,12 @@ def change_password_service(
     request_model: ChangePasswordRequest,
 ) -> None:
     """ Altera a senha de um usuário autenticado """
+    enforce_rate_limit(
+        key=f"rate:auth:change-password:{current_user.id}",
+        max_attempts=settings.CHANGE_PASSWORD_MAX_PER_HOUR,
+        window_seconds=3600,
+        error_message="Muitas alterações de senha. Tente novamente mais tarde.",
+    )
     old = request_model.old_password
     new = request_model.new_password
 
@@ -208,6 +233,12 @@ def change_email_service(
     request_model: ChangeEmailRequest,
 ) -> None:
     """ Altera o email de um usuário autenticado e marca como não verificado """
+    enforce_rate_limit(
+        key=f"rate:auth:change-email:{current_user.id}",
+        max_attempts=settings.CHANGE_EMAIL_MAX_PER_HOUR,
+        window_seconds=3600,
+        error_message="Muitas alterações de e-mail. Tente novamente mais tarde.",
+    )
     new_email = request_model.new_email
     if get_user_by_email(db, new_email):
         logger.warning("change_email_failed", user_id=str(current_user.id), email=new_email)
@@ -227,14 +258,16 @@ def refresh_token_service(
 ) -> TokenPairResponse:
     """ Troca um Refresh Token válido por um novo Access Token e novo Refresh Token (rotacionando) """
     ip = resolve_client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
+    fingerprint = compute_device_fingerprint(ip, user_agent)
     request_id = request.headers.get("x-request-id") or request.headers.get("x-requestid")
     raw_token = _resolve_refresh_token(payload, request)
     if not raw_token:
-        logger.warning("refresh_failed_missing", ip=ip, request_id=request_id)
+        logger.warning("refresh_failed_missing", ip=ip, fingerprint=fingerprint, request_id=request_id)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autorizado")
     refresh = get_refresh_token(db, raw_token)
     if not refresh:
-        logger.warning("refresh_failed_invalid", ip=ip, request_id=request_id)
+        logger.warning("refresh_failed_invalid", ip=ip, fingerprint=fingerprint, request_id=request_id)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autorizado")
 
     #Limite por usuário autenticado — protege contra abuso de renovação de token
@@ -244,12 +277,19 @@ def refresh_token_service(
         window_seconds=settings.REFRESH_RATE_LIMIT_WINDOW,
         error_message="Muitas requisições de renovação de token. Tente novamente em breve.",
     )
+    #Limite por dispositivo — detecta clientes automatizados com múltiplas sessões
+    enforce_rate_limit(
+        key=f"rate:auth:device-refresh:{fingerprint}",
+        max_attempts=settings.DEVICE_BRUTE_FORCE_MAX_ATTEMPTS,
+        window_seconds=settings.REFRESH_RATE_LIMIT_WINDOW,
+        error_message="Muitas requisições de renovação de token. Tente novamente em breve.",
+    )
 
     #Revoga o token antigo
     revoke_refresh_token(db, refresh)
 
     #Cria raw + registro
-    new_raw, new_refresh = create_refresh_token(db, str(refresh.user_id), ip, request.headers.get("user-agent", ""))
+    new_raw, new_refresh = create_refresh_token(db, str(refresh.user_id), ip, user_agent)
 
     #Gera novo access token com jti unico
     user = get_user_by_id(db, refresh.user_id)
@@ -269,6 +309,7 @@ def refresh_token_service(
         old_id=str(refresh.id),
         new_token_id=str(new_refresh.id),
         ip=ip,
+        fingerprint=fingerprint,
         request_id=request_id,
     )
     return TokenPairResponse(access_token=access_token, refresh_token=new_raw, token_type="bearer")

@@ -22,12 +22,17 @@ def _account_key(identifier: str) -> str:
     """ Chave por conta — agrega tentativas de todos os IPs (defesa contra brute-force distribuído) """
     return f"rate:auth:account:{identifier}"
 
-def block_ip(request: Request, identifier: str = "") -> None:
+def _device_key(fingerprint: str) -> str:
+    """ Chave por dispositivo — detecta bots que rotacionam contas a partir do mesmo dispositivo """
+    return f"rate:auth:device:{fingerprint}"
+
+def block_ip(request: Request, identifier: str = "", fingerprint: str = "") -> None:
     """
     Verifica limites de segurança antes de autenticar.
-    Aplica duas políticas independentes:
+    Aplica três políticas independentes:
     - (IP, conta): bloqueia um IP específico atacando uma conta específica.
     - conta global: bloqueia uma conta sob ataque distribuído (muitas IPs).
+    - dispositivo: bloqueia bots que rotacionam contas a partir do mesmo fingerprint.
     """
     ip = resolve_client_ip(request)
     try:
@@ -47,17 +52,27 @@ def block_ip(request: Request, identifier: str = "") -> None:
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="Conta temporariamente bloqueada. Tente novamente mais tarde."
                 )
+
+        if fingerprint:
+            device_attempts = int(redis_client.get(_device_key(fingerprint)) or 0)
+            if device_attempts >= settings.DEVICE_BRUTE_FORCE_MAX_ATTEMPTS:
+                logger.warning("device_blocked", fingerprint=fingerprint, attempts=device_attempts)
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Muitas tentativas de login. Tente novamente mais tarde."
+                )
     except HTTPException:
         raise
     except Exception:
         logger.exception("redis_unavailable_in_block_ip", ip=ip)
         #Em caso de falha no Redis, não bloqueia por segurança
 
-def record_failed_attempt(request: Request, identifier: str = "") -> None:
+def record_failed_attempt(request: Request, identifier: str = "", fingerprint: str = "") -> None:
     """
-    Registra falha de login nos dois contadores independentes:
+    Registra falha de login nos três contadores independentes:
     - (IP, conta): TTL curto, isola o par atacante/alvo.
     - conta global: TTL longo, detecta ataques distribuídos.
+    - dispositivo: TTL médio, detecta bots com rotação de contas.
     """
     ip = resolve_client_ip(request)
     try:
@@ -73,24 +88,35 @@ def record_failed_attempt(request: Request, identifier: str = "") -> None:
             if account_attempts == 1:
                 redis_client.expire(acc_key, settings.ACCOUNT_LOCKOUT_DURATION)
 
+        device_attempts = None
+        if fingerprint:
+            dev_key = _device_key(fingerprint)
+            device_attempts = redis_client.incr(dev_key)
+            if device_attempts == 1:
+                redis_client.expire(dev_key, settings.DEVICE_BRUTE_FORCE_DURATION)
+
         logger.info(
             "failed_login_attempt",
             ip=ip,
             identifier=identifier,
+            fingerprint=fingerprint,
             ip_attempts=ip_attempts,
             account_attempts=account_attempts,
+            device_attempts=device_attempts,
         )
     except Exception:
         logger.exception("redis_unavailable_in_record_failed", ip=ip)
 
-def reset_failed_attempts(request: Request, identifier: str = "") -> None:
-    """ Remove ambos os contadores após autenticação bem-sucedida """
+def reset_failed_attempts(request: Request, identifier: str = "", fingerprint: str = "") -> None:
+    """ Remove os três contadores após autenticação bem-sucedida """
     ip = resolve_client_ip(request)
     try:
         redis_client.delete(_login_key(ip, identifier))
         if identifier:
             redis_client.delete(_account_key(identifier))
-        logger.info("reset_failed_attempts", ip=ip, identifier=identifier)
+        if fingerprint:
+            redis_client.delete(_device_key(fingerprint))
+        logger.info("reset_failed_attempts", ip=ip, identifier=identifier, fingerprint=fingerprint)
     except Exception:
         logger.exception("redis_unavailable_in_reset", ip=ip)
 

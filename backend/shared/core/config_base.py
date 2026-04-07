@@ -76,6 +76,12 @@ class ConfigBase(BaseSettings):
     REFRESH_RATE_LIMIT_MAX: int = int(os.getenv("REFRESH_RATE_LIMIT_MAX", "20")) #Renovações permitidas na janela
     REFRESH_RATE_LIMIT_WINDOW: int = int(os.getenv("REFRESH_RATE_LIMIT_WINDOW", "300")) #Janela em segundos (5 min)
 
+    # Política por dispositivo (fingerprint IP+UA): defesa contra bots que rotacionam contas.
+    # Limiar maior que por (IP, conta) pois um dispositivo legítimo pode tentar várias contas.
+    # TTL médio — 30 min bloqueia a janela de ataque automatizado sem punir usuários.
+    DEVICE_BRUTE_FORCE_MAX_ATTEMPTS: int = int(os.getenv("DEVICE_BRUTE_FORCE_MAX_ATTEMPTS", "20")) #Tentativas por dispositivo
+    DEVICE_BRUTE_FORCE_DURATION: int = int(os.getenv("DEVICE_BRUTE_FORCE_DURATION", "1800")) #Bloqueio em segundos (30 min)
+
     #Rate limits para tasks Celery
     SCRAPER_RATE_LIMIT: str = os.getenv("SCRAPER_RATE_LIMIT", "10/m") #Limite de scraping
     COMPETITOR_RATE_LIMIT: str = os.getenv("COMPETITOR_RATE_LIMIT", "10/m") #Limite de concorrentes

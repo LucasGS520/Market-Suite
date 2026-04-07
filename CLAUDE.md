@@ -19,21 +19,17 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Objetivo e Problemas Identificados
 
-**Resumo**
-
-- **Problema a resolver:** o sistema está usando o IP visto pelo container, não o IP real do usuário, então vários usuários caem na mesma chave Redis e acabam bloqueados em conjunto. O ponto crítico está em `bruteforce.py`, consumidos por `services_auth.py` e `routes_login.py`.
-
-- **Objetivo do plano:** separar corretamente a identidade de cada cliente, impedir bloqueio cruzado entre usuários e padronizar as chaves Redis para que cada entidade tenha sua própria governança.
+1. O código já avançou na direção certa:
+`client_identity.py`, `bruteforce.py`, `services_auth.py`, `services_account.py`
+2. Porém o runtime ainda mostra todos como `172.18.0.14`.
+3. O ponto crítico de ambiente está em `docker-compose.hml.yml`: forwarded-allow-ips está em 172.28.0.0/16, mas os logs mostram tráfego vindo de 172.18.x.x.
+4. Resultado: o servidor pode ignorar headers encaminhados pelo Nginx e continuar enxergando IP interno do proxy, gerando bloqueio cruzado.
 
 ---
 
 ## Análise de Riscos e Decisões Chave
 
-- **Decisão técnica principal:** parar de depender de `request.client.host` como identidade única e passar a resolver a identidade por uma camada central, confiando em headers de proxy apenas quando o tráfego vier de um proxy confiável.
-
-- **Risco principal:** corrigir só o proxy sem mudar as chaves Redis continua causando bloqueio coletivo; corrigir só a chave sem corrigir a origem do IP gera identidade errada e métricas falsas.
-
-- **Dependências:** Nginx/HML em `nginx.hml.conf`, startup da API em `docker-compose.hml.yml`, Redis operacional, e testes integrados com múltiplos usuários atrás do mesmo proxy.
+- **Decisão arquitetural principal:** cada evento deve operar no menor escopo possível. O plano deve atacar 2 frentes ao mesmo tempo: isolamento lógico de chaves e consistência de execução em produção/HML.
 
 ---
 
