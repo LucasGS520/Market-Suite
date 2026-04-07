@@ -209,7 +209,7 @@ export const productsService = {
       : undefined;
 
     const response = await apiClient.get<PaginatedResponse<MonitoredProduct>>(
-      '/monitored',
+      '/monitored/',
       { params: sanitizedParams }
     );
     const normalizedItems = (response.data.items || []).map(normalizeMonitoredProduct);
@@ -312,7 +312,7 @@ export const productsService = {
     };
 
     const response = await apiClient.get<CompetitorsListResponse>(
-      '/competitors',
+      '/competitors/',
       { params: requestParams }
     );
     const normalizedItems = (response.data.items || []).map((competitor) =>
