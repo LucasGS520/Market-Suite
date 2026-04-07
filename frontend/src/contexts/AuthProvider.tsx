@@ -116,12 +116,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   /**
-   * Atualiza o token acessível ao contexto a partir de authService
+   * Atualiza o token acessível ao contexto a partir de authService.
+   * O agendamento do próximo refresh é gerenciado exclusivamente pelo
+   * useEffect([accessToken]) abaixo, evitando double-scheduling.
    */
   const syncAccessToken = () => {
     const token = getAccessToken();
     setAccessTokenState(token);
-    scheduleTokenRefresh(token);
   };
 
   /**

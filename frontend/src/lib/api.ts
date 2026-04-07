@@ -12,14 +12,18 @@ import {
  * - Adiciona interceptor de response para tratar 401 (tentar renovar token via /auth/refresh).
  */
 
-const API_BASE_URL: string = import.meta.env.VITE_API_URL;
+const _rawApiUrl: string = import.meta.env.VITE_API_URL ?? '';
 
-if (!API_BASE_URL) {
+if (!_rawApiUrl) {
   throw new Error(
     '[api] VITE_API_URL não definido. ' +
     'Configure a variável no arquivo .env adequado antes de executar o build.'
   );
 }
+
+// Normaliza HTTP → HTTPS para proteger contra builds feitos com http://.
+// Chamadas em HTTP seriam bloqueadas como mixed content no browser (página HTTPS).
+const API_BASE_URL = _rawApiUrl.replace(/^http:\/\//i, 'https://');
 
 // Cliente HTTP Axios configurado com baseURL e cabeçalho padrão
 export const apiClient = axios.create({
@@ -36,13 +40,18 @@ if (import.meta.env.DEV) {
   console.debug('[api] VITE_API_URL =', API_BASE_URL);
 }
 
+// Flag para evitar múltiplas navegações simultâneas para /login.
+// Sem ela, várias requisições com 401 simultâneas chamam redirectToLogin() N vezes.
+let _isRedirecting = false;
+
 /**
- * Função utilitária para limpar tokens e redirecionar o usuário para a tela de login.
- * Mantém comportamento reutilizável em casos de falha de autenticação.
+ * Limpa tokens e redireciona para a tela de login.
+ * Idempotente: chamadas subsequentes são ignoradas até a página recarregar.
  */
 const redirectToLogin = (): void => {
+  if (_isRedirecting) return;
+  _isRedirecting = true;
   clearAccessToken();
-  // Redireciona para rota de login da aplicação
   window.location.href = '/login';
 };
 
