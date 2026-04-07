@@ -17,6 +17,9 @@ tests/
 .env
 .env.*
 !.env.*.example
+# Arquivos de env do frontend excluídos explicitamente — o build usa --build-arg, não arquivos locais
+frontend/.env.frontend
+frontend/.env.frontend.*
 infra/.env
 
 #Ignora ambientes virtuais

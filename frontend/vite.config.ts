@@ -50,10 +50,25 @@ function parseFrontendEnvFile(filePath: string): Record<string, string> {
 
 function loadFrontendEnv(mode: string): Record<string, string> {
   const root = process.cwd()
-  return {
+
+  // Valores dos arquivos de env (base antes do mode-specific)
+  const fromFiles = {
     ...parseFrontendEnvFile(path.join(root, '.env.frontend')),
     ...parseFrontendEnvFile(path.join(root, `.env.frontend.${mode}`)),
   }
+
+  // Variáveis VITE_* já presentes em process.env têm prioridade sobre os arquivos.
+  // Isso garante que --build-arg/ENV do Dockerfile não seja silenciosamente sobrescrito
+  // pelo arquivo .env.frontend copiado no contexto de build.
+  const fromProcess: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith('VITE_') && value !== undefined) {
+      fromProcess[key] = value
+    }
+  }
+
+  // Ordem de prioridade (menor → maior): arquivo base < arquivo mode < process.env
+  return { ...fromFiles, ...fromProcess }
 }
 
 export default defineConfig(({ mode }) => {
@@ -64,6 +79,7 @@ export default defineConfig(({ mode }) => {
       .map(([key, value]) => [`import.meta.env.${key}`, JSON.stringify(value)]),
   )
 
+  // Sincroniza process.env para bibliotecas que o consultam diretamente (ex: plugins Vite)
   Object.assign(process.env, frontendEnv)
 
   return {

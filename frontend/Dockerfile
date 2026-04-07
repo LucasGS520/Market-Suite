@@ -27,12 +27,10 @@ RUN pnpm run build
 FROM node:20-alpine AS production
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
+# serve não depende de pnpm/corepack — instala apenas o binário necessário
+RUN npm install -g serve
 
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package.json ./
 
-RUN npm install -g serve
 EXPOSE 5173
-
 CMD ["serve", "-s", "dist", "-l", "5173"]
