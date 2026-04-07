@@ -64,7 +64,7 @@ export const authService = {
     name: string;
     phone_number?: string;
   }): Promise<User> {
-    const response = await apiClient.post<User>('/users', {
+    const response = await apiClient.post<User>('/users/', {
       email: payload.email,
       password: payload.password,
       name: payload.name,
