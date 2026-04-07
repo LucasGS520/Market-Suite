@@ -18,7 +18,9 @@ from market_alert.infrastructure.security.bruteforce import (
     block_ip,
     reset_failed_attempts,
     record_failed_attempt,
+    enforce_rate_limit,
 )
+from market_alert.infrastructure.security.client_identity import resolve_client_ip
 from market_alert.models.models_users import User
 from market_alert.schemas.schemas_auth import (
     ResetPasswordRequest,
@@ -76,25 +78,25 @@ def login_user(
     password: str,
 ) -> TokenPairResponse:
     """ Organiza o fluxo de login: Bloqueio por IP, Autenticação, Registro de falhas ou sucesso, Geração de JWT """
-    ip = request.client.host
+    ip = resolve_client_ip(request)
     email = username
 
-    #Bloqueio de IP antes de autenticar
-    block_ip(request)
+    #Bloqueio de IP antes de autenticar (chave composta: IP + alvo)
+    block_ip(request, identifier=email)
 
     user = authenticate_user(db, email, password)
     if not user:
         logger.warning("login_failed", ip=ip, email=email)
-        record_failed_attempt(request)
+        record_failed_attempt(request, identifier=email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail ou senha inválidos", headers={"WWW-Authenticate": "Bearer"})
 
     if not user.is_active or user.status == UserStatus.suspended:
         logger.warning("login_inactive", ip=ip, email=email)
-        record_failed_attempt(request)
+        record_failed_attempt(request, identifier=email)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Usuário desativado. Contate o administrador")
 
     #Login bem-sucedido
-    reset_failed_attempts(request)
+    reset_failed_attempts(request, identifier=email)
     #Atualiza last_login
     user.last_login = datetime.now(timezone.utc)
 
@@ -113,7 +115,7 @@ def login_user(
         }
     )
     raw_refresh, refresh = create_refresh_token(
-        db, str(user.id), request.client.host, request.headers.get("user-agent", "")
+        db, str(user.id), ip, request.headers.get("user-agent", "")
     )
     logger.info("refresh_token_issued_on_login", refresh_id=str(refresh.id), user_id=str(user.id))
     return TokenPairResponse(access_token=token, refresh_token=raw_refresh, token_type="bearer")
@@ -224,21 +226,30 @@ def refresh_token_service(
     request: Request,
 ) -> TokenPairResponse:
     """ Troca um Refresh Token válido por um novo Access Token e novo Refresh Token (rotacionando) """
+    ip = resolve_client_ip(request)
     request_id = request.headers.get("x-request-id") or request.headers.get("x-requestid")
     raw_token = _resolve_refresh_token(payload, request)
     if not raw_token:
-        logger.warning("refresh_failed_missing", ip=request.client.host, request_id=request_id)
+        logger.warning("refresh_failed_missing", ip=ip, request_id=request_id)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autorizado")
     refresh = get_refresh_token(db, raw_token)
     if not refresh:
-        logger.warning("refresh_failed_invalid", ip=request.client.host, request_id=request_id)
+        logger.warning("refresh_failed_invalid", ip=ip, request_id=request_id)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autorizado")
+
+    #Limite por usuário autenticado — protege contra abuso de renovação de token
+    enforce_rate_limit(
+        key=f"rate:auth:refresh:{refresh.user_id}",
+        max_attempts=settings.REFRESH_RATE_LIMIT_MAX,
+        window_seconds=settings.REFRESH_RATE_LIMIT_WINDOW,
+        error_message="Muitas requisições de renovação de token. Tente novamente em breve.",
+    )
 
     #Revoga o token antigo
     revoke_refresh_token(db, refresh)
 
     #Cria raw + registro
-    new_raw, new_refresh = create_refresh_token(db, str(refresh.user_id), request.client.host, request.headers.get("user-agent", ""))
+    new_raw, new_refresh = create_refresh_token(db, str(refresh.user_id), ip, request.headers.get("user-agent", ""))
 
     #Gera novo access token com jti unico
     user = get_user_by_id(db, refresh.user_id)
@@ -257,7 +268,7 @@ def refresh_token_service(
         user_id=str(refresh.user_id),
         old_id=str(refresh.id),
         new_token_id=str(new_refresh.id),
-        ip=request.client.host,
+        ip=ip,
         request_id=request_id,
     )
     return TokenPairResponse(access_token=access_token, refresh_token=new_raw, token_type="bearer")
@@ -268,14 +279,15 @@ def logout_service(
     request: Request,
 ) -> None:
     """ Logout de sessão: revoga apenas o Refresh Token fornecido """
+    ip = resolve_client_ip(request)
     raw_token = _resolve_refresh_token(payload, request)
     if not raw_token:
-        logger.warning("logout_missing_token", ip=request.client.host)
+        logger.warning("logout_missing_token", ip=ip)
         return
     refresh = get_refresh_token(db, raw_token)
     if not refresh:
-        logger.warning("logout_invalid_token", ip=request.client.host)
+        logger.warning("logout_invalid_token", ip=ip)
         return
 
     revoke_refresh_token(db, refresh)
-    logger.info("logout_success", token_id=str(refresh.id), user_id=str(refresh.user_id), ip=request.client.host)
+    logger.info("logout_success", token_id=str(refresh.id), user_id=str(refresh.user_id), ip=ip)

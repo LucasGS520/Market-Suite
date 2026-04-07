@@ -6,6 +6,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from market_alert.infrastructure.security.bruteforce import enforce_rate_limit
+from market_alert.infrastructure.security.client_identity import resolve_client_ip
 from market_alert.core.config_alert import settings
 from market_alert.core.tokens import generate_phone_otp, generate_verification_token, token_expiry
 from market_alert.models.models_users import User
@@ -62,7 +63,7 @@ def verify_phone_otp(db: Session, user_id: UUID, otp: str) -> UserResponse:
 def resend_verification(db: Session, user: User, payload: VerificationResendRequest, request: Request) -> None:
     """ Reenvia token/OTP respeitando limites de tentativa e cooldown """
     from market_alert.users.tasks.verification_tasks import send_email_verification, send_phone_otp
-    ip_address = request.client.host if request.client else "unknown"
+    ip_address = resolve_client_ip(request)
     enforce_rate_limit(
         key=f"verify:resend:{user.id}:{payload.channel}",
         max_attempts=settings.VERIFICATION_RESEND_MAX_PER_HOUR,

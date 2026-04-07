@@ -19,28 +19,21 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Objetivo e Problemas Identificados
 
+**Resumo**
+
+- **Problema a resolver:** o sistema está usando o IP visto pelo container, não o IP real do usuário, então vários usuários caem na mesma chave Redis e acabam bloqueados em conjunto. O ponto crítico está em `bruteforce.py`, consumidos por `services_auth.py` e `routes_login.py`.
+
+- **Objetivo do plano:** separar corretamente a identidade de cada cliente, impedir bloqueio cruzado entre usuários e padronizar as chaves Redis para que cada entidade tenha sua própria governança.
+
 ---
 
 ## Análise de Riscos e Decisões Chave
 
-### Risco Principal
-**Imagens build sem shared causam falha silenciosa em homologação**
+- **Decisão técnica principal:** parar de depender de `request.client.host` como identidade única e passar a resolver a identidade por uma camada central, confiando em headers de proxy apenas quando o tráfego vier de um proxy confiável.
 
-*Mitigação*:
-- Refatorar Dockerfiles para copiar `shared/` explicitamente.
+- **Risco principal:** corrigir só o proxy sem mudar as chaves Redis continua causando bloqueio coletivo; corrigir só a chave sem corrigir a origem do IP gera identidade errada e métricas falsas.
 
-### Risco Secundário
-**Nginx roteia para localhost dentro container → 502 Bad Gateway**
-
-*Mitigação*:
-- Usar nomes de serviço Docker como upstream (market_alert, frontend).
-
-### Risco Terceiro
-**Scripts não versionados geram reprodutibilidade fraca**
-
-*Mitigação*:
-- Mover scripts críticos para pasta versionada.
-- Adicionar documentação de execução no repositório.
+- **Dependências:** Nginx/HML em `nginx.hml.conf`, startup da API em `docker-compose.hml.yml`, Redis operacional, e testes integrados com múltiplos usuários atrás do mesmo proxy.
 
 ---
 

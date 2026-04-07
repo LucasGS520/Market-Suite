@@ -25,6 +25,7 @@ from market_alert.notifications.crud import crud_notifications
 from market_alert.users.domain.account_domain import normalize_email, normalize_phone
 from market_alert.users.domain.settings_domain import DEFAULT_NOTIFICATION_CHANNELS
 from market_alert.users.tasks.verification_tasks import send_email_verification, send_phone_otp
+from market_alert.infrastructure.security.client_identity import resolve_client_ip
 
 
 logger = structlog.get_logger("users.services.settings")
@@ -123,7 +124,7 @@ def update_profile_settings(
             kind=VerificationKind.email,
             raw_token=token,
             expires_at=expires_at,
-            metadata={"ip": request.client.host if request.client else "unknown"},
+            metadata={"ip": resolve_client_ip(request)},
         )
         send_email_verification.delay(str(user.id), token)
         email_verification_required = True
@@ -138,7 +139,7 @@ def update_profile_settings(
             raw_token=otp,
             expires_at=expires_at,
             attempts_remaining=settings.PHONE_VERIFICATION_MAX_ATTEMPTS,
-            metadata={"ip": request.client.host if request.client else "unknown"},
+            metadata={"ip": resolve_client_ip(request)},
         )
         send_phone_otp.delay(str(user.id), otp)
         phone_verification_required = True

@@ -60,8 +60,21 @@ class ConfigBase(BaseSettings):
     REDIS_TTL_IDEMPOTENCY_SECONDS: int = int(os.getenv("REDIS_TTL_IDEMPOTENCY_SECONDS", "300")) #Chaves de idempotência
 
     #Proteção contra tentativas de brute-force
+    # Política por (IP, conta): bloqueia um IP específico atacando uma conta específica.
+    # TTL curto — atacantes transitórios são desbloqueados em 15 min sem impacto em outros usuários.
     BRUTE_FORCE_MAX_ATTEMPTS: int = int(os.getenv("BRUTE_FORCE_MAX_ATTEMPTS", "5")) #Tentativas permitidas
-    BRUTE_FORCE_BLOCK_DURATION: int = int(os.getenv("BRUTE_FORCE_BLOCK_DURATION", "900")) #Bloqueio em segundos
+    BRUTE_FORCE_BLOCK_DURATION: int = int(os.getenv("BRUTE_FORCE_BLOCK_DURATION", "900")) #Bloqueio em segundos (15 min)
+
+    # Política por conta (agregada, todos os IPs): protege contra brute-force distribuído.
+    # Limiar mais alto que por IP pois contabiliza tentativas legítimas de múltiplos dispositivos.
+    # TTL longo — sinaliza comprometimento ativo; reset automático em 1 hora.
+    ACCOUNT_LOCKOUT_MAX_ATTEMPTS: int = int(os.getenv("ACCOUNT_LOCKOUT_MAX_ATTEMPTS", "10")) #Tentativas de qualquer IP
+    ACCOUNT_LOCKOUT_DURATION: int = int(os.getenv("ACCOUNT_LOCKOUT_DURATION", "3600")) #Bloqueio em segundos (1 hora)
+
+    # Política de refresh por usuário autenticado: evita abuso de renovação de token.
+    # 20 renovações em 5 min cobre uso legítimo normal (múltiplas abas, reconnects).
+    REFRESH_RATE_LIMIT_MAX: int = int(os.getenv("REFRESH_RATE_LIMIT_MAX", "20")) #Renovações permitidas na janela
+    REFRESH_RATE_LIMIT_WINDOW: int = int(os.getenv("REFRESH_RATE_LIMIT_WINDOW", "300")) #Janela em segundos (5 min)
 
     #Rate limits para tasks Celery
     SCRAPER_RATE_LIMIT: str = os.getenv("SCRAPER_RATE_LIMIT", "10/m") #Limite de scraping
