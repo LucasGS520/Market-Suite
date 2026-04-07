@@ -17,65 +17,41 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Diagnóstico atual - resumo
-O desenho atual está tecnicamente sólido e coerente com um modelo profissional de multiambiente. A governança dos compose foi bem executada: cada arquivo tem papel definido, com fronteiras claras. A operação de homologação está madura e próxima do ideal de reprodutibilidade. 
-
-O principal risco residual está concentrado na consistência dos arquivos de ambiente, o problema agora não é técnico de subida, é governança de configuração. Com muitos arquivos `.env` por ambiente e por serviço.
-
 ## Objetivo e Estratégias de Implementação
 
 **Objetivo**  
-Fechar o contrato de configuração dos arquivos de ambiente para eliminar duplicações, conflito de variáveis e risco de vazamento de segredo, mantendo execução previsível entre development, staging e production.
+Criar e alinhar um ambiente de testes técnico e automatizado para o módulo `market_alert`, cobrindo testes unitários e de integração dos fluxos essenciais de autenticação, usuários, produtos, coleta, comparações, notificações, segurança e startup operacional.
 
-**Estratégia de implementação**  
-Executar em 4 blocos:  
-1. Governança de contratos por família de arquivo.  
-2. Higienização dos arquivos ativos sem sufixo.  
-3. Padronização de templates por ambiente.  
-4. Validação operacional com regras automáticas.
-
----
-
-## Erros Comuns Confirmados e Alinhamento Ideal
-
-1. **Erro comum: arquivo ativo vira fonte de modelagem**  
-Descrição: arquivos sem sufixo acabam recebendo edição manual e viram “verdade paralela”.  
-Alinhamento ideal: arquivos sem sufixo são somente artefato ativo gerado, nunca fonte de definição.
-
-2. **Erro comum: variáveis duplicadas em famílias diferentes**  
-Descrição: a mesma variável aparece em common e no serviço, gerando precedência ambígua.  
-Alinhamento ideal: uma variável tem dono único por contrato.
-
-3. **Erro comum: crescimento sem taxonomia**  
-Descrição: novos env entram sem regra e aumentam conflito entre times.  
-Alinhamento ideal: cada família tem escopo fechado e lista permitida de variáveis.
-
-4. **Erro comum: templates não refletem runtime real**  
-Descrição: templates existem, mas execução consome outro conjunto de arquivos.  
-Alinhamento ideal: script de carga gera exatamente os ativos lidos pelos compose.
-
-5. **Erro comum: segredo real em arquivo ativo persistente**  
-Descrição: segredos ficam em ativos como [ .env.common ](.env.common).  
-Alinhamento ideal: ativo local pode existir, mas com política rígida de geração, rotação e validação pré-subida.
+**Estratégia de Implementação**  
+A implementação será feita em 6 fases sequenciais: fundação do ambiente, padronização da estrutura de testes, suíte unitária por domínio, suíte de integração por fluxos críticos, testes de estresse técnico, e governança contínua por qualidade e execução em CI.  
+A abordagem prioriza:
+- Isolamento para testes unitários.
+- Integração realista para fluxos críticos.
+- Observabilidade, segurança e determinismo desde o início.
 
 ---
 
-## Ações Corretivas Objetivas por Problema
+## Análise de Riscos e Decisões Chave
 
-1. **Segredo em ativo sem controle**  
-Ação: transformar ativos em artefatos de geração e exigir pré-validação obrigatória antes de subir hml.
+**Decisão Técnica Principal**  
+Adotar pirâmide de testes com duas trilhas explícitas:
+- Unit: validação de regras puras e serviços com mocks/fakes.
+- Integration: validação de contratos e fluxos fim-a-fim do backend com infraestrutura de teste controlada.
 
-2. **Duplicação de variável entre arquivos**  
-Ação: consolidar owner único e remover todas as cópias fora do owner.
+**Risco Principal**  
+Flakiness por dependências externas e estado compartilhado (DB/Redis/Temporal/Celery), causando falsos negativos e baixa confiança.
 
-3. **Conflito de precedência por múltiplos env_file**  
-Ação: publicar ordem oficial de precedência e reduzir sobreposição entre famílias.
+**Mitigações Principais**
+- Fixtures com isolamento por teste e limpeza transacional.
+- Fakes e mocks para integrações externas em unit.
+- Marcadores e execução segregada por suíte.
+- Timeouts, retries e seeds determinísticas.
 
-4. **Template de ambiente divergente do runtime**  
-Ação: alinhar script de carga para gerar exatamente os arquivos consumidos pelos compose.
-
-5. **Evolução sem padrão**  
-Ação: criar checklist obrigatório de mudança de configuração para toda alteração de env.
+**Dependências**
+- Estrutura recomendada em `estrutura_ambiente_testes.md`.
+- Contratos e fluxos documentados em `README.md`.
+- Configuração da aplicação em `config_alert.py`.
+- Bootstraps e runtime operacional em `main.py`, `startup_validation.py`, `celery_app.py`.
 
 ---
 
