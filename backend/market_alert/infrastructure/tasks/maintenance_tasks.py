@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 
 import structlog
 from celery import shared_task
@@ -119,4 +120,20 @@ def cleanup_cache() -> None:
         )
     except Exception:
         logger.exception("cleanup_cache_failure")
-        
+
+
+@shared_task(name="market_alert.infrastructure.tasks.maintenance_tasks.beat_heartbeat")
+def beat_heartbeat() -> None:
+    """Atualiza o heartbeat do Celery Beat no Redis.
+
+    Executada a cada 60s pelo Beat. O endpoint /health/ lê beat:last_success
+    para confirmar que o agendador está ativo. TTL de 600s cobre até 10 ciclos
+    sem disparo antes de ser declarado stale.
+    """
+    redis_client = get_redis_operational()
+    if redis_client is None:
+        logger.warning("beat_heartbeat_skipped", reason="redis_unavailable")
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    redis_client.set("beat:last_success", now, ex=600)
+    logger.debug("beat_heartbeat_ok", timestamp=now)

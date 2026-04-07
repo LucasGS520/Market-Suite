@@ -33,9 +33,25 @@ def _config():
 
     O import em nível de módulo acionaria Path.expanduser() durante carregamento,
     proibido pelo sandbox determinístico do Temporal SDK.
+
+    Tenta importar de market_orchestrator; se o módulo não estiver instalado no
+    container (ex: market_alert sem market_orchestrator), usa fallback via env vars
+    com os mesmos defaults, permitindo probe de conectividade sem ImportError.
     """
-    from market_orchestrator.core.config_orchestrator import settings
-    return settings
+    try:
+        from market_orchestrator.core.config_orchestrator import settings
+        return settings
+    except ImportError:
+        import os
+        import types
+        cfg = types.SimpleNamespace(
+            TEMPORAL_HOST=os.getenv("TEMPORAL_HOST", "temporal"),
+            TEMPORAL_PORT=int(os.getenv("TEMPORAL_PORT", "7233")),
+            TEMPORAL_NAMESPACE=os.getenv("TEMPORAL_NAMESPACE", "default"),
+            TEMPORAL_TASK_QUEUE=os.getenv("TEMPORAL_TASK_QUEUE", "market-orchestrator"),
+        )
+        cfg.temporal_target = f"{cfg.TEMPORAL_HOST}:{cfg.TEMPORAL_PORT}"
+        return cfg
 
 # Política de reutilização de ID: permite novo workflow se o anterior terminou/falhou
 _WORKFLOW_ID_REUSE = WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY

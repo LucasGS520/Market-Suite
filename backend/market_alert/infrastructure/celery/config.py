@@ -93,6 +93,11 @@ BEAT_SCHEDULE = {
         600,  #10 minutos para garantir que falhas sejam detectadas
         queue="scraping",
     ),
+    "beat-heartbeat": _schedule_entry(
+        "market_alert.infrastructure.tasks.maintenance_tasks.beat_heartbeat",
+        60,  #1 minuto — atualiza beat:last_success para o health check da API
+        queue="scraping",
+    ),
 }
 
 
