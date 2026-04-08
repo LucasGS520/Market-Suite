@@ -20,26 +20,29 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 ## Objetivo e Estratégias de Implementação
 
 **Objetivo**  
-Criar um ambiente de testes técnico, automatizado e alinhado ao papel do `market_orchestrator`, cobrindo o workflow Temporal, activities, contratos, configuração e pontos de integração com Redis, PostgreSQL e a camada consumidora em market_alert.
+Implementar um ambiente de testes técnico, automatizado e confiável para o módulo `market_scraper`, cobrindo testes unitários, de integração e técnicos, com foco em validação de regras de parsing, fluxo HTTP, cache condicional, robustez de rede e mapeamento de falhas.
 
 **Estratégia de Implementação**  
-Montar a base de testes primeiro, depois cobrir o núcleo determinístico do workflow em unit, em seguida validar as activities e o worker em integration, e por fim fechar com testes técnicos, governança de execução e critérios de qualidade. O ponto de partida real é que o diretório de testes do módulo existe, mas ainda está vazio, e o bootstrap global de pytest em `pytest.ini` ainda está orientado para tests.
+A execução será em fases incrementais: primeiro fundação do ambiente e isolamento, depois cobertura unitária dos componentes críticos, em seguida integração de fluxos ponta a ponta internos do módulo, e por fim governança de qualidade (cobertura, estabilidade e execução contínua).  
+Cada fase termina com critérios objetivos de validação para reduzir flakiness e evitar acoplamento com infraestrutura externa real.
 
 ---
 
 ## Análise de Riscos e Decisões Chave
 
 **Decisão Técnica Principal**  
-separar claramente testes unitários de testes de integração, mantendo unit sem I/O real e integration com infraestrutura controlada, seguindo a estrutura proposta em `estrutura_ambiente_testes.md`.
+Separar claramente as suítes por nível de isolamento: unit sem I/O real, integration com infraestrutura controlada (fakes e stubs determinísticos), e stress técnico com carga limitada e repetível.
 
 **Risco Principal**  
-flakiness por Temporal, Redis, SQL e dependências de processo no worker. Isso precisa ser mitigado com fixtures determinísticas, fakes/mocks para unit, isolamento por arquivo de teste e marcação explícita de suíte.
+Flakiness por dependências de rede, tempo e concorrência (download, DNS, robots, cache e singleflight).  
+Mitigação: monkeypatch em pontos de I/O, limites de timeout curtos em teste, dados de entrada fixos, reset de estado global por teste e ausência de chamadas externas reais.
 
-**Dependências**
-- `config_orchestrator.py` para parametrização de ambiente.
-- `worker.py` para bootstrap do worker e validação de infraestrutura.
-- `workflow.py` para as regras determinísticas do fluxo.
-- `dispatch_activity.py`, `status_activity.py`, `policy_activity.py` e `snapshot_activity.py` para validação dos caminhos de I/O.
+**Dependências**  
+- Contratos de request/response compartilhados com o módulo shared  
+- Configuração carregada por variáveis de ambiente específicas do scraper  
+- Componentes principais do pipeline sequencial e etapas de parsing  
+- Utilitários de cache condicional, download HTTP, validação de host e robots  
+- Suporte do pytest global do backend e alinhamento com marcações existentes
 
 ---
 
