@@ -1,0 +1,14 @@
+# Dependencias especificas do modulo market_orchestrator
+# Mudam com mais frequencia - camada separada do base
+
+# Orquestracao e workflow
+temporalio>=1.7.0,<2.0.0
+
+# Logging, configuracao e cache
+structlog==25.3.0
+pydantic-settings==2.9.1
+redis==6.1.0
+
+# Banco de dados
+sqlalchemy==2.0.40
+psycopg2-binary==2.9.10

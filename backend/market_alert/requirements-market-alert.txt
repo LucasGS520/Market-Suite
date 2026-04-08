@@ -1,19 +1,19 @@
-# Dependências específicas do módulo market_alert
-# Mudam com mais frequência — camada separada do base
+# Dependencias especificas do modulo market_alert
+# Mudam com mais frequencia - camada separada do base
 
-# Autenticação e segurança
+# Autenticacao e seguranca
 python-jose[cryptography]==3.3.0
 bcrypt==4.3.0
 PyJWT==2.10.1
 
-# API utilitários
+# API utilitarios
 slowapi==0.1.9
 Jinja2==3.1.6
 email_validator==2.2.0
 phonenumbers==9.0.21
 python-multipart==0.0.20
 
-# Notificações
+# Notificacoes
 pyfcm==2.0.8
 twilio==9.6.4
 aiosmtplib==4.0.1
@@ -22,10 +22,5 @@ aiosmtplib==4.0.1
 aiohttp==3.12.13
 aiohttp-retry==2.9.1
 
-# Resiliência
+# Resiliencia
 tenacity==9.1.2
-
-# Testes específicos do módulo
-respx==0.22.0
-freezegun==1.5.1
-pytest-cov==4.1.0

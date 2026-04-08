@@ -31,7 +31,7 @@ market_orchestrator/
 |-- schemas/                    # Dataclasses de input/signals/snapshot/policy
 |-- workflow.py                 # MonitoredProductWorkflow (deterministico)
 |-- worker.py                   # Bootstrap do Temporal Worker
-|-- requirements-orchestrator.txt
+|-- requirements-market-orchestrator.txt
 `-- .env.market_orchestrator
 ```
 
