@@ -7,6 +7,9 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+from tests_runtime import (
+    reset_market_orchestrator_runtime_state as reset_market_orchestrator_runtime,
+)
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -112,3 +115,10 @@ def fresh_orchestrator_settings(
 @pytest.fixture(scope="session")
 def high_cost_integration_marker() -> pytest.MarkDecorator:
     return HIGH_COST_INTEGRATION_MARK
+
+
+@pytest.fixture(autouse=True)
+def reset_orchestrator_runtime_state():
+    reset_market_orchestrator_runtime()
+    yield
+    reset_market_orchestrator_runtime()

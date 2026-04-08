@@ -1,4 +1,4 @@
-# Contexto Codex — Organização e Separação Modular (`market_orchestrator`)
+# Contexto Codex
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -20,35 +20,30 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 ## Objetivo e Estratégias de Implementação
 
 **Objetivo**  
-Criar e alinhar o ambiente de testes do módulo compartilhado shared para validar contratos, utilitários, infraestrutura técnica e clientes de integração, com cobertura consistente de testes unitários e de integração, sem dependência de infraestrutura externa real nos cenários unitários.
+Alinhar e fechar as lacunas das suítes de testes dos 4 módulos backend para que a cobertura reflita as responsabilidades reais de negócio e infraestrutura, reduzindo risco sistêmico em fluxos assíncronos, integrações e componentes compartilhados.
 
 **Estratégia de Implementação**  
-A implementação será incremental em 4 fases:  
-1. fundação do ambiente de teste do shared,  
-2. cobertura unitária dos componentes críticos,  
-3. integração controlada dos clientes e fluxos entre componentes,  
-4. governança de qualidade (execução, cobertura e estabilidade).  
-Cada fase terá critérios objetivos para reduzir flakiness e garantir isolamento.
+A execução será incremental em fases, priorizando primeiro os pontos de maior risco operacional: tasks assíncronas e infraestrutura compartilhada. Depois, faremos hardening dos módulos já maduros.
 
 ---
 
 ## Análise de Riscos e Decisões Chave
 
 **Decisão Técnica Principal**  
-Adotar isolamento por nível de teste:  
-- Unit: zero I/O real (Redis, Temporal, HTTP, banco), usando monkeypatch, mocks e fakeredis quando necessário.  
-- Integration: integração entre componentes do próprio shared com dependências técnicas controladas (stubs/fakes), sem chamar serviços reais do ecossistema.
+Adotar matriz de testes por criticidade:  
+- Unit: zero I/O real, uso de fakes determinísticos  
+- Integration controlada: contratos e fluxos entre componentes locais  
+- Integration high-cost: Temporal e fluxos mais caros, com escopo reduzido  
+- Stress técnico: somente cenários onde concorrência/timeout é responsabilidade funcional
 
 **Risco Principal**  
-Flakiness por dependências de tempo/rede e acoplamento cruzado com módulos de serviço, especialmente nos clientes scraper_client.py e orchestrator_client.py.  
-Mitigação: timeout curto em teste, estado global resetado por fixture, fakes determinísticos e cenários de erro explícitos.
+Falsa sensação de cobertura por excesso de integração mockada, sem validar pontos de borda críticos (Celery, Redis avançado, dedup/lock/cooldown).  
+Mitigação: criar suíte mínima obrigatória por risco operacional e gate de cobertura por área crítica.
 
 **Dependências**  
-- Configuração global de pytest em pytest.ini  
-- Bootstrap global em conftest.py  
-- Contratos canônicos em schemas  
-- Componentes de infra em infra  
-- Diretrizes arquiteturais em README.md
+- Configuração global em `pytest.ini` e `conftest.py`  
+- Estrutura alvo em `estrutura_ambiente_testes.md`  
+- Requisitos de cada módulo (arquivos requirements)  
 
 ---
 

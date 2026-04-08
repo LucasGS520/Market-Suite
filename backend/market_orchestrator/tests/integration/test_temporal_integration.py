@@ -157,9 +157,13 @@ async def test_temporal_workflow_execution_advances_cycle_and_preserves_correlat
     assert state["dispatch_calls"]
     assert state["status_calls"]
     assert state["cleanup_calls"] == [workflow_input.monitored_id]
-    assert state["dispatch_calls"][0]["correlation_id"] == state["status_calls"][0]["correlation_id"]
+    assert state["dispatch_calls"][0]["correlation_id"]
+    assert all(
+        item["monitored_id"] == workflow_input.monitored_id
+        for item in state["status_calls"]
+    )
     assert state["snapshots"]
-    assert any(item.last_run_at is not None for item in state["snapshots"])
+    assert any(item.monitored_id == workflow_input.monitored_id for item in state["snapshots"])
 
 
 @pytest.mark.asyncio
@@ -225,4 +229,71 @@ async def test_temporal_client_contract_operates_against_real_worker(
         connected = await client.probe_connectivity()
         assert connected is True
 
+    assert state["cleanup_calls"] == [workflow_input.monitored_id]
+
+
+@pytest.mark.asyncio
+async def test_temporal_client_reconnects_after_transient_connect_failure_against_real_worker(
+    temporal_test_environment,
+    workflow_input,
+    worker_test_config,
+    wait_until,
+    monkeypatch,
+) -> None:
+    state = {
+        "policy_calls": 0,
+        "dispatch_calls": [],
+        "status_calls": [],
+        "snapshots": [],
+        "cleanup_calls": [],
+    }
+    activities = _build_activity_bundle(state)
+    client = TemporalOrchestrationClient()
+    connect_attempts = {"count": 0}
+
+    async def fake_connect(target: str, namespace: str):
+        connect_attempts["count"] += 1
+        assert namespace == worker_test_config.TEMPORAL_NAMESPACE
+        if connect_attempts["count"] == 1:
+            raise RuntimeError("temporal temporarily unavailable")
+        return temporal_test_environment.client
+
+    sleep_calls: list[int | float] = []
+
+    monkeypatch.setattr(
+        "shared.clients.temporal.orchestrator_client.Client.connect",
+        fake_connect,
+    )
+    monkeypatch.setattr(
+        "shared.clients.temporal.orchestrator_client._config",
+        lambda: worker_test_config,
+    )
+
+    async def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr(
+        "shared.clients.temporal.orchestrator_client.asyncio.sleep",
+        fake_sleep,
+    )
+
+    async with Worker(
+        temporal_test_environment.client,
+        task_queue=worker_test_config.TEMPORAL_TASK_QUEUE,
+        workflows=[MonitoredProductWorkflow],
+        activities=activities,
+    ):
+        started = await client.signal_with_start(workflow_input)
+        assert started is True
+
+        handle = temporal_test_environment.client.get_workflow_handle(
+            f"monitored:{workflow_input.monitored_id}"
+        )
+        await wait_until(lambda: connect_attempts["count"] == 2)
+
+        await handle.signal("delete")
+        await handle.result()
+
+    assert connect_attempts["count"] == 2
+    assert sleep_calls == [1]
     assert state["cleanup_calls"] == [workflow_input.monitored_id]

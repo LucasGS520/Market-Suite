@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -66,20 +67,20 @@ def test_notifications_preferences_and_history_http_contract(
         channel_metadata=None,
         commit=True,
     ):
-        preference = {
-            "id": preference_id,
-            "user_id": user_id,
-            "monitored_product_id": monitored_product_id,
-            "alert_type": alert_type,
-            "channel": channel,
-            "destination": destination,
-            "enabled": enabled,
-            "cooldown_seconds": cooldown_seconds,
-            "channel_metadata": channel_metadata,
-            "last_notified_at": None,
-            "created_at": integration_now,
-            "updated_at": integration_now,
-        }
+        preference = SimpleNamespace(
+            id=preference_id,
+            user_id=user_id,
+            monitored_product_id=monitored_product_id,
+            alert_type=alert_type,
+            channel=channel,
+            destination=destination,
+            enabled=enabled,
+            cooldown_seconds=cooldown_seconds,
+            channel_metadata=channel_metadata,
+            last_notified_at=None,
+            created_at=integration_now,
+            updated_at=integration_now,
+        )
         integration_state["preferences"] = [preference]
         return preference
 
@@ -164,7 +165,7 @@ def test_comparisons_summary_and_detail_http_contract(
         "monitored_product_id": monitored_id,
         "timestamp": integration_now,
         "data": {
-            "competitiveness_status": "urgent",
+            "competitiveness_status": "urgente",
             "competitors_min": 189.9,
             "monitored_price": 199.9,
         },
@@ -184,7 +185,7 @@ def test_comparisons_summary_and_detail_http_contract(
         "potential_adjustment": 10.0,
         "ignored_due_to_inactive": False,
         "comparison_insights": "Menor preco do concorrente abaixo do monitorado.",
-        "competitiveness_status": "urgent",
+        "competitiveness_status": "urgente",
         "discrepancies": [],
     }
 
@@ -204,7 +205,7 @@ def test_comparisons_summary_and_detail_http_contract(
         headers={"Authorization": "Bearer test-access-token"},
     )
     assert summary_response.status_code == 200
-    assert summary_response.json()["competitiveness_status"] == "urgent"
+    assert summary_response.json()["competitiveness_status"] == "urgente"
     assert summary_response.json()["comparison_id"] == str(comparison_id)
 
     detail_response = api_client.get(
@@ -212,5 +213,5 @@ def test_comparisons_summary_and_detail_http_contract(
         headers={"Authorization": "Bearer test-access-token"},
     )
     assert detail_response.status_code == 200
-    assert detail_response.json()["data"]["competitiveness_status"] == "urgent"
+    assert detail_response.json()["data"]["competitiveness_status"] == "urgente"
     assert detail_response.json()["monitored_product_id"] == str(monitored_id)

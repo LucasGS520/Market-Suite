@@ -101,6 +101,10 @@ class MonitoredProductWorkflow:
         else:
             self._state = WorkflowState.WaitingTimer
 
+        resumed_attempt_count = input.bootstrap_flags.get("attempt_count")
+        if isinstance(resumed_attempt_count, int) and resumed_attempt_count >= 0:
+            self._attempt_count = resumed_attempt_count
+
         await self._run_loop()
 
     # ------------------------------------------------------------------

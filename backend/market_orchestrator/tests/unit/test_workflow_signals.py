@@ -134,6 +134,28 @@ async def test_sleep_preemptible_ignores_resume_signal_while_already_active(
 
 
 @pytest.mark.asyncio
+async def test_sleep_preemptible_prioritizes_pause_over_resume_signal(
+    workflow_instance,
+    monkeypatch,
+) -> None:
+    workflow_instance._pause_requested = True
+    workflow_instance._resume_payload = ResumeSignalPayload(immediate_collect=True)
+    monkeypatch.setattr(
+        workflow_module.workflow,
+        "wait_condition",
+        AsyncMock(return_value=None),
+    )
+
+    preempted = await workflow_instance._sleep_preemptible(30)
+
+    assert preempted is True
+    assert workflow_instance._state is WorkflowState.Paused
+    assert workflow_instance._resume_payload == ResumeSignalPayload(immediate_collect=True)
+    snapshot = workflow_instance.query_get_state()
+    assert snapshot.state is WorkflowState.Paused
+
+
+@pytest.mark.asyncio
 async def test_sleep_preemptible_returns_false_when_timer_expires(
     workflow_instance,
     monkeypatch,

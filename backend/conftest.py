@@ -28,12 +28,16 @@ _ensure_backend_on_path()
 _seed_backend_test_env()
 
 
+def _has_marker(item: pytest.Item, marker_name: str) -> bool:
+    return any(item.iter_markers(name=marker_name))
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         node_path = str(item.fspath).replace("\\", "/")
-        if "/tests/unit/" in node_path and "unit" not in item.keywords:
+        if "/tests/unit/" in node_path and not _has_marker(item, "unit"):
             item.add_marker(pytest.mark.unit)
-        if "/tests/integration/" in node_path and "integration" not in item.keywords:
+        if "/tests/integration/" in node_path and not _has_marker(item, "integration"):
             item.add_marker(pytest.mark.integration)
-        if "/tests/stress/" in node_path and "stress" not in item.keywords:
+        if "/tests/stress/" in node_path and not _has_marker(item, "stress"):
             item.add_marker(pytest.mark.stress)

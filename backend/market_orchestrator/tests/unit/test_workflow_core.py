@@ -49,6 +49,27 @@ async def test_run_restores_resume_state_before_entering_loop(workflow_policy) -
 
 
 @pytest.mark.asyncio
+async def test_run_restores_attempt_count_from_continue_as_new_bootstrap(
+    workflow_policy,
+) -> None:
+    instance = MonitoredProductWorkflow()
+    instance._run_loop = AsyncMock()
+
+    await instance.run(
+        WorkflowInput(
+            monitored_id="monitored-1",
+            user_id="user-1",
+            policy=workflow_policy,
+            bootstrap_flags={"resume_state": WorkflowState.Backoff.value, "attempt_count": 2},
+        )
+    )
+
+    assert instance._state is WorkflowState.Backoff
+    assert instance._attempt_count == 2
+    instance._run_loop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_run_falls_back_to_waiting_timer_for_invalid_resume_state(
     workflow_policy,
 ) -> None:
@@ -83,6 +104,43 @@ async def test_run_loop_continues_as_new_when_history_limit_is_reached(
     await workflow_instance._run_loop()
 
     workflow_instance._continue_as_new.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_loop_continues_as_new_when_signal_limit_is_reached(
+    workflow_instance,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        workflow_module.workflow,
+        "info",
+        lambda: _WorkflowInfoStub(workflow_module._HISTORY_LENGTH_LIMIT - 1),
+    )
+    workflow_instance._signal_count = workflow_module._SIGNAL_COUNT_LIMIT
+    workflow_instance._continue_as_new = AsyncMock()
+
+    await workflow_instance._run_loop()
+
+    workflow_instance._continue_as_new.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_loop_does_not_continue_as_new_before_history_and_signal_limits(
+    workflow_instance,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        workflow_module.workflow,
+        "info",
+        lambda: _WorkflowInfoStub(workflow_module._HISTORY_LENGTH_LIMIT - 1),
+    )
+    workflow_instance._signal_count = workflow_module._SIGNAL_COUNT_LIMIT - 1
+    workflow_instance._state = WorkflowState.CompletedDeleted
+    workflow_instance._continue_as_new = AsyncMock()
+
+    await workflow_instance._run_loop()
+
+    workflow_instance._continue_as_new.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -126,6 +184,35 @@ async def test_handle_waiting_timer_applies_pending_policy_update_and_dispatches
 
 
 @pytest.mark.asyncio
+async def test_handle_waiting_timer_uses_activity_timeout_and_default_retry_policy(
+    workflow_instance,
+    workflow_now,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_execute_activity(*args, **kwargs):
+        captured.update(kwargs)
+        return PolicyActivityOutput(
+            interval_seconds=30,
+            next_check_at=(workflow_now + timedelta(seconds=30)).isoformat(),
+            paused=False,
+            stability_score=1,
+            scheduling_reason="db-policy",
+        ).__dict__
+
+    monkeypatch.setattr(workflow_module.workflow, "execute_activity", fake_execute_activity)
+    monkeypatch.setattr(workflow_module.workflow, "now", lambda: workflow_now)
+    workflow_instance._persist_snapshot = AsyncMock()
+    workflow_instance._sleep_preemptible = AsyncMock(return_value=True)
+
+    await workflow_instance._handle_waiting_timer()
+
+    assert captured["start_to_close_timeout"] == workflow_module._FETCH_POLICY_TIMEOUT
+    assert captured["retry_policy"] == workflow_module._DEFAULT_RETRY
+
+
+@pytest.mark.asyncio
 async def test_handle_waiting_timer_transitions_to_paused_when_policy_marks_paused(
     workflow_instance,
     monkeypatch,
@@ -163,6 +250,28 @@ async def test_handle_dispatching_stores_correlation_and_enters_waiting_result(
     assert workflow_instance._current_correlation_id == str(correlation_uuid)
     assert workflow_instance._last_run_at == workflow_now
     assert workflow_instance._last_error is None
+
+
+@pytest.mark.asyncio
+async def test_handle_dispatching_uses_activity_timeout_and_default_retry_policy(
+    workflow_instance,
+    workflow_now,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_execute_activity(*args, **kwargs):
+        captured.update(kwargs)
+        return DispatchActivityOutput(success=True, task_id="task-1")
+
+    monkeypatch.setattr(workflow_module.workflow, "execute_activity", fake_execute_activity)
+    monkeypatch.setattr(workflow_module.workflow, "uuid4", lambda: UUID(int=1))
+    monkeypatch.setattr(workflow_module.workflow, "now", lambda: workflow_now)
+
+    await workflow_instance._handle_dispatching()
+
+    assert captured["start_to_close_timeout"] == workflow_module._DISPATCH_TIMEOUT
+    assert captured["retry_policy"] == workflow_module._DEFAULT_RETRY
 
 
 @pytest.mark.asyncio
@@ -208,6 +317,30 @@ async def test_handle_waiting_result_resets_attempts_when_collection_completes(
 
 
 @pytest.mark.asyncio
+async def test_handle_waiting_result_uses_query_timeout_and_default_retry_policy(
+    workflow_instance,
+    workflow_now,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    now_values = iter([workflow_now, workflow_now])
+
+    async def fake_execute_activity(*args, **kwargs):
+        captured.update(kwargs)
+        return QueryStatusOutput(completed=True)
+
+    monkeypatch.setattr(workflow_module.workflow, "execute_activity", fake_execute_activity)
+    monkeypatch.setattr(workflow_module.workflow, "now", lambda: next(now_values))
+    workflow_instance._current_correlation_id = "corr-1"
+    workflow_instance._persist_snapshot = AsyncMock()
+
+    await workflow_instance._handle_waiting_result()
+
+    assert captured["start_to_close_timeout"] == workflow_module._QUERY_STATUS_TIMEOUT
+    assert captured["retry_policy"] == workflow_module._DEFAULT_RETRY
+
+
+@pytest.mark.asyncio
 async def test_handle_waiting_result_times_out_into_backoff(
     workflow_instance,
     workflow_now,
@@ -250,6 +383,24 @@ async def test_handle_backoff_transitions_to_failed_terminal_at_limit(
 
 
 @pytest.mark.asyncio
+async def test_handle_backoff_uses_exponential_delay_for_second_attempt(
+    workflow_instance,
+    monkeypatch,
+) -> None:
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(workflow_module.workflow, "sleep", sleep_mock)
+    workflow_instance._attempt_count = 1
+
+    await workflow_instance._handle_backoff()
+
+    sleep_mock.assert_awaited_once_with(
+        timedelta(seconds=workflow_instance._policy.backoff_base_seconds * 2)
+    )
+    assert workflow_instance._attempt_count == 2
+    assert workflow_instance._state is WorkflowState.Dispatching
+
+
+@pytest.mark.asyncio
 async def test_handle_backoff_sleeps_and_retries_before_limit(
     workflow_instance,
     monkeypatch,
@@ -263,6 +414,29 @@ async def test_handle_backoff_sleeps_and_retries_before_limit(
         timedelta(seconds=workflow_instance._policy.backoff_base_seconds)
     )
     assert workflow_instance._attempt_count == 1
+    assert workflow_instance._state is WorkflowState.Dispatching
+
+
+@pytest.mark.asyncio
+async def test_handle_backoff_caps_sleep_at_one_hour(
+    workflow_instance,
+    monkeypatch,
+) -> None:
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(workflow_module.workflow, "sleep", sleep_mock)
+    workflow_instance._policy = CollectionPolicy(
+        interval_seconds=60,
+        backoff_max_attempts=20,
+        backoff_base_seconds=500,
+        stability_score=0,
+        scheduling_reason="test-cap",
+    )
+    workflow_instance._attempt_count = 8
+
+    await workflow_instance._handle_backoff()
+
+    sleep_mock.assert_awaited_once_with(timedelta(seconds=3600))
+    assert workflow_instance._attempt_count == 9
     assert workflow_instance._state is WorkflowState.Dispatching
 
 
@@ -286,6 +460,27 @@ async def test_handle_paused_resumes_into_dispatching_when_immediate_collect(
     assert workflow_instance._resume_payload is None
     assert workflow_instance._state is WorkflowState.Dispatching
     workflow_instance._persist_snapshot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_paused_prioritizes_delete_over_pending_resume(
+    workflow_instance,
+    monkeypatch,
+) -> None:
+    workflow_instance._delete_requested = True
+    workflow_instance._resume_payload = ResumeSignalPayload(immediate_collect=True)
+    workflow_instance._persist_snapshot = AsyncMock()
+    workflow_instance._do_delete = AsyncMock()
+    monkeypatch.setattr(
+        workflow_module.workflow,
+        "wait_condition",
+        AsyncMock(return_value=None),
+    )
+
+    await workflow_instance._handle_paused()
+
+    workflow_instance._do_delete.assert_awaited_once()
+    assert workflow_instance._resume_payload == ResumeSignalPayload(immediate_collect=True)
 
 
 @pytest.mark.asyncio

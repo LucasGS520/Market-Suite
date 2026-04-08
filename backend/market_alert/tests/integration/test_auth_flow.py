@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from market_alert.auth.routes_auth import routes_login, routes_logout, routes_refresh
@@ -18,25 +20,34 @@ def test_auth_register_login_refresh_logout_flow(
     user_payload,
 ) -> None:
     password = user_payload["password"]
+    request_name = "Test User"
 
     def _register_user(db, user_data, request):
         persisted = dict(user_payload)
         persisted["email"] = user_data.email.strip().lower()
         integration_state["users"][persisted["email"]] = persisted
-        return persisted
+        return SimpleNamespace(**persisted)
 
     def _login_user(request, db, username, password_value):
         assert username in integration_state["users"]
         assert password_value == password
         integration_state["refresh_tokens"].add("refresh-token-1")
-        return {"access_token": "access-token-1", "refresh_token": "refresh-token-1", "token_type": "bearer"}
+        return SimpleNamespace(
+            access_token="access-token-1",
+            refresh_token="refresh-token-1",
+            token_type="bearer",
+        )
 
     def _refresh_token_service(db, payload, request):
         current_refresh = request.cookies.get("refresh_token") or (payload.refresh_token if payload else None)
         assert current_refresh == "refresh-token-1"
         integration_state["refresh_tokens"].discard(current_refresh)
         integration_state["refresh_tokens"].add("refresh-token-2")
-        return {"access_token": "access-token-2", "refresh_token": "refresh-token-2", "token_type": "bearer"}
+        return SimpleNamespace(
+            access_token="access-token-2",
+            refresh_token="refresh-token-2",
+            token_type="bearer",
+        )
 
     def _logout_service(db, payload, request):
         current_refresh = request.cookies.get("refresh_token") or (payload.refresh_token if payload else None)
@@ -51,14 +62,14 @@ def test_auth_register_login_refresh_logout_flow(
     register_response = api_client.post(
         "/users/",
         json={
-            "name": user_payload["name"],
+            "name": request_name,
             "email": user_payload["email"],
             "phone_number": user_payload["phone_number"],
             "password": password,
         },
     )
     assert register_response.status_code == 200
-    assert register_response.json()["email"] == user_payload["email"]
+    assert register_response.json()["email"] == user_payload["email"].strip().lower()
 
     login_response = api_client.post(
         "/auth/login",

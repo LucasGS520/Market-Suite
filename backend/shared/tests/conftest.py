@@ -7,6 +7,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+from tests_runtime import reset_shared_runtime_state as reset_shared_runtime
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -55,33 +56,7 @@ def _seed_shared_test_env() -> None:
 
 
 def _reset_loaded_runtime_state() -> None:
-    redis_client_module = sys.modules.get("shared.utils.redis_client")
-    if redis_client_module is not None:
-        thread_local = getattr(redis_client_module, "_thread_local", None)
-        if thread_local is not None:
-            for attr in ("client", "operational_client"):
-                client = getattr(thread_local, attr, None)
-                if client is not None and hasattr(client, "close"):
-                    client.close()
-                if hasattr(thread_local, attr):
-                    delattr(thread_local, attr)
-        getattr(redis_client_module, "_registered_scripts", {}).clear()
-        getattr(redis_client_module, "_registered_token_bucket_scripts", {}).clear()
-
-    task_dispatcher_module = sys.modules.get("shared.clients.celery.task_dispatcher")
-    if task_dispatcher_module is not None:
-        task_dispatcher_module._sender = None
-
-    scraper_client_module = sys.modules.get("shared.clients.scraper.scraper_client")
-    if scraper_client_module is not None:
-        scraper_client_module._rate_limiter_inst = None
-        scraper_client_module._circuit_breaker_inst = None
-
-    database_module = sys.modules.get("shared.infra.db.database")
-    if database_module is not None:
-        engine = getattr(database_module, "engine", None)
-        if engine is not None and hasattr(engine, "dispose"):
-            engine.dispose()
+    reset_shared_runtime()
 
 
 _ensure_backend_on_path()

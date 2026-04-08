@@ -90,7 +90,7 @@ def test_register_user_normalizes_identifiers_and_creates_verifications(
     payload = UserCreate(
         name="User Test",
         email="  User@Example.COM ",
-        phone_number="(11) 99876-1234",
+        phone_number="+5511998761234",
         password="StrongPass123",
     )
     request = build_request(headers={"user-agent": "pytest-users"})

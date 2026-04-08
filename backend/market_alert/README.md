@@ -430,6 +430,7 @@ SCRAPER_SERVICE_URL=http://market_scraper:8000
 - `unit`: isolamento sem Redis, banco, HTTP, Celery ou Temporal reais.
 - `integration`: contratos HTTP e fluxos internos com infraestrutura controlada.
 - `integration_high_cost`: subconjunto que valida caminhos mais caros de Temporal.
+- Configuracao canônica do `pytest`: `backend/pytest.ini` unico para todo o backend. Nao existe `pytest.ini` local por modulo.
 
 Executar a partir da raiz do repositorio `market_suite`:
 
@@ -437,6 +438,8 @@ Executar a partir da raiz do repositorio `market_suite`:
 .\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests/unit -q
 .\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests/integration -q
 .\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests -m "not integration_high_cost" -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests --cov=market_alert --cov-report=term -q
 ```
 
 ### Regras de manutencao

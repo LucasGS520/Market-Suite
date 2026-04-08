@@ -7,7 +7,12 @@ import httpx
 from shared.schemas.shared_schemas_scraper import ParserResponse
 from shared.utils.url_validation import UrlIssue
 
-from market_scraper.services.synergic_pipeline import PipelineStep, StepResult
+from market_scraper.services.synergic_pipeline import (
+    PipelineContext,
+    PipelineOutcome,
+    PipelineStep,
+    StepResult,
+)
 
 
 def test_parse_flow_returns_success_with_shared_contract(
@@ -274,3 +279,51 @@ def test_parse_flow_returns_pipeline_timeout(
 
     assert response.status_code == 504
     assert response.json()["error_code"] == "pipeline_timeout"
+
+
+def test_parse_flow_normalizes_degraded_success_payload_without_breaking_contract(
+    integration_client,
+    monkeypatch,
+):
+    context = PipelineContext(
+        url="https://example.com/product/degraded",
+        source="example.com",
+        default_step_timeout=1.0,
+        trace_id="trace-contract",
+    )
+    context.data["last_status"] = "temporarily_unavailable"
+
+    async def fake_run_pipeline(url: str, *, force_refresh: bool = False, trace_id: str | None = None):
+        assert url == "https://example.com/product/degraded"
+        assert trace_id is not None
+        return PipelineOutcome(
+            status="success",
+            context=context,
+            payload={
+                "name": "Produto degradado",
+                "current_price": "preco invalido",
+                "source": None,
+                "marketplace": "fallback.example.com",
+                "sku": "SKU-9",
+            },
+        )
+
+    monkeypatch.setattr(
+        "market_scraper.routes.routes_scraper.resolve_public_address",
+        lambda host: ["93.184.216.34"],
+    )
+    monkeypatch.setattr(
+        "market_scraper.routes.routes_scraper.run_pipeline",
+        fake_run_pipeline,
+    )
+
+    response = integration_client.post("/scraper/parse", json={"url": "example.com/product/degraded"})
+
+    assert response.status_code == 200
+    assert response.headers["x-marketscraper-cache-status"] == "miss"
+    payload = ParserResponse.model_validate(response.json())
+    assert payload.name == "Produto degradado"
+    assert payload.current_price is None
+    assert payload.last_status == "temporarily_unavailable"
+    assert payload.source == "fallback.example.com"
+    assert payload.payload == {"sku": "SKU-9"}

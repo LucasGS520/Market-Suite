@@ -208,6 +208,9 @@ Executar a partir da raiz do repositorio `market_suite`:
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/unit -q
 .\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/integration -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/stress -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests -m unit -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests --cov=market_scraper --cov-report=term -q
 ```
 
 Comandos de apoio operacional:
@@ -223,6 +226,7 @@ Comandos de apoio operacional:
 - Testes `integration` devem exercitar somente fluxos internos do modulo com infraestrutura controlada e HTML fixo em `tests/fixtures`.
 - Testes `stress` devem permanecer pequenos, deterministas e limitados a timeout, concorrencia controlada e estabilidade de resposta.
 - Estado global do modulo (`cache`, `singleflight` e settings carregados) deve continuar sendo resetado por teste via [`tests/conftest.py`](tests/conftest.py).
+- A configuracao canônica do `pytest` segue centralizada em [`../pytest.ini`](../pytest.ini), sem `pytest.ini` local no modulo.
 - Nenhum teste deve depender de `.env.market_scraper.test`, `ENV_FILE` ou leitura implícita de `.env` operacional.
 - Novos parsers ou novos erros de fluxo devem vir acompanhados de cobertura minima em `unit` e `integration` antes de serem considerados prontos.
 

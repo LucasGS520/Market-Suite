@@ -170,9 +170,12 @@ Cliente oficial para **interação com Temporal** (workflows de orquestração).
 
 ## Testes do Modulo
 
-Executar os comandos a partir de `backend/` para garantir uso do
-`backend/pytest.ini`, coleta explicita de `shared/tests` e auto-marcacao por
-pasta (`unit` e `integration`).
+Executar os comandos a partir da raiz `market_suite` para garantir uso do
+`backend/pytest.ini`, coleta explicita de `backend/shared/tests` e
+auto-marcacao por pasta (`unit` e `integration`).
+
+Decisao canônica da suite: existe **um unico `backend/pytest.ini`** para os 4
+modulos backend, sem `pytest.ini` local por modulo.
 
 ### Bootstrap e isolamento
 
@@ -186,19 +189,19 @@ pasta (`unit` e `integration`).
 Suite unitaria do `shared`:
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest shared/tests/unit -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/shared/tests/unit -q
 ```
 
 Suite de integracao controlada do `shared`:
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest shared/tests/integration -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/shared/tests/integration -q
 ```
 
 Suite completa do `shared`:
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest shared/tests -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/shared/tests -q
 ```
 
 ### Selecao por marker para pipeline
@@ -206,13 +209,13 @@ Suite completa do `shared`:
 Etapa rapida padrao (`unit`):
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest shared/tests -m unit -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/shared/tests -m unit -q
 ```
 
 Etapa posterior de integracao controlada (`integration`):
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest shared/tests -m integration -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/shared/tests -m integration -q
 ```
 
 Governanca esperada para pipeline:
@@ -234,7 +237,7 @@ Meta inicial: **80% de cobertura de linhas do pacote `shared`**, priorizando:
 Comando canonico de cobertura:
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest shared/tests --cov=shared --cov-report=term-missing --cov-fail-under=80 -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/shared/tests --cov=shared --cov-report=term-missing --cov-fail-under=80 -q
 ```
 
 O comando de cobertura requer `pytest-cov` instalado no ambiente de testes.

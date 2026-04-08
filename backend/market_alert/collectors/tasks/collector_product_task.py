@@ -42,6 +42,7 @@ from market_alert.core.config_alert import settings
 from market_alert.infrastructure.celery.celery_app import celery_app
 from market_alert.infrastructure.celery.dlq_base_task import DLQTask
 from market_alert.infrastructure.celery.retry_policies import COLLECTION_RETRY
+from market_alert.infrastructure.celery.retry_policies import LOCK_RETRY_MAX_RETRIES
 from market_alert.infrastructure.celery.retry_policies import RetryPolicy
 from market_alert.infrastructure.resilience.rate_limiter import (
     _increment_invalid_url_attempt,
@@ -400,12 +401,12 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     delay_seconds=delay,
                 )
                 try:
-                    #Evita disparar exceção para manter o retorno compatível com o contrato
-                    self.retry(
-                        countdown=delay,
-                        max_retries=RetryPolicy.LOCK_RETRY_MAX_RETRIES,
-                        throw=False,
-                    )
+                        #Evita disparar exceção para manter o retorno compatível com o contrato
+                        self.retry(
+                            countdown=delay,
+                            max_retries=LOCK_RETRY_MAX_RETRIES,
+                            throw=False,
+                        )
                 except self.MaxRetriesExceededError:
                     logger.warning(
                         "collect_lock_retry_exhausted",

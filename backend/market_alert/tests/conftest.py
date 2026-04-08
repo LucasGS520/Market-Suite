@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 from fastapi import Request
 from market_alert.comparisons.domain.price_competitiveness import ComparisonSnapshot
+from tests_runtime import reset_market_alert_runtime_state as reset_market_alert_runtime
 
 TESTS_DIR = Path(__file__).resolve().parent
 MARKET_ALERT_DIR = TESTS_DIR.parent
@@ -76,6 +77,11 @@ def market_alert_test_paths() -> MappingProxyType[str, Path]:
     )
 
 
+@pytest.fixture(scope="session")
+def market_alert_test_env_defaults() -> MappingProxyType[str, str]:
+    return MappingProxyType(dict(DEFAULT_MARKET_ALERT_TEST_ENV))
+
+
 @pytest.fixture
 def env_override(monkeypatch: pytest.MonkeyPatch):
     def _apply(**overrides: str | int | None) -> None:
@@ -101,9 +107,13 @@ def reload_market_alert_modules():
 
 
 @pytest.fixture
-def fresh_market_alert_settings(env_override, reload_market_alert_modules):
+def fresh_market_alert_settings(
+    env_override,
+    reload_market_alert_modules,
+    market_alert_test_env_defaults,
+):
     def _factory(**overrides: str | int | None):
-        env_override(**DEFAULT_MARKET_ALERT_TEST_ENV)
+        env_override(**dict(market_alert_test_env_defaults))
         if overrides:
             env_override(**overrides)
 
@@ -119,6 +129,13 @@ def fresh_market_alert_settings(env_override, reload_market_alert_modules):
 @pytest.fixture(scope="session")
 def high_cost_integration_marker() -> pytest.MarkDecorator:
     return HIGH_COST_INTEGRATION_MARK
+
+
+@pytest.fixture(autouse=True)
+def reset_market_alert_runtime_state():
+    reset_market_alert_runtime()
+    yield
+    reset_market_alert_runtime()
 
 
 @pytest.fixture

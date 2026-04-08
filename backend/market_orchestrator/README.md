@@ -246,10 +246,12 @@ market_orchestrator/tests/
 - O boundary do Temporal serializa payloads de activity/query como `dict` em alguns caminhos; o workflow e o client normalizam esses retornos explicitamente para manter o contrato tipado.
 
 ### Comandos recomendados
-- Suite unit do modulo: `.\.venv\Scripts\python.exe -m pytest backend/market_orchestrator/tests/unit -q`
-- Suite de integracao do modulo: `.\.venv\Scripts\python.exe -m pytest backend/market_orchestrator/tests/integration -q`
-- Execucao completa do modulo: `.\.venv\Scripts\python.exe -m pytest backend/market_orchestrator/tests -q`
-- Execucao completa do backend com descoberta centralizada: `.\.venv\Scripts\python.exe -m pytest backend -q`
+- Configuracao canônica do `pytest`: `backend/pytest.ini` unico para todo o backend. Nao existe `pytest.ini` local por modulo.
+- Suite unit do modulo: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests/unit -q`
+- Suite de integracao do modulo: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests/integration -q`
+- Execucao completa do modulo sem cenarios caros: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests -m "not integration_high_cost" -q`
+- Execucao do subconjunto caro de Temporal: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests -m integration_high_cost -q`
+- Cobertura do modulo: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests --cov=market_orchestrator --cov-report=term -q`
 
 ### Observacoes operacionais
 - A descoberta oficial do backend fica em [`../pytest.ini`](../pytest.ini) e inclui explicitamente `market_orchestrator/tests`.
