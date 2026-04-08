@@ -166,3 +166,69 @@ Cliente oficial para **interação com Temporal** (workflows de orquestração).
 - **`shared/clients/scraper/scraper_client.py` importa `market_alert`** — exceção arquitetural consciente, isolada no cliente canônico de scraping.
 - **Contratos de orquestração** ficam em `shared/schemas/shared_schemas_orchestrator.py` como dataclasses/Pydantic puros sem I/O.
 - **Utilitários** só entram em `shared` se forem verdadeiramente neutros (sem regra de negócio de nenhum domínio).
+---
+
+## Testes do Modulo
+
+Executar os comandos a partir de `backend/` para garantir uso do
+`backend/pytest.ini`, coleta explicita de `shared/tests` e auto-marcacao por
+pasta (`unit` e `integration`).
+
+### Execucao local padrao
+
+Suite unitaria do `shared`:
+
+```powershell
+..\.venv\Scripts\python.exe -m pytest shared/tests/unit -q
+```
+
+Suite de integracao controlada do `shared`:
+
+```powershell
+..\.venv\Scripts\python.exe -m pytest shared/tests/integration -q
+```
+
+Suite completa do `shared`:
+
+```powershell
+..\.venv\Scripts\python.exe -m pytest shared/tests -q
+```
+
+### Selecao por marker para pipeline
+
+Etapa rapida padrao (`unit`):
+
+```powershell
+..\.venv\Scripts\python.exe -m pytest shared/tests -m unit -q
+```
+
+Etapa posterior de integracao controlada (`integration`):
+
+```powershell
+..\.venv\Scripts\python.exe -m pytest shared/tests -m integration -q
+```
+
+Governanca esperada para pipeline:
+
+- `unit` como estagio padrao e rapido;
+- `integration` em estagio posterior;
+- nenhum cenario unitario depende de Redis, Temporal, HTTP ou banco reais.
+
+### Cobertura inicial do `shared`
+
+Meta inicial: **80% de cobertura de linhas do pacote `shared`**, priorizando:
+
+- contratos em `schemas`;
+- utilitarios criticos em `utils`;
+- infra de baixo nivel em `infra`;
+- clientes canonicos em `clients`.
+
+Comando canonico de cobertura:
+
+```powershell
+..\.venv\Scripts\python.exe -m pytest shared/tests --cov=shared --cov-report=term-missing --cov-fail-under=80 -q
+```
+
+O comando de cobertura requer `pytest-cov` instalado no ambiente de testes.
+Ele nao foi colocado em `addopts` global para evitar quebrar ambientes que
+ainda nao possuam o plugin.

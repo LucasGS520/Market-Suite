@@ -28,3 +28,4 @@ tenacity==9.1.2
 # Testes específicos do módulo
 respx==0.22.0
 freezegun==1.5.1
+pytest-cov==4.1.0

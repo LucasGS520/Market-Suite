@@ -20,29 +20,35 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 ## Objetivo e Estratégias de Implementação
 
 **Objetivo**  
-Implementar um ambiente de testes técnico, automatizado e confiável para o módulo `market_scraper`, cobrindo testes unitários, de integração e técnicos, com foco em validação de regras de parsing, fluxo HTTP, cache condicional, robustez de rede e mapeamento de falhas.
+Criar e alinhar o ambiente de testes do módulo compartilhado shared para validar contratos, utilitários, infraestrutura técnica e clientes de integração, com cobertura consistente de testes unitários e de integração, sem dependência de infraestrutura externa real nos cenários unitários.
 
 **Estratégia de Implementação**  
-A execução será em fases incrementais: primeiro fundação do ambiente e isolamento, depois cobertura unitária dos componentes críticos, em seguida integração de fluxos ponta a ponta internos do módulo, e por fim governança de qualidade (cobertura, estabilidade e execução contínua).  
-Cada fase termina com critérios objetivos de validação para reduzir flakiness e evitar acoplamento com infraestrutura externa real.
+A implementação será incremental em 4 fases:  
+1. fundação do ambiente de teste do shared,  
+2. cobertura unitária dos componentes críticos,  
+3. integração controlada dos clientes e fluxos entre componentes,  
+4. governança de qualidade (execução, cobertura e estabilidade).  
+Cada fase terá critérios objetivos para reduzir flakiness e garantir isolamento.
 
 ---
 
 ## Análise de Riscos e Decisões Chave
 
 **Decisão Técnica Principal**  
-Separar claramente as suítes por nível de isolamento: unit sem I/O real, integration com infraestrutura controlada (fakes e stubs determinísticos), e stress técnico com carga limitada e repetível.
+Adotar isolamento por nível de teste:  
+- Unit: zero I/O real (Redis, Temporal, HTTP, banco), usando monkeypatch, mocks e fakeredis quando necessário.  
+- Integration: integração entre componentes do próprio shared com dependências técnicas controladas (stubs/fakes), sem chamar serviços reais do ecossistema.
 
 **Risco Principal**  
-Flakiness por dependências de rede, tempo e concorrência (download, DNS, robots, cache e singleflight).  
-Mitigação: monkeypatch em pontos de I/O, limites de timeout curtos em teste, dados de entrada fixos, reset de estado global por teste e ausência de chamadas externas reais.
+Flakiness por dependências de tempo/rede e acoplamento cruzado com módulos de serviço, especialmente nos clientes scraper_client.py e orchestrator_client.py.  
+Mitigação: timeout curto em teste, estado global resetado por fixture, fakes determinísticos e cenários de erro explícitos.
 
 **Dependências**  
-- Contratos de request/response compartilhados com o módulo shared  
-- Configuração carregada por variáveis de ambiente específicas do scraper  
-- Componentes principais do pipeline sequencial e etapas de parsing  
-- Utilitários de cache condicional, download HTTP, validação de host e robots  
-- Suporte do pytest global do backend e alinhamento com marcações existentes
+- Configuração global de pytest em pytest.ini  
+- Bootstrap global em conftest.py  
+- Contratos canônicos em schemas  
+- Componentes de infra em infra  
+- Diretrizes arquiteturais em README.md
 
 ---
 
