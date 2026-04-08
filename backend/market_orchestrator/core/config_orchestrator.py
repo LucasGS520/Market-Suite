@@ -1,6 +1,16 @@
 """ Configurações centralizadas do módulo market_orchestrator """
+import os
+from pathlib import Path
+
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_ENV_FILE = Path("market_orchestrator") / ".env.market_orchestrator"
+ENV_FILE = Path(os.getenv("ENV_FILE", str(DEFAULT_ENV_FILE)))
+if not ENV_FILE.is_absolute():
+    ENV_FILE = BACKEND_DIR / ENV_FILE
 
 
 class OrchestratorSettings(BaseSettings):
@@ -73,7 +83,11 @@ class OrchestratorSettings(BaseSettings):
     def temporal_target(self) -> str:
         return f"{self.TEMPORAL_HOST}:{self.TEMPORAL_PORT}"
 
-    model_config = {"env_file": ".env.market_orchestrator", "extra": "ignore"}
+    model_config = {
+        "env_file": ENV_FILE,
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 settings = OrchestratorSettings()

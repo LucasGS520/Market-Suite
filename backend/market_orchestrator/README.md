@@ -237,6 +237,7 @@ market_orchestrator/tests/
 - Arquivos seguem `test_<area>.py`; fixtures compartilhadas ficam em `conftest.py`; casos locais do modulo ficam abaixo de `tests/unit` e `tests/integration`.
 
 ### Fixtures e decisoes de isolamento
+- A suíte usa o arquivo dedicado `market_orchestrator/.env.market_orchestrator.test`, selecionado via `ENV_FILE` no bootstrap de testes.
 - `tests/conftest.py` centraliza `orchestrator_test_env_defaults`, `env_override`, `reload_orchestrator_modules` e `fresh_orchestrator_settings` para manter config previsivel entre testes.
 - `tests/unit/conftest.py` concentra `workflow_instance`, `workflow_policy`, IDs validos e helpers para fakes de sessao/row.
 - Unit usa monkeypatch e doubles para `workflow.execute_activity`, `SessionLocal`, Redis e dispatcher Celery.
