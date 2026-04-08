@@ -153,12 +153,13 @@ Todas as activities retornam tipos tipados de `shared.schemas.shared_schemas_orc
 ---
 
 ## Configuração
-As configurações do módulo estão em [`core/config_orchestrator.py`](core/config_orchestrator.py), carregadas por `OrchestratorSettings` com `env_file=.env.market_orchestrator`.
+As configurações do módulo estão em [`core/config_orchestrator.py`](core/config_orchestrator.py), carregadas por `OrchestratorSettings`.
 
 ### Ordem de carregamento
 1. Defaults definidos em codigo.
-2. `.env.market_orchestrator` sobrescreve defaults quando presente.
+2. Fora de teste, `.env.market_orchestrator` sobrescreve defaults quando presente.
 3. Variáveis exportadas no ambiente do processo tem precedencia final.
+4. Em teste (`PYTEST_RUNNING=1`), nenhum `.env` e carregado pelo modulo; a suite usa apenas defaults Python e overrides declarados em `tests/conftest.py`.
 
 > **Importante — Docker:** o `env_file` usa caminho relativo e pode não ser encontrado dependendo do working directory do container. Em ambiente Docker, declare `TEMPORAL_HOST` e `TEMPORAL_PORT` diretamente no ambiente do processo. A forma canônica é adicioná-los em `.env.common` (carregado por todos os serviços via docker-compose). Variáveis de processo sempre têm precedência sobre o `env_file`.
 >
@@ -237,8 +238,8 @@ market_orchestrator/tests/
 - Arquivos seguem `test_<area>.py`; fixtures compartilhadas ficam em `conftest.py`; casos locais do modulo ficam abaixo de `tests/unit` e `tests/integration`.
 
 ### Fixtures e decisoes de isolamento
-- A suíte usa o arquivo dedicado `market_orchestrator/.env.market_orchestrator.test`, selecionado via `ENV_FILE` no bootstrap de testes.
 - `tests/conftest.py` centraliza `orchestrator_test_env_defaults`, `env_override`, `reload_orchestrator_modules` e `fresh_orchestrator_settings` para manter config previsivel entre testes.
+- A suite nao usa `.env.test` nem `ENV_FILE` dedicado. O bootstrap de teste e controlado apenas por `PYTEST_RUNNING=1`, com defaults locais em Python.
 - `tests/unit/conftest.py` concentra `workflow_instance`, `workflow_policy`, IDs validos e helpers para fakes de sessao/row.
 - Unit usa monkeypatch e doubles para `workflow.execute_activity`, `SessionLocal`, Redis e dispatcher Celery.
 - Integration usa `temporalio.testing.WorkflowEnvironment.start_time_skipping()` para validar worker, workflow e client sem depender de Temporal externo do projeto.

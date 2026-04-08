@@ -8,9 +8,13 @@ from pydantic_settings import BaseSettings
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_FILE = Path("market_orchestrator") / ".env.market_orchestrator"
-ENV_FILE = Path(os.getenv("ENV_FILE", str(DEFAULT_ENV_FILE)))
-if not ENV_FILE.is_absolute():
-    ENV_FILE = BACKEND_DIR / ENV_FILE
+PYTEST_RUNNING = os.getenv("PYTEST_RUNNING") == "1"
+ENV_FILE: Path | None = None
+
+if not PYTEST_RUNNING:
+    ENV_FILE = Path(os.getenv("ENV_FILE", str(DEFAULT_ENV_FILE)))
+    if not ENV_FILE.is_absolute():
+        ENV_FILE = BACKEND_DIR / ENV_FILE
 
 
 class OrchestratorSettings(BaseSettings):
@@ -83,11 +87,14 @@ class OrchestratorSettings(BaseSettings):
     def temporal_target(self) -> str:
         return f"{self.TEMPORAL_HOST}:{self.TEMPORAL_PORT}"
 
-    model_config = {
-        "env_file": ENV_FILE,
-        "env_file_encoding": "utf-8",
-        "extra": "ignore",
-    }
+    if PYTEST_RUNNING:
+        model_config = {"extra": "ignore"}
+    else:
+        model_config = {
+            "env_file": ENV_FILE,
+            "env_file_encoding": "utf-8",
+            "extra": "ignore",
+        }
 
 
 settings = OrchestratorSettings()

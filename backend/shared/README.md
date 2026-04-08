@@ -174,6 +174,13 @@ Executar os comandos a partir de `backend/` para garantir uso do
 `backend/pytest.ini`, coleta explicita de `shared/tests` e auto-marcacao por
 pasta (`unit` e `integration`).
 
+### Bootstrap e isolamento
+
+- A suite do `shared` nao usa `.env.test`.
+- `shared/tests/conftest.py` define defaults locais em Python para Redis, banco, Temporal e logging.
+- `PYTEST_RUNNING=1` e o unico sinal global de modo teste; quando ativo, `shared/core/config_base.py` ignora qualquer carregamento de `.env`.
+- `env_override`, `reload_shared_modules` e `fresh_shared_settings` sao as entradas canonicas para testar configuracao sem acoplamento ao filesystem.
+
 ### Execucao local padrao
 
 Suite unitaria do `shared`:
@@ -213,6 +220,7 @@ Governanca esperada para pipeline:
 - `unit` como estagio padrao e rapido;
 - `integration` em estagio posterior;
 - nenhum cenario unitario depende de Redis, Temporal, HTTP ou banco reais.
+- nenhum teste deve depender de `ENV_FILE` ou de `.env` dedicado para a suite.
 
 ### Cobertura inicial do `shared`
 

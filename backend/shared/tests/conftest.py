@@ -12,10 +12,8 @@ import pytest
 TESTS_DIR = Path(__file__).resolve().parent
 MODULE_DIR = TESTS_DIR.parent
 BACKEND_DIR = MODULE_DIR.parent
-SHARED_TEST_ENV_FILE = MODULE_DIR / ".env.shared.test"
 
 DEFAULT_SHARED_TEST_ENV = {
-    "ENV_FILE": str(Path("shared") / ".env.shared.test"),
     "PYTEST_RUNNING": "1",
     "DATABASE_URL": "sqlite+pysqlite:///:memory:",
     "REDIS_HOST": "localhost",
@@ -50,17 +48,9 @@ def _reload_module(module_name: str):
 
 
 def _seed_shared_test_env() -> None:
-    if not SHARED_TEST_ENV_FILE.exists():
-        raise RuntimeError(
-            "Arquivo de ambiente de teste ausente: "
-            f"{SHARED_TEST_ENV_FILE}"
-        )
-
     os.environ.pop("SERVICE_NAME", None)
-    os.environ["ENV_FILE"] = DEFAULT_SHARED_TEST_ENV["ENV_FILE"]
+    os.environ.pop("ENV_FILE", None)
     for key, value in DEFAULT_SHARED_TEST_ENV.items():
-        if key == "ENV_FILE":
-            continue
         os.environ.setdefault(key, value)
 
 
@@ -105,7 +95,6 @@ def shared_test_paths() -> MappingProxyType[str, Path]:
             "backend": BACKEND_DIR,
             "module": MODULE_DIR,
             "tests": TESTS_DIR,
-            "env_file": SHARED_TEST_ENV_FILE,
         }
     )
 

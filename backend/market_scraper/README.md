@@ -156,6 +156,7 @@ As configurações combinam base compartilhada em [`../shared/core/config_base.p
 3. Caso contrario, usa `ENV_FILE` (ou `.env`) e carrega com `override=True`.
 4. Depois disso, `Settings` do scraper aplica defaults de codigo para chaves ainda ausentes.
 5. Nos compose ativos (`docker-compose.dev.yml` e `docker-compose.hml.yml`), `market_scraper` sobe com `env_file: ./backend/market_scraper/.env.market_scraper` e `ENV_FILE=.env.market_scraper`, mantendo o arquivo local do servico como fonte principal de override.
+6. Em teste (`PYTEST_RUNNING=1`), o bootstrap ignora completamente `.env.common`, `.env`, `.env.<service>` e `ENV_FILE`; a suite usa apenas defaults locais em `tests/conftest.py` e overrides explicitos do teste.
 
 ### Categorias de variaveis
 | Categoria | Variaveis relevantes |
@@ -193,7 +194,7 @@ SCRAPER_PRICE_TOLERANCE=0.0
 ---
 
 ## Testes
-O `market_scraper` possui suite local isolada em [`tests/`](tests) e usa somente [`../pytest.ini`](../pytest.ini) como configuracao central do `pytest`. O ambiente dedicado da suite e [`.env.market_scraper.test`](.env.market_scraper.test), carregado por [`tests/conftest.py`](tests/conftest.py) para evitar dependencia dos envs operacionais durante import de settings, coleta e execucao.
+O `market_scraper` possui suite local isolada em [`tests/`](tests) e usa somente [`../pytest.ini`](../pytest.ini) como configuracao central do `pytest`. O bootstrap de teste nao usa `.env.test`: [`tests/conftest.py`](tests/conftest.py) define defaults locais em Python, reseta estado global do modulo e ativa o modo teste com `PYTEST_RUNNING=1`.
 
 ### Estrutura da suite
 - [`tests/unit`](tests/unit): regras isoladas, sem I/O real, com mocks e fakes para cache, rede, parsers e rotas.
@@ -222,6 +223,7 @@ Comandos de apoio operacional:
 - Testes `integration` devem exercitar somente fluxos internos do modulo com infraestrutura controlada e HTML fixo em `tests/fixtures`.
 - Testes `stress` devem permanecer pequenos, deterministas e limitados a timeout, concorrencia controlada e estabilidade de resposta.
 - Estado global do modulo (`cache`, `singleflight` e settings carregados) deve continuar sendo resetado por teste via [`tests/conftest.py`](tests/conftest.py).
+- Nenhum teste deve depender de `.env.market_scraper.test`, `ENV_FILE` ou leitura implícita de `.env` operacional.
 - Novos parsers ou novos erros de fluxo devem vir acompanhados de cobertura minima em `unit` e `integration` antes de serem considerados prontos.
 
 ### Cobertura atual da suite

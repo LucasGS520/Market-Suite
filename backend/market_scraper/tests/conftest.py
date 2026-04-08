@@ -13,11 +13,37 @@ import pytest
 TESTS_DIR = Path(__file__).resolve().parent
 MODULE_DIR = TESTS_DIR.parent
 BACKEND_DIR = MODULE_DIR.parent
-SCRAPER_TEST_ENV_FILE = MODULE_DIR / ".env.market_scraper.test"
 
 DEFAULT_SCRAPER_TEST_ENV = {
-    "ENV_FILE": str(Path("market_scraper") / ".env.market_scraper.test"),
     "PYTEST_RUNNING": "1",
+    "REDIS_HOST": "localhost",
+    "REDIS_PORT": "6379",
+    "REDIS_PASSWORD": "",
+    "REDIS_BROKER_DB": "15",
+    "REDIS_RESULT_DB": "14",
+    "REDIS_OPERATIONAL_DB": "13",
+    "CELERY_BROKER_URL": "redis://localhost:6379/15",
+    "CELERY_RESULT_BACKEND": "redis://localhost:6379/14",
+    "LOG_LEVEL": "WARNING",
+    "LOG_FORMAT": "text",
+    "SCRAPER_CACHE_TTL_SECONDS": "60",
+    "SCRAPER_CACHE_MAX_ENTRIES": "32",
+    "SCRAPER_STEP_TIMEOUT_SECONDS": "2.0",
+    "SCRAPER_PIPELINE_TIMEOUT_SECONDS": "3.0",
+    "SCRAPER_SINGLEFLIGHT_LOCK_TTL": "2.0",
+    "SCRAPER_SINGLEFLIGHT_MAX_ENTRIES": "32",
+    "SCRAPER_HTTP_TIMEOUT_CONNECT": "0.5",
+    "SCRAPER_HTTP_TIMEOUT_READ": "0.5",
+    "SCRAPER_HTTP_TIMEOUT_WRITE": "0.5",
+    "SCRAPER_HTTP_TIMEOUT_POOL": "0.5",
+    "SCRAPER_HTTP_RETRIES": "0",
+    "SCRAPER_HTTP_RETRY_BACKOFF_BASE": "0.1",
+    "SCRAPER_HTTP_MAX_REDIRECTS": "2",
+    "SCRAPER_HTTP_MAX_CONNECTIONS": "4",
+    "SCRAPER_HTTP_MAX_KEEPALIVE": "2",
+    "SCRAPER_HTTP_MAX_CONTENT_LENGTH": "250000",
+    "SCRAPER_DNS_TIMEOUT": "0.5",
+    "SCRAPER_DNS_CACHE_TTL": "5.0",
 }
 
 
@@ -35,15 +61,10 @@ def _reload_module(module_name: str):
 
 
 def _seed_scraper_test_env() -> None:
-    if not SCRAPER_TEST_ENV_FILE.exists():
-        raise RuntimeError(
-            "Arquivo de ambiente de teste ausente: "
-            f"{SCRAPER_TEST_ENV_FILE}"
-        )
-
     os.environ.pop("SERVICE_NAME", None)
-    os.environ["ENV_FILE"] = DEFAULT_SCRAPER_TEST_ENV["ENV_FILE"]
-    os.environ.setdefault("PYTEST_RUNNING", DEFAULT_SCRAPER_TEST_ENV["PYTEST_RUNNING"])
+    os.environ.pop("ENV_FILE", None)
+    for key, value in DEFAULT_SCRAPER_TEST_ENV.items():
+        os.environ.setdefault(key, value)
 
 
 def _reset_loaded_runtime_state() -> None:
@@ -67,7 +88,6 @@ def scraper_test_paths() -> MappingProxyType[str, Path]:
             "backend": BACKEND_DIR,
             "module": MODULE_DIR,
             "tests": TESTS_DIR,
-            "env_file": SCRAPER_TEST_ENV_FILE,
         }
     )
 

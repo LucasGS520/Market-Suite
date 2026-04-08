@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import random
 
 import pytest
@@ -33,6 +34,19 @@ def test_settings_require_frontend_origins(fresh_market_alert_settings) -> None:
 def test_settings_require_frontend_origin_scheme(fresh_market_alert_settings) -> None:
     with pytest.raises(ValidationError, match="http:// ou https://"):
         fresh_market_alert_settings(FRONTEND_ORIGINS="frontend.local")
+
+
+def test_fresh_market_alert_settings_ignore_env_file_in_pytest(
+    fresh_market_alert_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ENV_FILE", "ignored-by-tests.env")
+
+    settings = fresh_market_alert_settings()
+
+    assert os.environ["ENV_FILE"] == "ignored-by-tests.env"
+    assert settings.FRONTEND_ORIGINS == "http://localhost:5173"
+    assert settings.SECRET_KEY == "pytest-secret-key"
 
 
 def test_validate_startup_dependencies_returns_true_when_all_checks_pass(monkeypatch) -> None:
