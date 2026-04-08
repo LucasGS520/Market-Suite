@@ -209,6 +209,53 @@ SNAPSHOT_TTL_SECONDS=86400
 
 ---
 
+## Suite de Testes
+
+### Estrutura da suite
+```text
+market_orchestrator/tests/
+|-- conftest.py                 # defaults de ambiente, reload de settings, paths e markers
+|-- unit/
+|   |-- conftest.py             # fixtures locais do workflow e helpers fakes
+|   |-- test_workflow_core.py
+|   |-- test_workflow_signals.py
+|   |-- test_workflow_contracts.py
+|   |-- test_dispatch_activity.py
+|   |-- test_status_activity.py
+|   |-- test_policy_activity.py
+|   `-- test_snapshot_activity.py
+`-- integration/
+    |-- conftest.py             # WorkflowEnvironment, fixtures de ids e inputs
+    |-- test_worker_bootstrap.py
+    `-- test_temporal_integration.py
+```
+
+### Marcacoes e convencoes
+- `@pytest.mark.unit`: testes isolados sem I/O real, sem banco real, sem Redis real e sem servidor Temporal.
+- `@pytest.mark.integration`: testes de contrato e fluxo com infraestrutura controlada.
+- `@pytest.mark.integration_high_cost`: subconjunto que sobe `temporal-test-server` do SDK e por isso deve ficar fora da execucao rapida padrao.
+- Arquivos seguem `test_<area>.py`; fixtures compartilhadas ficam em `conftest.py`; casos locais do modulo ficam abaixo de `tests/unit` e `tests/integration`.
+
+### Fixtures e decisoes de isolamento
+- `tests/conftest.py` centraliza `orchestrator_test_env_defaults`, `env_override`, `reload_orchestrator_modules` e `fresh_orchestrator_settings` para manter config previsivel entre testes.
+- `tests/unit/conftest.py` concentra `workflow_instance`, `workflow_policy`, IDs validos e helpers para fakes de sessao/row.
+- Unit usa monkeypatch e doubles para `workflow.execute_activity`, `SessionLocal`, Redis e dispatcher Celery.
+- Integration usa `temporalio.testing.WorkflowEnvironment.start_time_skipping()` para validar worker, workflow e client sem depender de Temporal externo do projeto.
+- O boundary do Temporal serializa payloads de activity/query como `dict` em alguns caminhos; o workflow e o client normalizam esses retornos explicitamente para manter o contrato tipado.
+
+### Comandos recomendados
+- Suite unit do modulo: `.\.venv\Scripts\python.exe -m pytest backend/market_orchestrator/tests/unit -q`
+- Suite de integracao do modulo: `.\.venv\Scripts\python.exe -m pytest backend/market_orchestrator/tests/integration -q`
+- Execucao completa do modulo: `.\.venv\Scripts\python.exe -m pytest backend/market_orchestrator/tests -q`
+- Execucao completa do backend com descoberta centralizada: `.\.venv\Scripts\python.exe -m pytest backend -q`
+
+### Observacoes operacionais
+- A descoberta oficial do backend fica em [`../pytest.ini`](../pytest.ini) e inclui explicitamente `market_orchestrator/tests`.
+- O `pytest.ini` fixa `asyncio_default_fixture_loop_scope=function` para evitar comportamento implicito diferente entre versoes do `pytest-asyncio`.
+- Na primeira execucao dos testes de integracao com `WorkflowEnvironment`, o SDK pode precisar baixar o `temporal-test-server` se ele ainda nao estiver em cache local.
+
+---
+
 ## Operação e Execução
 
 ### Infra Temporal no docker-compose

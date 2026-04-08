@@ -233,6 +233,8 @@ class MonitoredProductWorkflow:
                 start_to_close_timeout=_QUERY_STATUS_TIMEOUT,
                 retry_policy=_DEFAULT_RETRY,
             )
+            if isinstance(result, dict):
+                result = QueryStatusOutput(**result)
 
             if result.completed:
                 self._attempt_count = 0

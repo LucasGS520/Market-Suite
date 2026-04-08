@@ -208,6 +208,32 @@ class TemporalOrchestrationClient:
             client = await self._get_client()
             handle = client.get_workflow_handle(_workflow_id(monitored_id))
             snapshot: WorkflowSnapshot = await handle.query("get_state")
+            if isinstance(snapshot, dict):
+                from datetime import datetime
+
+                from market_orchestrator.enums.enums_workflow import WorkflowState
+                from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
+
+                state = snapshot.get("state", WorkflowState.Active)
+                if isinstance(state, str):
+                    state = WorkflowState(state)
+
+                next_run_at = snapshot.get("next_run_at")
+                if isinstance(next_run_at, str):
+                    next_run_at = datetime.fromisoformat(next_run_at)
+
+                last_run_at = snapshot.get("last_run_at")
+                if isinstance(last_run_at, str):
+                    last_run_at = datetime.fromisoformat(last_run_at)
+
+                snapshot = WorkflowSnapshot(
+                    state=state,
+                    next_run_at=next_run_at,
+                    last_run_at=last_run_at,
+                    last_error=snapshot.get("last_error"),
+                    attempt_count=snapshot.get("attempt_count", 0),
+                    monitored_id=snapshot.get("monitored_id", monitored_id),
+                )
             return snapshot
 
         except RPCError as exc:

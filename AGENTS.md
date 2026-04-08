@@ -20,38 +20,26 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 ## Objetivo e Estratégias de Implementação
 
 **Objetivo**  
-Criar e alinhar um ambiente de testes técnico e automatizado para o módulo `market_alert`, cobrindo testes unitários e de integração dos fluxos essenciais de autenticação, usuários, produtos, coleta, comparações, notificações, segurança e startup operacional.
+Criar um ambiente de testes técnico, automatizado e alinhado ao papel do `market_orchestrator`, cobrindo o workflow Temporal, activities, contratos, configuração e pontos de integração com Redis, PostgreSQL e a camada consumidora em market_alert.
 
 **Estratégia de Implementação**  
-A implementação será feita em 6 fases sequenciais: fundação do ambiente, padronização da estrutura de testes, suíte unitária por domínio, suíte de integração por fluxos críticos, testes de estresse técnico, e governança contínua por qualidade e execução em CI.  
-A abordagem prioriza:
-- Isolamento para testes unitários.
-- Integração realista para fluxos críticos.
-- Observabilidade, segurança e determinismo desde o início.
+Montar a base de testes primeiro, depois cobrir o núcleo determinístico do workflow em unit, em seguida validar as activities e o worker em integration, e por fim fechar com testes técnicos, governança de execução e critérios de qualidade. O ponto de partida real é que o diretório de testes do módulo existe, mas ainda está vazio, e o bootstrap global de pytest em `pytest.ini` ainda está orientado para tests.
 
 ---
 
 ## Análise de Riscos e Decisões Chave
 
 **Decisão Técnica Principal**  
-Adotar pirâmide de testes com duas trilhas explícitas:
-- Unit: validação de regras puras e serviços com mocks/fakes.
-- Integration: validação de contratos e fluxos fim-a-fim do backend com infraestrutura de teste controlada.
+separar claramente testes unitários de testes de integração, mantendo unit sem I/O real e integration com infraestrutura controlada, seguindo a estrutura proposta em `estrutura_ambiente_testes.md`.
 
 **Risco Principal**  
-Flakiness por dependências externas e estado compartilhado (DB/Redis/Temporal/Celery), causando falsos negativos e baixa confiança.
-
-**Mitigações Principais**
-- Fixtures com isolamento por teste e limpeza transacional.
-- Fakes e mocks para integrações externas em unit.
-- Marcadores e execução segregada por suíte.
-- Timeouts, retries e seeds determinísticas.
+flakiness por Temporal, Redis, SQL e dependências de processo no worker. Isso precisa ser mitigado com fixtures determinísticas, fakes/mocks para unit, isolamento por arquivo de teste e marcação explícita de suíte.
 
 **Dependências**
-- Estrutura recomendada em `estrutura_ambiente_testes.md`.
-- Contratos e fluxos documentados em `README.md`.
-- Configuração da aplicação em `config_alert.py`.
-- Bootstraps e runtime operacional em `main.py`, `startup_validation.py`, `celery_app.py`.
+- `config_orchestrator.py` para parametrização de ambiente.
+- `worker.py` para bootstrap do worker e validação de infraestrutura.
+- `workflow.py` para as regras determinísticas do fluxo.
+- `dispatch_activity.py`, `status_activity.py`, `policy_activity.py` e `snapshot_activity.py` para validação dos caminhos de I/O.
 
 ---
 
