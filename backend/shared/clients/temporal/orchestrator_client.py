@@ -150,6 +150,22 @@ class TemporalOrchestrationClient:
                 await handle.signal(signal_name)
             return True
 
+        except RPCError as exc:
+            err_str = str(exc).lower()
+            if "workflow execution already started" in err_str or "already started" in err_str:
+                # Workflow já ativo — idempotente, tratado como sucesso.
+                logger.info(
+                    "temporal_signal_with_start_already_running",
+                    monitored_id=input.monitored_id,
+                )
+                return True
+            logger.error(
+                "temporal_client_signal_with_start_error",
+                monitored_id=input.monitored_id,
+                error=str(exc),
+            )
+            return False
+
         except Exception as exc:
             logger.error(
                 "temporal_client_signal_with_start_error",
@@ -210,30 +226,43 @@ class TemporalOrchestrationClient:
             snapshot: WorkflowSnapshot = await handle.query("get_state")
             if isinstance(snapshot, dict):
                 from datetime import datetime
+                try:
+                    from market_orchestrator.enums.enums_workflow import WorkflowState
+                    from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot as _WorkflowSnapshot
 
-                from market_orchestrator.enums.enums_workflow import WorkflowState
-                from market_orchestrator.schemas.schemas_snapshot import WorkflowSnapshot
+                    state = snapshot.get("state", WorkflowState.Active)
+                    if isinstance(state, str):
+                        state = WorkflowState(state)
 
-                state = snapshot.get("state", WorkflowState.Active)
-                if isinstance(state, str):
-                    state = WorkflowState(state)
+                    next_run_at = snapshot.get("next_run_at")
+                    if isinstance(next_run_at, str):
+                        next_run_at = datetime.fromisoformat(next_run_at)
 
-                next_run_at = snapshot.get("next_run_at")
-                if isinstance(next_run_at, str):
-                    next_run_at = datetime.fromisoformat(next_run_at)
+                    last_run_at = snapshot.get("last_run_at")
+                    if isinstance(last_run_at, str):
+                        last_run_at = datetime.fromisoformat(last_run_at)
 
-                last_run_at = snapshot.get("last_run_at")
-                if isinstance(last_run_at, str):
-                    last_run_at = datetime.fromisoformat(last_run_at)
-
-                snapshot = WorkflowSnapshot(
-                    state=state,
-                    next_run_at=next_run_at,
-                    last_run_at=last_run_at,
-                    last_error=snapshot.get("last_error"),
-                    attempt_count=snapshot.get("attempt_count", 0),
-                    monitored_id=snapshot.get("monitored_id", monitored_id),
-                )
+                    snapshot = _WorkflowSnapshot(
+                        state=state,
+                        next_run_at=next_run_at,
+                        last_run_at=last_run_at,
+                        last_error=snapshot.get("last_error"),
+                        attempt_count=snapshot.get("attempt_count", 0),
+                        monitored_id=snapshot.get("monitored_id", monitored_id),
+                    )
+                except ImportError:
+                    # market_orchestrator não instalado neste container (ex: market_alert).
+                    # Retorna namespace neutro — sinaliza "workflow vivo" para o reconciler
+                    # sem depender de tipos do pacote orquestrador.
+                    import types
+                    snapshot = types.SimpleNamespace(
+                        state=snapshot.get("state"),
+                        monitored_id=snapshot.get("monitored_id", monitored_id),
+                        attempt_count=snapshot.get("attempt_count", 0),
+                        last_error=snapshot.get("last_error"),
+                        next_run_at=snapshot.get("next_run_at"),
+                        last_run_at=snapshot.get("last_run_at"),
+                    )
             return snapshot
 
         except RPCError as exc:

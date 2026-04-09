@@ -1,4 +1,4 @@
-# Claude — Preparação e Alinhamento de Configurações
+# Claude — Contexto e Objetivos
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -17,19 +17,25 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Objetivo e Problemas Identificados
-
-1. O código já avançou na direção certa:
-`client_identity.py`, `bruteforce.py`, `services_auth.py`, `services_account.py`
-2. Porém o runtime ainda mostra todos como `172.18.0.14`.
-3. O ponto crítico de ambiente está em `docker-compose.hml.yml`: forwarded-allow-ips está em 172.28.0.0/16, mas os logs mostram tráfego vindo de 172.18.x.x.
-4. Resultado: o servidor pode ignorar headers encaminhados pelo Nginx e continuar enxergando IP interno do proxy, gerando bloqueio cruzado.
+## Diagnóstico Principal
+A orquestração foi executada (Temporal + Redis OK) e dispatchs foram gravados, porém as tasks de coleta que deveriam persistir resultados falham em runtime dentro do worker Celery devido a um `AttributeError` referente a `RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS`. Como consequência direta, não há gravação em `price_history` nem atualização de `last_scraped_at`.  
+  
+  - **Fatos que sustentam essa conclusão:**
+    - `dispatch_collection_ok` aparece nos logs do orquestrador para o `monitored_id` (orquestrador fez o trabalho de enfileirar/dispatch).  
+    - Redis contém `workflow:dispatch` e `workflow:snapshot` para o monitorado — indica dispatch registrado.  
+    - Worker Celery reportou exceção explícita `AttributeError(...)` durante execução de `collect_product_task` — indica falha em processamento.  
+    - DB mostra `last_scraped_at` nulo e `price_history` vazio para o monitorado — resultado esperado quando task falha antes de persistir.
 
 ---
 
-## Análise de Riscos e Decisões Chave
+## Conclusões e Objetivo
 
-- **Decisão arquitetural principal:** cada evento deve operar no menor escopo possível. O plano deve atacar 2 frentes ao mesmo tempo: isolamento lógico de chaves e consistência de execução em produção/HML.
+- `market_alert` recebeu requisição e enfileirou.
+- `market_orchestrator` está vivo e faz dispatch (confirmado antes por `dispatch_collection_ok` e chaves `workflow:*`).
+- `celery-worker-scraping` recebe e executa tasks.
+- Falha ocorre **na lógica de execução/retry da task**, não na infraestrutura base (Redis/queues/worker up).
+
+Corrigir e Ajustar problemas de falha de código, quebra de tasks de coletas para que requisições recebidas pelo orquestrador retorne dados corretos e processamento correto de execução.
 
 ---
 

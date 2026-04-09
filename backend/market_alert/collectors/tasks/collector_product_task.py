@@ -44,6 +44,11 @@ from market_alert.infrastructure.celery.dlq_base_task import DLQTask
 from market_alert.infrastructure.celery.retry_policies import COLLECTION_RETRY
 from market_alert.infrastructure.celery.retry_policies import LOCK_RETRY_MAX_RETRIES
 from market_alert.infrastructure.celery.retry_policies import RetryPolicy
+from market_alert.infrastructure.celery.retry_policies import (
+    SCRAPE_RETRY_MAX_ATTEMPTS,
+    SCRAPE_RETRY_TTL_SECONDS,
+    SCRAPE_RETRY_WINDOW_SECONDS,
+)
 from market_alert.infrastructure.resilience.rate_limiter import (
     _increment_invalid_url_attempt,
     _increment_temporary_failure_attempt,
@@ -460,7 +465,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     "invalid_url",
                     invalid_attempt,
                     max_attempts=settings.SCRAPER_INVALID_URL_MAX_ATTEMPTS,
-                    max_seconds=min(RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                    max_seconds=min(SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
                     now=base_now,
                 )
                 if should_retry and next_retry_at is not None:
@@ -479,11 +484,11 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
         if payload and lock_target and _should_schedule_temporary_retry(result, reason) and not blocked_invalid:
             retry_attempt = _increment_temporary_failure_attempt(
                 str(lock_target),
-                ttl_seconds=RetryPolicy.SCRAPE_RETRY_TTL_SECONDS,
+                ttl_seconds=SCRAPE_RETRY_TTL_SECONDS,
             )
             if retry_attempt is None:
                 retry_attempt = 1
-            if retry_attempt > RetryPolicy.SCRAPE_RETRY_MAX_ATTEMPTS:
+            if retry_attempt > SCRAPE_RETRY_MAX_ATTEMPTS:
                 #Reinicia contador para evitar loops infinitos após atingir o limite
                 _reset_temporary_failure_attempt(str(lock_target))
                 delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
@@ -514,7 +519,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     reason or "unknown",
                     retry_attempt,
                     retry_after=getattr(result, "retry_after", None),
-                    max_seconds=min(RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                    max_seconds=min(SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
                     now=base_now,
                 )
                 if should_retry and next_retry_at is not None:
