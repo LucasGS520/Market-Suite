@@ -31,10 +31,9 @@ services:
   # Executa migrações Alembic (perfil infra ou api)
   migrations:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - infra
@@ -78,10 +77,9 @@ services:
   # API principal do MarketAlert
   market_alert:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - api
@@ -125,10 +123,9 @@ services:
   # Worker Temporal — orquestração durável de workflows
   market_orchestrator:
     build:
-      context: ./backend/market_orchestrator
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_orchestrator/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - orchestrator
@@ -160,10 +157,9 @@ services:
   # Microserviço de scraping
   market_scraper:
     build:
-      context: ./backend/market_scraper
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_scraper/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - scraper
@@ -205,10 +201,9 @@ services:
   # Celery worker — fila scraping
   celery-worker-scraping:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - workers
@@ -246,10 +241,9 @@ services:
   # Celery worker — fila compare
   celery-worker-compare:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - workers
@@ -287,10 +281,9 @@ services:
   # Celery worker — fila notifications
   celery-worker-notifications:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - workers
