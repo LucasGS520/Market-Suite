@@ -372,15 +372,35 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     _trace_id = (payload.get("trace_id") if payload else None) or getattr(self.request, "id", None) or ""
     set_trace_id(_trace_id)
 
-    with SessionLocal() as db:
-        # A task mantém sessão única do início ao fim para garantir rastreabilidade e fechamento previsível com contexto.
-        outcome, result, reason = collect_product(
-            payload,
-            use_lock=True,
-            dispatch_comparison=True,
-            logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
-            db=db,
+    try:
+        db_context = SessionLocal()
+    except Exception:
+        logger.exception(
+            "collect_product_task_db_open_failed",
+            task_id=getattr(self.request, "id", None),
+            trace_id=_trace_id,
         )
+        return {"outcome": "error", "status": "error", "reason": "db_open_failed", "next_retry_at": None, "product_id": None}
+
+    with db_context as db:
+        # A task mantém sessão única do início ao fim para garantir rastreabilidade e fechamento previsível com contexto.
+        try:
+            outcome, result, reason = collect_product(
+                payload,
+                use_lock=True,
+                dispatch_comparison=True,
+                logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
+                db=db,
+            )
+        except Exception:
+            logger.exception(
+                "collect_product_task_unhandled",
+                task_id=getattr(self.request, "id", None),
+                trace_id=_trace_id,
+                payload_kind=payload.get("kind") if payload else None,
+                monitored_id=payload.get("monitored_id") if payload else None,
+            )
+            return {"outcome": "error", "status": "error", "reason": "task_unhandled_exception", "next_retry_at": None, "product_id": None}
         if payload is not None:
             kind, monitored_id, competitor_id, _ = _validate_payload(payload)
             lock_target = competitor_id or monitored_id
