@@ -20,9 +20,8 @@ import {
   Alert,
   CircularProgress,
 } from '@mui/material';
-import { AxiosError } from 'axios';
 import { useAuth } from '../hooks/useAuth';
-import { ApiErrorResponse } from '../types';
+import { getApiErrorDetail } from '../utils/apiErrors';
 import VerificationPrompt from '../components/VerificationPrompt';
 
 /**
@@ -95,10 +94,7 @@ const Register: React.FC = () => {
       setRegisteredUserId(user.id);
     } catch (err: unknown) {
       // Tenta extrair mensagem detalhada da resposta; senão, mostra mensagem genérica
-      const axiosError = err as AxiosError<ApiErrorResponse>;
-      const detailMessage = axiosError.response?.data?.detail;
-
-      setError(detailMessage || 'Erro ao criar conta. Tente novamente.');
+      setError(getApiErrorDetail(err, 'Erro ao criar conta. Tente novamente.'));
     } finally {
       setIsLoading(false);
     }

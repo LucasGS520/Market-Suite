@@ -43,12 +43,11 @@ import {
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
 } from '@mui/icons-material';
-import { AxiosError } from 'axios';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
-import type { 
-  ApiErrorResponse,
+import { getApiErrorDetail } from '../utils/apiErrors';
+import type {
   MonitoredProduct,
   MonitoredProductCreateScraping,
   MonitoredScrapeCreationResponse,
@@ -58,14 +57,6 @@ import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus, statusToBadge } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
 import { useToast } from '../hooks/useToast';
-
-/**
- * Extrai a mensagem detalhada de erro retornada pelo API quando disponível
- */
-const getApiErrorDetail = (error: unknown): string | undefined => {
-  const axiosError = error as AxiosError<ApiErrorResponse>;
-  return axiosError.response?.data?.detail;
-};
 
 /**
  * Normaliza o modo de visualização para evitar estados inválidos vindos da URL.

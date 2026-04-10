@@ -19,9 +19,8 @@ import {
   Alert,
   CircularProgress,
 } from '@mui/material';
-import { AxiosError } from 'axios';
 import { useAuth } from '../hooks/useAuth';
-import { ApiErrorResponse } from '../types';
+import { getApiErrorDetail } from '../utils/apiErrors';
 import VerificationPrompt from '../components/VerificationPrompt';
 
 /**
@@ -82,10 +81,7 @@ const Login: React.FC = () => {
       navigate('/dashboard');
     } catch (err: unknown) {
       // Tenta extrair mensagem detalhada do backend (se existir), caso contrário usa mensagem padrão
-      const axiosError = err as AxiosError<ApiErrorResponse>;
-      const detailMessage = axiosError.response?.data?.detail;
-
-      setError(detailMessage || 'Erro ao fazer login. Verifique suas credenciais.');
+      setError(getApiErrorDetail(err, 'Erro ao fazer login. Verifique suas credenciais.'));
     } finally {
       setIsLoading(false);
     }

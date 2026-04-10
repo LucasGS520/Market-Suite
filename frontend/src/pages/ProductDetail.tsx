@@ -39,7 +39,6 @@ import {
   Pause as PauseIcon,
   OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
-import { AxiosError } from 'axios';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
@@ -48,16 +47,9 @@ import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
-import { ApiErrorResponse, CompetitorProduct, MonitoredProduct } from '../types';
+import { CompetitorProduct, MonitoredProduct } from '../types';
 import { useToast } from '../hooks/useToast';
-
-/**
- * Obtém o detalhe do erro enviado pela API, quando presente
- */
-const getApiErrorDetail = (error: unknown): string | undefined => {
-  const axiosError = error as AxiosError<ApiErrorResponse>;
-  return axiosError.response?.data?.detail;
-};
+import { getApiErrorDetail } from '../utils/apiErrors';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.

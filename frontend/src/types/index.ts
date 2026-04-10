@@ -242,9 +242,24 @@ export interface MonitoredScrapeCreationResponse extends ScrapeCreationResponse 
   competitor_error?: string; // Campo opcional para compatibilidade com versões futuras
 }
 
+/** Objeto de erro individual do Pydantic (erro de validação). */
+export interface PydanticValidationError {
+  type: string;
+  loc: (string | number)[];
+  msg: string;
+  input?: unknown;
+  ctx?: Record<string, unknown>;
+}
+
 /**
  * Estrutura genérica de resposta de erro vinda da API.
+ *
+ * `detail` pode ser:
+ * - string  → erro simples retornado pelo backend
+ * - array   → erros de validação Pydantic (ex: URL inválida, campo obrigatório)
+ *
+ * Use `getApiErrorDetail()` de `utils/apiErrors` para normalizar sempre para string.
  */
 export interface ApiErrorResponse {
-  detail?: string; // Mensagem detalhada de erro retornada pela API
+  detail?: string | PydanticValidationError[];
 }
