@@ -32,8 +32,10 @@ class OrchestratorSettings(BaseSettings):
     WORKFLOW_SIGNAL_COUNT_LIMIT: int = 500
 
     # --- Workflow: polling de resultado de coleta ---
-    COLLECTION_RESULT_TIMEOUT_SECONDS: int = 1800  # 30 min
-    COLLECTION_POLL_INTERVAL_SECONDS: int = 30
+    # Custo real: coleta HTTP ~10-60s + lock retries (até ~120s) + margem = 300s máximo.
+    # 1800s (30 min) causava TMPRL1104 ao manter o workflow em WaitingResult por tempo excessivo.
+    COLLECTION_RESULT_TIMEOUT_SECONDS: int = 300  # 5 min
+    COLLECTION_POLL_INTERVAL_SECONDS: int = 15  # reduzido de 30s para detectar conclusão mais rápido
 
     # --- Retry policy padrão para activities ---
     RETRY_MAX_ATTEMPTS: int = 5

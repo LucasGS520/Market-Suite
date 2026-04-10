@@ -18,8 +18,181 @@ from market_alert.collectors.utils.collector_result import (
     _should_schedule_temporary_retry,
 )
 
+import market_alert.collectors.tasks.collector_product_task as collector_task_module
+
 
 pytestmark = pytest.mark.unit
+
+
+# ---------------------------------------------------------------------------
+# Helpers de mock para testes de collect_product
+# ---------------------------------------------------------------------------
+
+class _FakeDB(SimpleNamespace):
+    """Stub de Session para testes que não atingem banco."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+
+def _make_monitored_payload(**overrides) -> dict:
+    from uuid import uuid4
+    payload = {
+        "version": 1,
+        "kind": "monitored",
+        "monitored_id": str(uuid4()),
+        "url": "https://store.example.com/produto",
+        "trace_id": str(uuid4()),
+        "user_id": str(uuid4()),
+        "name": "Produto Teste",
+    }
+    payload.update(overrides)
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# error_category — classificação de desfecho na collect_product
+# ---------------------------------------------------------------------------
+
+def test_collect_product_error_category_operational_on_lock_skipped(monkeypatch) -> None:
+    """lock_skipped deve ser classificado como operational (ruído de concorrência)."""
+    captured_logs: list[dict] = []
+
+    monkeypatch.setattr(collector_task_module, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(collector_task_module, "acquire_product_lock", lambda target, ttl_seconds=None: (False, None))
+
+    class _LogBound:
+        def bind(self, **kwargs):
+            return self
+        def info(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def warning(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def error(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def exception(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+
+    payload = _make_monitored_payload()
+    db = _FakeDB()
+
+    outcome, result, reason = collector_task_module.collect_product(
+        payload,
+        use_lock=True,
+        dispatch_comparison=False,
+        logger_bound=_LogBound(),
+        db=db,
+    )
+
+    assert reason == "lock_skipped"
+    finished_log = next(
+        (e for e in captured_logs if e["event"] == "collect_product_finished"), None
+    )
+    assert finished_log is not None
+    assert finished_log["error_category"] == "operational"
+
+
+def test_collect_product_error_category_none_on_success(monkeypatch) -> None:
+    """Coleta bem-sucedida deve ter error_category='none'."""
+    captured_logs: list[dict] = []
+
+    from uuid import UUID, uuid4
+    from decimal import Decimal as D
+
+    monitored_id_str = str(uuid4())
+    user_id_str = str(uuid4())
+
+    class _LogBound:
+        def bind(self, **kwargs):
+            return self
+        def info(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def warning(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def error(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def exception(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+
+    success_result = ScrapeResult(
+        status="success",
+        product_id=monitored_id_str,
+        http_status=200,
+        price_changed=True,
+    )
+
+    monkeypatch.setattr(collector_task_module, "is_scraping_suspended", lambda: False)
+    monkeypatch.setattr(collector_task_module, "acquire_product_lock", lambda target, ttl_seconds=None: (True, "lock-owner"))
+    monkeypatch.setattr(collector_task_module, "release_product_lock", lambda target, owner: True)
+    monkeypatch.setattr(
+        collector_task_module,
+        "scrape_monitored_product",
+        lambda db, url, user_id, payload, collected_at: success_result,
+    )
+    monkeypatch.setattr(
+        collector_task_module,
+        "get_monitored_product_by_id",
+        lambda db, mid: SimpleNamespace(id=UUID(monitored_id_str), user_id=UUID(user_id_str), paused=False),
+    )
+    monkeypatch.setattr(collector_task_module, "activate_pending_monitored", lambda db, mid, commit=True: None)
+    monkeypatch.setattr(collector_task_module, "schedule_comparison_after_commit", lambda *a, **kw: None)
+
+    payload = _make_monitored_payload(monitored_id=monitored_id_str, user_id=user_id_str)
+    db = _FakeDB()
+
+    outcome, result, reason = collector_task_module.collect_product(
+        payload,
+        use_lock=True,
+        dispatch_comparison=True,
+        logger_bound=_LogBound(),
+        db=db,
+    )
+
+    assert outcome == "success"
+    finished_log = next(
+        (e for e in captured_logs if e["event"] == "collect_product_finished"), None
+    )
+    assert finished_log is not None
+    assert finished_log["error_category"] == "none"
+
+
+def test_collect_product_error_category_operational_on_invalid_payload(monkeypatch) -> None:
+    """Payload inválido deve retornar error_category='domain'."""
+    captured_logs: list[dict] = []
+
+    class _LogBound:
+        def bind(self, **kwargs):
+            return self
+        def info(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def warning(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def error(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+        def exception(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+
+    db = _FakeDB()
+
+    # Payload None → invalid_payload reason
+    outcome, result, reason = collector_task_module.collect_product(
+        None,
+        use_lock=False,
+        dispatch_comparison=False,
+        logger_bound=_LogBound(),
+        db=db,
+    )
+
+    assert reason == "invalid_payload"
+    finished_log = next(
+        (e for e in captured_logs if e["event"] == "collect_product_finished"), None
+    )
+    assert finished_log is not None
+    # invalid_payload está em _DOMAIN_REASONS
+    assert finished_log["error_category"] == "domain"
 
 
 def test_execute_scraper_fetch_prefers_mocked_parse() -> None:

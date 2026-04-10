@@ -236,6 +236,9 @@ class Settings(ConfigBase):
     ONBOARDING_ENQUEUE_STAGGER_SECONDS: float = float(
         os.getenv("ONBOARDING_ENQUEUE_STAGGER_SECONDS", "0.5")
     ) #Atraso leve para diluir enfileiramento inicial
+    COLLECTION_DISPATCH_COOLDOWN_SECONDS: int = int(
+        os.getenv("COLLECTION_DISPATCH_COOLDOWN_SECONDS", "30")
+    ) #Janela mínima entre dispatches do mesmo produto (anti-burst); 0 desabilita
 
     #Configurações da camada de notificações
     DEFAULT_COOLDOWN_SECONDS: int = int(

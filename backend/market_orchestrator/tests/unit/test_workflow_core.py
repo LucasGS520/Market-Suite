@@ -371,6 +371,60 @@ async def test_handle_waiting_result_times_out_into_backoff(
 
 
 @pytest.mark.asyncio
+async def test_handle_waiting_result_goes_to_backoff_when_completed_with_error(
+    workflow_instance,
+    workflow_now,
+    monkeypatch,
+) -> None:
+    """completed=True + last_error set deve ir para Backoff, não WaitingTimer."""
+    now_values = iter([workflow_now, workflow_now])
+
+    async def fake_execute_activity(*args, **kwargs):
+        return QueryStatusOutput(completed=True, last_error="parse_failed")
+
+    monkeypatch.setattr(workflow_module.workflow, "execute_activity", fake_execute_activity)
+    monkeypatch.setattr(workflow_module.workflow, "now", lambda: next(now_values))
+    workflow_instance._attempt_count = 0
+    workflow_instance._current_correlation_id = "corr-1"
+    workflow_instance._persist_snapshot = AsyncMock()
+
+    await workflow_instance._handle_waiting_result()
+
+    assert workflow_instance._state is WorkflowState.Backoff
+    assert workflow_instance._last_error == "parse_failed"
+    # attempt_count não é zerado em falha real — workflow vai para Backoff acumulando tentativas
+    assert workflow_instance._attempt_count == 0
+    workflow_instance._persist_snapshot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_handle_waiting_result_goes_to_waiting_timer_on_lock_skipped(
+    workflow_instance,
+    workflow_now,
+    monkeypatch,
+) -> None:
+    """completed=True + last_error=None (lock_skipped absorvido) → WaitingTimer, zera attempt_count."""
+    now_values = iter([workflow_now, workflow_now])
+
+    async def fake_execute_activity(*args, **kwargs):
+        # lock_skipped foi absorvido pelo status_activity — last_error é None
+        return QueryStatusOutput(completed=True, last_error=None)
+
+    monkeypatch.setattr(workflow_module.workflow, "execute_activity", fake_execute_activity)
+    monkeypatch.setattr(workflow_module.workflow, "now", lambda: next(now_values))
+    workflow_instance._attempt_count = 3
+    workflow_instance._current_correlation_id = "corr-1"
+    workflow_instance._persist_snapshot = AsyncMock()
+
+    await workflow_instance._handle_waiting_result()
+
+    assert workflow_instance._state is WorkflowState.WaitingTimer
+    assert workflow_instance._attempt_count == 0
+    assert workflow_instance._last_error is None
+    workflow_instance._persist_snapshot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_handle_backoff_transitions_to_failed_terminal_at_limit(
     workflow_instance,
 ) -> None:

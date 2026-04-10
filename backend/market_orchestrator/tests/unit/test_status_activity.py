@@ -157,6 +157,234 @@ def test_read_dispatch_timestamp_returns_none_when_redis_is_missing(
     assert result is None
 
 
+# ---------------------------------------------------------------------------
+# _read_collection_result
+# ---------------------------------------------------------------------------
+
+def test_read_collection_result_returns_none_when_redis_unavailable(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: None)
+
+    result = status_activity._read_collection_result(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result is None
+
+
+def test_read_collection_result_returns_dict_when_key_present(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    import json
+
+    stored = {"outcome": "success", "reason": ""}
+    raw = json.dumps(stored).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = status_activity._read_collection_result(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result == stored
+
+
+def test_read_collection_result_returns_none_when_key_absent(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    class _RedisStub:
+        def get(self, key):
+            return None
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = status_activity._read_collection_result(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result is None
+
+
+def test_read_collection_result_returns_none_on_exception(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    class _BrokenRedis:
+        def get(self, key):
+            raise RuntimeError("redis down")
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _BrokenRedis())
+
+    result = status_activity._read_collection_result(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# query_collection_status — result key fast path
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_query_collection_status_result_key_success_outcome_returns_completed(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    import json
+
+    raw = json.dumps({"outcome": "success", "reason": ""}).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_query_collection_status_result_key_not_modified_returns_completed(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    import json
+
+    raw = json.dumps({"outcome": "not_modified", "reason": ""}).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_query_collection_status_result_key_lock_skipped_returns_completed_no_error(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    """lock_skipped é transitório — workflow deve retomar WaitingTimer, não Backoff."""
+    import json
+
+    raw = json.dumps({"outcome": "no_result", "reason": "lock_skipped"}).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_query_collection_status_result_key_lock_exhausted_returns_completed_no_error(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    import json
+
+    raw = json.dumps({"outcome": "no_result", "reason": "lock_exhausted"}).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_query_collection_status_result_key_domain_failure_returns_last_error(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    """Falha real de domínio (parser falhou) deve ir para Backoff via last_error."""
+    import json
+
+    raw = json.dumps({"outcome": "no_result", "reason": "parse_failed"}).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error == "parse_failed"
+
+
+@pytest.mark.asyncio
+async def test_query_collection_status_result_key_error_outcome_returns_last_error(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    """outcome=error com reason deve propagar reason como last_error."""
+    import json
+
+    raw = json.dumps({"outcome": "error", "reason": "scraper_client_error"}).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error == "scraper_client_error"
+
+
 def test_read_dispatch_timestamp_parses_iso_value_from_redis(
     orchestrator_ids,
     monkeypatch,

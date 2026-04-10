@@ -299,6 +299,9 @@ services:
           memory: 384M
 
   # --- Celery worker: scraping ---
+  # Staging: concurrency=6 (de 10). Orçamento de memória: 6 × ~50MB = ~300MB,
+  # dentro do limite de 512M com margem de ~200MB para overhead do processo principal.
+  # --max-tasks-per-child=100 previne acúmulo de memória por runs longas.
   celery-worker-scraping:
     image: market-suite/market_alert:latest
     env_file:
@@ -314,7 +317,8 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=10"
+      - "--concurrency=6"
+      - "--max-tasks-per-child=100"
       - "-Q"
       - "celery,scraping"
     user: "1000:1000"
@@ -338,6 +342,7 @@ services:
           memory: 256M
 
   # --- Celery worker: comparação de preços ---
+  # Staging: concurrency=3. Compare é CPU+DB leve; 3 workers cobrem demanda sem pressionar memória.
   celery-worker-compare:
     image: market-suite/market_alert:latest
     env_file:
@@ -353,7 +358,8 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=4"
+      - "--concurrency=3"
+      - "--max-tasks-per-child=100"
       - "-Q"
       - "compare"
     user: "1000:1000"
@@ -377,6 +383,7 @@ services:
           memory: 256M
 
   # --- Celery worker: notificações ---
+  # Staging: concurrency=4 mantido; notificações são I/O com canais externos — 4 workers adequados.
   celery-worker-notifications:
     image: market-suite/market_alert:latest
     env_file:
@@ -393,6 +400,7 @@ services:
       - "--loglevel=info"
       - "--pool=prefork"
       - "--concurrency=4"
+      - "--max-tasks-per-child=100"
       - "-Q"
       - "notifications"
     user: "1000:1000"

@@ -39,8 +39,10 @@ from market_alert.infrastructure.resilience.rate_limiter import _compute_lock_re
 # Constantes de política de lock/scrape — ponto único de verdade
 # ---------------------------------------------------------------------------
 
-#: Máximo de retentativas ao falhar em adquirir o lock Redis
-LOCK_RETRY_MAX_RETRIES: int = 3
+#: Máximo de retentativas ao falhar em adquirir o lock Redis.
+#: Aumentado de 3 → 5: lock TTL é 60s; com backoff exponencial base=5s e jitter,
+#: 5 tentativas cobrem ~120s de espera total antes de sinalizar falha ao workflow.
+LOCK_RETRY_MAX_RETRIES: int = 5
 
 #: Delay máximo para lock retry (em segundos)
 LOCK_RETRY_MAX_DELAY_SECONDS: int = 30

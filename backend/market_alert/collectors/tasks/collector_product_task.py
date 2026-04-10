@@ -79,6 +79,10 @@ from market_alert.comparisons.utils.price_comparator import _parse_force_compare
 
 logger = structlog.get_logger("collector_product_task")
 
+# Prefixo Redis para sinalizar outcome ao workflow Temporal (deve estar em sincronia com status_activity.py)
+_COLLECTION_RESULT_KEY_PREFIX = "workflow:collection_result"
+_COLLECTION_RESULT_TTL_SECONDS = 600  # 10 min — suficiente para o workflow fazer polling
+
 def collect_product(
     payload: Mapping[str, str | None] | None,
     *,
@@ -301,6 +305,7 @@ def collect_product(
             http_status=exc.status_code,
             error_code=error_code,
             reason_code="environment",
+            error_category="operational",
         )
     except ScraperError as exc:
         reason = "scraper_error"
@@ -318,6 +323,7 @@ def collect_product(
             http_status=exc.status_code,
             error_code="scraper_error",
             reason_code="application",
+            error_category="domain",
         )
     except Exception:
         reason = "unexpected_error"
@@ -331,6 +337,7 @@ def collect_product(
             kind=kind,
             error_code="unexpected_error",
             reason_code="unknown",
+            error_category="operational",
         )
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
@@ -338,8 +345,29 @@ def collect_product(
             reason = "invalid_url"
         if result is not None and result.status == "no_result" and reason is None:
             reason = _resolve_no_result_reason(result)
-        
+
         outcome = _resolve_outcome(kind, result, lock_status=lock_status, reason=reason)
+
+        # Classifica a causa para facilitar separação de métricas nos logs.
+        # "operational": falhas de infra/concorrência sem relação com dados do produto.
+        # "domain": falhas de extração ou dados inválidos do produto.
+        _OPERATIONAL_REASONS = frozenset({
+            "lock_skipped", "scraping_suspended", "missing_target", "paused",
+            "timeout", "rate_limit", "scraper_client_error", "unexpected_error",
+            "missing_user_id", "db_open_failed",
+        })
+        _DOMAIN_REASONS = frozenset({
+            "invalid_payload", "invalid_url", "scraper_error", "validation",
+        })
+        if outcome in {"success", "not_modified"}:
+            error_category = "none"
+        elif reason in _OPERATIONAL_REASONS:
+            error_category = "operational"
+        elif reason in _DOMAIN_REASONS:
+            error_category = "domain"
+        else:
+            error_category = "operational"
+
         if use_lock and lock_status == "acquired":
             released = release_product_lock(lock_target, lock_owner)
             if not released:
@@ -347,6 +375,7 @@ def collect_product(
                     "collect_lock_release_failed",
                     product_id=str(lock_target) if lock_target else None,
                     trace_id=trace_id,
+                    error_category="operational",
                 )
         task_logger.info(
             "collect_product_finished",
@@ -355,6 +384,7 @@ def collect_product(
             outcome=outcome,
             reason=reason,
             lock_status=lock_status,
+            error_category=error_category,
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
             trace_id=trace_id,
@@ -437,6 +467,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             lock_target = None
             trace_id = None
 
+        _lock_retry_queued = False
         if payload and lock_target and outcome == "no_result":
             error_code = getattr(result, "error_code", None)
             if error_code == "lock_skipped":
@@ -457,6 +488,8 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                             max_retries=LOCK_RETRY_MAX_RETRIES,
                             throw=False,
                         )
+                        #retry() não lançou — outro ciclo foi agendado, resultado não é final
+                        _lock_retry_queued = True
                 except self.MaxRetriesExceededError:
                     logger.warning(
                         "collect_lock_retry_exhausted",
@@ -601,6 +634,28 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                         delay_seconds=delay,
                         next_retry_at=next_retry_at.isoformat(),
                     )
+
+        # Sinaliza outcome no Redis para o workflow Temporal — apenas quando:
+        # 1. Há correlation_id no payload (dispatch via orquestrador)
+        # 2. Produto é monitorado (concorrentes não têm workflow próprio)
+        # 3. Este é o resultado final (não foi agendado outro retry de lock)
+        _correlation_id = payload.get("correlation_id") if payload else None
+        if _correlation_id and kind == "monitored" and monitored_id and not _lock_retry_queued:
+            try:
+                import json as _json
+                from shared.utils.redis_client import get_redis_operational as _get_redis
+                _redis = _get_redis()
+                if _redis is not None:
+                    _result_key = f"{_COLLECTION_RESULT_KEY_PREFIX}:{monitored_id}:{_correlation_id}"
+                    _result_data = _json.dumps({"outcome": outcome, "reason": reason or ""})
+                    _redis.setex(_result_key, _COLLECTION_RESULT_TTL_SECONDS, _result_data)
+            except Exception:
+                logger.warning(
+                    "collect_result_redis_write_failed",
+                    monitored_id=str(monitored_id) if monitored_id else None,
+                    correlation_id=_correlation_id,
+                    trace_id=trace_id,
+                )
 
         status = "blocked" if blocked_invalid else ("temporary_failure" if temporary_failure else outcome)
         return {

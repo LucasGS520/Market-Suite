@@ -241,8 +241,15 @@ class MonitoredProductWorkflow:
                 result = QueryStatusOutput(**result)
 
             if result.completed:
-                self._attempt_count = 0
-                self._state = WorkflowState.WaitingTimer
+                if result.last_error:
+                    # Falha real de coleta (no_result de parser, error de infra) — Backoff
+                    self._last_error = result.last_error
+                    self._state = WorkflowState.Backoff
+                else:
+                    # Sucesso ou lock transitório absorvido — retoma timer normalmente
+                    self._attempt_count = 0
+                    self._last_error = None
+                    self._state = WorkflowState.WaitingTimer
                 await self._persist_snapshot()
                 return
 
@@ -251,7 +258,7 @@ class MonitoredProductWorkflow:
 
             await workflow.sleep(timedelta(seconds=_COLLECTION_POLL_INTERVAL_SECONDS))
 
-        #Timeout — vai para backoff
+        #Timeout de polling — vai para backoff para tentar no próximo ciclo
         self._last_error = "collection_result_timeout"
         self._state = WorkflowState.Backoff
 

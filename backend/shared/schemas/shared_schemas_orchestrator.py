@@ -66,6 +66,7 @@ class CollectionPayload(BaseModel):
     force_compare: str | None = Field(default=None, description="Flag para forçar comparação ('true'/'1')")
     collected_at: str | None = Field(default=None, description="ISO timestamp da coleta")
     name: str | None = Field(default=None, description="Nome para logs e depuração")
+    correlation_id: str | None = Field(default=None, description="ID de correlação do ciclo de workflow (preenchido pelo orquestrador)")
 
     @model_validator(mode="before")
     @classmethod

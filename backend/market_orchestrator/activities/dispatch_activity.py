@@ -76,6 +76,7 @@ async def dispatch_collection(
             url=url,
             trace_id=trace_id,
             force_compare="true" if force_compare else None,
+            correlation_id=correlation_id,
         )
 
         from shared.clients.celery.task_dispatcher import send_collection_task
