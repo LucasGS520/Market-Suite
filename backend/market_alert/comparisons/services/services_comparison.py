@@ -290,6 +290,14 @@ def run_price_comparison(
             db, monitored=monitored, reason=inactive_reason, total=total_competitors
         )
 
+    if monitored.current_price is None:
+        logger.info(
+            "comparison_no_monitored_price",
+            monitored_id=str(monitored_id),
+            competitors_count=total_competitors,
+            note="competitiveness_status will be None without a monitored reference price",
+        )
+
     logger.info(
         "comparison_started",
         monitored_id=str(monitored_id),

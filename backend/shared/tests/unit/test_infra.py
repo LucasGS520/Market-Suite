@@ -240,3 +240,90 @@ def test_cache_strategy_degrades_gracefully_when_cache_backend_fails(monkeypatch
 
     invalidate("cache:key")
     invalidate_pattern("cache:*")
+
+
+# ──────────────────── Fase 1: Redis e rate limit — testes de regressão ────────────────────
+
+
+def test_redis_client_init_failure_does_not_raise_secondary_exception(monkeypatch):
+    """get_redis_operational retorna None sem gerar exceção secundária de logging.
+
+    Garante que o logger estruturado usado dentro do except não cause TypeError
+    quando o Redis não consegue ser inicializado.
+    """
+    import redis as redis_module
+    import shared.utils.redis_client as rc
+
+    # Força uma falha na criação do cliente
+    def broken_from_url(*_args, **_kwargs):
+        raise ConnectionError("redis unreachable")
+
+    monkeypatch.setattr(redis_module.Redis, "from_url", broken_from_url)
+    # Limpa cache de thread-local para forçar nova tentativa de conexão
+    monkeypatch.setattr(rc, "_thread_local", type("T", (), {})())
+
+    # Não deve lançar nenhuma exceção, incluindo TypeError do logger
+    result = rc.get_redis_operational()
+    assert result is None
+
+
+def test_consume_token_bucket_allows_when_redis_unavailable(monkeypatch):
+    """consume_token_bucket retorna (True, None) quando nenhum client Redis está disponível."""
+    import shared.utils.redis_client as rc
+
+    monkeypatch.setattr(rc, "get_redis_operational", lambda: None)
+
+    allowed, tokens = rc.consume_token_bucket(
+        "rate:host:test",
+        capacity=5,
+        refill_rate_per_second=1.0,
+    )
+    assert allowed is True
+    assert tokens is None
+
+
+def test_consume_token_bucket_allows_when_redis_raises(monkeypatch):
+    """consume_token_bucket retorna (True, None) quando Redis levanta exceção — sem propagar erro."""
+    import shared.utils.redis_client as rc
+
+    # get_redis_operational retorna None → fallback
+    monkeypatch.setattr(rc, "get_redis_operational", lambda: None)
+
+    allowed, tokens = rc.consume_token_bucket(
+        "rate:host:test",
+        capacity=5,
+        refill_rate_per_second=1.0,
+    )
+    assert allowed is True
+    assert tokens is None
+
+
+def test_consume_leaky_bucket_allows_when_redis_unavailable(monkeypatch):
+    """consume_leaky_bucket retorna (True, None) quando Redis está indisponível."""
+    import shared.utils.redis_client as rc
+
+    monkeypatch.setattr(rc, "get_redis_operational", lambda: None)
+
+    allowed, tokens = rc.consume_leaky_bucket(
+        "rate:leak:test",
+        capacity=5,
+        leak_rate_per_second=1.0,
+    )
+    assert allowed is True
+    assert tokens is None
+
+
+def test_scraping_rate_limiter_allows_when_factory_raises():
+    """ScrapingRateLimiter retorna True (permissivo) quando o factory do cliente levanta exceção."""
+
+    def broken_factory():
+        raise RuntimeError("can't connect")
+
+    limiter = ScrapingRateLimiter(
+        broken_factory,
+        max_requests=5,
+        window_seconds=10,
+    )
+
+    # Não deve lançar exceção; deve retornar True como fallback
+    assert limiter.allow("example.com") is True

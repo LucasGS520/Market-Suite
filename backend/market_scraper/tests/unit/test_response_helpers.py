@@ -238,8 +238,9 @@ def test_build_no_result_response_logs_validation_failure_metadata():
     )
 
     assert response.status_code == 422
+    # parse_no_result é o único log — parse_error foi suprimido para evitar duplicação
     warning_events = [event for event, _fields in request_logger.warning_calls]
-    assert warning_events == ["parse_no_result", "parse_error"]
+    assert warning_events == ["parse_no_result"]
     parse_no_result_fields = request_logger.warning_calls[0][1]
     assert parse_no_result_fields["reason_code"] == "price_invalid"
     assert parse_no_result_fields["reason_message"] == "Preco ausente ou invalido"

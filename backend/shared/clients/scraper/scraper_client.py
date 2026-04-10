@@ -86,10 +86,12 @@ class ScraperClientError(Exception):
         status_code: int | None = None,
         *,
         retry_after: int | None = None,
+        error_code: str | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retry_after = retry_after
+        self.error_code = error_code
 
 @dataclass(slots=True)
 class ScraperFetchResult:
@@ -428,6 +430,7 @@ class ScraperClient:
             raise ScraperClientError(
                 f"Erro retornado pelo scraper: {result.error_code}",
                 status_code=result.status_code,
+                error_code=result.error_code,
             )
 
         raise ScraperClientError(

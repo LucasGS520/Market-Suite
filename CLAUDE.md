@@ -17,25 +17,11 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Diagnóstico Principal
-A orquestração foi executada (Temporal + Redis OK) e dispatchs foram gravados, porém as tasks de coleta que deveriam persistir resultados falham em runtime dentro do worker Celery devido a um `AttributeError` referente a `RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS`. Como consequência direta, não há gravação em `price_history` nem atualização de `last_scraped_at`.  
-  
-  - **Fatos que sustentam essa conclusão:**
-    - `dispatch_collection_ok` aparece nos logs do orquestrador para o `monitored_id` (orquestrador fez o trabalho de enfileirar/dispatch).  
-    - Redis contém `workflow:dispatch` e `workflow:snapshot` para o monitorado — indica dispatch registrado.  
-    - Worker Celery reportou exceção explícita `AttributeError(...)` durante execução de `collect_product_task` — indica falha em processamento.  
-    - DB mostra `last_scraped_at` nulo e `price_history` vazio para o monitorado — resultado esperado quando task falha antes de persistir.
+**Resumo do Problema**
+O fluxo de criação e primeira coleta está válido, mas existem bugs de aplicação que se repetem em qualquer ambiente que execute o mesmo código e os mesmos alvos: falha no tratamento do Redis/rate limit, fragilidade no contrato de parsing do scraper para produtos (monitorados e concorrentes) e encadeamento de erros que transforma falhas recuperáveis em task failures.
 
----
-
-## Conclusões e Objetivo
-
-- `market_alert` recebeu requisição e enfileirou.
-- `market_orchestrator` está vivo e faz dispatch (confirmado antes por `dispatch_collection_ok` e chaves `workflow:*`).
-- `celery-worker-scraping` recebe e executa tasks.
-- Falha ocorre **na lógica de execução/retry da task**, não na infraestrutura base (Redis/queues/worker up).
-
-Corrigir e Ajustar problemas de falha de código, quebra de tasks de coletas para que requisições recebidas pelo orquestrador retorne dados corretos e processamento correto de execução.
+**Objetivo**
+Corrigir apenas os pontos de aplicação que impactam múltiplos ambientes, reduzindo erro em cascata, melhorando previsibilidade do scraping e deixando explícito quando o sistema não consegue extrair dados. 
 
 ---
 

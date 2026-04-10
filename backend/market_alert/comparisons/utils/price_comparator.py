@@ -148,12 +148,15 @@ def compare_prices(
         }
 
     #Filtra concorrentes disponíveis com preço válido
+    #Defesa-em-profundidade: filter_competitors_for_comparison() já deveria ter feito
+    #essa filtragem, mas garantimos aqui caso compare_prices() seja chamado diretamente.
     ignored_statuses = {ProductStatus.unavailable, ProductStatus.removed}
     valid_competitors = [
         c
         for c in competitors
         if c.current_price is not None
         and getattr(c, "status", ProductStatus.available) not in ignored_statuses
+        and getattr(c, "availability", None) is not False
     ]
 
     #Se nenhum concorrente possui preço válido, retorna resultado vazio

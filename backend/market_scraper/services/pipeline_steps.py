@@ -155,6 +155,49 @@ class FetchHTMLStep(PipelineStep):
         )
         return StepResult.success(message="HTML baixado com sucesso")
     
+class AntiBotDetectionStep(PipelineStep):
+    """Detecta páginas de proteção anti-bot antes dos parsers
+
+    Consome: ``context.html``
+    Produz: ``context.data['anti_bot_detected']``, ``context.data['anti_bot_pattern']``
+
+    Se detectar padrão conhecido, esvazia ``context.html`` para que as etapas
+    de parsing subsequentes retornem ``empty`` imediatamente em vez de tentar
+    extrair dados de uma página de challenge.
+    """
+
+    _PATTERNS: tuple[tuple[str, str], ...] = (
+        ("suspicious-traffic-frontend", "mercadolivre_challenge"),
+        ("challenges.cloudflare.com", "cloudflare_challenge"),
+        ("__cf_chl", "cloudflare_challenge"),
+        ("recaptcha/api.js", "captcha_challenge"),
+        ("_pxcaptcha", "perimeterx_challenge"),
+    )
+
+    def __init__(self) -> None:
+        super().__init__(name="anti_bot_detection")
+
+    async def run(self, context: PipelineContext) -> StepResult:
+        if not context.html:
+            return StepResult.empty("HTML indisponível para detecção de anti-bot")
+
+        html_lower = context.html.lower()
+        for pattern, pattern_type in self._PATTERNS:
+            if pattern.lower() in html_lower:
+                context.data["anti_bot_detected"] = True
+                context.data["anti_bot_pattern"] = pattern_type
+                context.html = ""
+                logger.warning(
+                    "anti_bot_page_detected",
+                    url=context.url,
+                    domain=context.source,
+                    pattern_type=pattern_type,
+                )
+                return StepResult.failure(message="anti_bot_page")
+
+        return StepResult.empty("Nenhum padrão de anti-bot detectado")
+
+
 class _BaseParserStep(PipelineStep):
     """ Implementa o fluxo padrão para etapas de parsing 
     
@@ -236,6 +279,7 @@ class DomainSpecificParserStep(PipelineStep):
         domain = context.source or extract_domain(context.url) or ""
         matched = get_domain_parser(domain)
         if not matched:
+            context.data["no_domain_parser"] = True
             return StepResult.empty("Domínio sem parser dedicado")
         
         suffix, parser = matched
@@ -257,6 +301,7 @@ def default_pipeline_steps() -> list[PipelineStep]:
     """ Retorna a sequência padrão de etapas do pipeline enxuto """
     steps: list[PipelineStep] = [
         FetchHTMLStep(),
+        AntiBotDetectionStep(),
         JsonLdParserStep(),
         HtmlMetadataParserStep(),
         DomainSpecificParserStep(),
@@ -267,6 +312,7 @@ def default_pipeline_steps() -> list[PipelineStep]:
 
 __all__ = [
     "FetchHTMLStep",
+    "AntiBotDetectionStep",
     "JsonLdParserStep",
     "HtmlMetadataParserStep",
     "DomainSpecificParserStep",

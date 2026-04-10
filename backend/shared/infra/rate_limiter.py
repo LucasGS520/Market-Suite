@@ -197,7 +197,7 @@ class ScrapingRateLimiter:
         try:
             return self._client_factory()
         except Exception as exc:
-            logger.warning("scraping_rate_limiter_client_error: %s", exc)
+            logger.warning("scraping_rate_limiter_client_error", exc=str(exc))
             return None
 
     def allow(self, host: str) -> bool:

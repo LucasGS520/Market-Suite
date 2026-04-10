@@ -70,26 +70,34 @@ def _resolve_outcome(
     return "error"
 
 def _resolve_no_result_reason(result: ScrapeResult | None) -> str:
-    """ Determina uma razão descritiva para status ``no_result`` """
+    """ Determina uma razão descritiva para status ``no_result``.
+
+    Distingue explicitamente lock contention, pausa e ausência de alvo para
+    que callers possam diferenciar causas operacionais de causas de extração.
+    """
     if result is None:
         return "validation"
-    
+
     error_code = (result.error_code or "").strip().lower()
+
+    if error_code == "lock_skipped":
+        return "lock_skipped"
+
+    if error_code in {"paused", "missing_target"}:
+        return error_code
+
     if "robot" in error_code:
         return "robots"
-    
+
     if error_code in RATE_LIMIT_ERROR_CODES or result.http_status == 429:
         return "rate_limit"
-    
+
     if error_code in INVALID_URL_ERRORS_CODES:
         return "invalid_url"
-    
+
     if "timeout" in error_code or result.http_status in {408, 504}:
         return "timeout"
-    
-    if error_code == "no_result":
-        return "validation"
-    
+
     return "validation"
 
 def _should_schedule_temporary_retry(

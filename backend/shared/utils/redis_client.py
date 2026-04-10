@@ -8,19 +8,19 @@ bucket* utilizada pelas rotas HTTP para evitar explosões de requisições.
 
 from __future__ import annotations
 
-import logging
 import math
 import threading
 import time
 from typing import Any, Tuple
 import redis
+import structlog
 
 from shared.core.config_base import ConfigBase
 
 
 #Armazena instâncias isoladas de Redis por thread
 _thread_local = threading.local()
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger("shared.utils.redis_client")
 SCRAPING_SUSPENDED_KEY = "scraping:suspended"
 _settings = ConfigBase()
 

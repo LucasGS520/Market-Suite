@@ -281,7 +281,11 @@ def collect_product(
 
     except ScraperClientError as exc:
         reason = "scraper_client_error"
-        error_code = "rate_limit" if exc.status_code == 429 else "service_unavailable" if exc.status_code in {503, 504} else "scraper_client_error"
+        error_code = (
+            "rate_limit" if exc.status_code == 429
+            else "service_unavailable" if exc.status_code in {503, 504}
+            else exc.error_code or "scraper_client_error"
+        )
         result = ScrapeResult(
             status="error",
             product_id=str(lock_target) if lock_target else None,
@@ -289,7 +293,15 @@ def collect_product(
             error_code=error_code,
             retry_after=exc.retry_after,
         )
-        task_logger.warning("scraper_client_error", kind=kind, error=str(exc), http_status=exc.status_code)          
+        # causa de ambiente: HTTP failure do scraper (rate_limit, timeout, indisponibilidade)
+        task_logger.warning(
+            "scraper_client_error",
+            kind=kind,
+            error=str(exc),
+            http_status=exc.status_code,
+            error_code=error_code,
+            reason_code="environment",
+        )
     except ScraperError as exc:
         reason = "scraper_error"
         result = ScrapeResult(
@@ -298,7 +310,15 @@ def collect_product(
             http_status=exc.status_code,
             error_code="scraper_error",
         )
-        task_logger.warning("scraper_error", kind=kind, error=str(exc))
+        # causa de aplicação: scraper retornou resposta estruturada de erro (ex: parse falhou)
+        task_logger.warning(
+            "scraper_error",
+            kind=kind,
+            error=str(exc),
+            http_status=exc.status_code,
+            error_code="scraper_error",
+            reason_code="application",
+        )
     except Exception:
         reason = "unexpected_error"
         result = ScrapeResult(
@@ -306,7 +326,12 @@ def collect_product(
             product_id=str(lock_target) if lock_target else None,
             error_code="unexpected_error",
         )
-        task_logger.exception("collect_unexpected", kind=kind)
+        task_logger.exception(
+            "collect_unexpected",
+            kind=kind,
+            error_code="unexpected_error",
+            reason_code="unknown",
+        )
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
         if result is not None and reason is None and (result.error_code or "").strip().lower() in INVALID_URL_ERRORS_CODES:
@@ -509,29 +534,45 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             if retry_attempt is None:
                 retry_attempt = 1
             if retry_attempt > SCRAPE_RETRY_MAX_ATTEMPTS:
-                #Reinicia contador para evitar loops infinitos após atingir o limite
-                _reset_temporary_failure_attempt(str(lock_target))
-                delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
-                base_now = datetime.now(timezone.utc)
-                should_retry, next_retry_at = RetryPolicy.should_retry_scrape_failure(
-                    reason or "unknown",
-                    retry_attempt,
-                    max_attempts=retry_attempt,
-                    max_seconds=delay,
-                    now=base_now,
-                )
-                if not should_retry:
+                if kind == "competitor" and competitor_id is not None:
+                    #Concorrente com falhas repetidas é pausado para evitar loop caro.
+                    #O operador pode reativar manualmente após investigar a causa.
+                    _reset_temporary_failure_attempt(str(lock_target))
+                    update_competitor_pause_state(db, competitor_id, is_paused=True)
                     next_retry_at = None
-                temporary_failure = True
-                logger.warning(
-                    "scrape_retry_exhausted",
-                    kind=kind,
-                    product_id=str(lock_target),
-                    trace_id=trace_id,
-                    attempts=retry_attempt,
-                    delay_seconds=delay,
-                    next_retry_at=next_retry_at.isoformat() if next_retry_at else None,
-                )
+                    logger.warning(
+                        "scrape_retry_exhausted_competitor_paused",
+                        kind=kind,
+                        competitor_id=str(competitor_id),
+                        monitored_id=str(monitored_id) if monitored_id else None,
+                        trace_id=trace_id,
+                        attempts=retry_attempt,
+                        reason=reason,
+                    )
+                else:
+                    #Monitorado: agenda retry com delay longo e reinicia contador
+                    _reset_temporary_failure_attempt(str(lock_target))
+                    delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
+                    base_now = datetime.now(timezone.utc)
+                    should_retry, next_retry_at = RetryPolicy.should_retry_scrape_failure(
+                        reason or "unknown",
+                        retry_attempt,
+                        max_attempts=retry_attempt,
+                        max_seconds=delay,
+                        now=base_now,
+                    )
+                    if not should_retry:
+                        next_retry_at = None
+                    temporary_failure = True
+                    logger.warning(
+                        "scrape_retry_exhausted",
+                        kind=kind,
+                        product_id=str(lock_target),
+                        trace_id=trace_id,
+                        attempts=retry_attempt,
+                        delay_seconds=delay,
+                        next_retry_at=next_retry_at.isoformat() if next_retry_at else None,
+                    )
             else:
                 #Falhas temporárias padrão usam policy única para evitar divergência de cálculo de next_retry_at entre consumidores.
                 base_now = datetime.now(timezone.utc)

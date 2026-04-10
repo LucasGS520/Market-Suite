@@ -66,6 +66,7 @@ router = APIRouter(tags=["scraper"])
         400: {"model": ErrorResponse},
         403: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
         504: {"model": ErrorResponse},
     },
 )
