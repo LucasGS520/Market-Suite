@@ -124,9 +124,17 @@ class DispatchActivityOutput:
 
 @dataclass
 class QueryStatusOutput:
-    """ Resultado da activity query_collection_status."""
+    """ Resultado da activity query_collection_status.
+
+    Campos adicionados em schema_version=2 (retrocompatíveis, default=None):
+    - outcome: outcome bruto do coletor (success/not_modified/error/no_result).
+    - error_class: categoria semântica do erro (transient/structural/domain_empty/neutral).
+      Consumido pelo workflow para observabilidade e sinalização técnica de erros estruturais.
+    """
     completed: bool = False
     last_error: str | None = None
+    outcome: str | None = None
+    error_class: str | None = None
     schema_version: int = 1
 
 @dataclass

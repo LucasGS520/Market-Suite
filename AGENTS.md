@@ -1,4 +1,4 @@
-# Contexto Codex
+# Claude — Contexto e Objetivos
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -17,33 +17,33 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Objetivo e Estratégias de Implementação
+### Resumo do Problema e Objetivo da Correção
 
-**Objetivo**  
-Alinhar e fechar as lacunas das suítes de testes dos 4 módulos backend para que a cobertura reflita as responsabilidades reais de negócio e infraestrutura, reduzindo risco sistêmico em fluxos assíncronos, integrações e componentes compartilhados.
+- **Objetivo:** Alinhar e robustecer o contrato entre coleta, orquestrador e comparação, preservando a arquitetura atual e corrigindo ambiguidades semânticas para distinguir falha transitória, falha estrutural e ausência real de resultado.
 
-**Estratégia de Implementação**  
-A execução será incremental em fases, priorizando primeiro os pontos de maior risco operacional: tasks assíncronas e infraestrutura compartilhada. Depois, faremos hardening dos módulos já maduros.
+- **Resultado Esperado:** Taxonomia única e versionada de outcome/reason aplicada de ponta a ponta, com decisões do workflow mais precisas e resumos de comparação refletindo falhas upstream de forma explícita.
+
+- **Estratégia de Execução:** Implementar por camadas sem quebrar contratos externos: primeiro catálogo semântico único, depois adaptação de classificação no coletor, em seguida leitura no status/orquestrador, e por fim propagação para comparação/observabilidade.
+
+- **Premissas:**
+  - Contrato base já está estável: payload tipado e retorno com outcome/status/reason/next_retry_at/product_id.
+  - Gating por `persisted_at` já está correto e deve ser preservado.
+  - Correções devem priorizar compatibilidade retroativa.
 
 ---
 
-## Análise de Riscos e Decisões Chave
+- **Dependências**
+  - Coletor: `collector_product_task.py`
+  - Normalização de resultado: `collector_result.py`
+  - Contratos compartilhados: `shared_schemas_orchestrator.py` e `shared_schemas_scraper.py`
+  - Leitura de status: `status_activity.py`
+  - Workflow: `workflow.py`
+  - Gating comparação: `price_comparator.py`
+  - Serviço de comparação: `services_comparison.py`
 
-**Decisão Técnica Principal**  
-Adotar matriz de testes por criticidade:  
-- Unit: zero I/O real, uso de fakes determinísticos  
-- Integration controlada: contratos e fluxos entre componentes locais  
-- Integration high-cost: Temporal e fluxos mais caros, com escopo reduzido  
-- Stress técnico: somente cenários onde concorrência/timeout é responsabilidade funcional
-
-**Risco Principal**  
-Falsa sensação de cobertura por excesso de integração mockada, sem validar pontos de borda críticos (Celery, Redis avançado, dedup/lock/cooldown).  
-Mitigação: criar suíte mínima obrigatória por risco operacional e gate de cobertura por área crítica.
-
-**Dependências**  
-- Configuração global em `pytest.ini` e `conftest.py`  
-- Estrutura alvo em `estrutura_ambiente_testes.md`  
-- Requisitos de cada módulo (arquivos requirements)  
+- **Impactos Arquiteturais** (se aplicável)
+  - Sem impacto estrutural relevante; impacto principal é semântico e de governança de contrato.
+  - Melhora de observabilidade operacional e redução de ambiguidade de backoff no workflow.
 
 ---
 

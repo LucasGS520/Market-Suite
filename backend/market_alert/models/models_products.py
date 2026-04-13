@@ -73,6 +73,7 @@ class MonitoredProduct(Base):
     paused_at = Column(DateTime(timezone=True), nullable=True)
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_collection_reason = Column(String, nullable=True)
     collected_at = Column(DateTime(timezone=True), nullable=True)
     last_price_change_at = Column(DateTime(timezone=True), nullable=True)
     group_collected_at = Column(DateTime(timezone=True), nullable=True)

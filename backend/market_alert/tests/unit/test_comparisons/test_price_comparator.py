@@ -6,15 +6,18 @@ sem levantar exceções nem gerar resultados incoerentes.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import pytest
 
+import market_alert.comparisons.utils.price_comparator as price_comparator_module
 from market_alert.enums.enums_products import ProductStatus
 from market_alert.comparisons.utils.price_comparator import compare_prices
 from market_alert.comparisons.utils.comparison_utils import filter_competitors_for_comparison
+from shared.schemas.shared_schemas_scraper import ScrapeResult
 
 
 pytestmark = pytest.mark.unit
@@ -130,3 +133,55 @@ def test_filter_competitors_excludes_all_when_no_price_available() -> None:
 
     assert filtered.entries == []
     assert filtered.filtered_reasons.get("missing_price", 0) == 2
+
+
+def test_dispatch_comparison_requires_persisted_source_integrity(monkeypatch) -> None:
+    captured_requests: list[tuple[object, str]] = []
+    monitored_id = uuid4()
+    result = ScrapeResult(
+        status="success",
+        product_id=str(monitored_id),
+        price_changed=True,
+        persisted_at=None,
+    )
+
+    monkeypatch.setattr(
+        price_comparator_module,
+        "request_comparison_recompute",
+        lambda monitored_uuid, reason: captured_requests.append((monitored_uuid, reason)),
+    )
+
+    price_comparator_module.dispatch_comparison_for_scrape_result(
+        monitored_id,
+        result,
+        trace_id="trace-no-persist",
+    )
+
+    assert price_comparator_module._has_comparison_source_integrity(result) is False
+    assert captured_requests == []
+
+
+def test_dispatch_comparison_enqueues_when_source_integrity_and_change_are_present(monkeypatch) -> None:
+    captured_requests: list[tuple[object, str]] = []
+    monitored_id = uuid4()
+    result = ScrapeResult(
+        status="success",
+        product_id=str(monitored_id),
+        price_changed=True,
+        persisted_at=datetime.now(timezone.utc),
+    )
+
+    monkeypatch.setattr(
+        price_comparator_module,
+        "request_comparison_recompute",
+        lambda monitored_uuid, reason: captured_requests.append((monitored_uuid, reason)),
+    )
+
+    price_comparator_module.dispatch_comparison_for_scrape_result(
+        monitored_id,
+        result,
+        trace_id="trace-persisted",
+    )
+
+    assert price_comparator_module._has_comparison_source_integrity(result) is True
+    assert captured_requests == [(monitored_id, "material_change")]

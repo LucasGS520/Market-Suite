@@ -271,6 +271,7 @@ def _persist_existing_monitored(
         existing.last_modified = last_modified or existing.last_modified
         existing.last_checked = checked_at
         existing.last_scraped_at = checked_at
+        existing.last_collection_reason = None
         existing.collected_at = collected_reference
         existing.status = MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active
         existing.availability = availability
@@ -378,6 +379,7 @@ def _persist_new_monitored(
         status=MonitoredStatus.inactive if inactive_due_to_data else MonitoredStatus.active,
         last_checked=checked_at,
         last_scraped_at=checked_at,
+        last_collection_reason=None,
         collected_at=collected_reference,
         next_check_at=None,
         currency=resolved_currency,
@@ -802,3 +804,38 @@ def activate_pending_monitored(
         monitored_id=str(monitored_id),
     )
     return product
+
+
+def update_monitored_collection_reason(
+    db: Session,
+    monitored_id: UUID,
+    reason: str | None,
+    *,
+    commit: bool = False,
+) -> None:
+    """ Persiste o motivo tipado da última coleta no monitorado.
+
+    Chamado pelo collector em dois cenários:
+    - Falha de coleta (error/no_result não-neutro): grava o reason tipado
+      do catálogo (ex: http_429, challenge_detected, parse_price_failed).
+    - Sucesso/not_modified: já é limpo por ``_persist_existing_monitored``;
+      esta função não precisa ser chamada nesses casos.
+
+    O valor é lido por ``run_price_comparison`` para propagar ``upstream_reason``
+    específico no resumo de comparação, em vez do genérico ``upstream_collection_failed``.
+
+    Args:
+        db: Sessão ativa.
+        monitored_id: UUID do monitorado.
+        reason: Reason tipado do catálogo ou None para limpar.
+        commit: Commita a transação quando True (padrão: False — integra
+            em transação existente via flush implícito na sessão).
+    """
+    product = get_monitored_product_by_id(db, monitored_id)
+    if product is None:
+        return
+    product.last_collection_reason = reason
+    if commit:
+        db.commit()
+    else:
+        db.flush()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import json
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -13,6 +14,7 @@ import market_alert.infrastructure.celery.domain_task_enqueuer as enqueuer_modul
 import market_alert.infrastructure.celery.dlq_base_task as dlq_base_task_module
 import market_alert.notifications.tasks.notifications_enqueue_task as enqueue_task_module
 import market_alert.notifications.tasks.send_notification_task as send_task_module
+import shared.utils.redis_client as redis_client_module
 
 
 pytestmark = pytest.mark.unit
@@ -164,6 +166,52 @@ def test_collect_product_task_schedules_retry_for_lock_skipped(monkeypatch) -> N
     ]
     assert result["outcome"] == "no_result"
     assert result["product_id"] == payload["monitored_id"]
+
+
+def test_collect_product_task_writes_contract_result_to_redis_for_status_activity(monkeypatch) -> None:
+    payload = _valid_collection_payload(correlation_id=str(uuid4()))
+    redis_calls: list[dict[str, object]] = []
+
+    class _RedisStub:
+        def setex(self, key, ttl, value):
+            redis_calls.append({"key": key, "ttl": ttl, "value": value})
+
+    monkeypatch.setattr(collector_task_module, "SessionLocal", lambda: _SessionStub())
+    monkeypatch.setattr(
+        collector_task_module,
+        "collect_product",
+        lambda *args, **kwargs: ("error", SimpleNamespace(error_code="anti_bot_page"), "challenge_detected"),
+    )
+    monkeypatch.setattr(collector_task_module, "_should_block_invalid_url", lambda result: False)
+    monkeypatch.setattr(
+        collector_task_module,
+        "_should_schedule_temporary_retry",
+        lambda result, reason: False,
+    )
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    with _task_request(
+        collector_task_module.collect_product_task,
+        id="collect-task-redis",
+        retries=0,
+        delivery_info={"routing_key": "scraping"},
+    ):
+        result = collector_task_module.collect_product_task.run(payload=payload)
+
+    assert result == {
+        "outcome": "error",
+        "status": "error",
+        "reason": "challenge_detected",
+        "next_retry_at": None,
+        "product_id": payload["monitored_id"],
+    }
+    assert redis_calls == [
+        {
+            "key": f"{collector_task_module._COLLECTION_RESULT_KEY_PREFIX}:{payload['monitored_id']}:{payload['correlation_id']}",
+            "ttl": collector_task_module._COLLECTION_RESULT_TTL_SECONDS,
+            "value": json.dumps({"outcome": "error", "reason": "challenge_detected"}),
+        }
+    ]
 
 
 def test_compare_prices_task_skips_notifications_when_flags_indicate_no_change(monkeypatch) -> None:

@@ -25,6 +25,10 @@ with workflow.unsafe.imports_passed_through():
         PolicyActivityOutput,
         QueryStatusOutput,
     )
+    from shared.schemas.collection_catalog import (
+        ERROR_CLASS_STRUCTURAL,
+        ERROR_CLASS_TRANSIENT,
+    )
 
     from market_orchestrator.core.config_orchestrator import settings
     from market_orchestrator.enums.enums_workflow import WorkflowState
@@ -242,11 +246,22 @@ class MonitoredProductWorkflow:
 
             if result.completed:
                 if result.last_error:
-                    # Falha real de coleta (no_result de parser, error de infra) — Backoff
+                    #Falha tipada — vai para Backoff.
+                    #error_class distingue transitório (espera-se correção) de estrutural (requer intervenção humana — sinalização técnica via log).
+                    error_class = result.error_class or ERROR_CLASS_TRANSIENT
+                    if error_class == ERROR_CLASS_STRUCTURAL:
+                        logger.warning(
+                            "collection_structural_error",
+                            monitored_id=self._monitored_id,
+                            reason=result.last_error,
+                            error_class=error_class,
+                            attempt_count=self._attempt_count,
+                            note="Erro estrutural requer revisão do parser ou URL — backoff aplicado",
+                        )
                     self._last_error = result.last_error
                     self._state = WorkflowState.Backoff
                 else:
-                    # Sucesso ou lock transitório absorvido — retoma timer normalmente
+                    #Sucesso, not_modified ou neutral (lock/pausa/inativo) — retoma timer
                     self._attempt_count = 0
                     self._last_error = None
                     self._state = WorkflowState.WaitingTimer

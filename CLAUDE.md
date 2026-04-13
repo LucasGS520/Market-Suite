@@ -19,32 +19,51 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ### Resumo do Problema e Objetivo da Correção
 
-- **Problema:** A esteira de coleta/orquestração funciona, mas sofre degradação por contenção de lock, corrida entre coleta e comparação, e instabilidade de execução de workflow tasks (deadlock/timeout/task-not-found), com risco de repetição em Dev e Staging.
+- **Objetivo:** Alinhar e robustecer o contrato entre coleta, orquestrador e comparação, preservando a arquitetura atual e corrigindo ambiguidades semânticas para distinguir falha transitória, falha estrutural e ausência real de resultado.
 
-- **Sintoma observado:** Eventos recorrentes de `TMPRL1101`, `TMPRL1104`, `Task not found`, `lock_skipped` com retries, comparação iniciando sem dados consolidados, e sinais operacionais de pressão (`SIGKILL`, deadlines de fila).
+- **Resultado Esperado:** Taxonomia única e versionada de outcome/reason aplicada de ponta a ponta, com decisões do workflow mais precisas e resumos de comparação refletindo falhas upstream de forma explícita.
 
-- **Objetivo da correção:** Restaurar previsibilidade da execução assíncrona, separar falhas transitórias de falhas finais, reduzir cascata de erros e garantir que a comparação só rode com estado de coleta consistente.
+- **Estratégia de Execução:** Implementar por camadas sem quebrar contratos externos: primeiro catálogo semântico único, depois adaptação de classificação no coletor, em seguida leitura no status/orquestrador, e por fim propagação para comparação/observabilidade.
 
 - **Premissas:**
-  - O mesmo código-base é promovido entre Dev e Staging.
-  - Parte dos ruídos de `watchfiles` é específica de Dev local com `--reload`.
-  - Deadlock/timeout/task-not-found e corrida de domínio podem aparecer em qualquer ambiente sob mesma lógica e carga.
+  - Contrato base já está estável: payload tipado e retorno com outcome/status/reason/next_retry_at/product_id.
+  - Gating por `persisted_at` já está correto e deve ser preservado.
+  - Correções devem priorizar compatibilidade retroativa.
+
+- **Pontos em Aberto** (se houver)
+  - Definir política final de retry para erros estruturais de página (sempre retryável, parcialmente retryável, ou não retryável por domínio/host).
+  - Definir se `source_integrity` será campo explícito no ScrapeResult ou derivado internamente por regra.
+  - Definir granularidade mínima obrigatória de reason para dashboards (por exemplo, dom_not_ready e selector_missing separados ou agrupados em parse_structure_error).
 
 ---
 
 ### Riscos, Impacto e Decisões
 
-- **Decisão Técnica Principal:** Estabelecer contrato explícito de execução assíncrona por estado (`success`, `not_modified`, `retryable_lock`, `retryable_timeout`, `no_result`, `error_final`) e alinhar o gating da comparação para somente após persistência válida.
+- **Decisões Técnicas Principais**
+  - Criar catálogo único de semântica (outcomes, reasons, classes de erro, retryabilidade, neutralidade para workflow) em módulo compartilhado.
+  - Proibir strings soltas para outcome/reason em coleta, status activity e workflow; usar apenas constantes/enums do catálogo.
+  - Redefinir `no_result` como exclusivo de ausência legítima de dado após resposta íntegra e parse válido.
+  - Reclassificar anti-bot/challenge/timeout/bloqueio para outcome error com reason tipado.
+  - Manter compatibilidade de payload e envelope atuais, adicionando metadados semânticos progressivamente.
 
-- **Risco Principal:** Mitigações parciais mascararem sintomas sem resolver causa de coordenação, mantendo degradação intermitente.
+- **Riscos Principais**
+  - Regressão por mudança de significado em métricas e alertas existentes.
+  - Divergência entre implementação e comentários/documentação (caso lock_exhausted vs lock_skipped).
+  - Classificação excessivamente rígida gerar falsos erros em páginas limítrofes.
+  - Comparação passar a “silenciar” cenários se upstream_reason não for propagado corretamente.
 
-- **Impacto atual:** Perda de previsibilidade, janelas com comparação sem candidatos válidos por timing, aumento de retries e risco de queda de throughput sob pressão.
+- **Dependências**
+  - Coletor: `collector_product_task.py`
+  - Normalização de resultado: `collector_result.py`
+  - Contratos compartilhados: `shared_schemas_orchestrator.py` e `shared_schemas_scraper.py`
+  - Leitura de status: `status_activity.py`
+  - Workflow: `workflow.py`
+  - Gating comparação: `price_comparator.py`
+  - Serviço de comparação: `services_comparison.py`
 
-- **Dependências:**
-  - Configurações de Temporal (timeouts e comportamento de workflow task).
-  - Configurações de Celery (concurrency, prefetch, time limits, backoff).
-  - Contratos entre coleta e comparação (persistência e sinalização).
-  - Observabilidade comum entre API, workers, orquestrador e temporal.
+- **Impactos Arquiteturais** (se aplicável)
+  - Sem impacto estrutural relevante; impacto principal é semântico e de governança de contrato.
+  - Melhora de observabilidade operacional e redução de ambiguidade de backoff no workflow.
 
 ---
 

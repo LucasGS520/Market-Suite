@@ -312,10 +312,11 @@ async def test_query_collection_status_result_key_lock_skipped_returns_completed
 
 
 @pytest.mark.asyncio
-async def test_query_collection_status_result_key_lock_exhausted_returns_completed_no_error(
+async def test_query_collection_status_result_key_unknown_reason_returns_last_error(
     orchestrator_ids,
     monkeypatch,
 ) -> None:
+    """Reason desconhecido (ex: lock_exhausted removido do catálogo) não é neutro — vai para Backoff."""
     import json
 
     raw = json.dumps({"outcome": "no_result", "reason": "lock_exhausted"}).encode()
@@ -332,18 +333,19 @@ async def test_query_collection_status_result_key_lock_exhausted_returns_complet
     )
 
     assert result.completed is True
-    assert result.last_error is None
+    assert result.last_error == "lock_exhausted"
+    assert result.error_class == "transient"
 
 
 @pytest.mark.asyncio
-async def test_query_collection_status_result_key_domain_failure_returns_last_error(
+async def test_query_collection_status_result_key_structural_failure_returns_last_error(
     orchestrator_ids,
     monkeypatch,
 ) -> None:
     """Falha real de domínio (parser falhou) deve ir para Backoff via last_error."""
     import json
 
-    raw = json.dumps({"outcome": "no_result", "reason": "parse_failed"}).encode()
+    raw = json.dumps({"outcome": "error", "reason": "parse_price_failed"}).encode()
 
     class _RedisStub:
         def get(self, key):
@@ -357,7 +359,8 @@ async def test_query_collection_status_result_key_domain_failure_returns_last_er
     )
 
     assert result.completed is True
-    assert result.last_error == "parse_failed"
+    assert result.last_error == "parse_price_failed"
+    assert result.error_class == "structural"
 
 
 @pytest.mark.asyncio
@@ -383,6 +386,43 @@ async def test_query_collection_status_result_key_error_outcome_returns_last_err
 
     assert result.completed is True
     assert result.last_error == "scraper_client_error"
+    assert result.error_class == "transient"
+
+
+@pytest.mark.asyncio
+async def test_query_collection_status_result_key_domain_empty_returns_error_class_and_observability_fields(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    import json
+
+    raw = json.dumps({"outcome": "no_result", "reason": "parse_empty"}).encode()
+    captured_logs: list[dict[str, object]] = []
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    class _LoggerStub:
+        def info(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+
+        def warning(self, event, **kwargs):
+            captured_logs.append({"event": event, **kwargs})
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+    monkeypatch.setattr(status_activity, "logger", _LoggerStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error == "parse_empty"
+    assert result.error_class == "domain_empty"
+    assert captured_logs[-1]["semantic_category"] == "domain_empty"
+    assert captured_logs[-1]["source_integrity"] is True
 
 
 def test_read_dispatch_timestamp_parses_iso_value_from_redis(

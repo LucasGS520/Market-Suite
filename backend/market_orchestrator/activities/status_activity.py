@@ -9,6 +9,12 @@ from sqlalchemy import text
 from temporalio import activity
 
 from shared.schemas.shared_schemas_orchestrator import QueryStatusOutput
+from shared.schemas.collection_catalog import (
+    SUCCESSFUL_OUTCOMES,
+    NEUTRAL_REASONS,
+    get_error_class,
+    has_source_integrity,
+)
 
 
 logger = structlog.get_logger("orchestrator.activities.status")
@@ -18,12 +24,6 @@ _DISPATCH_KEY_PREFIX = "workflow:dispatch"
 
 #Deve estar em sincronia com collector_product_task._COLLECTION_RESULT_KEY_PREFIX
 _COLLECTION_RESULT_KEY_PREFIX = "workflow:collection_result"
-
-# Outcomes que indicam conclusão bem-sucedida da coleta (sem erro de negócio)
-_SUCCESSFUL_OUTCOMES = frozenset({"success", "not_modified"})
-
-# Outcomes de lock transitório: coleta foi "absorvida" por outro worker — não é falha de produto
-_LOCK_OUTCOMES = frozenset({"lock_skipped", "lock_exhausted"})
 
 
 def _read_dispatch_timestamp(monitored_id: str, correlation_id: str) -> datetime | None:
@@ -77,49 +77,69 @@ async def query_collection_status(
        (via ``workflow:dispatch:{id}:{corr_id}``). Protege contra collectors antigos que
        não escrevem o result key.
 
-    Semântica de outcomes para o workflow:
+    Semântica de outcomes para o workflow (via collection_catalog):
     - ``success`` / ``not_modified`` → completed=True, last_error=None (WaitingTimer)
-    - ``lock_skipped`` / ``lock_exhausted`` → completed=True, last_error=None
-      (lock é transitório — outro worker coletou; workflow vai para WaitingTimer)
-    - ``no_result`` / ``error`` com reason → completed=True, last_error=reason (Backoff)
+    - reason em NEUTRAL_REASONS (lock_skipped, paused, scraping_suspended, missing_target,
+      ignored_due_to_inactive) → completed=True, last_error=None (WaitingTimer)
+    - ``error`` / ``no_result`` com reason não-neutro → completed=True, last_error=reason
+      + error_class (transient/structural/domain_empty) para observabilidade (Backoff)
     """
     try:
         # --- Passo 1: verificar result key sinalizado pelo collector ---
         collection_result = _read_collection_result(monitored_id, correlation_id)
         if collection_result is not None:
             c_outcome = collection_result.get("outcome", "")
-            c_reason = collection_result.get("reason", "")
+            c_reason = collection_result.get("reason") or None
 
-            if c_outcome in _SUCCESSFUL_OUTCOMES:
+            #Sucesso confiável: dados coletados com integridade
+            if c_outcome in SUCCESSFUL_OUTCOMES:
                 logger.info(
                     "query_collection_status_result_key_success",
                     monitored_id=monitored_id,
                     correlation_id=correlation_id,
                     outcome=c_outcome,
+                    source_integrity=has_source_integrity(c_outcome, c_reason),
                 )
-                return QueryStatusOutput(completed=True)
+                return QueryStatusOutput(
+                    completed=True,
+                    outcome=c_outcome,
+                )
 
-            if c_reason in _LOCK_OUTCOMES or c_outcome == "no_result" and c_reason in _LOCK_OUTCOMES:
-                # Lock transitório: não é falha do produto — workflow volta para WaitingTimer
+            #Neutral: lock, pausa, inativo, suspended, missing_target
+            #Não é falha do produto — workflow retorna para WaitingTimer sem backoff
+            if c_reason in NEUTRAL_REASONS:
                 logger.info(
-                    "query_collection_status_result_key_lock",
+                    "query_collection_status_result_key_neutral",
                     monitored_id=monitored_id,
                     correlation_id=correlation_id,
+                    outcome=c_outcome,
                     reason=c_reason,
+                    semantic_category=get_error_class(c_reason),
+                    source_integrity=has_source_integrity(c_outcome, c_reason),
                 )
-                return QueryStatusOutput(completed=True)
+                return QueryStatusOutput(
+                    completed=True,
+                    outcome=c_outcome,
+                )
 
-            # Falha real (no_result por parser, error por infra) → Backoff
+            #Falha tipada (error transitório/estrutural ou no_result sem parse íntegro)
+            #last_error preenchido → workflow vai para Backoff
+            c_error_class = get_error_class(c_reason)
             logger.info(
                 "query_collection_status_result_key_failure",
                 monitored_id=monitored_id,
                 correlation_id=correlation_id,
                 outcome=c_outcome,
                 reason=c_reason,
+                error_class=c_error_class,
+                semantic_category=c_error_class,
+                source_integrity=has_source_integrity(c_outcome, c_reason),
             )
             return QueryStatusOutput(
                 completed=True,
                 last_error=c_reason or c_outcome or "collection_failed",
+                outcome=c_outcome,
+                error_class=c_error_class,
             )
 
         # --- Passo 2: fallback via last_scraped_at no banco ---

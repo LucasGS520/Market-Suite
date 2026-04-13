@@ -15,6 +15,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.schemas.collection_catalog import SUCCESSFUL_OUTCOMES
 from shared.utils.redis_client import set_key_with_ttl
 
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
@@ -22,6 +23,15 @@ from market_alert.enums.enums_products import ProductStatus
 
 
 logger = structlog.get_logger("price_comparator")
+
+
+def _has_comparison_source_integrity(result: ScrapeResult | None) -> bool:
+    """ Exige resultado bem-sucedido e persistido antes de comparar preços. """
+    return bool(
+        result is not None
+        and result.status in SUCCESSFUL_OUTCOMES
+        and result.persisted_at is not None
+    )
 
 def request_comparison_recompute(monitored_id: UUID, reason: str) -> None:
     """ Despacha ``compare_prices_task`` com debounce Redis para um monitorado.
@@ -227,17 +237,32 @@ def dispatch_comparison_for_scrape_result(
     """ Agenda comparação apenas quando scraping trouxe alteração relevante """
     if monitored_id is None or result is None:
         return
-    
-    if result.persisted_at is None:
+
+    #Gating por outcome: comparação só faz sentido quando coleta foi bem-sucedida.
+    #Defesa em profundidade além do check de persisted_at — impede comparação
+    source_integrity = _has_comparison_source_integrity(result)
+
+    if result.status not in SUCCESSFUL_OUTCOMES:
+        logger.debug(
+            "compare_dispatch_skipped_non_success_outcome",
+            monitored_id=str(monitored_id),
+            trace_id=trace_id,
+            status=result.status,
+            source_integrity=source_integrity,
+        )
+        return
+
+    if not source_integrity:
         #Evita enfileirar comparação antes do commit terminar de persistir dados
         logger.warning(
             "compare_dispatch_skipped_missing_persisted_at",
             monitored_id=str(monitored_id),
             trace_id=trace_id,
             status=result.status,
+            source_integrity=source_integrity,
         )
         return
-    
+
     changed = bool(getattr(result, "price_changed", False) or getattr(result, "availability_changed", False))
     if not (force or changed):
         return
@@ -251,6 +276,7 @@ def dispatch_comparison_for_scrape_result(
         forced=force,
         changed=changed,
         countdown_seconds=countdown_seconds,
+        source_integrity=source_integrity,
     )
 
 def schedule_comparison_after_commit(
@@ -314,5 +340,6 @@ __all__ = [
     "request_comparison_recompute",
     "dispatch_comparison_for_scrape_result",
     "schedule_comparison_after_commit",
+    "_has_comparison_source_integrity",
     "_parse_force_compare_",
 ]

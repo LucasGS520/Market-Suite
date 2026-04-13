@@ -33,6 +33,18 @@ from shared.exceptions import ScraperError
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, MonitoredProductCreateScraping
 from shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.schemas.shared_schemas_orchestrator import validate_payload as validate_collection_payload
+from shared.schemas.collection_catalog import (
+    REASON_HTTP_429,
+    REASON_SCRAPER_UNAVAILABLE,
+    REASON_SCRAPER_CLIENT_ERROR,
+    REASON_SCRAPER_ERROR,
+    REASON_UNEXPECTED_ERROR,
+    REASON_LOCK_SKIPPED,
+    REASON_INVALID_PAYLOAD,
+    NEUTRAL_REASONS,
+    get_error_class,
+    has_source_integrity,
+)
 from shared.clients.scraper.scraper_client import ScraperClientError
 from shared.utils.trace_context import set_trace_id
 from shared.utils.redis_client import is_scraping_suspended
@@ -60,6 +72,7 @@ from market_alert.products.crud.crud_monitored import (
     activate_pending_monitored,
     get_monitored_product_by_id,
     mark_monitored_product_failed,
+    update_monitored_collection_reason,
 )
 from market_alert.products.crud.crud_competitor import get_competitor_by_id, update_competitor_pause_state
 from market_alert.collectors.services.services_scraper_competitor import scrape_competitor_product
@@ -70,6 +83,7 @@ from market_alert.collectors.utils.collector_result import (
     _is_rate_limit_error,
     _resolve_no_result_reason,
     _resolve_outcome,
+    _resolve_reason_from_result,
     _should_block_invalid_url,
     _should_schedule_temporary_retry,
     _validate_payload,
@@ -223,7 +237,7 @@ def collect_product(
                         )
                         return resolved_monitored, result, None
 
-                    # Branch de monitorado
+                    #Branch de monitorado
                     monitored = get_monitored_product_by_id(session, monitored_id) if monitored_id else None
                     if monitored is not None and monitored.paused:
                         task_logger.info(
@@ -284,12 +298,14 @@ def collect_product(
                     )
 
     except ScraperClientError as exc:
-        reason = "scraper_client_error"
-        error_code = (
-            "rate_limit" if exc.status_code == 429
-            else "service_unavailable" if exc.status_code in {503, 504}
-            else exc.error_code or "scraper_client_error"
-        )
+        #Emite reason tipado do catálogo baseado no HTTP status recebido do scraper.
+        if exc.status_code == 429:
+            reason = REASON_HTTP_429
+        elif exc.status_code in {503, 504}:
+            reason = REASON_SCRAPER_UNAVAILABLE
+        else:
+            reason = REASON_SCRAPER_CLIENT_ERROR
+        error_code = exc.error_code or reason
         result = ScrapeResult(
             status="error",
             product_id=str(lock_target) if lock_target else None,
@@ -297,67 +313,83 @@ def collect_product(
             error_code=error_code,
             retry_after=exc.retry_after,
         )
-        # causa de ambiente: HTTP failure do scraper (rate_limit, timeout, indisponibilidade)
+        #causa de ambiente: HTTP failure do scraper (rate_limit, timeout, indisponibilidade)
         task_logger.warning(
             "scraper_client_error",
             kind=kind,
             error=str(exc),
             http_status=exc.status_code,
             error_code=error_code,
+            reason=reason,
             reason_code="environment",
             error_category="operational",
+            semantic_category=get_error_class(reason),
+            source_integrity=False,
         )
     except ScraperError as exc:
-        reason = "scraper_error"
+        reason = REASON_SCRAPER_ERROR
         result = ScrapeResult(
             status="error",
             product_id=str(lock_target) if lock_target else None,
             http_status=exc.status_code,
-            error_code="scraper_error",
+            error_code=REASON_SCRAPER_ERROR,
         )
-        # causa de aplicação: scraper retornou resposta estruturada de erro (ex: parse falhou)
+        #causa de aplicação: scraper retornou resposta estruturada de erro (ex: parse falhou)
         task_logger.warning(
             "scraper_error",
             kind=kind,
             error=str(exc),
             http_status=exc.status_code,
-            error_code="scraper_error",
+            error_code=REASON_SCRAPER_ERROR,
+            reason=reason,
             reason_code="application",
             error_category="domain",
+            semantic_category=get_error_class(reason),
+            source_integrity=False,
         )
     except Exception:
-        reason = "unexpected_error"
+        reason = REASON_UNEXPECTED_ERROR
         result = ScrapeResult(
             status="error",
             product_id=str(lock_target) if lock_target else None,
-            error_code="unexpected_error",
+            error_code=REASON_UNEXPECTED_ERROR,
         )
         task_logger.exception(
             "collect_unexpected",
             kind=kind,
-            error_code="unexpected_error",
+            error_code=REASON_UNEXPECTED_ERROR,
+            reason=reason,
             reason_code="unknown",
             error_category="operational",
+            semantic_category=get_error_class(reason),
+            source_integrity=False,
         )
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        if result is not None and reason is None and (result.error_code or "").strip().lower() in INVALID_URL_ERRORS_CODES:
-            reason = "invalid_url"
-        if result is not None and result.status == "no_result" and reason is None:
-            reason = _resolve_no_result_reason(result)
+        #Deriva reason tipado do catálogo quando ainda não definido.
+        #Cobre tanto results de error quanto de no_result sem reason explícito
+        if result is not None and reason is None:
+            reason = _resolve_reason_from_result(result)
 
         outcome = _resolve_outcome(kind, result, lock_status=lock_status, reason=reason)
 
-        # Classifica a causa para facilitar separação de métricas nos logs.
+        #Classifica a causa para facilitar separação de métricas nos logs.
         # "operational": falhas de infra/concorrência sem relação com dados do produto.
         # "domain": falhas de extração ou dados inválidos do produto.
-        _OPERATIONAL_REASONS = frozenset({
-            "lock_skipped", "scraping_suspended", "missing_target", "paused",
+        _OPERATIONAL_REASONS = frozenset(NEUTRAL_REASONS) | frozenset({
+            REASON_HTTP_429,
+            REASON_SCRAPER_CLIENT_ERROR,
+            REASON_SCRAPER_UNAVAILABLE,
+            REASON_UNEXPECTED_ERROR,
+            "missing_user_id",
+            "db_open_failed",
+            #Legacy strings mantidas para compatibilidade com logs/alertas existentes
             "timeout", "rate_limit", "scraper_client_error", "unexpected_error",
-            "missing_user_id", "db_open_failed",
         })
         _DOMAIN_REASONS = frozenset({
-            "invalid_payload", "invalid_url", "scraper_error", "validation",
+            REASON_INVALID_PAYLOAD,
+            REASON_SCRAPER_ERROR,
+            "invalid_url", "scraper_error", "validation",
         })
         if outcome in {"success", "not_modified"}:
             error_category = "none"
@@ -367,6 +399,8 @@ def collect_product(
             error_category = "domain"
         else:
             error_category = "operational"
+        semantic_category = None if reason is None else get_error_class(reason)
+        source_integrity = has_source_integrity(outcome, reason)
 
         if use_lock and lock_status == "acquired":
             released = release_product_lock(lock_target, lock_owner)
@@ -376,6 +410,8 @@ def collect_product(
                     product_id=str(lock_target) if lock_target else None,
                     trace_id=trace_id,
                     error_category="operational",
+                    semantic_category="neutral",
+                    source_integrity=False,
                 )
         task_logger.info(
             "collect_product_finished",
@@ -385,11 +421,37 @@ def collect_product(
             reason=reason,
             lock_status=lock_status,
             error_category=error_category,
+            semantic_category=semantic_category,
+            source_integrity=source_integrity,
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
             trace_id=trace_id,
             enqueued_at=enqueued_at,
         )
+
+        # Persiste o reason da coleta para permitir que a camada de comparação
+        # propague upstream_reason específico (ex: http_429, challenge_detected)
+        # em vez do genérico "upstream_collection_failed".
+        # Só atualiza para monitorados — concorrentes não alimentam upstream_reason.
+        # not_modified: limpa reason residual de coleta anterior (CRUD de sucesso
+        #   não é chamado em 304, então a limpeza deve ser explícita aqui).
+        # error/no_result não-neutro: grava reason tipado do catálogo.
+        # Neutral (lock_skipped, scraping_suspended, etc.): não toca — não representam
+        #   estado do produto, apenas condição operacional transitória.
+        if kind == "monitored" and monitored_id is not None:
+            try:
+                if outcome == "not_modified":
+                    # 304 não passa pelo CRUD de sucesso: limpa reason residual explicitamente.
+                    update_monitored_collection_reason(db, monitored_id, None, commit=True)
+                elif outcome in {"error", "no_result"} and reason not in NEUTRAL_REASONS:
+                    update_monitored_collection_reason(db, monitored_id, reason, commit=True)
+            except Exception:
+                task_logger.warning(
+                    "collect_collection_reason_update_failed",
+                    monitored_id=str(monitored_id),
+                    reason=reason,
+                    outcome=outcome,
+                )
 
     return outcome, result, reason
 

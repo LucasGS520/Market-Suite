@@ -68,7 +68,9 @@ def compare_prices_task(
             result = run_price_comparison(db, UUID(monitored_id))
 
             summary = result.get("summary") or {}
-            if not summary.get("reason") and summary.get("competitors_with_price_count") == 0:
+            #Garante que "no_available_competitors" não mascare falha de coleta upstream.
+            #upstream_reason preenchido indica que o monitorado tinha problema antes da comparação.
+            if not summary.get("reason") and not summary.get("upstream_reason") and summary.get("competitors_with_price_count") == 0:
                 summary["reason"] = "no_available_competitors"
             if not summary:
                 summary = {"reason": "no_available_competitors", "items": []}
@@ -80,7 +82,7 @@ def compare_prices_task(
                 highest=result["highest_competitor"],
             )
 
-            # Produto pausado/inativo: service já persistiu stub, não há notificações
+            #Produto pausado/inativo: service já persistiu stub, não há notificações
             if result.get("summary", {}).get("ignored_due_to_inactive"):
                 task_logger.info(
                     "compare_prices_notifications_skipped_inactive",

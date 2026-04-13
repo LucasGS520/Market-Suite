@@ -93,6 +93,8 @@ def test_collect_product_error_category_operational_on_lock_skipped(monkeypatch)
     )
     assert finished_log is not None
     assert finished_log["error_category"] == "operational"
+    assert finished_log["semantic_category"] == "neutral"
+    assert finished_log["source_integrity"] is False
 
 
 def test_collect_product_error_category_none_on_success(monkeypatch) -> None:
@@ -157,6 +159,8 @@ def test_collect_product_error_category_none_on_success(monkeypatch) -> None:
     )
     assert finished_log is not None
     assert finished_log["error_category"] == "none"
+    assert finished_log["semantic_category"] is None
+    assert finished_log["source_integrity"] is True
 
 
 def test_collect_product_error_category_operational_on_invalid_payload(monkeypatch) -> None:
@@ -193,6 +197,8 @@ def test_collect_product_error_category_operational_on_invalid_payload(monkeypat
     assert finished_log is not None
     # invalid_payload está em _DOMAIN_REASONS
     assert finished_log["error_category"] == "domain"
+    assert finished_log["semantic_category"] == "structural"
+    assert finished_log["source_integrity"] is False
 
 
 def test_execute_scraper_fetch_prefers_mocked_parse() -> None:
@@ -275,16 +281,16 @@ def test_resolve_no_result_reason_missing_target() -> None:
     assert _resolve_no_result_reason(result) == "missing_target"
 
 
-def test_resolve_no_result_reason_no_result_falls_to_validation() -> None:
-    """Scraper retornando no_result (sem dados extraídos) mantém razão 'validation'."""
+def test_resolve_no_result_reason_no_result_falls_to_parse_empty() -> None:
+    """Scraper retornando no_result legítimo deve usar o catálogo domain_empty."""
     result = ScrapeResult(status="no_result", error_code="no_result", product_id="id-1", http_status=422)
-    assert _resolve_no_result_reason(result) == "validation"
+    assert _resolve_no_result_reason(result) == "parse_empty"
 
 
-def test_resolve_no_result_reason_rate_limit() -> None:
-    """Rate limit é identificado explicitamente como 'rate_limit'."""
+def test_resolve_no_result_reason_rate_limit_maps_to_http_429() -> None:
+    """Rate limit deve usar o reason tipado do catálogo compartilhado."""
     result = ScrapeResult(status="no_result", error_code="rate_limit", product_id="id-1", http_status=429)
-    assert _resolve_no_result_reason(result) == "rate_limit"
+    assert _resolve_no_result_reason(result) == "http_429"
 
 
 def test_should_not_retry_lock_skipped() -> None:
