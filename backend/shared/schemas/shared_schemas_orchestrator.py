@@ -24,6 +24,7 @@ Redis). Mudanças devem seguir estas regras para não quebrar execuções em voo
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from dataclasses import dataclass, field, fields
 from typing import Literal
 from uuid import UUID, uuid4
@@ -134,8 +135,11 @@ class QueryStatusOutput:
     completed: bool = False
     last_error: str | None = None
     outcome: str | None = None
+    reason: str | None = None
     error_class: str | None = None
-    schema_version: int = 1
+    source_integrity: bool | None = None
+    next_retry_at: str | None = None
+    schema_version: int = 2
 
 @dataclass
 class PolicyActivityOutput:
@@ -175,6 +179,16 @@ class CollectionResult(BaseModel):
     trace_id: str = ""
     error: str | None = None
     collected_at: str | None = None
+
+class CollectionStatusSignal(BaseModel):
+    """ Payload canonico publicado pelo coletor para o workflow via Redis. """
+
+    outcome: str
+    reason: str | None = None
+    error_class: str | None = None
+    source_integrity: bool | None = None
+    next_retry_at: datetime | None = None
+    schema_version: int = 1
 
 
 # ─────────────────────── Contratos de Orquestração (neutros) ──────────────────
@@ -223,6 +237,7 @@ __all__ = [
     "PolicyActivityOutput",
     "WorkflowStateSnapshot",
     "CollectionResult",
+    "CollectionStatusSignal",
     "CollectionPolicy",
     "WorkflowInput",
     "ResumeSignalPayload",

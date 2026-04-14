@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 from uuid import UUID
 
-from shared.schemas.shared_schemas_scraper import ScrapeResult
+from shared.schemas.shared_schemas_scraper import SCRAPER_ALLOWED_ERROR_CODES, ScrapeResult
 from shared.schemas.collection_catalog import (
     OUTCOME_ERROR,
     OUTCOME_NOT_MODIFIED,
@@ -46,6 +46,7 @@ TEMPORARY_FAILURE_ERROR_CODES = {
     "rate_limit",
     "too_many_requests",
     "timeout",
+    "pipeline_timeout",
     "service_unavailable",
     "gateway_timeout",
 }
@@ -64,11 +65,20 @@ INVALID_URL_ERRORS_CODES = {
 #Códigos de error_code do scraper que indicam rate limit / anti-bot.
 RATE_LIMIT_ERROR_CODES = {"rate_limit", "too_many_requests", "429", "rate_limit_window_exhausted"}
 
-#Mapeamento de error_code vindo do scraper para catalog reason do coletor.
-#Permite que _resolve_reason_from_result() emita reasons tipados do catálogo.
-SCRAPER_ERROR_CODE_TO_REASON: dict[str, str] = {
-    #Anti-bot / challenge
+#Matriz contratual do scraper -> reason semântico do coletor.
+#Deve cobrir exatamente os error_codes documentados em shared_schemas_scraper.py.
+SCRAPER_CONTRACT_ERROR_CODE_TO_REASON: dict[str, str] = {
+    "invalid_url": REASON_INVALID_URL,
+    "blocked_host": REASON_BLOCKED_HOST,
+    "unsupported_by_robots": REASON_ROBOTS_DISALLOWED,
+    "too_many_redirects": REASON_INVALID_URL,
     "anti_bot_page": REASON_CHALLENGE_DETECTED,
+    "no_result": REASON_PARSE_EMPTY,
+    "pipeline_timeout": REASON_NAVIGATION_TIMEOUT,
+}
+
+#Compatibilidade retroativa para error_codes legados/operacionais ainda possíveis no cliente ou em integrações antigas, sempre convergindo para o catálogo.
+SCRAPER_LEGACY_ERROR_CODE_TO_REASON: dict[str, str] = {
     #Rate limit
     "rate_limit": REASON_HTTP_429,
     "too_many_requests": REASON_HTTP_429,
@@ -86,20 +96,24 @@ SCRAPER_ERROR_CODE_TO_REASON: dict[str, str] = {
     "parse_price_failed": REASON_PARSE_PRICE_FAILED,
     "unexpected_content_type": REASON_UNEXPECTED_CONTENT_TYPE,
     #URL estruturalmente inválida
-    "invalid_url": REASON_INVALID_URL,
     "unsupported_protocol": REASON_INVALID_URL,
-    "too_many_redirects": REASON_INVALID_URL,
     "redirect_loop": REASON_INVALID_URL,
-    "blocked_host": REASON_BLOCKED_HOST,
-    "unsupported_by_robots": REASON_ROBOTS_DISALLOWED,
     #Scraper indisponível
     "service_unavailable": REASON_SCRAPER_UNAVAILABLE,
     "scraper_error": REASON_SCRAPER_ERROR,
     "validation_error": REASON_PARSE_PRICE_FAILED,
-    #Domínio vazio (scraper retornou parse íntegro mas sem dado)
-    "no_result": REASON_PARSE_EMPTY,
+    #Domínio vazio
     "no_parser_data": REASON_PARSE_EMPTY,
 }
+
+SCRAPER_ERROR_CODE_TO_REASON: dict[str, str] = {
+    **SCRAPER_CONTRACT_ERROR_CODE_TO_REASON,
+    **SCRAPER_LEGACY_ERROR_CODE_TO_REASON,
+}
+
+UNMAPPED_SCRAPER_CONTRACT_ERROR_CODES = frozenset(
+    set(SCRAPER_ALLOWED_ERROR_CODES) - set(SCRAPER_CONTRACT_ERROR_CODE_TO_REASON)
+)
 
 def _has_source_integrity(result: ScrapeResult | None) -> bool:
     """ Indica se a origem é confiável para emitir not_modified.
@@ -316,7 +330,9 @@ def _validate_payload(
 
 __all__ = [
     "INVALID_URL_ERRORS_CODES",
+    "SCRAPER_CONTRACT_ERROR_CODE_TO_REASON",
     "SCRAPER_ERROR_CODE_TO_REASON",
+    "UNMAPPED_SCRAPER_CONTRACT_ERROR_CODES",
     "_has_source_integrity",
     "_resolve_outcome",
     "_resolve_reason_from_result",

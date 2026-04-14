@@ -100,6 +100,7 @@ def test_collect_product_error_category_operational_on_lock_skipped(monkeypatch)
 def test_collect_product_error_category_none_on_success(monkeypatch) -> None:
     """Coleta bem-sucedida deve ter error_category='none'."""
     captured_logs: list[dict] = []
+    captured_request_metadata: dict[str, object] = {}
 
     from uuid import UUID, uuid4
     from decimal import Decimal as D
@@ -132,7 +133,9 @@ def test_collect_product_error_category_none_on_success(monkeypatch) -> None:
     monkeypatch.setattr(
         collector_task_module,
         "scrape_monitored_product",
-        lambda db, url, user_id, payload, collected_at: success_result,
+        lambda db, url, user_id, payload, collected_at, request_metadata=None: (
+            captured_request_metadata.update(request_metadata or {}) or success_result
+        ),
     )
     monkeypatch.setattr(
         collector_task_module,
@@ -142,7 +145,11 @@ def test_collect_product_error_category_none_on_success(monkeypatch) -> None:
     monkeypatch.setattr(collector_task_module, "activate_pending_monitored", lambda db, mid, commit=True: None)
     monkeypatch.setattr(collector_task_module, "schedule_comparison_after_commit", lambda *a, **kw: None)
 
-    payload = _make_monitored_payload(monitored_id=monitored_id_str, user_id=user_id_str)
+    payload = _make_monitored_payload(
+        monitored_id=monitored_id_str,
+        user_id=user_id_str,
+        correlation_id="corr-collect-1",
+    )
     db = _FakeDB()
 
     outcome, result, reason = collector_task_module.collect_product(
@@ -161,6 +168,13 @@ def test_collect_product_error_category_none_on_success(monkeypatch) -> None:
     assert finished_log["error_category"] == "none"
     assert finished_log["semantic_category"] is None
     assert finished_log["source_integrity"] is True
+    assert finished_log["correlation_id"] == "corr-collect-1"
+    assert captured_request_metadata == {
+        "trace_id": payload["trace_id"],
+        "correlation_id": "corr-collect-1",
+        "monitored_id": monitored_id_str,
+        "competitor_id": None,
+    }
 
 
 def test_collect_product_error_category_operational_on_invalid_payload(monkeypatch) -> None:

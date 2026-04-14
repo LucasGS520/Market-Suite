@@ -18,8 +18,21 @@ from shared.schemas.shared_schemas_products import (
     ProductCore,
 )
 from shared.schemas.shared_schemas_scraper import (
+    ErrorResponse,
     ParserRequest,
     ParserResponse,
+    SCRAPER_ALLOWED_ERROR_CODES,
+    SCRAPER_CONTRACT_CHANGELOG_PATH,
+    SCRAPER_CONTRACT_COMPATIBILITY_POLICY,
+    SCRAPER_CONTRACT_VERSION,
+    SCRAPER_CONTRACT_VERSION_HEADER,
+    SCRAPER_ERROR_RESPONSE_OPTIONAL_FIELDS,
+    SCRAPER_ERROR_RESPONSE_REQUIRED_FIELDS,
+    SCRAPER_HTTP_CODES,
+    SCRAPER_REQUEST_OPTIONAL_FIELDS,
+    SCRAPER_REQUEST_REQUIRED_FIELDS,
+    SCRAPER_RESPONSE_OPTIONAL_FIELDS,
+    SCRAPER_RESPONSE_REQUIRED_FIELDS,
     ScrapeResult,
 )
 
@@ -170,3 +183,39 @@ def test_scrape_result_supports_mapping_style_access():
     assert result["status"] == "success"
     assert result["http_status"] == 200
     assert result["persisted_at"] == persisted_at
+
+
+def test_scraper_contract_constants_expose_version_fields_and_allowed_errors():
+    assert SCRAPER_CONTRACT_VERSION == "v1"
+    assert SCRAPER_CONTRACT_VERSION_HEADER == "X-MarketScraper-Contract-Version"
+    assert SCRAPER_CONTRACT_CHANGELOG_PATH.endswith("CONTRATO_HTTP_SCRAPER.md")
+    assert "Mudancas aditivas" in SCRAPER_CONTRACT_COMPATIBILITY_POLICY
+    assert SCRAPER_REQUEST_REQUIRED_FIELDS == ("url",)
+    assert SCRAPER_REQUEST_OPTIONAL_FIELDS == ("product_type", "user_id", "metadata")
+    assert SCRAPER_RESPONSE_REQUIRED_FIELDS == ()
+    assert "payload" in SCRAPER_RESPONSE_OPTIONAL_FIELDS
+    assert SCRAPER_ERROR_RESPONSE_REQUIRED_FIELDS == ("message", "error_code")
+    assert SCRAPER_ERROR_RESPONSE_OPTIONAL_FIELDS == ("trace_id",)
+    assert SCRAPER_HTTP_CODES == (200, 304, 400, 403, 422, 429, 504)
+    assert SCRAPER_ALLOWED_ERROR_CODES == (
+        "invalid_url",
+        "blocked_host",
+        "unsupported_by_robots",
+        "too_many_redirects",
+        "anti_bot_page",
+        "no_result",
+        "pipeline_timeout",
+    )
+
+
+def test_error_response_rejects_error_code_outside_documented_contract():
+    valid = ErrorResponse.model_validate(
+        {"message": "URL invalida", "error_code": "invalid_url"}
+    )
+
+    assert valid.error_code == "invalid_url"
+
+    with pytest.raises(ValueError):
+        ErrorResponse.model_validate(
+            {"message": "Erro inesperado", "error_code": "unexpected_code"}
+        )

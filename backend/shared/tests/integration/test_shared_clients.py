@@ -276,3 +276,58 @@ def test_shared_architecture_service_import_boundaries_are_explicit():
             violations.append(f"{relative_path}: {sorted(unexpected)}")
 
     assert violations == []
+
+
+def test_service_domain_boundaries_do_not_leak_scraper_persistence_or_alert_parsing():
+    backend_dir = Path(__file__).resolve().parents[3]
+    checks = [
+        (
+            backend_dir / "market_scraper",
+            (
+                "market_alert",
+                "shared.infra.db",
+                "sqlalchemy",
+            ),
+            "scraper",
+        ),
+        (
+            backend_dir / "market_alert",
+            (
+                "market_scraper.routes",
+                "market_scraper.parsers",
+                "market_scraper.services.pipeline_steps",
+                "bs4",
+                "lxml",
+                "selectolax",
+            ),
+            "alert",
+        ),
+    ]
+    violations: list[str] = []
+
+    for root_dir, forbidden_modules, domain_name in checks:
+        for file_path in root_dir.rglob("*.py"):
+            if "tests" in file_path.parts:
+                continue
+
+            relative_path = file_path.relative_to(backend_dir).as_posix()
+            tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported_modules = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported_modules = [node.module]
+                else:
+                    continue
+
+                for imported_module in imported_modules:
+                    if any(
+                        imported_module == forbidden or imported_module.startswith(f"{forbidden}.")
+                        for forbidden in forbidden_modules
+                    ):
+                        violations.append(
+                            f"{domain_name}:{relative_path}: {imported_module}"
+                        )
+
+    assert violations == []

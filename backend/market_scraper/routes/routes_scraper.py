@@ -6,6 +6,7 @@ executar o pipeline sequencial de scraping.
 
 from __future__ import annotations
 
+from typing import Any
 from decimal import Decimal
 from uuid import uuid4
 
@@ -22,6 +23,8 @@ from shared.schemas.shared_schemas_scraper import (
     ErrorResponse,
     ParserRequest,
     ParserResponse,
+    SCRAPER_CONTRACT_VERSION,
+    SCRAPER_CONTRACT_VERSION_HEADER,
 )
 
 from market_scraper.routes.response_helpers import (
@@ -48,6 +51,67 @@ from market_scraper.utils.price import parse_price_str
 
 logger = structlog.get_logger("routes_scraper")
 
+_CONTRACT_VERSION_HEADER_DOC = {
+    SCRAPER_CONTRACT_VERSION_HEADER: {
+        "description": "Versao major do contrato HTTP do scraper.",
+        "schema": {"type": "string", "example": SCRAPER_CONTRACT_VERSION},
+    }
+}
+
+_PARSE_ROUTE_RESPONSES = {
+    200: {
+        "model": ParserResponse,
+        "description": "Parse concluido com payload normalizado.",
+        "headers": _CONTRACT_VERSION_HEADER_DOC,
+    },
+    304: {
+        "description": "Representacao nao modificada para ETag/Last-Modified.",
+        "headers": _CONTRACT_VERSION_HEADER_DOC,
+    },
+    400: {
+        "model": ErrorResponse,
+        "description": "Requisicao invalida ou host bloqueado antes do pipeline.",
+        "headers": _CONTRACT_VERSION_HEADER_DOC,
+    },
+    403: {
+        "model": ErrorResponse,
+        "description": "URL bloqueada por regras de robots.txt.",
+        "headers": _CONTRACT_VERSION_HEADER_DOC,
+    },
+    422: {
+        "model": ErrorResponse,
+        "description": "No result ou falha semantica detectada durante o parse.",
+        "headers": _CONTRACT_VERSION_HEADER_DOC,
+    },
+    429: {
+        "model": ErrorResponse,
+        "description": "Pagina anti-bot detectada pelo scraper.",
+        "headers": _CONTRACT_VERSION_HEADER_DOC,
+    },
+    504: {
+        "model": ErrorResponse,
+        "description": "Pipeline excedeu o tempo limite documentado.",
+        "headers": _CONTRACT_VERSION_HEADER_DOC,
+    },
+}
+
+
+def _extract_log_correlation_context(metadata: dict[str, Any] | None) -> dict[str, str | None]:
+    """ Extrai campos canônicos de correlação para binding estruturado. """
+    metadata = metadata or {}
+    return {
+        "trace_id": str(metadata.get("trace_id") or uuid4()),
+        "correlation_id": (
+            str(metadata.get("correlation_id")) if metadata.get("correlation_id") is not None else None
+        ),
+        "monitored_id": (
+            str(metadata.get("monitored_id")) if metadata.get("monitored_id") is not None else None
+        ),
+        "competitor_id": (
+            str(metadata.get("competitor_id")) if metadata.get("competitor_id") is not None else None
+        ),
+    }
+
 def _ensure_public_endpoint(host: str) -> UrlIssue | None:
     """ Garante que apenas hosts públicos sejam processados pelo pipeline """
     #A resolução DNS utiliza utilitário compartilhado que bloqueia IPs privados e documenta eventuais falhas para facilitar auditoria de SSRF.
@@ -62,13 +126,7 @@ router = APIRouter(tags=["scraper"])
 @router.post(
     "/parse",
     response_model=ParserResponse,
-    responses={
-        400: {"model": ErrorResponse},
-        403: {"model": ErrorResponse},
-        422: {"model": ErrorResponse},
-        429: {"model": ErrorResponse},
-        504: {"model": ErrorResponse},
-    },
+    responses=_PARSE_ROUTE_RESPONSES,
 )
 
 async def parse_endpoint(
@@ -77,8 +135,9 @@ async def parse_endpoint(
     payload: ParserRequest = Body(...),
 ) -> ParserResponse | Response:
     """ Executa o pipeline sequencial, cuidando de respostas condicionais """
-    trace_id = str(uuid4())
-    request_logger = logger.bind(trace_id=trace_id)
+    log_context = _extract_log_correlation_context(payload.metadata)
+    trace_id = log_context["trace_id"]
+    request_logger = logger.bind(**log_context)
 
     raw_url = str(payload.url)
     try:
@@ -132,6 +191,7 @@ async def parse_endpoint(
         ):
             headers = build_cache_headers(cached_metadata)
             headers["X-MarketScraper-Cache-Status"] = cache_status
+            headers[SCRAPER_CONTRACT_VERSION_HEADER] = SCRAPER_CONTRACT_VERSION
             request_logger.info(
                 "parse_not_modified",
                 url=sanitize_log_data(normalized_url),
@@ -228,6 +288,7 @@ async def parse_endpoint(
             response.headers[key] = value
     #Cabeçalho customizado facilita inspeção de decisões do cache HTTP pelo cliente
     response.headers["X-MarketScraper-Cache-Status"] = cache_status
+    response.headers[SCRAPER_CONTRACT_VERSION_HEADER] = SCRAPER_CONTRACT_VERSION
     return parse_response
 
 

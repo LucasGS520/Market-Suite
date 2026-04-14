@@ -14,12 +14,13 @@ from shared.schemas.shared_schemas_orchestrator import CollectionPayload, Dispat
 
 logger = structlog.get_logger("orchestrator.activities.dispatch")
 
-#Prefixo da chave Redis que registra o timestamp do dispatch para correlação de status
+#Prefixo da chave Redis que registra o timestamp do dispatch para correlacao de status
 _DISPATCH_KEY_PREFIX = "workflow:dispatch"
-_DISPATCH_TTL_SECONDS = 7200  # 2h — tempo máximo esperado para conclusão de coleta
+_DISPATCH_TTL_SECONDS = 7200  # 2h - tempo maximo esperado para conclusao de coleta
+
 
 def _fetch_monitored_url(monitored_id: str) -> str | None:
-    """ Lê normalized_url (ou product_url como fallback) de monitored_products via SQL direto."""
+    """ Le normalized_url (ou product_url como fallback) de monitored_products via SQL direto. """
     db = SessionLocal()
     try:
         row = db.execute(
@@ -35,6 +36,7 @@ def _fetch_monitored_url(monitored_id: str) -> str | None:
     finally:
         db.close()
 
+
 @activity.defn(name="dispatch_collection")
 async def dispatch_collection(
     monitored_id: str,
@@ -45,18 +47,18 @@ async def dispatch_collection(
 ) -> DispatchActivityOutput:
     """ Enfileira a coleta do monitorado via Celery.
 
-    Busca a URL do produto no BD, constrói o CollectionPayload completo e
-    delega o enfileiramento ao enqueuer. Persiste o timestamp de dispatch no
-    Redis para que query_collection_status possa verificar conclusão.
-
-    Nota: o enfileiramento Celery ainda ocorre via market_alert.enqueue_collect
-    (acoplamento lazy necessário). Fase 4 irá mover esta responsabilidade para shared.
+    Busca a URL do produto no BD, constroi o CollectionPayload completo e
+    delega o enfileiramento ao dispatcher canonico em
+    ``shared.clients.celery.task_dispatcher``. Persiste o timestamp de
+    dispatch no Redis para que ``query_collection_status`` possa verificar
+    conclusao sem importar regras de scraping ou de persistencia do coletor.
     """
     from temporalio.exceptions import ApplicationError
 
-    #Propaga trace_id para o ContextVar — o processor structlog injeta automaticamente
+    # Propaga trace_id para o ContextVar; o processor structlog injeta automaticamente.
     try:
         from shared.utils.trace_context import set_trace_id as _set_trace_id
+
         _set_trace_id(trace_id)
     except Exception:
         pass
@@ -80,11 +82,13 @@ async def dispatch_collection(
         )
 
         from shared.clients.celery.task_dispatcher import send_collection_task
+
         send_collection_task(payload.model_dump(mode="json"))
 
-        #Salva timestamp de dispatch para correlação em query_collection_status
+        #Salva timestamp de dispatch para correlacao em query_collection_status.
         try:
             from shared.utils.redis_client import get_redis_operational
+
             redis_client = get_redis_operational()
             if redis_client is not None:
                 dispatch_key = f"{_DISPATCH_KEY_PREFIX}:{monitored_id}:{correlation_id}"

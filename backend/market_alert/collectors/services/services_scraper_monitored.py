@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any, Mapping
 from uuid import UUID
 
 import structlog
@@ -194,6 +195,7 @@ def scrape_monitored_product(
     payload: MonitoredProductCreateScraping,
     *,
     collected_at: datetime | None = None,
+    request_metadata: Mapping[str, Any] | None = None,
 ) -> ScrapeResult:
     """ Executa scraping para produto monitorado de forma síncrona
 
@@ -237,7 +239,7 @@ def scrape_monitored_product(
             force_refresh=force_refresh,
             product_type="monitored",
             user_id=user_id,
-            metadata=None,
+            metadata=request_metadata,
         )
 
     outcome = _handle_response(

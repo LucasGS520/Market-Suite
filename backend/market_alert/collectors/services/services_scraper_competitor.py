@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any, Mapping
 from uuid import UUID
 
 import structlog
@@ -68,6 +69,7 @@ def scrape_competitor_product(
     payload: CompetitorProductCreateScraping,
     *,
     collected_at: datetime | None = None,
+    request_metadata: Mapping[str, Any] | None = None,
 ) -> ScrapeResult:
     """ Executa scraping de concorrentes de forma síncrona e determinística 
     
@@ -91,7 +93,7 @@ def scrape_competitor_product(
             force_refresh=False,
             product_type="competitor",
             user_id=user_id,
-            metadata=None,
+            metadata=request_metadata,
         )
 
     status_code = response.status_code

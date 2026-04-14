@@ -32,7 +32,10 @@ from shared.infra.db import SessionLocal
 from shared.exceptions import ScraperError
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, MonitoredProductCreateScraping
 from shared.schemas.shared_schemas_scraper import ScrapeResult
-from shared.schemas.shared_schemas_orchestrator import validate_payload as validate_collection_payload
+from shared.schemas.shared_schemas_orchestrator import (
+    CollectionStatusSignal,
+    validate_payload as validate_collection_payload,
+)
 from shared.schemas.collection_catalog import (
     REASON_HTTP_429,
     REASON_SCRAPER_UNAVAILABLE,
@@ -119,6 +122,7 @@ def collect_product(
     reason: str | None = None
     result: ScrapeResult | None = None
     lock_owner: str | None = None
+    correlation_id = payload.get("correlation_id") if payload else None
 
     try:
         collected_at = datetime.now(timezone.utc)
@@ -234,6 +238,12 @@ def collect_product(
                             url=url,
                             payload=payload_model,
                             collected_at=collected_at,
+                            request_metadata={
+                                "trace_id": trace_id,
+                                "correlation_id": correlation_id,
+                                "monitored_id": str(resolved_monitored) if resolved_monitored else None,
+                                "competitor_id": str(competitor_id) if competitor_id else None,
+                            },
                         )
                         return resolved_monitored, result, None
 
@@ -276,6 +286,12 @@ def collect_product(
                         user_id=resolved_user_id,
                         payload=payload_model,
                         collected_at=collected_at,
+                        request_metadata={
+                            "trace_id": trace_id,
+                            "correlation_id": correlation_id,
+                            "monitored_id": str(monitored_id) if monitored_id else None,
+                            "competitor_id": str(competitor_id) if competitor_id else None,
+                        },
                     )
                     if result and result.status in {"success", "not_modified"}:
                         activated = activate_pending_monitored(session, monitored_id, commit=commit_activation)
@@ -425,6 +441,7 @@ def collect_product(
             source_integrity=source_integrity,
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
+            correlation_id=correlation_id,
             trace_id=trace_id,
             enqueued_at=enqueued_at,
         )
@@ -448,6 +465,7 @@ def collect_product(
                 task_logger.warning(
                     "collect_collection_status_update_failed",
                     monitored_id=str(monitored_id),
+                    correlation_id=correlation_id,
                     reason=reason,
                     outcome=outcome,
                 )
@@ -705,10 +723,20 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             try:
                 import json as _json
                 from shared.utils.redis_client import get_redis_operational as _get_redis
+                from shared.schemas.collection_catalog import get_error_class, has_source_integrity
                 _redis = _get_redis()
                 if _redis is not None:
                     _result_key = f"{_COLLECTION_RESULT_KEY_PREFIX}:{monitored_id}:{_correlation_id}"
-                    _result_data = _json.dumps({"outcome": outcome, "reason": reason or ""})
+                    _semantic_category = None if reason is None else get_error_class(reason)
+                    _source_integrity = has_source_integrity(outcome, reason)
+                    _result_payload = CollectionStatusSignal(
+                        outcome=outcome,
+                        reason=reason,
+                        error_class=_semantic_category,
+                        source_integrity=_source_integrity,
+                        next_retry_at=next_retry_at,
+                    )
+                    _result_data = _json.dumps(_result_payload.model_dump(mode="json"))
                     _redis.setex(_result_key, _COLLECTION_RESULT_TTL_SECONDS, _result_data)
             except Exception:
                 logger.warning(

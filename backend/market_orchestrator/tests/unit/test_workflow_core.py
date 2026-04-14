@@ -248,6 +248,7 @@ async def test_handle_dispatching_stores_correlation_and_enters_waiting_result(
 
     assert workflow_instance._state is WorkflowState.WaitingResult
     assert workflow_instance._current_correlation_id == str(correlation_uuid)
+    assert workflow_instance._current_trace_id == str(trace_uuid)
     assert workflow_instance._last_run_at == workflow_now
     assert workflow_instance._last_error is None
 
@@ -338,6 +339,30 @@ async def test_handle_waiting_result_uses_query_timeout_and_default_retry_policy
 
     assert captured["start_to_close_timeout"] == workflow_module._QUERY_STATUS_TIMEOUT
     assert captured["retry_policy"] == workflow_module._DEFAULT_RETRY
+
+
+@pytest.mark.asyncio
+async def test_handle_waiting_result_passes_trace_and_correlation_to_status_activity(
+    workflow_instance,
+    workflow_now,
+    monkeypatch,
+) -> None:
+    captured_args: list[object] = []
+    now_values = iter([workflow_now, workflow_now])
+
+    async def fake_execute_activity(*args, **kwargs):
+        captured_args[:] = list(kwargs["args"])
+        return QueryStatusOutput(completed=True)
+
+    monkeypatch.setattr(workflow_module.workflow, "execute_activity", fake_execute_activity)
+    monkeypatch.setattr(workflow_module.workflow, "now", lambda: next(now_values))
+    workflow_instance._current_correlation_id = "corr-1"
+    workflow_instance._current_trace_id = "trace-1"
+    workflow_instance._persist_snapshot = AsyncMock()
+
+    await workflow_instance._handle_waiting_result()
+
+    assert captured_args == ["monitored-1", "corr-1", "trace-1"]
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from shared.schemas.collection_catalog import REASON_CHALLENGE_DETECTED, REASON_HTTP_429
+
 from market_alert.infrastructure.resilience.rate_limiter import _compute_lock_retry_delay, _compute_scrape_retry_delay
 
 
@@ -57,7 +59,13 @@ SCRAPE_RETRY_WINDOW_SECONDS: int = 15 * 60  # 15 minutos
 SCRAPE_RETRY_TTL_SECONDS: int = 60 * 60  # 1 hora
 
 #: Motivos que indicam cooldown obrigatório (ex.: rate limit do servidor)
-COOLDOWN_REASONS: frozenset[str] = frozenset({"rate_limit", "429", "temporary_failure"})
+COOLDOWN_REASONS: frozenset[str] = frozenset({
+    REASON_HTTP_429,
+    REASON_CHALLENGE_DETECTED,
+    "rate_limit",
+    "429",
+    "temporary_failure",
+})
 
 
 # ---------------------------------------------------------------------------

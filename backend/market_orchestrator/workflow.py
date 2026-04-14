@@ -73,6 +73,8 @@ class MonitoredProductWorkflow:
         self._policy: CollectionPolicy = CollectionPolicy()
         self._monitored_id: str = ""
         self._user_id: str = ""
+        self._current_correlation_id: str = ""
+        self._current_trace_id: str = ""
         self._attempt_count: int = 0
         self._signal_count: int = 0
         self._last_run_at: datetime | None = None
@@ -202,6 +204,13 @@ class MonitoredProductWorkflow:
         """ Enfileira coleta e transiciona para WaitingResult."""
         correlation_id = str(workflow.uuid4())
         trace_id = str(workflow.uuid4())
+        logger.info(
+            "collection_dispatch_requested",
+            monitored_id=self._monitored_id,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            attempt_count=self._attempt_count,
+        )
 
         try:
             _result: DispatchActivityOutput = await workflow.execute_activity(
@@ -215,14 +224,29 @@ class MonitoredProductWorkflow:
             self._last_error = None
             #correlation_id salvo internamente para polling
             self._current_correlation_id = correlation_id
+            self._current_trace_id = trace_id
+            logger.info(
+                "collection_dispatch_enqueued",
+                monitored_id=self._monitored_id,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
+            )
 
         except ActivityError as exc:
             self._last_error = str(exc)
             self._state = WorkflowState.Backoff
+            logger.warning(
+                "collection_dispatch_failed",
+                monitored_id=self._monitored_id,
+                correlation_id=correlation_id,
+                trace_id=trace_id,
+                error=str(exc),
+            )
 
     async def _handle_waiting_result(self) -> None:
         """ Polling até coleta concluída ou timeout."""
         correlation_id = getattr(self, "_current_correlation_id", "")
+        trace_id = getattr(self, "_current_trace_id", "")
         deadline = workflow.now() + timedelta(seconds=_COLLECTION_RESULT_TIMEOUT_SECONDS)
 
         while workflow.now() < deadline:
@@ -237,7 +261,7 @@ class MonitoredProductWorkflow:
 
             result: QueryStatusOutput = await workflow.execute_activity(
                 "query_collection_status",
-                args=[self._monitored_id, correlation_id],
+                args=[self._monitored_id, correlation_id, trace_id],
                 start_to_close_timeout=_QUERY_STATUS_TIMEOUT,
                 retry_policy=_DEFAULT_RETRY,
             )
@@ -253,6 +277,8 @@ class MonitoredProductWorkflow:
                         logger.warning(
                             "collection_structural_error",
                             monitored_id=self._monitored_id,
+                            correlation_id=correlation_id,
+                            trace_id=trace_id,
                             reason=result.last_error,
                             error_class=error_class,
                             attempt_count=self._attempt_count,
@@ -265,6 +291,17 @@ class MonitoredProductWorkflow:
                     self._attempt_count = 0
                     self._last_error = None
                     self._state = WorkflowState.WaitingTimer
+                logger.info(
+                    "collection_result_resolved",
+                    monitored_id=self._monitored_id,
+                    correlation_id=correlation_id,
+                    trace_id=trace_id,
+                    outcome=result.outcome,
+                    reason=result.reason,
+                    error_class=result.error_class,
+                    source_integrity=result.source_integrity,
+                    completed=result.completed,
+                )
                 await self._persist_snapshot()
                 return
 
@@ -276,6 +313,13 @@ class MonitoredProductWorkflow:
         #Timeout de polling — vai para backoff para tentar no próximo ciclo
         self._last_error = "collection_result_timeout"
         self._state = WorkflowState.Backoff
+        logger.warning(
+            "collection_result_timeout",
+            monitored_id=self._monitored_id,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
+            timeout_seconds=_COLLECTION_RESULT_TIMEOUT_SECONDS,
+        )
 
     async def _handle_backoff(self) -> None:
         """ Backoff exponencial com jitter. Após max_attempts, FailedTerminal."""

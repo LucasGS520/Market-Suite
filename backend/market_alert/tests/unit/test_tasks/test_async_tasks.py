@@ -209,7 +209,16 @@ def test_collect_product_task_writes_contract_result_to_redis_for_status_activit
         {
             "key": f"{collector_task_module._COLLECTION_RESULT_KEY_PREFIX}:{payload['monitored_id']}:{payload['correlation_id']}",
             "ttl": collector_task_module._COLLECTION_RESULT_TTL_SECONDS,
-            "value": json.dumps({"outcome": "error", "reason": "challenge_detected"}),
+            "value": json.dumps(
+                {
+                    "outcome": "error",
+                    "reason": "challenge_detected",
+                    "error_class": "transient",
+                    "source_integrity": False,
+                    "next_retry_at": None,
+                    "schema_version": 1,
+                }
+            ),
         }
     ]
 

@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
 from shared.schemas import ParserResponse
+from shared.schemas.shared_schemas_scraper import (
+    SCRAPER_CONTRACT_VERSION,
+    SCRAPER_CONTRACT_VERSION_HEADER,
+)
 from shared.utils.url_validation import UrlIssue
 
 from market_scraper.main import app
@@ -56,6 +60,7 @@ def test_parse_route_returns_cached_304_when_request_is_not_modified(monkeypatch
     assert response.status_code == 304
     assert response.headers["etag"] == '"etag-1"'
     assert response.headers["x-marketscraper-cache-status"] == "hit"
+    assert response.headers[SCRAPER_CONTRACT_VERSION_HEADER] == SCRAPER_CONTRACT_VERSION
 
 
 def test_parse_route_returns_mapped_http_issue_and_invalidates_cache(monkeypatch):
@@ -107,10 +112,12 @@ def test_parse_route_returns_mapped_http_issue_and_invalidates_cache(monkeypatch
 
     assert response.status_code == 403
     assert response.json()["error_code"] == "unsupported_by_robots"
+    assert response.headers[SCRAPER_CONTRACT_VERSION_HEADER] == SCRAPER_CONTRACT_VERSION
     assert invalidated == ["https://example.com/product"]
 
 
 def test_parse_route_returns_success_and_sets_cache_headers(monkeypatch):
+    captured_kwargs: dict[str, object] = {}
     context = PipelineContext(
         url="https://example.com/product",
         source="example.com",
@@ -139,6 +146,7 @@ def test_parse_route_returns_success_and_sets_cache_headers(monkeypatch):
     )
 
     async def fake_run_pipeline(*args, **kwargs):
+        captured_kwargs.update(kwargs)
         return outcome
 
     monkeypatch.setattr(
@@ -167,12 +175,24 @@ def test_parse_route_returns_success_and_sets_cache_headers(monkeypatch):
     )
 
     client = TestClient(app)
-    response = client.post("/scraper/parse", json={"url": "example.com/product"})
+    response = client.post(
+        "/scraper/parse",
+        json={
+            "url": "example.com/product",
+            "metadata": {
+                "trace_id": "trace-from-alert",
+                "correlation_id": "corr-123",
+                "monitored_id": "mon-123",
+            },
+        },
+    )
 
     assert response.status_code == 200
     assert response.json()["name"] == "Produto"
     assert response.headers["etag"] == '"etag-2"'
     assert response.headers["x-marketscraper-cache-status"] == "miss"
+    assert response.headers[SCRAPER_CONTRACT_VERSION_HEADER] == SCRAPER_CONTRACT_VERSION
+    assert captured_kwargs["trace_id"] == "trace-from-alert"
 
 
 def test_parse_route_returns_invalid_url_error_when_compatibility_fails(monkeypatch):
@@ -193,6 +213,7 @@ def test_parse_route_returns_invalid_url_error_when_compatibility_fails(monkeypa
 
     assert response.status_code == 400
     assert response.json()["error_code"] == "blocked_host"
+    assert response.headers[SCRAPER_CONTRACT_VERSION_HEADER] == SCRAPER_CONTRACT_VERSION
 
 
 # ──────────────────────────────────────────────────────────────────────────────

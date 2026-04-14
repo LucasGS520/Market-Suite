@@ -181,7 +181,14 @@ def test_read_collection_result_returns_dict_when_key_present(
 ) -> None:
     import json
 
-    stored = {"outcome": "success", "reason": ""}
+    stored = {
+        "outcome": "success",
+        "reason": None,
+        "error_class": None,
+        "source_integrity": True,
+        "next_retry_at": None,
+        "schema_version": 1,
+    }
     raw = json.dumps(stored).encode()
 
     class _RedisStub:
@@ -425,6 +432,43 @@ async def test_query_collection_status_result_key_domain_empty_returns_error_cla
     assert captured_logs[-1]["source_integrity"] is True
 
 
+@pytest.mark.asyncio
+async def test_query_collection_status_result_key_propagates_enriched_contract_fields(
+    orchestrator_ids,
+    monkeypatch,
+) -> None:
+    import json
+
+    raw = json.dumps(
+        {
+            "outcome": "error",
+            "reason": "http_429",
+            "error_class": "transient",
+            "source_integrity": False,
+            "next_retry_at": "2026-04-08T12:15:00+00:00",
+            "schema_version": 1,
+        }
+    ).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error == "http_429"
+    assert result.reason == "http_429"
+    assert result.error_class == "transient"
+    assert result.source_integrity is False
+    assert result.next_retry_at == "2026-04-08T12:15:00+00:00"
+
+
 def test_read_dispatch_timestamp_parses_iso_value_from_redis(
     orchestrator_ids,
     monkeypatch,
@@ -443,3 +487,44 @@ def test_read_dispatch_timestamp_parses_iso_value_from_redis(
     )
 
     assert result == datetime.fromisoformat(expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected_last_error", "expected_error_class"),
+    [
+        ({"outcome": "no_result", "reason": "lock_skipped"}, None, "neutral"),
+        ({"outcome": "error", "reason": "http_429"}, "http_429", "transient"),
+        (
+            {"outcome": "error", "reason": "parse_price_failed"},
+            "parse_price_failed",
+            "structural",
+        ),
+    ],
+    ids=["neutral", "transient", "structural"],
+)
+async def test_query_collection_status_contract_classifies_result_key_by_semantic_category(
+    orchestrator_ids,
+    monkeypatch,
+    payload,
+    expected_last_error,
+    expected_error_class,
+) -> None:
+    import json
+
+    raw = json.dumps(payload).encode()
+
+    class _RedisStub:
+        def get(self, key):
+            return raw
+
+    monkeypatch.setattr(redis_client_module, "get_redis_operational", lambda: _RedisStub())
+
+    result = await status_activity.query_collection_status(
+        orchestrator_ids["monitored_id"],
+        orchestrator_ids["correlation_id"],
+    )
+
+    assert result.completed is True
+    assert result.last_error == expected_last_error
+    assert result.error_class == expected_error_class

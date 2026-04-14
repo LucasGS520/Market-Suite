@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from structlog.stdlib import BoundLogger
 
 from shared.schemas import ParserResponse
+from shared.schemas.shared_schemas_scraper import SCRAPER_CONTRACT_VERSION, SCRAPER_CONTRACT_VERSION_HEADER
 from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.url_validation import UrlIssue
 
@@ -81,6 +82,9 @@ def _http_error(
 
     return JSONResponse(
         status_code=status_code,
+        headers={
+            SCRAPER_CONTRACT_VERSION_HEADER: SCRAPER_CONTRACT_VERSION,
+        },
         content={
             "message": issue.message,
             "error_code": issue.code,

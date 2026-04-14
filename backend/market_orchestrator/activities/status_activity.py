@@ -8,7 +8,7 @@ import structlog
 from sqlalchemy import text
 from temporalio import activity
 
-from shared.schemas.shared_schemas_orchestrator import QueryStatusOutput
+from shared.schemas.shared_schemas_orchestrator import CollectionStatusSignal, QueryStatusOutput
 from shared.schemas.collection_catalog import (
     SUCCESSFUL_OUTCOMES,
     NEUTRAL_REASONS,
@@ -45,7 +45,7 @@ def _read_dispatch_timestamp(monitored_id: str, correlation_id: str) -> datetime
 def _read_collection_result(monitored_id: str, correlation_id: str) -> dict | None:
     """ Lê o resultado de coleta sinalizado pelo collector_product_task no Redis.
 
-    Retorna dict com ``{"outcome": str, "reason": str}`` ou None se ausente/erro.
+    Retorna o payload validado do contrato compartilhado de status ou None se ausente/erro.
     Presente apenas quando o collector terminou sua execução final (sem retry pendente).
     """
     try:
@@ -57,7 +57,8 @@ def _read_collection_result(monitored_id: str, correlation_id: str) -> dict | No
         raw = redis_client.get(result_key)
         if raw is None:
             return None
-        return json.loads(raw.decode())
+        payload = CollectionStatusSignal.model_validate(json.loads(raw.decode()))
+        return payload.model_dump(mode="json")
     except Exception:
         return None
 
@@ -66,6 +67,7 @@ def _read_collection_result(monitored_id: str, correlation_id: str) -> dict | No
 async def query_collection_status(
     monitored_id: str,
     correlation_id: str,
+    trace_id: str | None = None,
 ) -> QueryStatusOutput:
     """ Consulta se a coleta do ciclo atual foi concluída.
 
@@ -90,6 +92,11 @@ async def query_collection_status(
         if collection_result is not None:
             c_outcome = collection_result.get("outcome", "")
             c_reason = collection_result.get("reason") or None
+            c_error_class = collection_result.get("error_class") or get_error_class(c_reason)
+            c_source_integrity = collection_result.get("source_integrity")
+            if c_source_integrity is None:
+                c_source_integrity = has_source_integrity(c_outcome, c_reason)
+            c_next_retry_at = collection_result.get("next_retry_at")
 
             #Sucesso confiável: dados coletados com integridade
             if c_outcome in SUCCESSFUL_OUTCOMES:
@@ -97,12 +104,16 @@ async def query_collection_status(
                     "query_collection_status_result_key_success",
                     monitored_id=monitored_id,
                     correlation_id=correlation_id,
+                    trace_id=trace_id,
                     outcome=c_outcome,
-                    source_integrity=has_source_integrity(c_outcome, c_reason),
+                    source_integrity=c_source_integrity,
                 )
                 return QueryStatusOutput(
                     completed=True,
                     outcome=c_outcome,
+                    reason=c_reason,
+                    source_integrity=c_source_integrity,
+                    next_retry_at=c_next_retry_at,
                 )
 
             #Neutral: lock, pausa, inativo, suspended, missing_target
@@ -112,34 +123,43 @@ async def query_collection_status(
                     "query_collection_status_result_key_neutral",
                     monitored_id=monitored_id,
                     correlation_id=correlation_id,
+                    trace_id=trace_id,
                     outcome=c_outcome,
                     reason=c_reason,
-                    semantic_category=get_error_class(c_reason),
-                    source_integrity=has_source_integrity(c_outcome, c_reason),
+                    semantic_category=c_error_class,
+                    source_integrity=c_source_integrity,
                 )
                 return QueryStatusOutput(
                     completed=True,
                     outcome=c_outcome,
+                    reason=c_reason,
+                    error_class=c_error_class,
+                    source_integrity=c_source_integrity,
+                    next_retry_at=c_next_retry_at,
                 )
 
             #Falha tipada (error transitório/estrutural ou no_result sem parse íntegro)
             #last_error preenchido → workflow vai para Backoff
-            c_error_class = get_error_class(c_reason)
             logger.info(
                 "query_collection_status_result_key_failure",
                 monitored_id=monitored_id,
                 correlation_id=correlation_id,
+                trace_id=trace_id,
                 outcome=c_outcome,
                 reason=c_reason,
                 error_class=c_error_class,
                 semantic_category=c_error_class,
-                source_integrity=has_source_integrity(c_outcome, c_reason),
+                source_integrity=c_source_integrity,
+                next_retry_at=c_next_retry_at,
             )
             return QueryStatusOutput(
                 completed=True,
                 last_error=c_reason or c_outcome or "collection_failed",
                 outcome=c_outcome,
+                reason=c_reason,
                 error_class=c_error_class,
+                source_integrity=c_source_integrity,
+                next_retry_at=c_next_retry_at,
             )
 
         # --- Passo 2: fallback via last_scraped_at no banco ---
@@ -170,6 +190,7 @@ async def query_collection_status(
                     "query_collection_status_dispatch_ts_missing",
                     monitored_id=monitored_id,
                     correlation_id=correlation_id,
+                    trace_id=trace_id,
                 )
                 return QueryStatusOutput(completed=True)
 
@@ -187,6 +208,8 @@ async def query_collection_status(
         logger.warning(
             "query_collection_status_error",
             monitored_id=monitored_id,
+            correlation_id=correlation_id,
+            trace_id=trace_id,
             error=str(exc),
         )
         return QueryStatusOutput(completed=False, last_error=str(exc))

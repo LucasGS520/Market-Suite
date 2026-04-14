@@ -17,21 +17,40 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-### Resumo do Problema e Objetivo da Correção
+### Resumo e Estratégia do Plano
 
-- **Problema:** O alinhamento semântico entre coleta, orquestrador e comparação avançou, mas a visibilidade contratual para a UI ainda é insuficiente, mantendo produtos em estado ambíguo como “Coletando dados...” mesmo quando já existe falha classificada.
+- **Objetivo:** Fechar contratos entre os módulos de scraping/coleta/orquestração, eliminar ambiguidades de responsabilidade e impedir vazamento de domínio durante a evolução do serviço de scraping (`market_scraper`).
 
-- **Sintoma observado:**
-  - Nos logs de staging, a coleta já classifica corretamente falhas como error com reason tipado, por exemplo http_429 e scraper_unavailable, com source_integrity false e semantic_category transient.
-  - A UI continua dependente de heurística fraca para estado de coleta, baseada em ausência de last_scraped_at e preço nulo, sem consumir motivo/estado contratual explícito: productStatus.ts.
-  - A mensagem “Coletando dados...” é exibida sem vínculo com reason e next_retry_at: renderMonitoredPrice.tsx.
+- **Resultado Esperado:** Fronteiras técnicas explícitas e testadas entre market_scraper, market_alert e market_orchestrator, com contratos versionados e matriz de responsabilidades validada.
 
-- **Objetivo da correção:** Criar Testes que cubram o contrato ponta a ponta para que estado de coleta, motivo e próxima ação sejam persistidos e exibidos de forma explícita ao usuário, eliminando ambiguidade operacional.
+- **Estratégia de Execução:** Executar em fases curtas e verificáveis: governança de domínio -> contrato técnico -> semântica de erros -> observabilidade -> testes de contrato -> gates de mudança.
 
-- **Premissas:**
-  - Catálogo semântico central já existe e deve ser a fonte única: `collection_catalog.py`.
-  - Classificação de falhas no coletor já está funcional em staging.
-  - O problema restante é majoritariamente de propagação e apresentação contratual.
+- **Premissas:** O fluxo atual já está funcional na orquestração; o problema principal é consistência contratual e governança entre módulos, não ausência de componentes.
+
+---
+
+### Riscos, Impacto e Decisões
+
+- **Decisões Técnicas Principais**
+- Consolidar contrato de entrada/saída do scraper em torno de `shared_schemas_scraper.py` e `routes_scraper.py`.
+- Consolidar semântica de coleta em `collection_catalog.py` e mapeamento em `collector_result.py`.
+- Manter responsabilidade de extração no scraper, política operacional de coleta no alert e transição de estado no orchestrator.
+
+- **Riscos Principais**
+- Divergência entre `error_code` emitido pelo scraper e `reason` usado pelo coletor.
+- Duplicação de retry/backoff em camadas diferentes gerando comportamento imprevisível.
+- Regressão silenciosa por ausência de testes de contrato ponta a ponta.
+
+- **Dependências**
+- Contratos compartilhados em schemas.
+- Cliente consumidor em `scraper_client.py`.
+- Activities de status/dispatch em `status_activity.py` e `dispatch_activity.py`.
+
+- **Impactos Arquiteturais**
+- Redução de acoplamento implícito.
+- Maior previsibilidade de evolução do scraper sem quebrar coleta/orquestração.
+- Melhoria de diagnósticos operacionais por padronização de sinais entre serviços.
+
 
 ---
 
