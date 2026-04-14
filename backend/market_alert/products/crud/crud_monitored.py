@@ -14,6 +14,14 @@ from shared.schemas.shared_schemas_products import MonitoredProductCreateScrapin
 from shared.scheduling import EVENT_RESUMED, EVENT_STANDARD
 from shared.utils import sanitize_text
 from shared.utils.url_validation import normalize_product_url_for_storage
+from shared.schemas.collection_catalog import (
+    NEUTRAL_REASONS,
+    SUCCESSFUL_OUTCOMES,
+    get_error_class,
+    get_user_message_key,
+    has_source_integrity,
+    is_retryable,
+)
 
 from market_alert.models import User
 from market_alert.models.models_products import MonitoredProduct, CompetitorProduct
@@ -835,6 +843,71 @@ def update_monitored_collection_reason(
     if product is None:
         return
     product.last_collection_reason = reason
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+
+
+def update_collection_status(
+    db: Session,
+    monitored_id: UUID,
+    *,
+    outcome: str | None,
+    reason: str | None,
+    next_retry_at: datetime | None = None,
+    commit: bool = False,
+) -> None:
+    """ Persiste o estado semântico completo da última tentativa de coleta.
+
+    Substitui ``update_monitored_collection_reason`` ao gravar todos os campos
+    do contrato de coleta atomicamente, derivando classes e flags diretamente
+    do catálogo semântico para evitar strings livres.
+
+    Regras de atualização por outcome:
+    - ``success`` / ``not_modified``: limpa campos de erro, marca integridade.
+    - ``error`` / ``no_result`` não-neutro: grava reason, classe, retryable e
+      next_retry_at. Limpa next_retry_at quando sem retry agendado.
+    - Outcomes neutros (lock_skipped, paused, etc.): não altera estado do
+      produto — são condições operacionais transitórias.
+
+    Args:
+        db: Sessão ativa.
+        monitored_id: UUID do produto monitorado.
+        outcome: Outcome canônico do catálogo (OUTCOME_* constants).
+        reason: Reason tipado do catálogo, ou None para sucesso/not_modified.
+        next_retry_at: Próxima tentativa agendada (datetime com tz), ou None.
+        commit: Commita a transação quando True; usa flush implícito quando False.
+    """
+    # Outcomes neutros não representam estado de produto — não toca no registro.
+    if outcome == "no_result" and reason in NEUTRAL_REASONS:
+        return
+
+    product = get_monitored_product_by_id(db, monitored_id)
+    if product is None:
+        return
+
+    now = datetime.now(timezone.utc)
+    source_ok = has_source_integrity(outcome, reason)
+
+    # Campos presentes em todos os outcomes
+    product.collection_outcome = outcome
+    product.collection_source_integrity = source_ok
+    product.collection_status_updated_at = now
+
+    if outcome in SUCCESSFUL_OUTCOMES:
+        # Sucesso: limpa tudo que é específico de falha
+        product.last_collection_reason = None
+        product.collection_error_class = None
+        product.collection_retryable = None
+        product.collection_next_retry_at = None
+    else:
+        # Falha ou ausência de dado: grava informações de diagnóstico
+        product.last_collection_reason = reason
+        product.collection_error_class = get_error_class(reason)
+        product.collection_retryable = is_retryable(reason)
+        product.collection_next_retry_at = next_retry_at
+
     if commit:
         db.commit()
     else:

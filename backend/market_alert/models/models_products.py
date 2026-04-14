@@ -74,6 +74,13 @@ class MonitoredProduct(Base):
     last_checked = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_scraped_at = Column(DateTime(timezone=True), nullable=True, index=True)
     last_collection_reason = Column(String, nullable=True)
+    # Contrato de estado de coleta (v1) — campos adicionados em f3b2d1e5a8c7
+    collection_outcome = Column(String, nullable=True)
+    collection_error_class = Column(String, nullable=True)
+    collection_retryable = Column(Boolean, nullable=True)
+    collection_next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    collection_source_integrity = Column(Boolean, nullable=True)
+    collection_status_updated_at = Column(DateTime(timezone=True), nullable=True)
     collected_at = Column(DateTime(timezone=True), nullable=True)
     last_price_change_at = Column(DateTime(timezone=True), nullable=True)
     group_collected_at = Column(DateTime(timezone=True), nullable=True)

@@ -272,6 +272,9 @@ def get_workflow_status(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Workflow não encontrado para este produto.")
 
+    from market_alert.products.services.services_products import _build_collection_status
+    collection_status = _build_collection_status(monitored)
+
     return {
         "monitored_id": snapshot.monitored_id,
         "state": snapshot.state.value if hasattr(snapshot.state, "value") else str(snapshot.state),
@@ -279,4 +282,7 @@ def get_workflow_status(
         "last_run_at": snapshot.last_run_at.isoformat() if snapshot.last_run_at else None,
         "last_error": snapshot.last_error,
         "attempt_count": snapshot.attempt_count,
+        # Complemento técnico: estado de coleta persistido no banco (visão contratual).
+        # Útil para diagnóstico quando o workflow Temporal e o DB divergem.
+        "collection_status": collection_status.model_dump() if collection_status else None,
     }

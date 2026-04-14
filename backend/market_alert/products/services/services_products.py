@@ -14,11 +14,21 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, status
 
 from shared.utils import sanitize_text
+from shared.schemas.collection_catalog import (
+    SUCCESSFUL_OUTCOMES,
+    ERROR_CLASS_STRUCTURAL,
+    get_user_message_key,
+    has_source_integrity,
+)
 
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
 from market_alert.models.models_comparisons import PriceComparisonSummary
 from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryResponse
-from market_alert.schemas.schemas_products import CompetitorProductResponse, MonitoredProductResponse
+from market_alert.schemas.schemas_products import (
+    CollectionStatusContract,
+    CompetitorProductResponse,
+    MonitoredProductResponse,
+)
 from market_alert.enums.enums_products import MonitoredStatus, ProductStatus
 from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.products.utils.product_stats_formatter import get_product_stats
@@ -53,6 +63,59 @@ def _ensure_price(
             ),
     )
     return value
+
+def _build_collection_status(monitored: MonitoredProduct) -> CollectionStatusContract | None:
+    """ Constrói o DTO de estado de coleta a partir dos campos persistidos no modelo.
+
+    Retorna None quando nenhuma tentativa de coleta foi registrada ainda
+    (todos os campos de estado são None). A UI deve interpretar None como
+    'collecting_real' (primeira coleta em andamento).
+    """
+    outcome = getattr(monitored, "collection_outcome", None)
+    if outcome is None and getattr(monitored, "last_collection_reason", None) is None:
+        return None
+
+    reason = getattr(monitored, "last_collection_reason", None)
+    next_retry_at = _normalize_timestamp(getattr(monitored, "collection_next_retry_at", None))
+    updated_at = _normalize_timestamp(getattr(monitored, "collection_status_updated_at", None))
+
+    user_message_key = get_user_message_key(
+        outcome,
+        reason,
+        retryable=getattr(monitored, "collection_retryable", None),
+        has_next_retry=next_retry_at is not None,
+    )
+
+    return CollectionStatusContract(
+        collection_outcome=outcome,
+        collection_reason=reason,
+        collection_error_class=getattr(monitored, "collection_error_class", None),
+        collection_retryable=getattr(monitored, "collection_retryable", None),
+        collection_next_retry_at=next_retry_at,
+        collection_source_integrity=getattr(monitored, "collection_source_integrity", None),
+        collection_updated_at=updated_at,
+        collection_user_message_key=user_message_key,
+    )
+
+
+def _resolve_display_status_priority(
+    collection_status: CollectionStatusContract | None,
+) -> str | None:
+    """ Define qual campo de status tem precedência para a UI.
+
+    Regras:
+    - None: nenhum estado registrado ainda (primeiro scraping).
+    - 'collection_status': outcome é erro/falha ativa — UI deve exibir mensagem de coleta.
+    - 'display_status': comparação é o estado mais relevante.
+    """
+    if collection_status is None:
+        return None
+    outcome = collection_status.collection_outcome
+    if outcome is None or outcome in SUCCESSFUL_OUTCOMES:
+        return "display_status"
+    # Erros e ausências de dado prioritizam collection_status para a UI
+    return "collection_status"
+
 
 def _resolve_display_status(
     *,
@@ -173,6 +236,9 @@ def build_monitored_response(
         competitiveness_status=competitiveness_status,
     )
 
+    collection_status = _build_collection_status(monitored)
+    display_status_priority = _resolve_display_status_priority(collection_status)
+
     return MonitoredProductResponse(
         id=monitored.id,
         owner_id=monitored.user_id,
@@ -200,6 +266,8 @@ def build_monitored_response(
         competitiveness_status=competitiveness_status,
         is_featured=monitored.is_featured,
         comparison_summary=comparison_summary,
+        collection_status=collection_status,
+        display_status_priority=display_status_priority,
     )
 
 def _friendly_name_from_url(url: str) -> str:

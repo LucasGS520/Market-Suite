@@ -75,6 +75,22 @@ class PriceComparisonSummaryResponse(BaseModel):
         ),
     )
     discrepancies: List[Dict[str, Any]] = Field(default_factory=list)
+    reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Motivo interno que explica o estado da comparação "
+            "(ex: sem_concorrentes_disponiveis, upstream_collection_failed). "
+            "Consumido pelo frontend para exibição contextual."
+        ),
+    )
+    upstream_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Reason de coleta upstream que causou a comparação ser ignorada ou degradada. "
+            "Distingue falha de coleta (upstream_collection_failed) de produto "
+            "genuinamente inativo (ignored_due_to_inactive)."
+        ),
+    )
 
 class PaginationMeta(BaseModel):
     """ Informações básicas de paginação utilizadas em respostas listadas """

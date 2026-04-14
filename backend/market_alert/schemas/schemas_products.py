@@ -11,6 +11,65 @@ from market_alert.enums.enums_comparisons import CompetitivenessStatus
 from market_alert.schemas.schemas_comparisons import PriceComparisonSummaryResponse
 
 
+# ─────────────────────────── Contrato de Coleta ───────────────────────────────
+
+class CollectionStatusContract(BaseModel):
+    """ Contrato oficial de estado de coleta para o frontend (v1).
+
+    Todos os campos derivam de constantes do catálogo semântico
+    (`shared.schemas.collection_catalog`) para evitar strings livres.
+
+    Campos:
+    - collection_outcome: outcome canônico da última tentativa (success, error, etc.)
+    - collection_reason: reason tipado da última tentativa (http_429, selector_missing, etc.)
+    - collection_error_class: classe do erro (transient, structural, domain_empty, neutral)
+    - collection_retryable: se o sistema vai tentar novamente automaticamente
+    - collection_next_retry_at: quando será a próxima tentativa (se agendada)
+    - collection_source_integrity: se a origem foi íntegra o suficiente para confiar no resultado
+    - collection_updated_at: quando este estado foi registrado pela última vez
+    - collection_user_message_key: chave canônica para a UI renderizar a mensagem correta
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    collection_outcome: str | None = Field(
+        None,
+        description="Outcome canônico da última tentativa de coleta (success, not_modified, error, no_result)",
+    )
+    collection_reason: str | None = Field(
+        None,
+        description="Reason tipado da última falha ou ausência (ex: http_429, selector_missing)",
+    )
+    collection_error_class: str | None = Field(
+        None,
+        description="Classe semântica do erro: transient, structural, domain_empty ou neutral",
+    )
+    collection_retryable: bool | None = Field(
+        None,
+        description="Indica se o sistema tentará novamente automaticamente",
+    )
+    collection_next_retry_at: datetime | None = Field(
+        None,
+        description="Próxima tentativa de coleta agendada, quando disponível",
+    )
+    collection_source_integrity: bool | None = Field(
+        None,
+        description="Verdadeiro quando a origem foi íntegra o suficiente para confiar no resultado",
+    )
+    collection_updated_at: datetime | None = Field(
+        None,
+        description="Momento em que este estado de coleta foi registrado pela última vez",
+    )
+    collection_user_message_key: str | None = Field(
+        None,
+        description=(
+            "Chave canônica para renderização de mensagem na UI. "
+            "Valores: collecting_real, retry_scheduled, failed_transient, "
+            "failed_structural, domain_empty_no_price, inactive_or_paused. "
+            "None quando o estado é positivo (success/not_modified)."
+        ),
+    )
+
+
 class ProductResponse(BaseModel):
     """ Visão simplificada do produto exposta pela API pública """
     model_config = ConfigDict(from_attributes=True)
@@ -85,6 +144,23 @@ class MonitoredProductResponse(ProductResponse):
     comparison_summary: PriceComparisonSummaryResponse | None = Field(
         default=None,
         description=("Último resumo consolidado de comparação de preços com indicadores normalizadas para exibição imediata no frontend."),
+    )
+    collection_status: CollectionStatusContract | None = Field(
+        default=None,
+        description=(
+            "Contrato oficial de estado de coleta (v1). "
+            "Presente quando existe ao menos uma tentativa registrada para este monitorado. "
+            "None indica que nenhuma tentativa foi registrada ainda — UI deve exibir 'collecting_real'."
+        ),
+    )
+    display_status_priority: Literal["collection_status", "display_status"] | None = Field(
+        default=None,
+        description=(
+            "Indica qual campo de status tem precedência para renderização na UI. "
+            "'collection_status': coleta com falha ativa — UI deve exibir mensagem de coleta/erro. "
+            "'display_status': estado de comparação é o mais relevante. "
+            "None quando não há estado de coleta registrado ainda."
+        ),
     )
 
 class MonitoredPausedUpdateRequest(BaseModel):

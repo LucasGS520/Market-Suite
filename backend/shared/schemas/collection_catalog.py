@@ -273,6 +273,67 @@ def is_neutral_outcome(outcome: str, reason: str | None) -> bool:
     return get_workflow_decision(outcome, reason) == WORKFLOW_WAITING_TIMER
 
 
+# ─────────────────────────── Contrato de UI ───────────────────────────────────
+
+# Chaves canônicas de mensagem para exibição na UI (Phase 4 matrix).
+# Cada chave corresponde a um estado distinguível pelo usuário final.
+UI_MSG_COLLECTING = "collecting_real"        # Coleta em andamento (sem estado persistido ainda)
+UI_MSG_RETRY_SCHEDULED = "retry_scheduled"   # Falha com retry agendado
+UI_MSG_FAILED_TRANSIENT = "failed_transient" # Falha transitória sem retry imediato
+UI_MSG_FAILED_STRUCTURAL = "failed_structural"  # Falha estrutural — requer ação humana
+UI_MSG_DOMAIN_EMPTY = "domain_empty_no_price"   # Parse íntegro, mas sem preço/disponibilidade
+UI_MSG_INACTIVE_PAUSED = "inactive_or_paused"   # Produto pausado/inativo — coleta descartada
+UI_MSG_OK = None                                # Estados de sucesso não exibem mensagem especial
+
+# Janela máxima (em segundos) para um produto permanecer em estado `collecting_real`
+# sem atualização antes de migrar para `unknown_with_timeout_reason`.
+COLLECTING_TIMEOUT_SECONDS: int = 3600  # 1 hora
+
+
+def get_user_message_key(
+    outcome: str | None,
+    reason: str | None,
+    *,
+    retryable: bool | None = None,
+    has_next_retry: bool = False,
+) -> str | None:
+    """ Retorna a chave canônica de mensagem de UI para o estado de coleta.
+
+    Regras de prioridade (do mais específico ao mais genérico):
+    1. Sem outcome → collecting_real (produto ainda sem estado persistido).
+    2. success / not_modified → None (sem mensagem — estado positivo).
+    3. no_result + reason neutro → inactive_or_paused.
+    4. no_result + domain_empty → domain_empty_no_price.
+    5. error/no_result + retryable + próximo retry → retry_scheduled.
+    6. error + transient (sem retry imediato) → failed_transient.
+    7. error + structural → failed_structural.
+    8. Fallback → failed_transient (conservador).
+    """
+    if outcome is None:
+        return UI_MSG_COLLECTING
+
+    if outcome in SUCCESSFUL_OUTCOMES:
+        return UI_MSG_OK
+
+    if outcome == OUTCOME_NO_RESULT and reason in NEUTRAL_REASONS:
+        return UI_MSG_INACTIVE_PAUSED
+
+    error_cls = get_error_class(reason)
+
+    if outcome == OUTCOME_NO_RESULT and error_cls == ERROR_CLASS_DOMAIN_EMPTY:
+        return UI_MSG_DOMAIN_EMPTY
+
+    # Determina retryability: usa parâmetro explícito ou deriva do catálogo
+    effective_retryable = retryable if retryable is not None else is_retryable(reason)
+    if effective_retryable and has_next_retry:
+        return UI_MSG_RETRY_SCHEDULED
+
+    if error_cls == ERROR_CLASS_STRUCTURAL:
+        return UI_MSG_FAILED_STRUCTURAL
+
+    return UI_MSG_FAILED_TRANSIENT  # transient ou desconhecido
+
+
 __all__ = [
     "CATALOG_VERSION",
     # Outcomes
@@ -330,4 +391,14 @@ __all__ = [
     "has_source_integrity",
     "get_workflow_decision",
     "is_neutral_outcome",
+    # Contrato de UI
+    "UI_MSG_COLLECTING",
+    "UI_MSG_RETRY_SCHEDULED",
+    "UI_MSG_FAILED_TRANSIENT",
+    "UI_MSG_FAILED_STRUCTURAL",
+    "UI_MSG_DOMAIN_EMPTY",
+    "UI_MSG_INACTIVE_PAUSED",
+    "UI_MSG_OK",
+    "COLLECTING_TIMEOUT_SECONDS",
+    "get_user_message_key",
 ]

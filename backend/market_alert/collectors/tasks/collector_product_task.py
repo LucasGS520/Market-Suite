@@ -72,7 +72,7 @@ from market_alert.products.crud.crud_monitored import (
     activate_pending_monitored,
     get_monitored_product_by_id,
     mark_monitored_product_failed,
-    update_monitored_collection_reason,
+    update_collection_status,
 )
 from market_alert.products.crud.crud_competitor import get_competitor_by_id, update_competitor_pause_state
 from market_alert.collectors.services.services_scraper_competitor import scrape_competitor_product
@@ -429,25 +429,24 @@ def collect_product(
             enqueued_at=enqueued_at,
         )
 
-        # Persiste o reason da coleta para permitir que a camada de comparação
-        # propague upstream_reason específico (ex: http_429, challenge_detected)
-        # em vez do genérico "upstream_collection_failed".
-        # Só atualiza para monitorados — concorrentes não alimentam upstream_reason.
-        # not_modified: limpa reason residual de coleta anterior (CRUD de sucesso
-        #   não é chamado em 304, então a limpeza deve ser explícita aqui).
-        # error/no_result não-neutro: grava reason tipado do catálogo.
-        # Neutral (lock_skipped, scraping_suspended, etc.): não toca — não representam
-        #   estado do produto, apenas condição operacional transitória.
+        #Persiste estado de coleta parcial (sem next_retry_at) para monitorados.
+        #next_retry_at é calculado após o lock/retry logic na task principal e será gravado em update_collection_status_with_retry (chamado ao final de collect_product_task). 
+        #Aqui apenas limpamos reason em not_modified, pois o CRUD de sucesso não é chamado em 304.
+        #Neutral (lock_skipped, etc.): update_collection_status ignora — não representam estado do produto.
         if kind == "monitored" and monitored_id is not None:
             try:
-                if outcome == "not_modified":
-                    # 304 não passa pelo CRUD de sucesso: limpa reason residual explicitamente.
-                    update_monitored_collection_reason(db, monitored_id, None, commit=True)
-                elif outcome in {"error", "no_result"} and reason not in NEUTRAL_REASONS:
-                    update_monitored_collection_reason(db, monitored_id, reason, commit=True)
+                if outcome in {"not_modified", "error", "no_result"}:
+                    update_collection_status(
+                        db,
+                        monitored_id,
+                        outcome=outcome,
+                        reason=reason,
+                        next_retry_at=None,  #será atualizado pelo chamador com valor real
+                        commit=True,
+                    )
             except Exception:
                 task_logger.warning(
-                    "collect_collection_reason_update_failed",
+                    "collect_collection_status_update_failed",
                     monitored_id=str(monitored_id),
                     reason=reason,
                     outcome=outcome,
@@ -716,6 +715,44 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     "collect_result_redis_write_failed",
                     monitored_id=str(monitored_id) if monitored_id else None,
                     correlation_id=_correlation_id,
+                    trace_id=trace_id,
+                )
+
+        #Grava estado de coleta completo para success (CRUD não escreve campos novos) e complementa next_retry_at para erros com retry agendado.
+        # success: grava collection_outcome=success e limpa campos de erro.
+        # error/no_result com next_retry_at: complementa com o valor real calculado.
+        if kind == "monitored" and monitored_id and outcome == "success":
+            try:
+                update_collection_status(
+                    db,
+                    monitored_id,
+                    outcome=outcome,
+                    reason=None,
+                    next_retry_at=None,
+                    commit=True,
+                )
+            except Exception:
+                logger.warning(
+                    "collect_collection_status_success_update_failed",
+                    monitored_id=str(monitored_id) if monitored_id else None,
+                    trace_id=trace_id,
+                )
+
+        if kind == "monitored" and monitored_id and next_retry_at and outcome in {"error", "no_result"}:
+            try:
+                update_collection_status(
+                    db,
+                    monitored_id,
+                    outcome=outcome,
+                    reason=reason,
+                    next_retry_at=next_retry_at,
+                    commit=True,
+                )
+            except Exception:
+                logger.warning(
+                    "collect_collection_next_retry_update_failed",
+                    monitored_id=str(monitored_id) if monitored_id else None,
+                    reason=reason,
                     trace_id=trace_id,
                 )
 
