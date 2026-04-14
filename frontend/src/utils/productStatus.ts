@@ -17,6 +17,9 @@ export type MonitoredStatusKey =
   | 'urgent'
   | 'no_competitors'
   | 'collecting'
+  | 'retry_scheduled'
+  | 'error_transient'
+  | 'error_structural'
   | 'unknown';
 
 interface MonitoredBadgeMeta {
@@ -79,11 +82,47 @@ export const statusToBadge: Record<MonitoredStatusKey, MonitoredBadgeMeta> = {
     color: 'default',
     tooltip: 'Status não identificado ou aguardando atualização.',
   },
+  retry_scheduled: {
+    label: 'Aguardando',
+    color: 'warning',
+    tooltip: 'Falha temporária. Nova tentativa automática agendada.',
+  },
+  error_transient: {
+    label: 'Falha Temp.',
+    color: 'warning',
+    tooltip: 'Falha técnica temporária na coleta. Sistema tentará novamente.',
+  },
+  error_structural: {
+    label: 'Falha Coleta',
+    color: 'error',
+    tooltip: 'A estrutura da página mudou ou a URL é inválida. Verifique o produto.',
+  },
+};
+
+/**
+ * Mapeia a chave canônica de mensagem de coleta para o MonitoredStatusKey correspondente.
+ * Usado quando display_status_priority === 'collection_status'.
+ */
+const collectionMsgKeyToStatus: Record<string, MonitoredStatusKey> = {
+  collecting_real: 'collecting',
+  retry_scheduled: 'retry_scheduled',
+  failed_transient: 'error_transient',
+  failed_structural: 'error_structural',
+  domain_empty_no_price: 'no_price',
+  inactive_or_paused: 'paused',
 };
 
 /**
  * Resolve o estado do produto monitorado priorizando pausa e disponibilidade.
- * Usa o status de competitividade apenas quando o item está ativo e com coleta.
+ *
+ * Ordem de prioridade:
+ * 1. Indisponibilidade / pausa explícita (maior prioridade — sempre exibida).
+ * 2. display_status_priority contratual:
+ *    - 'collection_status': usa collection_user_message_key para determinar o status.
+ *    - 'display_status': usa display_status retornado pelo backend.
+ *    - null: produto sem coleta registrada → 'collecting'.
+ * 3. Fallback heurístico para produtos sem o campo display_status_priority
+ *    (retrocompatibilidade com respostas de API sem o contrato v1).
  */
 export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStatusKey => {
   const price = normalizePriceInput(product.current_price);
@@ -98,6 +137,7 @@ export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStat
     product.comparison_summary?.competitors_count ??
     0;
 
+  // ── 1. Indisponibilidade e pausa — sempre têm prioridade ──────────────────
   if (product.comparison_summary?.ignored_due_to_inactive) {
     return 'inactive';
   }
@@ -129,6 +169,34 @@ export const resolveMonitoredStatus = (product: MonitoredProduct): MonitoredStat
 
   if (isPaused) return 'paused';
 
+  // ── 2. Lógica contratual (display_status_priority presente na resposta) ────
+  if ('display_status_priority' in product) {
+    const priority = product.display_status_priority;
+
+    // Sem estado de coleta registrado → produto em primeira coleta real
+    if (priority === null || priority === undefined) {
+      return 'collecting';
+    }
+
+    if (priority === 'collection_status') {
+      const msgKey = product.collection_status?.collection_user_message_key ?? null;
+      if (msgKey && msgKey in collectionMsgKeyToStatus) {
+        return collectionMsgKeyToStatus[msgKey];
+      }
+      // Fallback dentro do contrato: estado de coleta desconhecido → 'collecting'
+      return 'collecting';
+    }
+
+    // priority === 'display_status': usa status consolidado do backend
+    if (displayStatus) {
+      if (['competitive', 'attention', 'urgent'].includes(displayStatus)) {
+        if (competitorsWithPrice <= 0) return 'no_competitors';
+      }
+      return displayStatus as MonitoredStatusKey;
+    }
+  }
+
+  // ── 3. Fallback heurístico (retrocompatibilidade sem display_status_priority) ──
   if (displayStatus) {
     if (['competitive', 'attention', 'urgent'].includes(displayStatus)) {
       if (competitorsWithPrice <= 0) return 'no_competitors';

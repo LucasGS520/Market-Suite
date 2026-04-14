@@ -19,51 +19,38 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ### Resumo do Problema e Objetivo da Correção
 
-- **Objetivo:** Alinhar e robustecer o contrato entre coleta, orquestrador e comparação, preservando a arquitetura atual e corrigindo ambiguidades semânticas para distinguir falha transitória, falha estrutural e ausência real de resultado.
+- **Problema:** O alinhamento semântico entre coleta, orquestrador e comparação avançou, mas a visibilidade contratual para a UI ainda é insuficiente, mantendo produtos em estado ambíguo como “Coletando dados...” mesmo quando já existe falha classificada.
 
-- **Resultado Esperado:** Taxonomia única e versionada de outcome/reason aplicada de ponta a ponta, com decisões do workflow mais precisas e resumos de comparação refletindo falhas upstream de forma explícita.
+- **Sintoma observado:**
+  - Nos logs de staging, a coleta já classifica corretamente falhas como error com reason tipado, por exemplo http_429 e scraper_unavailable, com source_integrity false e semantic_category transient.
+  - A UI continua dependente de heurística fraca para estado de coleta, baseada em ausência de last_scraped_at e preço nulo, sem consumir motivo/estado contratual explícito: productStatus.ts.
+  - A mensagem “Coletando dados...” é exibida sem vínculo com reason e next_retry_at: renderMonitoredPrice.tsx.
 
-- **Estratégia de Execução:** Implementar por camadas sem quebrar contratos externos: primeiro catálogo semântico único, depois adaptação de classificação no coletor, em seguida leitura no status/orquestrador, e por fim propagação para comparação/observabilidade.
+- **Objetivo da correção:** Fechar o contrato ponta a ponta para que estado de coleta, motivo e próxima ação sejam persistidos e exibidos de forma explícita ao usuário, eliminando ambiguidade operacional e evitando “coleta infinita” na UI.
 
 - **Premissas:**
-  - Contrato base já está estável: payload tipado e retorno com outcome/status/reason/next_retry_at/product_id.
-  - Gating por `persisted_at` já está correto e deve ser preservado.
-  - Correções devem priorizar compatibilidade retroativa.
-
-- **Pontos em Aberto** (se houver)
-  - Definir política final de retry para erros estruturais de página (sempre retryável, parcialmente retryável, ou não retryável por domínio/host).
-  - Definir se `source_integrity` será campo explícito no ScrapeResult ou derivado internamente por regra.
-  - Definir granularidade mínima obrigatória de reason para dashboards (por exemplo, dom_not_ready e selector_missing separados ou agrupados em parse_structure_error).
+  - Catálogo semântico central já existe e deve ser a fonte única: `collection_catalog.py`.
+  - Classificação de falhas no coletor já está funcional em staging.
+  - O problema restante é majoritariamente de propagação e apresentação contratual.
 
 ---
 
 ### Riscos, Impacto e Decisões
 
-- **Decisões Técnicas Principais**
-  - Criar catálogo único de semântica (outcomes, reasons, classes de erro, retryabilidade, neutralidade para workflow) em módulo compartilhado.
-  - Proibir strings soltas para outcome/reason em coleta, status activity e workflow; usar apenas constantes/enums do catálogo.
-  - Redefinir `no_result` como exclusivo de ausência legítima de dado após resposta íntegra e parse válido.
-  - Reclassificar anti-bot/challenge/timeout/bloqueio para outcome error com reason tipado.
-  - Manter compatibilidade de payload e envelope atuais, adicionando metadados semânticos progressivamente.
+- **Decisão Técnica Principal:** Introduzir um contrato mínimo de estado de coleta persistido e exposto para UI, com campos explícitos de outcome, reason, error_class, retryable, next_retry_at, source_integrity e updated_at.
 
-- **Riscos Principais**
-  - Regressão por mudança de significado em métricas e alertas existentes.
-  - Divergência entre implementação e comentários/documentação (caso lock_exhausted vs lock_skipped).
-  - Classificação excessivamente rígida gerar falsos erros em páginas limítrofes.
-  - Comparação passar a “silenciar” cenários se upstream_reason não for propagado corretamente.
+- **Risco Principal:** Divergência entre o que já está nos logs/workflow e o que a API entrega ao frontend, mantendo inconsistência de percepção para usuário final.
 
-- **Dependências**
-  - Coletor: `collector_product_task.py`
-  - Normalização de resultado: `collector_result.py`
-  - Contratos compartilhados: `shared_schemas_orchestrator.py` e `shared_schemas_scraper.py`
-  - Leitura de status: `status_activity.py`
-  - Workflow: `workflow.py`
-  - Gating comparação: `price_comparator.py`
-  - Serviço de comparação: `services_comparison.py`
+- **Impacto atual:**
+  - Operação perde legibilidade para suporte e produto.
+  - Usuário não diferencia “coleta em andamento”, “falha transitória com retry agendado” e “falha estrutural”.
+  - Mitigação de incidentes fica mais lenta.
 
-- **Impactos Arquiteturais** (se aplicável)
-  - Sem impacto estrutural relevante; impacto principal é semântico e de governança de contrato.
-  - Melhora de observabilidade operacional e redução de ambiguidade de backoff no workflow.
+- **Dependências:**
+  - Coletor e persistência de reason atual: `collector_product_task.py`, `models_products.py`
+  - Status orquestrado: `status_activity.py`
+  - Comparação com upstream_reason interno: `services_comparison.py`
+  - Tipos frontend sem reason/upstream_reason: `index.ts`
 
 ---
 

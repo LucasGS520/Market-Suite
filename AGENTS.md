@@ -19,31 +19,19 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ### Resumo do Problema e Objetivo da Correção
 
-- **Objetivo:** Alinhar e robustecer o contrato entre coleta, orquestrador e comparação, preservando a arquitetura atual e corrigindo ambiguidades semânticas para distinguir falha transitória, falha estrutural e ausência real de resultado.
+- **Problema:** O alinhamento semântico entre coleta, orquestrador e comparação avançou, mas a visibilidade contratual para a UI ainda é insuficiente, mantendo produtos em estado ambíguo como “Coletando dados...” mesmo quando já existe falha classificada.
 
-- **Resultado Esperado:** Taxonomia única e versionada de outcome/reason aplicada de ponta a ponta, com decisões do workflow mais precisas e resumos de comparação refletindo falhas upstream de forma explícita.
+- **Sintoma observado:**
+  - Nos logs de staging, a coleta já classifica corretamente falhas como error com reason tipado, por exemplo http_429 e scraper_unavailable, com source_integrity false e semantic_category transient.
+  - A UI continua dependente de heurística fraca para estado de coleta, baseada em ausência de last_scraped_at e preço nulo, sem consumir motivo/estado contratual explícito: productStatus.ts.
+  - A mensagem “Coletando dados...” é exibida sem vínculo com reason e next_retry_at: renderMonitoredPrice.tsx.
 
-- **Estratégia de Execução:** Implementar por camadas sem quebrar contratos externos: primeiro catálogo semântico único, depois adaptação de classificação no coletor, em seguida leitura no status/orquestrador, e por fim propagação para comparação/observabilidade.
+- **Objetivo da correção:** Criar Testes que cubram o contrato ponta a ponta para que estado de coleta, motivo e próxima ação sejam persistidos e exibidos de forma explícita ao usuário, eliminando ambiguidade operacional.
 
 - **Premissas:**
-  - Contrato base já está estável: payload tipado e retorno com outcome/status/reason/next_retry_at/product_id.
-  - Gating por `persisted_at` já está correto e deve ser preservado.
-  - Correções devem priorizar compatibilidade retroativa.
-
----
-
-- **Dependências**
-  - Coletor: `collector_product_task.py`
-  - Normalização de resultado: `collector_result.py`
-  - Contratos compartilhados: `shared_schemas_orchestrator.py` e `shared_schemas_scraper.py`
-  - Leitura de status: `status_activity.py`
-  - Workflow: `workflow.py`
-  - Gating comparação: `price_comparator.py`
-  - Serviço de comparação: `services_comparison.py`
-
-- **Impactos Arquiteturais** (se aplicável)
-  - Sem impacto estrutural relevante; impacto principal é semântico e de governança de contrato.
-  - Melhora de observabilidade operacional e redução de ambiguidade de backoff no workflow.
+  - Catálogo semântico central já existe e deve ser a fonte única: `collection_catalog.py`.
+  - Classificação de falhas no coletor já está funcional em staging.
+  - O problema restante é majoritariamente de propagação e apresentação contratual.
 
 ---
 

@@ -634,6 +634,51 @@ const ProductDetail: React.FC = () => {
                         <Box>
                           {renderMonitoredPrice(product, { variant: 'h4' })}
                         </Box>
+                        {/* CTA contextual de estado de coleta — exibido apenas quando há falha ativa */}
+                        {(() => {
+                          const cs = product.collection_status;
+                          const key = cs?.collection_user_message_key;
+                          if (!key || key === 'collecting_real') return null;
+
+                          if (key === 'failed_structural') {
+                            return (
+                              <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: '0.8rem' }}>
+                                Estrutura da página ou URL inválida. Revise o endereço do produto.
+                              </Alert>
+                            );
+                          }
+
+                          if (key === 'retry_scheduled' && cs?.collection_next_retry_at) {
+                            const retryDate = new Date(cs.collection_next_retry_at);
+                            const retryLabel = retryDate.toLocaleTimeString('pt-BR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            });
+                            return (
+                              <Alert severity="warning" sx={{ mt: 1, py: 0.5, fontSize: '0.8rem' }}>
+                                Falha temporária. Próxima tentativa às {retryLabel}.
+                              </Alert>
+                            );
+                          }
+
+                          if (key === 'failed_transient') {
+                            return (
+                              <Alert severity="warning" sx={{ mt: 1, py: 0.5, fontSize: '0.8rem' }}>
+                                Falha técnica temporária na coleta. Tentativa automática em progresso.
+                              </Alert>
+                            );
+                          }
+
+                          if (key === 'domain_empty_no_price') {
+                            return (
+                              <Alert severity="info" sx={{ mt: 1, py: 0.5, fontSize: '0.8rem' }}>
+                                Produto coletado, mas sem preço identificado na origem.
+                              </Alert>
+                            );
+                          }
+
+                          return null;
+                        })()}
                       </Grid>
                       <Grid item xs={12} sm={4}>
                         <Typography variant="body2" color="text.secondary">
