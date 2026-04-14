@@ -33,6 +33,18 @@ from shared.exceptions import ScraperError
 from shared.schemas.shared_schemas_products import CompetitorProductCreateScraping, MonitoredProductCreateScraping
 from shared.schemas.shared_schemas_scraper import ScrapeResult
 from shared.schemas.shared_schemas_orchestrator import validate_payload as validate_collection_payload
+from shared.schemas.collection_catalog import (
+    REASON_HTTP_429,
+    REASON_SCRAPER_UNAVAILABLE,
+    REASON_SCRAPER_CLIENT_ERROR,
+    REASON_SCRAPER_ERROR,
+    REASON_UNEXPECTED_ERROR,
+    REASON_LOCK_SKIPPED,
+    REASON_INVALID_PAYLOAD,
+    NEUTRAL_REASONS,
+    get_error_class,
+    has_source_integrity,
+)
 from shared.clients.scraper.scraper_client import ScraperClientError
 from shared.utils.trace_context import set_trace_id
 from shared.utils.redis_client import is_scraping_suspended
@@ -42,7 +54,13 @@ from market_alert.core.config_alert import settings
 from market_alert.infrastructure.celery.celery_app import celery_app
 from market_alert.infrastructure.celery.dlq_base_task import DLQTask
 from market_alert.infrastructure.celery.retry_policies import COLLECTION_RETRY
+from market_alert.infrastructure.celery.retry_policies import LOCK_RETRY_MAX_RETRIES
 from market_alert.infrastructure.celery.retry_policies import RetryPolicy
+from market_alert.infrastructure.celery.retry_policies import (
+    SCRAPE_RETRY_MAX_ATTEMPTS,
+    SCRAPE_RETRY_TTL_SECONDS,
+    SCRAPE_RETRY_WINDOW_SECONDS,
+)
 from market_alert.infrastructure.resilience.rate_limiter import (
     _increment_invalid_url_attempt,
     _increment_temporary_failure_attempt,
@@ -54,6 +72,7 @@ from market_alert.products.crud.crud_monitored import (
     activate_pending_monitored,
     get_monitored_product_by_id,
     mark_monitored_product_failed,
+    update_collection_status,
 )
 from market_alert.products.crud.crud_competitor import get_competitor_by_id, update_competitor_pause_state
 from market_alert.collectors.services.services_scraper_competitor import scrape_competitor_product
@@ -64,6 +83,7 @@ from market_alert.collectors.utils.collector_result import (
     _is_rate_limit_error,
     _resolve_no_result_reason,
     _resolve_outcome,
+    _resolve_reason_from_result,
     _should_block_invalid_url,
     _should_schedule_temporary_retry,
     _validate_payload,
@@ -72,6 +92,10 @@ from market_alert.comparisons.utils.price_comparator import _parse_force_compare
 
 
 logger = structlog.get_logger("collector_product_task")
+
+# Prefixo Redis para sinalizar outcome ao workflow Temporal (deve estar em sincronia com status_activity.py)
+_COLLECTION_RESULT_KEY_PREFIX = "workflow:collection_result"
+_COLLECTION_RESULT_TTL_SECONDS = 600  # 10 min — suficiente para o workflow fazer polling
 
 def collect_product(
     payload: Mapping[str, str | None] | None,
@@ -213,7 +237,7 @@ def collect_product(
                         )
                         return resolved_monitored, result, None
 
-                    # Branch de monitorado
+                    #Branch de monitorado
                     monitored = get_monitored_product_by_id(session, monitored_id) if monitored_id else None
                     if monitored is not None and monitored.paused:
                         task_logger.info(
@@ -274,8 +298,14 @@ def collect_product(
                     )
 
     except ScraperClientError as exc:
-        reason = "scraper_client_error"
-        error_code = "rate_limit" if exc.status_code == 429 else "service_unavailable" if exc.status_code in {503, 504} else "scraper_client_error"
+        #Emite reason tipado do catálogo baseado no HTTP status recebido do scraper.
+        if exc.status_code == 429:
+            reason = REASON_HTTP_429
+        elif exc.status_code in {503, 504}:
+            reason = REASON_SCRAPER_UNAVAILABLE
+        else:
+            reason = REASON_SCRAPER_CLIENT_ERROR
+        error_code = exc.error_code or reason
         result = ScrapeResult(
             status="error",
             product_id=str(lock_target) if lock_target else None,
@@ -283,32 +313,95 @@ def collect_product(
             error_code=error_code,
             retry_after=exc.retry_after,
         )
-        task_logger.warning("scraper_client_error", kind=kind, error=str(exc), http_status=exc.status_code)          
+        #causa de ambiente: HTTP failure do scraper (rate_limit, timeout, indisponibilidade)
+        task_logger.warning(
+            "scraper_client_error",
+            kind=kind,
+            error=str(exc),
+            http_status=exc.status_code,
+            error_code=error_code,
+            reason=reason,
+            reason_code="environment",
+            error_category="operational",
+            semantic_category=get_error_class(reason),
+            source_integrity=False,
+        )
     except ScraperError as exc:
-        reason = "scraper_error"
+        reason = REASON_SCRAPER_ERROR
         result = ScrapeResult(
             status="error",
             product_id=str(lock_target) if lock_target else None,
             http_status=exc.status_code,
-            error_code="scraper_error",
+            error_code=REASON_SCRAPER_ERROR,
         )
-        task_logger.warning("scraper_error", kind=kind, error=str(exc))
+        #causa de aplicação: scraper retornou resposta estruturada de erro (ex: parse falhou)
+        task_logger.warning(
+            "scraper_error",
+            kind=kind,
+            error=str(exc),
+            http_status=exc.status_code,
+            error_code=REASON_SCRAPER_ERROR,
+            reason=reason,
+            reason_code="application",
+            error_category="domain",
+            semantic_category=get_error_class(reason),
+            source_integrity=False,
+        )
     except Exception:
-        reason = "unexpected_error"
+        reason = REASON_UNEXPECTED_ERROR
         result = ScrapeResult(
             status="error",
             product_id=str(lock_target) if lock_target else None,
-            error_code="unexpected_error",
+            error_code=REASON_UNEXPECTED_ERROR,
         )
-        task_logger.exception("collect_unexpected", kind=kind)
+        task_logger.exception(
+            "collect_unexpected",
+            kind=kind,
+            error_code=REASON_UNEXPECTED_ERROR,
+            reason=reason,
+            reason_code="unknown",
+            error_category="operational",
+            semantic_category=get_error_class(reason),
+            source_integrity=False,
+        )
     finally:
         duration_ms = int((time.perf_counter() - started_perf) * 1000)
-        if result is not None and reason is None and (result.error_code or "").strip().lower() in INVALID_URL_ERRORS_CODES:
-            reason = "invalid_url"
-        if result is not None and result.status == "no_result" and reason is None:
-            reason = _resolve_no_result_reason(result)
-        
+        #Deriva reason tipado do catálogo quando ainda não definido.
+        #Cobre tanto results de error quanto de no_result sem reason explícito
+        if result is not None and reason is None:
+            reason = _resolve_reason_from_result(result)
+
         outcome = _resolve_outcome(kind, result, lock_status=lock_status, reason=reason)
+
+        #Classifica a causa para facilitar separação de métricas nos logs.
+        # "operational": falhas de infra/concorrência sem relação com dados do produto.
+        # "domain": falhas de extração ou dados inválidos do produto.
+        _OPERATIONAL_REASONS = frozenset(NEUTRAL_REASONS) | frozenset({
+            REASON_HTTP_429,
+            REASON_SCRAPER_CLIENT_ERROR,
+            REASON_SCRAPER_UNAVAILABLE,
+            REASON_UNEXPECTED_ERROR,
+            "missing_user_id",
+            "db_open_failed",
+            #Legacy strings mantidas para compatibilidade com logs/alertas existentes
+            "timeout", "rate_limit", "scraper_client_error", "unexpected_error",
+        })
+        _DOMAIN_REASONS = frozenset({
+            REASON_INVALID_PAYLOAD,
+            REASON_SCRAPER_ERROR,
+            "invalid_url", "scraper_error", "validation",
+        })
+        if outcome in {"success", "not_modified"}:
+            error_category = "none"
+        elif reason in _OPERATIONAL_REASONS:
+            error_category = "operational"
+        elif reason in _DOMAIN_REASONS:
+            error_category = "domain"
+        else:
+            error_category = "operational"
+        semantic_category = None if reason is None else get_error_class(reason)
+        source_integrity = has_source_integrity(outcome, reason)
+
         if use_lock and lock_status == "acquired":
             released = release_product_lock(lock_target, lock_owner)
             if not released:
@@ -316,6 +409,9 @@ def collect_product(
                     "collect_lock_release_failed",
                     product_id=str(lock_target) if lock_target else None,
                     trace_id=trace_id,
+                    error_category="operational",
+                    semantic_category="neutral",
+                    source_integrity=False,
                 )
         task_logger.info(
             "collect_product_finished",
@@ -324,11 +420,37 @@ def collect_product(
             outcome=outcome,
             reason=reason,
             lock_status=lock_status,
+            error_category=error_category,
+            semantic_category=semantic_category,
+            source_integrity=source_integrity,
             monitored_id=str(monitored_id) if monitored_id else None,
             competitor_id=str(competitor_id) if competitor_id else None,
             trace_id=trace_id,
             enqueued_at=enqueued_at,
         )
+
+        #Persiste estado de coleta parcial (sem next_retry_at) para monitorados.
+        #next_retry_at é calculado após o lock/retry logic na task principal e será gravado em update_collection_status_with_retry (chamado ao final de collect_product_task). 
+        #Aqui apenas limpamos reason em not_modified, pois o CRUD de sucesso não é chamado em 304.
+        #Neutral (lock_skipped, etc.): update_collection_status ignora — não representam estado do produto.
+        if kind == "monitored" and monitored_id is not None:
+            try:
+                if outcome in {"not_modified", "error", "no_result"}:
+                    update_collection_status(
+                        db,
+                        monitored_id,
+                        outcome=outcome,
+                        reason=reason,
+                        next_retry_at=None,  #será atualizado pelo chamador com valor real
+                        commit=True,
+                    )
+            except Exception:
+                task_logger.warning(
+                    "collect_collection_status_update_failed",
+                    monitored_id=str(monitored_id),
+                    reason=reason,
+                    outcome=outcome,
+                )
 
     return outcome, result, reason
 
@@ -366,15 +488,35 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
     _trace_id = (payload.get("trace_id") if payload else None) or getattr(self.request, "id", None) or ""
     set_trace_id(_trace_id)
 
-    with SessionLocal() as db:
-        # A task mantém sessão única do início ao fim para garantir rastreabilidade e fechamento previsível com contexto.
-        outcome, result, reason = collect_product(
-            payload,
-            use_lock=True,
-            dispatch_comparison=True,
-            logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
-            db=db,
+    try:
+        db_context = SessionLocal()
+    except Exception:
+        logger.exception(
+            "collect_product_task_db_open_failed",
+            task_id=getattr(self.request, "id", None),
+            trace_id=_trace_id,
         )
+        return {"outcome": "error", "status": "error", "reason": "db_open_failed", "next_retry_at": None, "product_id": None}
+
+    with db_context as db:
+        # A task mantém sessão única do início ao fim para garantir rastreabilidade e fechamento previsível com contexto.
+        try:
+            outcome, result, reason = collect_product(
+                payload,
+                use_lock=True,
+                dispatch_comparison=True,
+                logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
+                db=db,
+            )
+        except Exception:
+            logger.exception(
+                "collect_product_task_unhandled",
+                task_id=getattr(self.request, "id", None),
+                trace_id=_trace_id,
+                payload_kind=payload.get("kind") if payload else None,
+                monitored_id=payload.get("monitored_id") if payload else None,
+            )
+            return {"outcome": "error", "status": "error", "reason": "task_unhandled_exception", "next_retry_at": None, "product_id": None}
         if payload is not None:
             kind, monitored_id, competitor_id, _ = _validate_payload(payload)
             lock_target = competitor_id or monitored_id
@@ -386,6 +528,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
             lock_target = None
             trace_id = None
 
+        _lock_retry_queued = False
         if payload and lock_target and outcome == "no_result":
             error_code = getattr(result, "error_code", None)
             if error_code == "lock_skipped":
@@ -400,12 +543,14 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     delay_seconds=delay,
                 )
                 try:
-                    #Evita disparar exceção para manter o retorno compatível com o contrato
-                    self.retry(
-                        countdown=delay,
-                        max_retries=RetryPolicy.LOCK_RETRY_MAX_RETRIES,
-                        throw=False,
-                    )
+                        #Evita disparar exceção para manter o retorno compatível com o contrato
+                        self.retry(
+                            countdown=delay,
+                            max_retries=LOCK_RETRY_MAX_RETRIES,
+                            throw=False,
+                        )
+                        #retry() não lançou — outro ciclo foi agendado, resultado não é final
+                        _lock_retry_queued = True
                 except self.MaxRetriesExceededError:
                     logger.warning(
                         "collect_lock_retry_exhausted",
@@ -459,7 +604,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     "invalid_url",
                     invalid_attempt,
                     max_attempts=settings.SCRAPER_INVALID_URL_MAX_ATTEMPTS,
-                    max_seconds=min(RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                    max_seconds=min(SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
                     now=base_now,
                 )
                 if should_retry and next_retry_at is not None:
@@ -478,34 +623,50 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
         if payload and lock_target and _should_schedule_temporary_retry(result, reason) and not blocked_invalid:
             retry_attempt = _increment_temporary_failure_attempt(
                 str(lock_target),
-                ttl_seconds=RetryPolicy.SCRAPE_RETRY_TTL_SECONDS,
+                ttl_seconds=SCRAPE_RETRY_TTL_SECONDS,
             )
             if retry_attempt is None:
                 retry_attempt = 1
-            if retry_attempt > RetryPolicy.SCRAPE_RETRY_MAX_ATTEMPTS:
-                #Reinicia contador para evitar loops infinitos após atingir o limite
-                _reset_temporary_failure_attempt(str(lock_target))
-                delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
-                base_now = datetime.now(timezone.utc)
-                should_retry, next_retry_at = RetryPolicy.should_retry_scrape_failure(
-                    reason or "unknown",
-                    retry_attempt,
-                    max_attempts=retry_attempt,
-                    max_seconds=delay,
-                    now=base_now,
-                )
-                if not should_retry:
+            if retry_attempt > SCRAPE_RETRY_MAX_ATTEMPTS:
+                if kind == "competitor" and competitor_id is not None:
+                    #Concorrente com falhas repetidas é pausado para evitar loop caro.
+                    #O operador pode reativar manualmente após investigar a causa.
+                    _reset_temporary_failure_attempt(str(lock_target))
+                    update_competitor_pause_state(db, competitor_id, is_paused=True)
                     next_retry_at = None
-                temporary_failure = True
-                logger.warning(
-                    "scrape_retry_exhausted",
-                    kind=kind,
-                    product_id=str(lock_target),
-                    trace_id=trace_id,
-                    attempts=retry_attempt,
-                    delay_seconds=delay,
-                    next_retry_at=next_retry_at.isoformat() if next_retry_at else None,
-                )
+                    logger.warning(
+                        "scrape_retry_exhausted_competitor_paused",
+                        kind=kind,
+                        competitor_id=str(competitor_id),
+                        monitored_id=str(monitored_id) if monitored_id else None,
+                        trace_id=trace_id,
+                        attempts=retry_attempt,
+                        reason=reason,
+                    )
+                else:
+                    #Monitorado: agenda retry com delay longo e reinicia contador
+                    _reset_temporary_failure_attempt(str(lock_target))
+                    delay = max(30, settings.SCRAPER_NO_RESULT_RETRY_SECONDS)
+                    base_now = datetime.now(timezone.utc)
+                    should_retry, next_retry_at = RetryPolicy.should_retry_scrape_failure(
+                        reason or "unknown",
+                        retry_attempt,
+                        max_attempts=retry_attempt,
+                        max_seconds=delay,
+                        now=base_now,
+                    )
+                    if not should_retry:
+                        next_retry_at = None
+                    temporary_failure = True
+                    logger.warning(
+                        "scrape_retry_exhausted",
+                        kind=kind,
+                        product_id=str(lock_target),
+                        trace_id=trace_id,
+                        attempts=retry_attempt,
+                        delay_seconds=delay,
+                        next_retry_at=next_retry_at.isoformat() if next_retry_at else None,
+                    )
             else:
                 #Falhas temporárias padrão usam policy única para evitar divergência de cálculo de next_retry_at entre consumidores.
                 base_now = datetime.now(timezone.utc)
@@ -513,7 +674,7 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                     reason or "unknown",
                     retry_attempt,
                     retry_after=getattr(result, "retry_after", None),
-                    max_seconds=min(RetryPolicy.SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
+                    max_seconds=min(SCRAPE_RETRY_WINDOW_SECONDS, settings.SCRAPER_MAX_RETRY_DELAY_SECONDS),
                     now=base_now,
                 )
                 if should_retry and next_retry_at is not None:
@@ -534,6 +695,66 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                         delay_seconds=delay,
                         next_retry_at=next_retry_at.isoformat(),
                     )
+
+        # Sinaliza outcome no Redis para o workflow Temporal — apenas quando:
+        # 1. Há correlation_id no payload (dispatch via orquestrador)
+        # 2. Produto é monitorado (concorrentes não têm workflow próprio)
+        # 3. Este é o resultado final (não foi agendado outro retry de lock)
+        _correlation_id = payload.get("correlation_id") if payload else None
+        if _correlation_id and kind == "monitored" and monitored_id and not _lock_retry_queued:
+            try:
+                import json as _json
+                from shared.utils.redis_client import get_redis_operational as _get_redis
+                _redis = _get_redis()
+                if _redis is not None:
+                    _result_key = f"{_COLLECTION_RESULT_KEY_PREFIX}:{monitored_id}:{_correlation_id}"
+                    _result_data = _json.dumps({"outcome": outcome, "reason": reason or ""})
+                    _redis.setex(_result_key, _COLLECTION_RESULT_TTL_SECONDS, _result_data)
+            except Exception:
+                logger.warning(
+                    "collect_result_redis_write_failed",
+                    monitored_id=str(monitored_id) if monitored_id else None,
+                    correlation_id=_correlation_id,
+                    trace_id=trace_id,
+                )
+
+        #Grava estado de coleta completo para success (CRUD não escreve campos novos) e complementa next_retry_at para erros com retry agendado.
+        # success: grava collection_outcome=success e limpa campos de erro.
+        # error/no_result com next_retry_at: complementa com o valor real calculado.
+        if kind == "monitored" and monitored_id and outcome == "success":
+            try:
+                update_collection_status(
+                    db,
+                    monitored_id,
+                    outcome=outcome,
+                    reason=None,
+                    next_retry_at=None,
+                    commit=True,
+                )
+            except Exception:
+                logger.warning(
+                    "collect_collection_status_success_update_failed",
+                    monitored_id=str(monitored_id) if monitored_id else None,
+                    trace_id=trace_id,
+                )
+
+        if kind == "monitored" and monitored_id and next_retry_at and outcome in {"error", "no_result"}:
+            try:
+                update_collection_status(
+                    db,
+                    monitored_id,
+                    outcome=outcome,
+                    reason=reason,
+                    next_retry_at=next_retry_at,
+                    commit=True,
+                )
+            except Exception:
+                logger.warning(
+                    "collect_collection_next_retry_update_failed",
+                    monitored_id=str(monitored_id) if monitored_id else None,
+                    reason=reason,
+                    trace_id=trace_id,
+                )
 
         status = "blocked" if blocked_invalid else ("temporary_failure" if temporary_failure else outcome)
         return {

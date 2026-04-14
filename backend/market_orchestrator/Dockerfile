@@ -8,10 +8,10 @@ ENV PYTHONPATH=/backend \
     PIP_NO_INPUT=1
 
 # Instalar dependências (layer cacheado separado do código)
-COPY backend/market_orchestrator/requirements-orchestrator.txt requirements-orchestrator.txt
+COPY backend/market_orchestrator/requirements-market-orchestrator.txt requirements-market-orchestrator.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements-orchestrator.txt
+    pip install -r requirements-market-orchestrator.txt
 
 # Copiar shared/ (dependência compartilhada entre serviços)
 # Requer additional_contexts: shared_ctx: ./backend/shared no compose

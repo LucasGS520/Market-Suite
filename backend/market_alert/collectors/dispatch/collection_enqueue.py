@@ -20,6 +20,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from shared.schemas.shared_schemas_orchestrator import CollectionPayload
+from shared.utils.redis_client import set_key_with_ttl
 
 from market_alert.core.config_alert import settings
 from market_alert.models.models_products import CompetitorProduct, MonitoredProduct
@@ -47,6 +48,29 @@ def _get_enqueuer() -> CollectionEnqueuer:
         _enqueuer = CollectionEnqueuer()
     return _enqueuer
 
+def _check_dispatch_burst(product_id: str | UUID) -> bool:
+    """ Retorna True se o dispatch pode prosseguir (burst OK); False se deve ser suprimido.
+
+    Usa chave Redis com TTL = COLLECTION_DISPATCH_COOLDOWN_SECONDS para impedir que o
+    mesmo produto receba múltiplos dispatches dentro da janela mínima. Supressão é
+    tratada como ruído operacional recuperável — não como erro de domínio.
+
+    Se Redis estiver indisponível, permite o dispatch (fail-open).
+    """
+    cooldown = settings.COLLECTION_DISPATCH_COOLDOWN_SECONDS
+    if cooldown <= 0:
+        return True
+
+    key = f"collection:dispatch_cooldown:{product_id}"
+    result = set_key_with_ttl(key, "1", cooldown, only_if_absent=True)
+    if result is None:
+        # Redis indisponível — fail-open para não bloquear coleta
+        return True
+    # result=True → chave criada agora → primeiro dispatch na janela → OK
+    # result=False → chave já existia → burst suprimido
+    return bool(result)
+
+
 def enqueue_collect(
     payload: CollectionPayload | dict,
     *,
@@ -56,10 +80,22 @@ def enqueue_collect(
 
     Aceita ``CollectionPayload`` (novo padrão) ou ``dict`` (legado).
     O enfileiramento real ocorre exclusivamente em ``CollectionEnqueuer._send()``.
+    Aplica proteção de burst: dispatches dentro da janela COLLECTION_DISPATCH_COOLDOWN_SECONDS
+    são suprimidos silenciosamente para o mesmo produto.
     """
     if isinstance(payload, dict):
         #Converte payload legado para ``CollectionPayload`` antes de enfileirar
         payload = CollectionPayload.model_validate(payload)
+
+    product_id = payload.competitor_id or payload.monitored_id
+    if product_id and not _check_dispatch_burst(product_id):
+        logger.info(
+            "enqueue_dispatch_burst_suppressed",
+            product_id=str(product_id),
+            cooldown_seconds=settings.COLLECTION_DISPATCH_COOLDOWN_SECONDS,
+            error_category="operational",
+        )
+        return
 
     _get_enqueuer()._send(payload, countdown=countdown)
 

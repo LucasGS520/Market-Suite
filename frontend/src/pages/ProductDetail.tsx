@@ -39,7 +39,6 @@ import {
   Pause as PauseIcon,
   OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
-import { AxiosError } from 'axios';
 import { productsService } from '../services/productsService';
 import Layout from '../components/Layout';
 import { formatCurrency, normalizePriceInput } from '../utils/currency';
@@ -48,16 +47,9 @@ import TruncatedText from '../utils/TruncatedText';
 import ProductStateBadge from '../components/ProductStateBadge';
 import { resolveMonitoredStatus } from '../utils/productStatus';
 import { renderMonitoredPrice } from '../utils/renderMonitoredPrice';
-import { ApiErrorResponse, CompetitorProduct, MonitoredProduct } from '../types';
+import { CompetitorProduct, MonitoredProduct } from '../types';
 import { useToast } from '../hooks/useToast';
-
-/**
- * Obtém o detalhe do erro enviado pela API, quando presente
- */
-const getApiErrorDetail = (error: unknown): string | undefined => {
-  const axiosError = error as AxiosError<ApiErrorResponse>;
-  return axiosError.response?.data?.detail;
-};
+import { getApiErrorDetail } from '../utils/apiErrors';
 
 /**
  * Componente de exibição de detalhes do produto monitorado.
@@ -642,6 +634,51 @@ const ProductDetail: React.FC = () => {
                         <Box>
                           {renderMonitoredPrice(product, { variant: 'h4' })}
                         </Box>
+                        {/* CTA contextual de estado de coleta — exibido apenas quando há falha ativa */}
+                        {(() => {
+                          const cs = product.collection_status;
+                          const key = cs?.collection_user_message_key;
+                          if (!key || key === 'collecting_real') return null;
+
+                          if (key === 'failed_structural') {
+                            return (
+                              <Alert severity="error" sx={{ mt: 1, py: 0.5, fontSize: '0.8rem' }}>
+                                Estrutura da página ou URL inválida. Revise o endereço do produto.
+                              </Alert>
+                            );
+                          }
+
+                          if (key === 'retry_scheduled' && cs?.collection_next_retry_at) {
+                            const retryDate = new Date(cs.collection_next_retry_at);
+                            const retryLabel = retryDate.toLocaleTimeString('pt-BR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            });
+                            return (
+                              <Alert severity="warning" sx={{ mt: 1, py: 0.5, fontSize: '0.8rem' }}>
+                                Falha temporária. Próxima tentativa às {retryLabel}.
+                              </Alert>
+                            );
+                          }
+
+                          if (key === 'failed_transient') {
+                            return (
+                              <Alert severity="warning" sx={{ mt: 1, py: 0.5, fontSize: '0.8rem' }}>
+                                Falha técnica temporária na coleta. Tentativa automática em progresso.
+                              </Alert>
+                            );
+                          }
+
+                          if (key === 'domain_empty_no_price') {
+                            return (
+                              <Alert severity="info" sx={{ mt: 1, py: 0.5, fontSize: '0.8rem' }}>
+                                Produto coletado, mas sem preço identificado na origem.
+                              </Alert>
+                            );
+                          }
+
+                          return null;
+                        })()}
                       </Grid>
                       <Grid item xs={12} sm={4}>
                         <Typography variant="body2" color="text.secondary">

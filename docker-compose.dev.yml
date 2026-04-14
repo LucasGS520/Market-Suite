@@ -31,10 +31,9 @@ services:
   # Executa migrações Alembic (perfil infra ou api)
   migrations:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - infra
@@ -78,10 +77,9 @@ services:
   # API principal do MarketAlert
   market_alert:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - api
@@ -91,6 +89,9 @@ services:
     environment:
       - ENV_FILE=.env.market_alert
       - PYTHONPATH=/backend
+    # Para desenvolvimento interativo com hot-reload, adicione "--reload" ao command abaixo.
+    # Remova em testes de estabilidade: --reload ativa watchfiles e gera ruído operacional
+    # que contamina métricas de TMPRL1101/TMPRL1104 e lock_skipped.
     command:
       - uvicorn
       - "main:app"
@@ -98,7 +99,6 @@ services:
       - "0.0.0.0"
       - "--port"
       - "8000"
-      - "--reload"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 20s
@@ -125,10 +125,9 @@ services:
   # Worker Temporal — orquestração durável de workflows
   market_orchestrator:
     build:
-      context: ./backend/market_orchestrator
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_orchestrator/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - orchestrator
@@ -160,10 +159,9 @@ services:
   # Microserviço de scraping
   market_scraper:
     build:
-      context: ./backend/market_scraper
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_scraper/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - scraper
@@ -176,6 +174,8 @@ services:
       - REDIS_PORT=6379
       - REDIS_OPERATIONAL_DB=2
       - PYTHONPATH=/app
+    # Para desenvolvimento interativo com hot-reload, adicione "--reload" ao command abaixo.
+    # Remova em testes de estabilidade: --reload ativa watchfiles e gera ruído operacional.
     command:
       - uvicorn
       - "market_scraper.main:app"
@@ -183,7 +183,6 @@ services:
       - "0.0.0.0"
       - "--port"
       - "8000"
-      - "--reload"
     ports:
       - "8010:8000"
     depends_on:
@@ -203,12 +202,14 @@ services:
   
   
   # Celery worker — fila scraping
+  # Dev: concurrency=4 (vs 6 em staging). Reduzido de 10 para evitar pressão de memória
+  # e risco de SIGKILL em máquinas locais. Cada processo prefork usa ~50MB.
+  # --max-tasks-per-child=50 recicla processos mais frequentemente para evitar leaks de memória.
   celery-worker-scraping:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - workers
@@ -225,7 +226,8 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=10"
+      - "--concurrency=4"
+      - "--max-tasks-per-child=50"
       - "-Q"
       - "celery,scraping"
     user: "1000:1000"
@@ -242,14 +244,20 @@ services:
     restart: on-failure
     networks:
       - monitoring-net
-  
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
   # Celery worker — fila compare
+  # Dev: concurrency=2. Compare é operação de DB leve — 2 workers são suficientes em dev.
   celery-worker-compare:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - workers
@@ -266,7 +274,8 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=4"
+      - "--concurrency=2"
+      - "--max-tasks-per-child=50"
       - "-Q"
       - "compare"
     user: "1000:1000"
@@ -283,14 +292,20 @@ services:
     restart: on-failure
     networks:
       - monitoring-net
-  
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
   # Celery worker — fila notifications
+  # Dev: concurrency=2. Notificações em dev usam mock — sem pressão real de I/O externo.
   celery-worker-notifications:
     build:
-      context: ./backend/market_alert
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/market_alert/Dockerfile
       additional_contexts:
-        root: .
         shared_ctx: ./backend/shared
     profiles:
       - workers
@@ -307,7 +322,8 @@ services:
       - "worker"
       - "--loglevel=info"
       - "--pool=prefork"
-      - "--concurrency=4"
+      - "--concurrency=2"
+      - "--max-tasks-per-child=50"
       - "-Q"
       - "notifications"
     user: "1000:1000"
@@ -324,6 +340,12 @@ services:
     restart: on-failure
     networks:
       - monitoring-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
   
   
   # Frontend — dev rápido em container (bind-mounts, sem rebuild pesado)

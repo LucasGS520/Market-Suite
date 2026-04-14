@@ -1,5 +1,5 @@
-# Dependências estáveis de infraestrutura — raramente mudam
-# Utilizadas ao redor o sistema (não exclusivas de um serviço)
+# Dependencias estaveis de infraestrutura - raramente mudam
+# Utilizadas ao redor o sistema (nao exclusivas de um servico)
 # Separadas para maximizar cache de build Docker
 
 # Web framework
@@ -15,7 +15,7 @@ psycopg2-binary==2.9.10
 alembic==1.15.2
 Mako==1.3.10
 
-# Validação e configuração (Pydantic)
+# Validacao e configuracao (Pydantic)
 pydantic==2.11.4
 pydantic-settings==2.9.1
 pydantic_core==2.33.2
@@ -28,10 +28,10 @@ httpx==0.28.1
 requests==2.32.3
 structlog==25.3.0
 
-#  Orquestração de workflows (Temporal)
+# Orquestracao de workflows (Temporal)
 temporalio>=1.7.0,<2.0.0
 
-# Fila de tarefas (Celery e dependências)
+# Fila de tarefas (Celery e dependencias)
 celery==5.5.2
 billiard==4.2.1
 click==8.2.0
@@ -42,5 +42,5 @@ vine==5.1.0
 redis==6.1.0
 cachetools==5.5.2
 
-# Resiliência
+# Resiliencia
 tenacity==9.1.2

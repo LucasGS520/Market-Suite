@@ -18,7 +18,7 @@ Exemplo de uso em uma route:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import structlog
@@ -294,10 +294,18 @@ def create_monitored_product(
         #Inicia workflow durável de rechecagem contínua (não-bloqueante)
         if _TEMPORAL_AVAILABLE:
             try:
+                interval_seconds = getattr(pending, "check_interval", 3600) or 3600
+                #Avança next_check_at para o primeiro intervalo completo antes de iniciar o
+                #workflow. Sem isso, o scheduler retorna next_check_at=now para produtos
+                #pendentes, fazendo o Temporal despachar imediatamente e colidir com o
+                #enqueue acima (lock contention). O workflow lerá o valor atualizado via
+                #fetch_monitored_policy e dormirá pelo intervalo correto.
+                pending.next_check_at = datetime.now(timezone.utc) + timedelta(seconds=interval_seconds)
+                db.commit()
                 get_temporal_client().start_monitoring(
                     pending.id,
                     user.id,
-                    interval_seconds=getattr(pending, "check_interval", 3600) or 3600,
+                    interval_seconds=interval_seconds,
                 )
             except Exception as exc:
                 logger.warning(

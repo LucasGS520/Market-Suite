@@ -4,10 +4,9 @@
 
 import React, { useState } from 'react';
 import { Alert, Box, Card, CardContent, Stack, Typography, Button } from '@mui/material';
-import { AxiosError } from 'axios';
 import { Link as RouterLink } from 'react-router-dom';
 import ResendButton from './ResendButton';
-import { ApiErrorResponse } from '../types';
+import { getApiErrorDetail } from '../utils/apiErrors';
 
 interface VerificationPromptProps {
   email: string;
@@ -37,10 +36,9 @@ const VerificationPrompt: React.FC<VerificationPromptProps> = ({
       // Mantém a confirmação de envio para orientar o usuário após a ação
       setFeedback({ severity: 'success', message: 'Código enviado com sucesso.' });
     } catch (error) {
-      const axiosError = error as AxiosError<ApiErrorResponse>;
       setFeedback({
         severity: 'error',
-        message: axiosError.response?.data?.detail || 'Não foi possível enviar o código.',
+        message: getApiErrorDetail(error, 'Não foi possível enviar o código.'),
       });
       throw error;
     }
@@ -55,10 +53,9 @@ const VerificationPrompt: React.FC<VerificationPromptProps> = ({
       // Mantém a confirmação de envio para orientar o usuário após a ação
       setFeedback({ severity: 'success', message: 'Código enviado com sucesso.' });
     } catch (error) {
-      const axiosError = error as AxiosError<ApiErrorResponse>;
       setFeedback({
         severity: 'error',
-        message: axiosError.response?.data?.detail || 'Não foi possível enviar o código.',
+        message: getApiErrorDetail(error, 'Não foi possível enviar o código.'),
       });
       throw error;
     }

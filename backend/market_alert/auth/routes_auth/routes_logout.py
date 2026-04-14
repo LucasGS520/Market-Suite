@@ -10,6 +10,7 @@ from market_alert.core.config_alert import settings
 from market_alert.schemas.schemas_auth import RefreshRequest
 from market_alert.auth.services.services_auth import logout_service
 from market_alert.auth.utils.cookies_auth import clear_refresh_cookie
+from market_alert.infrastructure.security.client_identity import resolve_client_ip
 
 
 logger = structlog.get_logger("route.auth.logout")
@@ -23,7 +24,7 @@ def logout(request: Request, response: Response, payload: RefreshRequest | None 
     cookie_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
     logger.info(
         "logout_route_called",
-        ip=request.client.host,
+        ip=resolve_client_ip(request),
         request_id=request_id,
         cookie_current=bool(cookie_token),
         payload_current=bool(payload and payload.refresh_token),

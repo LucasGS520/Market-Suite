@@ -1,4 +1,4 @@
-# Claude — Preparação e Alinhamento de Configurações
+# Claude — Contexto e Objetivos
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -17,30 +17,40 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Objetivo e Problemas Identificados
+### Resumo do Problema e Objetivo da Correção
+
+- **Problema:** O alinhamento semântico entre coleta, orquestrador e comparação avançou, mas a visibilidade contratual para a UI ainda é insuficiente, mantendo produtos em estado ambíguo como “Coletando dados...” mesmo quando já existe falha classificada.
+
+- **Sintoma observado:**
+  - Nos logs de staging, a coleta já classifica corretamente falhas como error com reason tipado, por exemplo http_429 e scraper_unavailable, com source_integrity false e semantic_category transient.
+  - A UI continua dependente de heurística fraca para estado de coleta, baseada em ausência de last_scraped_at e preço nulo, sem consumir motivo/estado contratual explícito: productStatus.ts.
+  - A mensagem “Coletando dados...” é exibida sem vínculo com reason e next_retry_at: renderMonitoredPrice.tsx.
+
+- **Objetivo da correção:** Fechar o contrato ponta a ponta para que estado de coleta, motivo e próxima ação sejam persistidos e exibidos de forma explícita ao usuário, eliminando ambiguidade operacional e evitando “coleta infinita” na UI.
+
+- **Premissas:**
+  - Catálogo semântico central já existe e deve ser a fonte única: `collection_catalog.py`.
+  - Classificação de falhas no coletor já está funcional em staging.
+  - O problema restante é majoritariamente de propagação e apresentação contratual.
 
 ---
 
-## Análise de Riscos e Decisões Chave
+### Riscos, Impacto e Decisões
 
-### Risco Principal
-**Imagens build sem shared causam falha silenciosa em homologação**
+- **Decisão Técnica Principal:** Introduzir um contrato mínimo de estado de coleta persistido e exposto para UI, com campos explícitos de outcome, reason, error_class, retryable, next_retry_at, source_integrity e updated_at.
 
-*Mitigação*:
-- Refatorar Dockerfiles para copiar `shared/` explicitamente.
+- **Risco Principal:** Divergência entre o que já está nos logs/workflow e o que a API entrega ao frontend, mantendo inconsistência de percepção para usuário final.
 
-### Risco Secundário
-**Nginx roteia para localhost dentro container → 502 Bad Gateway**
+- **Impacto atual:**
+  - Operação perde legibilidade para suporte e produto.
+  - Usuário não diferencia “coleta em andamento”, “falha transitória com retry agendado” e “falha estrutural”.
+  - Mitigação de incidentes fica mais lenta.
 
-*Mitigação*:
-- Usar nomes de serviço Docker como upstream (market_alert, frontend).
-
-### Risco Terceiro
-**Scripts não versionados geram reprodutibilidade fraca**
-
-*Mitigação*:
-- Mover scripts críticos para pasta versionada.
-- Adicionar documentação de execução no repositório.
+- **Dependências:**
+  - Coletor e persistência de reason atual: `collector_product_task.py`, `models_products.py`
+  - Status orquestrado: `status_activity.py`
+  - Comparação com upstream_reason interno: `services_comparison.py`
+  - Tipos frontend sem reason/upstream_reason: `index.ts`
 
 ---
 

@@ -156,6 +156,7 @@ As configurações combinam base compartilhada em [`../shared/core/config_base.p
 3. Caso contrario, usa `ENV_FILE` (ou `.env`) e carrega com `override=True`.
 4. Depois disso, `Settings` do scraper aplica defaults de codigo para chaves ainda ausentes.
 5. Nos compose ativos (`docker-compose.dev.yml` e `docker-compose.hml.yml`), `market_scraper` sobe com `env_file: ./backend/market_scraper/.env.market_scraper` e `ENV_FILE=.env.market_scraper`, mantendo o arquivo local do servico como fonte principal de override.
+6. Em teste (`PYTEST_RUNNING=1`), o bootstrap ignora completamente `.env.common`, `.env`, `.env.<service>` e `ENV_FILE`; a suite usa apenas defaults locais em `tests/conftest.py` e overrides explicitos do teste.
 
 ### Categorias de variaveis
 | Categoria | Variaveis relevantes |
@@ -189,6 +190,50 @@ SCRAPER_HTTP_MAX_CONTENT_LENGTH=2000000
 SCRAPER_DEFAULT_USER_AGENT=Mozilla/5.0
 SCRAPER_PRICE_TOLERANCE=0.0
 ```
+
+---
+
+## Testes
+O `market_scraper` possui suite local isolada em [`tests/`](tests) e usa somente [`../pytest.ini`](../pytest.ini) como configuracao central do `pytest`. O bootstrap de teste nao usa `.env.test`: [`tests/conftest.py`](tests/conftest.py) define defaults locais em Python, reseta estado global do modulo e ativa o modo teste com `PYTEST_RUNNING=1`.
+
+### Estrutura da suite
+- [`tests/unit`](tests/unit): regras isoladas, sem I/O real, com mocks e fakes para cache, rede, parsers e rotas.
+- [`tests/integration`](tests/integration): fluxos ponta a ponta internos do modulo usando `TestClient`, pipeline real e HTML de fixture deterministico.
+- [`tests/stress`](tests/stress): testes tecnicos de timeout e volume controlado sem acesso externo real.
+- [`tests/fixtures`](tests/fixtures): HTMLs fixos usados para manter cenarios repetiveis e sem flakiness.
+
+### Comandos oficiais
+Executar a partir da raiz do repositorio `market_suite`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/unit -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/integration -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/stress -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests -m unit -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests --cov=market_scraper --cov-report=term -q
+```
+
+Comandos de apoio operacional:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/stress -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests --collect-only -q
+```
+
+### Politica de manutencao da suite
+- Toda mudanca em contrato HTTP, mapeamento de `error_code`, ordem do pipeline, timeouts ou cache condicional deve atualizar ao menos uma suite relevante (`unit`, `integration` ou `stress`).
+- Testes `unit` nao devem fazer rede, DNS, Redis ou acesso externo real; usar `monkeypatch`, fakes e fixtures locais.
+- Testes `integration` devem exercitar somente fluxos internos do modulo com infraestrutura controlada e HTML fixo em `tests/fixtures`.
+- Testes `stress` devem permanecer pequenos, deterministas e limitados a timeout, concorrencia controlada e estabilidade de resposta.
+- Estado global do modulo (`cache`, `singleflight` e settings carregados) deve continuar sendo resetado por teste via [`tests/conftest.py`](tests/conftest.py).
+- A configuracao canônica do `pytest` segue centralizada em [`../pytest.ini`](../pytest.ini), sem `pytest.ini` local no modulo.
+- Nenhum teste deve depender de `.env.market_scraper.test`, `ENV_FILE` ou leitura implícita de `.env` operacional.
+- Novos parsers ou novos erros de fluxo devem vir acompanhados de cobertura minima em `unit` e `integration` antes de serem considerados prontos.
+
+### Cobertura atual da suite
+- `unit`: configuracao, contratos do pipeline, etapas com mocks de I/O, helpers de resposta, utilitarios criticos e rota.
+- `integration`: `health`, sucesso do parse, `304`, `force_refresh`, erros de fluxo, fallback por etapas e compatibilidade com schemas compartilhados.
+- `stress`: timeout por etapa, timeout global e volume concorrente controlado com resposta estavel.
 
 ---
 

@@ -33,6 +33,33 @@ export interface TokenPair {
 export type MonetaryValue = number | string | null;
 
 /**
+ * Estado semântico de coleta persistido pelo backend (contrato v1).
+ * Derivado diretamente do catálogo semântico — sem strings livres.
+ */
+export interface CollectionStatus {
+  /** Outcome canônico da última tentativa: success, not_modified, error, no_result */
+  collection_outcome: string | null;
+  /** Reason tipado (ex: http_429, selector_missing). Null em sucesso. */
+  collection_reason: string | null;
+  /** Classe semântica: transient, structural, domain_empty, neutral */
+  collection_error_class: string | null;
+  /** O sistema tentará novamente automaticamente */
+  collection_retryable: boolean | null;
+  /** Próxima tentativa agendada (ISO 8601). Null se não há retry. */
+  collection_next_retry_at: string | null;
+  /** A origem foi íntegra o suficiente para confiar no resultado */
+  collection_source_integrity: boolean | null;
+  /** Quando este estado foi registrado pela última vez */
+  collection_updated_at: string | null;
+  /**
+   * Chave canônica para renderização na UI:
+   * collecting_real | retry_scheduled | failed_transient |
+   * failed_structural | domain_empty_no_price | inactive_or_paused | null (sucesso)
+   */
+  collection_user_message_key: string | null;
+}
+
+/**
  * Produto monitorado pelo usuário no Market-Suite.
  */
 export interface MonitoredProduct {
@@ -70,6 +97,15 @@ export interface MonitoredProduct {
   paused_at?: string | null; // Momento em que a pausa foi aplicada
   next_check_at?: string | null; // Próxima rechecagem planejada
   is_paused?: boolean; // Alias legado para compatibilidade com lógicas existentes
+  /** Contrato oficial de estado de coleta (v1). Null = nenhuma tentativa registrada ainda. */
+  collection_status?: CollectionStatus | null;
+  /**
+   * Define qual campo de status tem precedência para a UI:
+   * - 'collection_status': coleta com falha ativa — exibir mensagem de erro/coleta.
+   * - 'display_status': status de comparação é o mais relevante.
+   * - null: sem estado registrado ainda.
+   */
+  display_status_priority?: 'collection_status' | 'display_status' | null;
 }
 
 /**
@@ -138,6 +174,10 @@ export interface PriceComparisonSummary {
   alerts?: Array<Record<string, unknown>>; // Alertas gerados a partir dessa comparação
   alerts_count?: number; //Total de alertas calculadas no resumo (quando exposto pelo backend)
   ignored_due_to_inactive?: boolean; // Indica se comparação foi ignorada por indisponibilidade
+  /** Motivo interno do estado (ex: sem_concorrentes_disponiveis). Consumo oficial pelo frontend. */
+  reason?: string | null;
+  /** Reason de coleta upstream que causou degradação da comparação (ex: upstream_collection_failed). */
+  upstream_reason?: string | null;
 }
 
 /**
@@ -242,9 +282,24 @@ export interface MonitoredScrapeCreationResponse extends ScrapeCreationResponse 
   competitor_error?: string; // Campo opcional para compatibilidade com versões futuras
 }
 
+/** Objeto de erro individual do Pydantic (erro de validação). */
+export interface PydanticValidationError {
+  type: string;
+  loc: (string | number)[];
+  msg: string;
+  input?: unknown;
+  ctx?: Record<string, unknown>;
+}
+
 /**
  * Estrutura genérica de resposta de erro vinda da API.
+ *
+ * `detail` pode ser:
+ * - string  → erro simples retornado pelo backend
+ * - array   → erros de validação Pydantic (ex: URL inválida, campo obrigatório)
+ *
+ * Use `getApiErrorDetail()` de `utils/apiErrors` para normalizar sempre para string.
  */
 export interface ApiErrorResponse {
-  detail?: string; // Mensagem detalhada de erro retornada pela API
+  detail?: string | PydanticValidationError[];
 }

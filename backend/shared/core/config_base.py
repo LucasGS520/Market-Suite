@@ -14,24 +14,27 @@ from pydantic_settings import BaseSettings
 
 #Diretório base do projeto (raiz do repositório)
 BASE_DIR = Path(__file__).resolve().parents[2]
+PYTEST_RUNNING = os.getenv("PYTEST_RUNNING") == "1"
+ENV_FILE: Path | None = None
 
-#Nome do serviço que está sendo executado
-SERVICE_NAME = os.getenv("SERVICE_NAME")
+if not PYTEST_RUNNING:
+    #Nome do serviço que está sendo executado
+    SERVICE_NAME = os.getenv("SERVICE_NAME")
 
-#Carrega primeiro as variáveis comuns a todos os serviços
-common_env = BASE_DIR / ".env.common"
-load_dotenv(common_env, override=False)
+    #Carrega primeiro as variáveis comuns a todos os serviços
+    common_env = BASE_DIR / ".env.common"
+    load_dotenv(common_env, override=False)
 
-if SERVICE_NAME:
-    #Arquivo específico do serviço atual
-    ENV_FILE = BASE_DIR / f".env.{SERVICE_NAME}"
-    load_dotenv(ENV_FILE, override=True)
-else:
-    #Retrocompatibilidade: utiliza ``ENV_FILE`` ou ``.env``
-    ENV_FILE = Path(os.getenv("ENV_FILE", ".env"))
-    if not ENV_FILE.is_absolute():
-        ENV_FILE = BASE_DIR / ENV_FILE
-    load_dotenv(ENV_FILE, override=True)
+    if SERVICE_NAME:
+        #Arquivo específico do serviço atual
+        ENV_FILE = BASE_DIR / f".env.{SERVICE_NAME}"
+        load_dotenv(ENV_FILE, override=True)
+    else:
+        #Retrocompatibilidade: utiliza ``ENV_FILE`` ou ``.env``
+        ENV_FILE = Path(os.getenv("ENV_FILE", ".env"))
+        if not ENV_FILE.is_absolute():
+            ENV_FILE = BASE_DIR / ENV_FILE
+        load_dotenv(ENV_FILE, override=True)
 
 __all__ = ["ConfigBase"]
 
@@ -60,8 +63,27 @@ class ConfigBase(BaseSettings):
     REDIS_TTL_IDEMPOTENCY_SECONDS: int = int(os.getenv("REDIS_TTL_IDEMPOTENCY_SECONDS", "300")) #Chaves de idempotência
 
     #Proteção contra tentativas de brute-force
+    # Política por (IP, conta): bloqueia um IP específico atacando uma conta específica.
+    # TTL curto — atacantes transitórios são desbloqueados em 15 min sem impacto em outros usuários.
     BRUTE_FORCE_MAX_ATTEMPTS: int = int(os.getenv("BRUTE_FORCE_MAX_ATTEMPTS", "5")) #Tentativas permitidas
-    BRUTE_FORCE_BLOCK_DURATION: int = int(os.getenv("BRUTE_FORCE_BLOCK_DURATION", "900")) #Bloqueio em segundos
+    BRUTE_FORCE_BLOCK_DURATION: int = int(os.getenv("BRUTE_FORCE_BLOCK_DURATION", "900")) #Bloqueio em segundos (15 min)
+
+    # Política por conta (agregada, todos os IPs): protege contra brute-force distribuído.
+    # Limiar mais alto que por IP pois contabiliza tentativas legítimas de múltiplos dispositivos.
+    # TTL longo — sinaliza comprometimento ativo; reset automático em 1 hora.
+    ACCOUNT_LOCKOUT_MAX_ATTEMPTS: int = int(os.getenv("ACCOUNT_LOCKOUT_MAX_ATTEMPTS", "10")) #Tentativas de qualquer IP
+    ACCOUNT_LOCKOUT_DURATION: int = int(os.getenv("ACCOUNT_LOCKOUT_DURATION", "3600")) #Bloqueio em segundos (1 hora)
+
+    # Política de refresh por usuário autenticado: evita abuso de renovação de token.
+    # 20 renovações em 5 min cobre uso legítimo normal (múltiplas abas, reconnects).
+    REFRESH_RATE_LIMIT_MAX: int = int(os.getenv("REFRESH_RATE_LIMIT_MAX", "20")) #Renovações permitidas na janela
+    REFRESH_RATE_LIMIT_WINDOW: int = int(os.getenv("REFRESH_RATE_LIMIT_WINDOW", "300")) #Janela em segundos (5 min)
+
+    # Política por dispositivo (fingerprint IP+UA): defesa contra bots que rotacionam contas.
+    # Limiar maior que por (IP, conta) pois um dispositivo legítimo pode tentar várias contas.
+    # TTL médio — 30 min bloqueia a janela de ataque automatizado sem punir usuários.
+    DEVICE_BRUTE_FORCE_MAX_ATTEMPTS: int = int(os.getenv("DEVICE_BRUTE_FORCE_MAX_ATTEMPTS", "20")) #Tentativas por dispositivo
+    DEVICE_BRUTE_FORCE_DURATION: int = int(os.getenv("DEVICE_BRUTE_FORCE_DURATION", "1800")) #Bloqueio em segundos (30 min)
 
     #Rate limits para tasks Celery
     SCRAPER_RATE_LIMIT: str = os.getenv("SCRAPER_RATE_LIMIT", "10/m") #Limite de scraping
@@ -111,11 +133,14 @@ class ConfigBase(BaseSettings):
     SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS: int = int(os.getenv("SCRAPER_RATE_LIMIT_COOLDOWN_SECONDS", str(10 * 60))) #Cooldown adicional após falhas de rate limit
 
     #Configurações extras do Pydantic
-    model_config = ConfigDict(
-        env_file=ENV_FILE,
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+    if PYTEST_RUNNING:
+        model_config = ConfigDict(extra="ignore")
+    else:
+        model_config = ConfigDict(
+            env_file=ENV_FILE,
+            env_file_encoding="utf-8",
+            extra="ignore",
+        )
 
     @property
     def redis_url(self) -> str:

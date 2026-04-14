@@ -32,6 +32,16 @@ __all__ = [
 T = TypeVar("T")
 logger = structlog.get_logger("singleflight")
 
+
+def _consume_future_exception(future: asyncio.Future[Any]) -> None:
+    """ Evita warnings de futures com exceção sem alterar o resultado aguardável """
+    if future.cancelled():
+        return
+    try:
+        future.exception()
+    except Exception:
+        return
+
 class _SingleFlightEntry:
     """ Controla o estado compartilhado de uma chamada singleflight """
     
@@ -47,6 +57,7 @@ class _SingleFlightEntry:
                     "AsyncSingleFlight requer um loop de eventos ativo; execute chamadas dentro de corrotinas."
                 ) from fallback_error
         self.future = loop.create_future()
+        self.future.add_done_callback(_consume_future_exception)
         self.created_at: float = time.monotonic()
 
     def is_stale(self, *, now: float, ttl: float) -> bool:

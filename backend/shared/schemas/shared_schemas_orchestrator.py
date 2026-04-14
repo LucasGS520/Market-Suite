@@ -66,6 +66,7 @@ class CollectionPayload(BaseModel):
     force_compare: str | None = Field(default=None, description="Flag para forçar comparação ('true'/'1')")
     collected_at: str | None = Field(default=None, description="ISO timestamp da coleta")
     name: str | None = Field(default=None, description="Nome para logs e depuração")
+    correlation_id: str | None = Field(default=None, description="ID de correlação do ciclo de workflow (preenchido pelo orquestrador)")
 
     @model_validator(mode="before")
     @classmethod
@@ -123,9 +124,17 @@ class DispatchActivityOutput:
 
 @dataclass
 class QueryStatusOutput:
-    """ Resultado da activity query_collection_status."""
+    """ Resultado da activity query_collection_status.
+
+    Campos adicionados em schema_version=2 (retrocompatíveis, default=None):
+    - outcome: outcome bruto do coletor (success/not_modified/error/no_result).
+    - error_class: categoria semântica do erro (transient/structural/domain_empty/neutral).
+      Consumido pelo workflow para observabilidade e sinalização técnica de erros estruturais.
+    """
     completed: bool = False
     last_error: str | None = None
+    outcome: str | None = None
+    error_class: str | None = None
     schema_version: int = 1
 
 @dataclass

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from market_alert.core.config_alert import settings
 from market_alert.core.tokens import hash_token
 from market_alert.models.models_refresh_token import RefreshToken
+from market_alert.infrastructure.security.device_fingerprint import compute_device_fingerprint
 
 
 logger = structlog.get_logger("crud.refresh_tokens")
@@ -45,7 +46,7 @@ def create_refresh_token(
         token_id=str(refresh.id),
         user_id=user_id,
         ip=ip,
-        user_agent=user_agent,
+        fingerprint=compute_device_fingerprint(ip, user_agent),
         expires_at=refresh.expires_at.isoformat()
     )
     return raw_token, refresh

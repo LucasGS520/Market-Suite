@@ -1,4 +1,4 @@
-# Contexto Codex — Organização e Separação Modular (`market_orchestrator`)
+# Claude — Contexto e Objetivos
 
 ## Sobre o Projeto *Market Suite* (`market_suite`)
 **MarketSuite** é uma plataforma de monitoramento e comparação de preços em e-commerce. Usuários cadastram produtos que desejam acompanhar, o sistema coleta informações de preço e disponibilidade automaticamente, compara com concorrentes e dispara notificações quando mudanças significativas são detectadas.
@@ -17,65 +17,21 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Diagnóstico atual - resumo
-O desenho atual está tecnicamente sólido e coerente com um modelo profissional de multiambiente. A governança dos compose foi bem executada: cada arquivo tem papel definido, com fronteiras claras. A operação de homologação está madura e próxima do ideal de reprodutibilidade. 
+### Resumo do Problema e Objetivo da Correção
 
-O principal risco residual está concentrado na consistência dos arquivos de ambiente, o problema agora não é técnico de subida, é governança de configuração. Com muitos arquivos `.env` por ambiente e por serviço.
+- **Problema:** O alinhamento semântico entre coleta, orquestrador e comparação avançou, mas a visibilidade contratual para a UI ainda é insuficiente, mantendo produtos em estado ambíguo como “Coletando dados...” mesmo quando já existe falha classificada.
 
-## Objetivo e Estratégias de Implementação
+- **Sintoma observado:**
+  - Nos logs de staging, a coleta já classifica corretamente falhas como error com reason tipado, por exemplo http_429 e scraper_unavailable, com source_integrity false e semantic_category transient.
+  - A UI continua dependente de heurística fraca para estado de coleta, baseada em ausência de last_scraped_at e preço nulo, sem consumir motivo/estado contratual explícito: productStatus.ts.
+  - A mensagem “Coletando dados...” é exibida sem vínculo com reason e next_retry_at: renderMonitoredPrice.tsx.
 
-**Objetivo**  
-Fechar o contrato de configuração dos arquivos de ambiente para eliminar duplicações, conflito de variáveis e risco de vazamento de segredo, mantendo execução previsível entre development, staging e production.
+- **Objetivo da correção:** Criar Testes que cubram o contrato ponta a ponta para que estado de coleta, motivo e próxima ação sejam persistidos e exibidos de forma explícita ao usuário, eliminando ambiguidade operacional.
 
-**Estratégia de implementação**  
-Executar em 4 blocos:  
-1. Governança de contratos por família de arquivo.  
-2. Higienização dos arquivos ativos sem sufixo.  
-3. Padronização de templates por ambiente.  
-4. Validação operacional com regras automáticas.
-
----
-
-## Erros Comuns Confirmados e Alinhamento Ideal
-
-1. **Erro comum: arquivo ativo vira fonte de modelagem**  
-Descrição: arquivos sem sufixo acabam recebendo edição manual e viram “verdade paralela”.  
-Alinhamento ideal: arquivos sem sufixo são somente artefato ativo gerado, nunca fonte de definição.
-
-2. **Erro comum: variáveis duplicadas em famílias diferentes**  
-Descrição: a mesma variável aparece em common e no serviço, gerando precedência ambígua.  
-Alinhamento ideal: uma variável tem dono único por contrato.
-
-3. **Erro comum: crescimento sem taxonomia**  
-Descrição: novos env entram sem regra e aumentam conflito entre times.  
-Alinhamento ideal: cada família tem escopo fechado e lista permitida de variáveis.
-
-4. **Erro comum: templates não refletem runtime real**  
-Descrição: templates existem, mas execução consome outro conjunto de arquivos.  
-Alinhamento ideal: script de carga gera exatamente os ativos lidos pelos compose.
-
-5. **Erro comum: segredo real em arquivo ativo persistente**  
-Descrição: segredos ficam em ativos como [ .env.common ](.env.common).  
-Alinhamento ideal: ativo local pode existir, mas com política rígida de geração, rotação e validação pré-subida.
-
----
-
-## Ações Corretivas Objetivas por Problema
-
-1. **Segredo em ativo sem controle**  
-Ação: transformar ativos em artefatos de geração e exigir pré-validação obrigatória antes de subir hml.
-
-2. **Duplicação de variável entre arquivos**  
-Ação: consolidar owner único e remover todas as cópias fora do owner.
-
-3. **Conflito de precedência por múltiplos env_file**  
-Ação: publicar ordem oficial de precedência e reduzir sobreposição entre famílias.
-
-4. **Template de ambiente divergente do runtime**  
-Ação: alinhar script de carga para gerar exatamente os arquivos consumidos pelos compose.
-
-5. **Evolução sem padrão**  
-Ação: criar checklist obrigatório de mudança de configuração para toda alteração de env.
+- **Premissas:**
+  - Catálogo semântico central já existe e deve ser a fonte única: `collection_catalog.py`.
+  - Classificação de falhas no coletor já está funcional em staging.
+  - O problema restante é majoritariamente de propagação e apresentação contratual.
 
 ---
 

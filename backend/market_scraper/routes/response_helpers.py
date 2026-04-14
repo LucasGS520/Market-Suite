@@ -47,6 +47,12 @@ def _map_http_download_issue(outcome: PipelineOutcome) -> tuple[UrlIssue, int] |
             message="A URL informada é inválida ou usa protocolo não suportado",
         )
         return issue, status.HTTP_422_UNPROCESSABLE_ENTITY
+    if any(step.message == "anti_bot_page" for step in outcome.steps):
+        issue = UrlIssue(
+            code="anti_bot_page",
+            message="Página de proteção anti-bot detectada; tente novamente mais tarde",
+        )
+        return issue, status.HTTP_429_TOO_MANY_REQUESTS
     return None
 
 def _http_error(
@@ -56,15 +62,22 @@ def _http_error(
     trace_id: str,
     request_logger: BoundLogger,
     log_extra: dict[str, Any] | None = None,
+    suppress_log: bool = False,
 ) -> JSONResponse:
-    """ Monta uma resposta JSON padronizada para erros do endpoint """
-    log_payload = dict(log_extra or {})
-    request_logger.warning(
-        "parse_error",
-        error_code=issue.code,
-        message=issue.message,
-        **log_payload,
-    )
+    """ Monta uma resposta JSON padronizada para erros do endpoint.
+
+    suppress_log=True omite o log interno — usar quando o caller já registrou
+    um log mais detalhado para o mesmo evento (evita entradas duplicadas).
+    """
+    if not suppress_log:
+        log_payload = dict(log_extra or {})
+        request_logger.warning(
+            "parse_error",
+            error_code=issue.code,
+            http_status=status_code,
+            message=issue.message,
+            **log_payload,
+        )
 
     return JSONResponse(
         status_code=status_code,
@@ -75,6 +88,19 @@ def _http_error(
         },
     )
 
+def _derive_no_result_reason(outcome: PipelineOutcome) -> str:
+    """ Deriva motivo explícito quando nenhuma falha de validação foi registrada.
+
+    Distingue três causas: HTML indisponível, domínio sem parser dedicado,
+    e parsers executados mas sem dados extraíveis.
+    """
+    if not outcome.context.html:
+        return "html_unavailable"
+    if outcome.context.data.get("no_domain_parser"):
+        return "no_domain_parser"
+    return "no_parser_data"
+
+
 def build_no_result_response(
     *,
     outcome: PipelineOutcome,
@@ -84,23 +110,29 @@ def build_no_result_response(
     """ Registra o cenário sem resultado e delega resposta padronizada """
     validation_failures = outcome.context.data.get("validation_failures", [])
     last_failure = validation_failures[-1] if validation_failures else None
+    reason_code = (
+        last_failure.get("reason_code") if last_failure
+        else _derive_no_result_reason(outcome)
+    )
     request_logger.warning(
         "parse_no_result",
         url=sanitize_log_data(outcome.context.url),
         source=outcome.context.source,
         error_code="no_result",
-        reason_code=last_failure.get("reason_code") if last_failure else None,
+        reason_code=reason_code,
         reason_message=last_failure.get("reason_message") if last_failure else None,
         step=last_failure.get("step") if last_failure else None,
         parser_name=last_failure.get("parser_name") if last_failure else None,
         dump_path=last_failure.get("dump_path") if last_failure else None,
     )
     issue = UrlIssue(code="no_result", message="Não foi possível extrair dados do produto")
+    # suppress_log=True porque parse_no_result acima já registrou o evento com contexto completo
     return _http_error(
         issue,
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         trace_id=trace_id,
         request_logger=request_logger,
+        suppress_log=True,
     )
 
 def _extract_additional_payload(data: dict[str, Any]) -> dict[str, Any] | None:

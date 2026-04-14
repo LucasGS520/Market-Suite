@@ -73,6 +73,7 @@ def empty_summary(competitors_count: int) -> Dict[str, Any]:
         "comparison_insights": None,
         "discrepancies": [],
         "reason": None,
+        "upstream_reason": None,
     }
 
 def coerce_decimal_fields(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -389,7 +390,10 @@ def apply_summary_defaults(
         no_competitors_available = competitors_count == 0 or summary.get(
             "competitors_with_price_count", 0
         ) == 0
-        if no_competitors_available:
+        #Não sobrescreve com "sem_concorrentes" quando a ausência é causada por contexto upstream já descrito em upstream_reason
+        #O upstream_reason já explica o problema real.
+        has_upstream_context = bool(summary.get("upstream_reason"))
+        if no_competitors_available and not has_upstream_context:
             summary["reason"] = "sem_concorrentes_disponiveis"
 
     return summary

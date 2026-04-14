@@ -118,14 +118,6 @@ def scrape_competitor_product(
 
     if status_code in {400, 403, 422}:
         error_code = response.error_code or "validation_error"
-        if error_code == "no_result":
-            return ScrapeResult(
-                #Evita sinalizar "no_result" quando o scraper já indicou erro de validação
-                status="error",
-                product_id=str(existing.id) if existing else None,
-                http_status=status_code,
-                error_code=error_code,
-            )
         return ScrapeResult(
             status="error",
             product_id=str(existing.id) if existing else None,

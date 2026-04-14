@@ -69,9 +69,38 @@ def health_check():
         status["beat"] = {"status": "error", "detail": "Falha ao obter heartbeat"}
         status["overall"] = "error"
 
-    #Métricas operacionais Redis
+    #Métricas operacionais Redis + alertas antecipados de saturação
     try:
-        status["redis_metrics"] = get_redis_metrics()
+        redis_metrics = get_redis_metrics()
+        status["redis_metrics"] = redis_metrics
+
+        # DLQ com backlog indica tasks falhando permanentemente — degraded imediato
+        dlq_backlog = redis_metrics.get("dlq_backlog")
+        if dlq_backlog is not None and dlq_backlog > 0:
+            status["overall"] = "degraded"
+            status["coordination"] = {
+                "status": "degraded",
+                "detail": f"DLQ com {dlq_backlog} task(s) em falha permanente",
+            }
+
+        # Muitos workflows em WaitingResult pode indicar polling sem resolução (TMPRL1104)
+        queue_processing = redis_metrics.get("queue_processing")
+        if queue_processing is not None and queue_processing > 20:
+            if status.get("overall") == "ok":
+                status["overall"] = "degraded"
+            coord = status.get("coordination", {})
+            coord["queue_processing_high"] = queue_processing
+            status["coordination"] = coord
+
+        # Fila de scraping com backlog alto indica workers não conseguindo acompanhar dispatches
+        scraping_depth = redis_metrics.get("celery_queue_scraping")
+        if scraping_depth is not None and scraping_depth > 50:
+            if status.get("overall") == "ok":
+                status["overall"] = "degraded"
+            coord = status.get("coordination", {})
+            coord["scraping_queue_backlog"] = scraping_depth
+            status["coordination"] = coord
+
     except Exception:
         logger.exception("redis_metrics_collection_failed")
         status["redis_metrics"] = None

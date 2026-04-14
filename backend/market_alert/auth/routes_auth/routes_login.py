@@ -10,6 +10,7 @@ from shared.infra.db import get_db
 from market_alert.schemas.schemas_auth import TokenPairResponse
 from market_alert.auth.services.services_auth import login_user
 from market_alert.auth.utils.cookies_auth import set_refresh_cookie
+from market_alert.infrastructure.security.client_identity import resolve_client_ip
 
 
 logger = structlog.get_logger("route.auth.login")
@@ -23,7 +24,7 @@ def login(
     db: Session = Depends(get_db),
 ):
     """ Autentica o usuário e retorna um JWT. Aplica bloqueio de IP e registro de tentativas """
-    logger.info("login_route_called", ip=request.client.host, email=form_data.username)
+    logger.info("login_route_called", ip=resolve_client_ip(request), email=form_data.username)
     token_pair = login_user(request, db, form_data.username, form_data.password)
     set_refresh_cookie(response, token_pair.refresh_token, request)
     return token_pair

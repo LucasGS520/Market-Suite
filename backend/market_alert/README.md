@@ -341,9 +341,10 @@ As configuracoes combinam a base compartilhada em `shared/core/config_base.py` c
 
 ### Ordem de carregamento de ambiente
 1. `.env.common` fornece parametros compartilhados da suite.
-2. O arquivo indicado por `ENV_FILE` sobrescreve os defaults compartilhados.
+2. O arquivo indicado por `ENV_FILE` sobrescreve os defaults compartilhados fora de teste.
 3. Nos compose ativos, o `market_alert` monta `./backend/market_alert/.env.market_alert` e define `ENV_FILE=.env.market_alert`, de modo que o modulo resolve seu arquivo local de serviço dentro do container.
 4. Variaveis de ambiente exportadas diretamente continuam tendo precedencia no processo.
+5. Em teste (`PYTEST_RUNNING=1`), a carga de `.env` e desabilitada; a suite usa somente defaults Python e overrides declarados em `tests/conftest.py`.
 
 ### Categorias de variaveis
 | Categoria | Variaveis relevantes |
@@ -410,6 +411,41 @@ SCRAPER_SERVICE_URL=http://market_scraper:8000
 ```
 
 ---
+
+## Suite de Testes
+
+### Estrutura atual
+- `tests/unit`: regras de dominio, auth, users, products, collectors, comparisons, security e startup validation.
+- `tests/integration`: contratos HTTP e fluxos internos controlados com `TestClient`, `dependency_overrides` e stubs/fakes para dependencias externas.
+- `tests/factories`: payload builders reutilizados pela suite.
+- `tests/conftest.py`: defaults de ambiente em Python, fixtures compartilhadas, reload de settings e utilitarios comuns.
+
+### Politica de bootstrap
+- A suite nao usa `.env.market_alert.test`.
+- `PYTEST_RUNNING=1` e o unico sinal global de modo teste.
+- Nenhum teste deve depender de `ENV_FILE` ou de leitura implicita de `.env` operacional.
+- Defaults de teste de `DATABASE_URL`, Redis, Temporal, cookies e logging ficam centralizados em [`tests/conftest.py`](tests/conftest.py).
+
+### Marcacoes e execucao
+- `unit`: isolamento sem Redis, banco, HTTP, Celery ou Temporal reais.
+- `integration`: contratos HTTP e fluxos internos com infraestrutura controlada.
+- `integration_high_cost`: subconjunto que valida caminhos mais caros de Temporal.
+- Configuracao canônica do `pytest`: `backend/pytest.ini` unico para todo o backend. Nao existe `pytest.ini` local por modulo.
+
+Executar a partir da raiz do repositorio `market_suite`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests/unit -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests/integration -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests -m "not integration_high_cost" -q
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_alert/tests --cov=market_alert --cov-report=term -q
+```
+
+### Regras de manutencao
+- Toda mudanca em contratos HTTP, auth, users, coleta, comparacao ou notificacao deve atualizar ao menos uma suite relevante.
+- Fixtures de integracao devem continuar controladas por `dependency_overrides`, monkeypatch e doubles previsiveis.
+- A suite deve permanecer desacoplada do filesystem para configuracao de teste.
 
 ## Fronteiras de Domínio
 

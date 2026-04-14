@@ -28,6 +28,8 @@ from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
+from shared.schemas.collection_catalog import NEUTRAL_REASONS
+
 from market_alert.core.config_alert import settings
 from market_alert.models import User
 from market_alert.models.models_comparisons import PriceComparisonSummary
@@ -53,6 +55,14 @@ from market_alert.comparisons.utils.snapshot_comparator import extract_material_
 
 
 logger = structlog.get_logger("comparison_service")
+
+#Mapeamento de razão interna de inatividade → upstream_reason no catálogo de comparação.
+#Permite que consumidores distingam falha de coleta de produto genuinamente inativo.
+_INACTIVE_REASON_TO_UPSTREAM: dict[str, str] = {
+    "paused": "ignored_due_to_inactive",
+    "monitored_unavailable": "skipped_due_to_monitored_unavailable",
+    "monitored_without_price": "upstream_collection_failed",
+}
 
 #Re-exporta summarize_comparison para consumidores legados
 #(services_products.py e outros que importam daqui)
@@ -280,14 +290,39 @@ def run_price_comparison(
 
     inactive_reason = resolve_monitored_inactive_reason(monitored)
     if inactive_reason:
+        # Propaga o reason tipado da última coleta como upstream_reason específico,
+        # permitindo que o resumo de comparação indique "http_429" ou "challenge_detected"
+        # em vez do genérico "upstream_collection_failed".
+        # Reasons neutros (lock_skipped, paused, etc.) não representam falha do produto
+        # e por isso são descartados — o mapeamento interno de _INACTIVE_REASON_TO_UPSTREAM
+        # já cobre esses casos com semântica adequada.
+        _last_reason = getattr(monitored, "last_collection_reason", None)
+        _upstream_reason = (
+            _last_reason
+            if _last_reason and _last_reason not in NEUTRAL_REASONS
+            else None
+        )
         logger.info(
             "comparison_skipped_inactive_monitored",
             monitored_id=str(monitored_id),
             reason=inactive_reason,
+            upstream_reason=_upstream_reason,
             competitors_count=total_competitors,
         )
         return _persist_inactive_comparison(
-            db, monitored=monitored, reason=inactive_reason, total=total_competitors
+            db,
+            monitored=monitored,
+            reason=inactive_reason,
+            total=total_competitors,
+            upstream_reason=_upstream_reason,
+        )
+
+    if monitored.current_price is None:
+        logger.info(
+            "comparison_no_monitored_price",
+            monitored_id=str(monitored_id),
+            competitors_count=total_competitors,
+            note="competitiveness_status will be None without a monitored reference price",
         )
 
     logger.info(
@@ -321,14 +356,23 @@ def _persist_inactive_comparison(
     monitored: Any,
     reason: str,
     total: int,
+    upstream_reason: str | None = None,
 ) -> Dict[str, Any]:
-    """ Persiste comparação stub para monitorado inativo e retorna resultado """
+    """ Persiste comparação stub para monitorado inativo/sem dados e retorna resultado.
+
+    upstream_reason distingue falha upstream de produto genuinamente inativo:
+    - skipped_due_to_monitored_unavailable: produto indisponível confirmado.
+    - upstream_collection_failed: preço ausente por falha de coleta anterior.
+    - ignored_due_to_inactive: produto pausado/inativo intencionalmente.
+    """
+    resolved_upstream = upstream_reason or _INACTIVE_REASON_TO_UPSTREAM.get(reason)
     payload_stub = {
         "monitored_price": None,
         "discrepancies": [],
         "lowest_competitor": None,
         "highest_competitor": None,
         "reason": reason,
+        "upstream_reason": resolved_upstream,
         "ignored_due_to_inactive": True,
     }
     now = datetime.now(timezone.utc)
@@ -349,6 +393,8 @@ def _persist_inactive_comparison(
     summary_payload["competitiveness_status"] = None
     summary_payload["comparison_insights"] = None
     summary_payload["ignored_due_to_inactive"] = True
+    if resolved_upstream:
+        summary_payload["upstream_reason"] = resolved_upstream
     encoded_summary = jsonable_encoder(summary_payload)
     upsert_price_comparison_summary(db, monitored.id, comparison.id, encoded_summary)
     return {

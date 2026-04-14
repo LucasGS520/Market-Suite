@@ -1,0 +1,21 @@
+# Dependencias de teste compartilhadas do backend
+# Instale este arquivo apenas em ambientes de desenvolvimento/CI.
+
+# Core do pytest
+pytest==8.3.5
+pytest-asyncio==0.26.0
+pytest-cov==6.1.1
+pytest-xdist==3.6.1
+pytest-mock==3.14.0
+coverage==7.8.0
+
+# Fakes, factories e infraestrutura de teste
+faker==37.1.0
+factory-boy==3.3.3
+pytest-postgresql==7.0.2
+fakeredis==2.28.1
+responses==0.25.7
+
+# Utilitarios de teste especificos de modulos
+respx==0.22.0
+freezegun==1.5.1

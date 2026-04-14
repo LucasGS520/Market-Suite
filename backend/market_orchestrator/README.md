@@ -31,7 +31,7 @@ market_orchestrator/
 |-- schemas/                    # Dataclasses de input/signals/snapshot/policy
 |-- workflow.py                 # MonitoredProductWorkflow (deterministico)
 |-- worker.py                   # Bootstrap do Temporal Worker
-|-- requirements-orchestrator.txt
+|-- requirements-market-orchestrator.txt
 `-- .env.market_orchestrator
 ```
 
@@ -153,12 +153,13 @@ Todas as activities retornam tipos tipados de `shared.schemas.shared_schemas_orc
 ---
 
 ## Configuração
-As configurações do módulo estão em [`core/config_orchestrator.py`](core/config_orchestrator.py), carregadas por `OrchestratorSettings` com `env_file=.env.market_orchestrator`.
+As configurações do módulo estão em [`core/config_orchestrator.py`](core/config_orchestrator.py), carregadas por `OrchestratorSettings`.
 
 ### Ordem de carregamento
 1. Defaults definidos em codigo.
-2. `.env.market_orchestrator` sobrescreve defaults quando presente.
+2. Fora de teste, `.env.market_orchestrator` sobrescreve defaults quando presente.
 3. Variáveis exportadas no ambiente do processo tem precedencia final.
+4. Em teste (`PYTEST_RUNNING=1`), nenhum `.env` e carregado pelo modulo; a suite usa apenas defaults Python e overrides declarados em `tests/conftest.py`.
 
 > **Importante — Docker:** o `env_file` usa caminho relativo e pode não ser encontrado dependendo do working directory do container. Em ambiente Docker, declare `TEMPORAL_HOST` e `TEMPORAL_PORT` diretamente no ambiente do processo. A forma canônica é adicioná-los em `.env.common` (carregado por todos os serviços via docker-compose). Variáveis de processo sempre têm precedência sobre o `env_file`.
 >
@@ -206,6 +207,56 @@ ACTIVITY_FETCH_POLICY_TIMEOUT_SECONDS=15
 SNAPSHOT_KEY_TEMPLATE=workflow:snapshot:{monitored_id}
 SNAPSHOT_TTL_SECONDS=86400
 ```
+
+---
+
+## Suite de Testes
+
+### Estrutura da suite
+```text
+market_orchestrator/tests/
+|-- conftest.py                 # defaults de ambiente, reload de settings, paths e markers
+|-- unit/
+|   |-- conftest.py             # fixtures locais do workflow e helpers fakes
+|   |-- test_workflow_core.py
+|   |-- test_workflow_signals.py
+|   |-- test_workflow_contracts.py
+|   |-- test_dispatch_activity.py
+|   |-- test_status_activity.py
+|   |-- test_policy_activity.py
+|   `-- test_snapshot_activity.py
+`-- integration/
+    |-- conftest.py             # WorkflowEnvironment, fixtures de ids e inputs
+    |-- test_worker_bootstrap.py
+    `-- test_temporal_integration.py
+```
+
+### Marcacoes e convencoes
+- `@pytest.mark.unit`: testes isolados sem I/O real, sem banco real, sem Redis real e sem servidor Temporal.
+- `@pytest.mark.integration`: testes de contrato e fluxo com infraestrutura controlada.
+- `@pytest.mark.integration_high_cost`: subconjunto que sobe `temporal-test-server` do SDK e por isso deve ficar fora da execucao rapida padrao.
+- Arquivos seguem `test_<area>.py`; fixtures compartilhadas ficam em `conftest.py`; casos locais do modulo ficam abaixo de `tests/unit` e `tests/integration`.
+
+### Fixtures e decisoes de isolamento
+- `tests/conftest.py` centraliza `orchestrator_test_env_defaults`, `env_override`, `reload_orchestrator_modules` e `fresh_orchestrator_settings` para manter config previsivel entre testes.
+- A suite nao usa `.env.test` nem `ENV_FILE` dedicado. O bootstrap de teste e controlado apenas por `PYTEST_RUNNING=1`, com defaults locais em Python.
+- `tests/unit/conftest.py` concentra `workflow_instance`, `workflow_policy`, IDs validos e helpers para fakes de sessao/row.
+- Unit usa monkeypatch e doubles para `workflow.execute_activity`, `SessionLocal`, Redis e dispatcher Celery.
+- Integration usa `temporalio.testing.WorkflowEnvironment.start_time_skipping()` para validar worker, workflow e client sem depender de Temporal externo do projeto.
+- O boundary do Temporal serializa payloads de activity/query como `dict` em alguns caminhos; o workflow e o client normalizam esses retornos explicitamente para manter o contrato tipado.
+
+### Comandos recomendados
+- Configuracao canônica do `pytest`: `backend/pytest.ini` unico para todo o backend. Nao existe `pytest.ini` local por modulo.
+- Suite unit do modulo: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests/unit -q`
+- Suite de integracao do modulo: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests/integration -q`
+- Execucao completa do modulo sem cenarios caros: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests -m "not integration_high_cost" -q`
+- Execucao do subconjunto caro de Temporal: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests -m integration_high_cost -q`
+- Cobertura do modulo: `.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_orchestrator/tests --cov=market_orchestrator --cov-report=term -q`
+
+### Observacoes operacionais
+- A descoberta oficial do backend fica em [`../pytest.ini`](../pytest.ini) e inclui explicitamente `market_orchestrator/tests`.
+- O `pytest.ini` fixa `asyncio_default_fixture_loop_scope=function` para evitar comportamento implicito diferente entre versoes do `pytest-asyncio`.
+- Na primeira execucao dos testes de integracao com `WorkflowEnvironment`, o SDK pode precisar baixar o `temporal-test-server` se ele ainda nao estiver em cache local.
 
 ---
 

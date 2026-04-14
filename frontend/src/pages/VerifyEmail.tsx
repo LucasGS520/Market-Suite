@@ -5,9 +5,8 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, Link as RouterLink } from 'react-router-dom';
 import { Alert, Box, Button, CircularProgress, Container, Paper, Stack, Typography } from '@mui/material';
-import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
-import { ApiErrorResponse } from '../types';
+import { getApiErrorDetail } from '../utils/apiErrors';
 
 /**
  * Página que confirma o token de verificação de email e mantém o usuário autenticado
@@ -34,8 +33,7 @@ const VerifyEmail: React.FC = () => {
         await authService.confirmEmailVerification(token);
         setStatus('success');
       } catch (error) {
-        const axiosError = error as AxiosError<ApiErrorResponse>;
-        setErrorMessage(axiosError.response?.data?.detail || 'Não foi possível verificar o e-mail.');
+        setErrorMessage(getApiErrorDetail(error, 'Não foi possível verificar o e-mail.'));
         setStatus('error');
       }
     };

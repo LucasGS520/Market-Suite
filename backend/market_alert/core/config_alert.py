@@ -236,6 +236,9 @@ class Settings(ConfigBase):
     ONBOARDING_ENQUEUE_STAGGER_SECONDS: float = float(
         os.getenv("ONBOARDING_ENQUEUE_STAGGER_SECONDS", "0.5")
     ) #Atraso leve para diluir enfileiramento inicial
+    COLLECTION_DISPATCH_COOLDOWN_SECONDS: int = int(
+        os.getenv("COLLECTION_DISPATCH_COOLDOWN_SECONDS", "30")
+    ) #Janela mínima entre dispatches do mesmo produto (anti-burst); 0 desabilita
 
     #Configurações da camada de notificações
     DEFAULT_COOLDOWN_SECONDS: int = int(
@@ -288,6 +291,24 @@ class Settings(ConfigBase):
     REGISTRATION_MAX_PER_HOUR: int = int(
         os.getenv("REGISTRATION_MAX_PER_HOUR", "5")
     ) #Limite de cadastros por hora por IP
+
+    # Rate limits para endpoints sensíveis de autenticação
+    # Cada política é independente — uma conta não impacta outra.
+    PASSWORD_RESET_REQUEST_MAX_PER_HOUR: int = int(
+        os.getenv("PASSWORD_RESET_REQUEST_MAX_PER_HOUR", "5")
+    ) #Limite de solicitações de reset por hora por (IP, email)
+    PASSWORD_RESET_CONFIRM_MAX_ATTEMPTS: int = int(
+        os.getenv("PASSWORD_RESET_CONFIRM_MAX_ATTEMPTS", "10")
+    ) #Limite de confirmações de reset por janela por IP
+    PASSWORD_RESET_CONFIRM_WINDOW_SECONDS: int = int(
+        os.getenv("PASSWORD_RESET_CONFIRM_WINDOW_SECONDS", "900")
+    ) #Janela em segundos para confirmações (15 min)
+    CHANGE_PASSWORD_MAX_PER_HOUR: int = int(
+        os.getenv("CHANGE_PASSWORD_MAX_PER_HOUR", "5")
+    ) #Limite de trocas de senha por hora por usuário autenticado
+    CHANGE_EMAIL_MAX_PER_HOUR: int = int(
+        os.getenv("CHANGE_EMAIL_MAX_PER_HOUR", "3")
+    ) #Limite de trocas de e-mail por hora por usuário autenticado
 
     @model_validator(mode="after")
     def _validate_required_secrets(self) -> "Settings":

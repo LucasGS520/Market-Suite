@@ -1,6 +1,20 @@
 """ Configurações centralizadas do módulo market_orchestrator """
+import os
+from pathlib import Path
+
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_ENV_FILE = Path("market_orchestrator") / ".env.market_orchestrator"
+PYTEST_RUNNING = os.getenv("PYTEST_RUNNING") == "1"
+ENV_FILE: Path | None = None
+
+if not PYTEST_RUNNING:
+    ENV_FILE = Path(os.getenv("ENV_FILE", str(DEFAULT_ENV_FILE)))
+    if not ENV_FILE.is_absolute():
+        ENV_FILE = BACKEND_DIR / ENV_FILE
 
 
 class OrchestratorSettings(BaseSettings):
@@ -18,8 +32,10 @@ class OrchestratorSettings(BaseSettings):
     WORKFLOW_SIGNAL_COUNT_LIMIT: int = 500
 
     # --- Workflow: polling de resultado de coleta ---
-    COLLECTION_RESULT_TIMEOUT_SECONDS: int = 1800  # 30 min
-    COLLECTION_POLL_INTERVAL_SECONDS: int = 30
+    # Custo real: coleta HTTP ~10-60s + lock retries (até ~120s) + margem = 300s máximo.
+    # 1800s (30 min) causava TMPRL1104 ao manter o workflow em WaitingResult por tempo excessivo.
+    COLLECTION_RESULT_TIMEOUT_SECONDS: int = 300  # 5 min
+    COLLECTION_POLL_INTERVAL_SECONDS: int = 15  # reduzido de 30s para detectar conclusão mais rápido
 
     # --- Retry policy padrão para activities ---
     RETRY_MAX_ATTEMPTS: int = 5
@@ -73,7 +89,14 @@ class OrchestratorSettings(BaseSettings):
     def temporal_target(self) -> str:
         return f"{self.TEMPORAL_HOST}:{self.TEMPORAL_PORT}"
 
-    model_config = {"env_file": ".env.market_orchestrator", "extra": "ignore"}
+    if PYTEST_RUNNING:
+        model_config = {"extra": "ignore"}
+    else:
+        model_config = {
+            "env_file": ENV_FILE,
+            "env_file_encoding": "utf-8",
+            "extra": "ignore",
+        }
 
 
 settings = OrchestratorSettings()

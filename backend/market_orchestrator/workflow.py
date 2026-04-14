@@ -25,6 +25,10 @@ with workflow.unsafe.imports_passed_through():
         PolicyActivityOutput,
         QueryStatusOutput,
     )
+    from shared.schemas.collection_catalog import (
+        ERROR_CLASS_STRUCTURAL,
+        ERROR_CLASS_TRANSIENT,
+    )
 
     from market_orchestrator.core.config_orchestrator import settings
     from market_orchestrator.enums.enums_workflow import WorkflowState
@@ -100,6 +104,10 @@ class MonitoredProductWorkflow:
                 self._state = WorkflowState.WaitingTimer
         else:
             self._state = WorkflowState.WaitingTimer
+
+        resumed_attempt_count = input.bootstrap_flags.get("attempt_count")
+        if isinstance(resumed_attempt_count, int) and resumed_attempt_count >= 0:
+            self._attempt_count = resumed_attempt_count
 
         await self._run_loop()
 
@@ -233,10 +241,30 @@ class MonitoredProductWorkflow:
                 start_to_close_timeout=_QUERY_STATUS_TIMEOUT,
                 retry_policy=_DEFAULT_RETRY,
             )
+            if isinstance(result, dict):
+                result = QueryStatusOutput(**result)
 
             if result.completed:
-                self._attempt_count = 0
-                self._state = WorkflowState.WaitingTimer
+                if result.last_error:
+                    #Falha tipada — vai para Backoff.
+                    #error_class distingue transitório (espera-se correção) de estrutural (requer intervenção humana — sinalização técnica via log).
+                    error_class = result.error_class or ERROR_CLASS_TRANSIENT
+                    if error_class == ERROR_CLASS_STRUCTURAL:
+                        logger.warning(
+                            "collection_structural_error",
+                            monitored_id=self._monitored_id,
+                            reason=result.last_error,
+                            error_class=error_class,
+                            attempt_count=self._attempt_count,
+                            note="Erro estrutural requer revisão do parser ou URL — backoff aplicado",
+                        )
+                    self._last_error = result.last_error
+                    self._state = WorkflowState.Backoff
+                else:
+                    #Sucesso, not_modified ou neutral (lock/pausa/inativo) — retoma timer
+                    self._attempt_count = 0
+                    self._last_error = None
+                    self._state = WorkflowState.WaitingTimer
                 await self._persist_snapshot()
                 return
 
@@ -245,7 +273,7 @@ class MonitoredProductWorkflow:
 
             await workflow.sleep(timedelta(seconds=_COLLECTION_POLL_INTERVAL_SECONDS))
 
-        #Timeout — vai para backoff
+        #Timeout de polling — vai para backoff para tentar no próximo ciclo
         self._last_error = "collection_result_timeout"
         self._state = WorkflowState.Backoff
 

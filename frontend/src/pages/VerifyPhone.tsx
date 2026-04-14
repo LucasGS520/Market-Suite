@@ -14,10 +14,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { AxiosError } from 'axios';
 import { authService } from '../services/authService';
 import { useAuth } from '../hooks/useAuth';
-import { ApiErrorResponse } from '../types';
+import { getApiErrorDetail } from '../utils/apiErrors';
 import ResendButton from '../components/ResendButton';
 
 const VerifyPhone: React.FC = () => {
@@ -54,8 +53,7 @@ const VerifyPhone: React.FC = () => {
       await authService.verifyPhoneOtp(userId, otp);
       setSuccess(true);
     } catch (err) {
-      const axiosError = err as AxiosError<ApiErrorResponse>;
-      setError(axiosError.response?.data?.detail || 'Não foi possível validar o código.');
+      setError(getApiErrorDetail(err, 'Não foi possível validar o código.'));
     } finally {
       setIsLoading(false);
     }
@@ -68,8 +66,7 @@ const VerifyPhone: React.FC = () => {
     try {
       await authService.requestPhoneOtp();
     } catch (err) {
-      const axiosError = err as AxiosError<ApiErrorResponse>;
-      setError(axiosError.response?.data?.detail || 'Não foi possível reenviar o código.');
+      setError(getApiErrorDetail(err, 'Não foi possível reenviar o código.'));
       throw err;
     }
   };
