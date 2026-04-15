@@ -1,5 +1,5 @@
 # Market Scraper
-Serviço FastAPI responsavel por transformar URLs de produto em um `ParserResponse` enxuto (`name`, `current_price`, `currency`, `availability`, `last_status`, `url`, `source`, `payload`). O foco atual e estabilidade em HTML estatico, sem renderizacao de JavaScript. O `market_alert` consome este servico via HTTP e não replica regras de parsing.
+Serviço FastAPI responsavel por transformar URLs de produto em um `ParserResponse` enxuto (`name`, `current_price`, `currency`, `availability`, `last_status`, `url`, `source`, `payload`). Utiliza aquisição de HTML em cascata com TLS impersonation (curl_cffi) e fallback Playwright para páginas com JavaScript, atingindo alta taxa de sucesso em Mercado Livre e marketplaces similares. O `market_alert` consome este servico via HTTP e não replica regras de parsing.
 
 ## Relacoes e Referencias
 - Visão arquitetural da suite: [`../README.md`](../README.md)
@@ -8,6 +8,7 @@ Serviço FastAPI responsavel por transformar URLs de produto em um `ParserRespon
 
 ## Principais Responsabilidades
 - **Normalizar e validar URLs** (formato, esquema e host publico) antes de tentar scraping.
+- **Adquirir HTML em cascata** (curl_cffi → Playwright) com classificação automática de resposta e rate limiting adaptativo.
 - **Executar pipeline sequencial de parsing** com estrategia por etapas e parada no primeiro payload valido.
 - **Expor API REST sincrona** para parse (`POST /scraper/parse`) e health check (`GET /health/ping`).
 - **Aplicar cache HTTP condicional** com `ETag`/`Last-Modified` e suporte a `304 Not Modified`.
@@ -16,13 +17,13 @@ Serviço FastAPI responsavel por transformar URLs de produto em um `ParserRespon
 ```text
 market_scraper/
 |-- core/                     # Configuracao do servico
-|-- main.py                   # Bootstrap FastAPI e registro de rotas
+|-- infra/                    # Infraestrutura de aquisição (rate limiter adaptativo)
+|-- main.py                   # Bootstrap FastAPI, lifespan Playwright e registro de rotas
 |-- routes/                   # Endpoints HTTP e mapeamento de respostas
-|-- services/                 # Orquestracao de pipeline e etapas
+|-- services/                 # Orquestracao de pipeline, etapas, Playwright pool e classificador
 |-- parsers/                  # Parsers por estrategia e por dominio
-|-- utils/                    # HTTP, cache, robots, DNS, retries, headers
+|-- utils/                    # HTTP (curl_cffi), cache, robots, DNS, retries, headers
 |-- schemas/                  # Schemas locais de apoio
-|-- scripts/                  # Scripts operacionais/diagnostico
 └──  tests/                   # Suite de testes
 ```
 
@@ -58,11 +59,14 @@ As rotas publicas são registradas em [`main.py`](main.py), com foco em um endpo
 - [`services/availability_inference.py`](services/availability_inference.py) infere disponibilidade e `last_status` em cenarios HTTP sem payload de produto.
 
 ### Infraestrutura de Scraping e Cache
-- [`utils/http_download.py`](utils/http_download.py) faz download com `httpx`, retries, limite de redirects, limite de tamanho e headers controlados.
+- [`utils/http_download.py`](utils/http_download.py) implementa `CurlffiHTTPClient` com TLS impersonation Chrome124 via `curl_cffi`. Mapeia erros para `httpx.*` equivalentes para compatibilidade com `FetchHTMLStep` legado.
+- [`services/response_classifier.py`](services/response_classifier.py) classifica cada resposta em `SUCCESS`, `SCALE` ou `REJECT` com base em status HTTP, tamanho do HTML e padrões anti-bot.
+- [`services/playwright_pool.py`](services/playwright_pool.py) gerencia pool singleton de Playwright com semáforo de concorrência, stealth injection e bloqueio de recursos pesados.
+- [`infra/adaptive_rate_limiter.py`](infra/adaptive_rate_limiter.py) rastreia taxa de sucesso por hostname no Redis e sugere camada de aquisição. Ativa cooldown automático em cenários de 429 recorrente.
 - [`utils/http_retry.py`](utils/http_retry.py) aplica politicas de retry com backoff para alvos HTTP.
 - [`utils/http_utils.py`](utils/http_utils.py) resolve DNS com cache e bloqueia hosts/IPs não publicos (protecao SSRF).
 - [`utils/robots.py`](utils/robots.py) valida `robots.txt` antes da coleta via Redis operacional (db 2); fallback atual e restritivo (bloqueia quando não consegue validar o parser).
-- Rate limiting por host usa chaves com prefixo `rate:scraping:{host}` no Redis operacional (db 2), isolado do broker Celery (db 0) e do result backend (db 1).
+- Rate limiting adaptativo usa chaves com prefixo `rate:ml:{host}` no Redis operacional (db 2), isolado do broker Celery (db 0) e do result backend (db 1).
 - [`utils/cache.py`](utils/cache.py), [`utils/singleflight.py`](utils/singleflight.py) e [`utils/conditional_payload.py`](utils/conditional_payload.py) suportam cache em memória, coalescing e revalidação condicional HTTP.
 
 #### Endpoints - Market Scraper
@@ -77,25 +81,130 @@ As rotas publicas são registradas em [`main.py`](main.py), com foco em um endpo
 
 ---
 
+## Arquitetura de Aquisição HTML (Camadas 1–3)
+
+O serviço utiliza uma estratégia de aquisição em cascata para maximizar a taxa de sucesso em marketplaces com proteção anti-bot. A lógica de escalonamento é centralizada em `CascadeFetchStep`.
+
+### Camadas de Aquisição
+
+| Camada | Tecnologia | Latência típica | Uso |
+|--------|-----------|-----------------|-----|
+| **1** | `curl_cffi` (Chrome124 TLS impersonation) | ~125 ms | 80–90 % das requisições |
+| **2** | Proxy residencial *(pós-MVP)* | — | Reservado |
+| **3** | Playwright (Chromium headless) | 5–10 s | Fallback para JS e anti-bot |
+
+### Fluxo de Decisão (CascadeFetchStep)
+
+```
+POST /scraper/parse
+        │
+        ▼
+ rate_limiter.should_allow(host)
+        │ blocked → 429 rate_limiter_cooldown
+        │ allowed ─────────────────────────────────────────────────────────┐
+        ▼                                                                  │
+ robots.is_allowed(url)                                                    │
+        │ bloqueado → 403 unsupported_by_robots                            │
+        ▼                                                                  │
+ cache.get(url) ──── hit ──► 200 html_from_cache                           │
+        │ miss                                                             │
+        ▼                                                                  │
+ download_html() [curl_cffi, singleflight]                                 │
+        │                                                                  │
+        ▼                                                                  │
+ ResponseClassifier.classify(status, html, error)                          │
+        │                                                                  │
+        ├── SUCCESS ──► cache.set + update_history(success)                │
+        │               ► 200 html_fetched_via_curl_cffi                   │
+        │                                                                  │
+        ├── REJECT ───► update_history(failure) ► 4xx/5xx                  │
+        │                                                                  │
+        └── SCALE ────► update_history(failure, layer=1)                   │
+                        │                                                  │
+                        ▼                                                  │
+                playwright_pool.fetch_html()                               │
+                        │                                                  │
+                        ├── sucesso ──► cache.set                          │
+                        │              update_history(success,3)           │
+                        │              ► 200 html_fetched_via_playwright   |
+                        │                                                  │
+                        └── erro ─────► update_history(failure,3)          |
+                                        ► erro mapeado                     │
+                                                                           │
+        ◄──────────────────────────────────────────────────────────────────┘
+```
+
+### Classificador de Resposta (`ResponseClassifier`)
+
+Centraliza as regras de escalonamento — sem lógica espalhada nas etapas:
+
+| Condição | Ação | Próxima camada |
+|----------|------|----------------|
+| 200 + HTML válido (≥ 1 KB, sem anti-bot) | `SUCCESS` | — |
+| 200 + HTML vazio ou anti-bot detectado | `SCALE` | 3 |
+| 429 | `SCALE` | 3 (layer 2 reservado pós-MVP) |
+| 403 / 405 / 5xx | `SCALE` | 3 |
+| 404 / 410 | `REJECT` | — |
+| Timeout / ConnectionError | `SCALE` | 3 |
+
+Padrões anti-bot detectados: `suspicious-traffic-frontend` (Mercado Livre), `challenges.cloudflare.com`, `__cf_chl`, `__cf_bm`, `recaptcha/api.js`, `_pxcaptcha`.
+
+### Rate Limiter Adaptativo (`AdaptiveRateLimiter`)
+
+Rastreia taxa de sucesso por hostname com histórico em Redis (db 2) e ativa cooldown automático quando a taxa cai abaixo dos limiares.
+
+**Limiares de decisão:**
+
+| Taxa de sucesso | Camada sugerida | Ação de cooldown |
+|-----------------|-----------------|-----------------|
+| ≥ 90 % | 1 (curl_cffi) | — |
+| 50 – 89 % | 3 (Playwright) | — |
+| 20 – 49 % + 429 recorrente | 3 | Cooldown 300 s |
+| < 20 % | rejeitar | Cooldown 3600 s |
+
+**Chaves Redis** (prefixo `rate:ml:{hostname}`, TTL 1h, db 2):
+
+| Chave | Tipo | Conteúdo |
+|-------|------|----------|
+| `rate:ml:{host}:success_count` | INCR | Requisições bem-sucedidas |
+| `rate:ml:{host}:failure_count` | INCR | Requisições com erro |
+| `rate:ml:{host}:cooldown_until` | SET | Timestamp Unix (float) de fim do cooldown |
+| `rate:ml:{host}:last_layer` | SET | Camada usada na última requisição |
+| `rate:ml:{host}:last_error_code` | SET | Último código de erro (`429`, `timeout`, …) |
+
+Quando Redis está indisponível, o limiter usa fallback in-memory (não persistente) — degradação segura sem interromper o pipeline.
+
+### Playwright Pool
+
+- **Pool singleton** (`playwright_pool`) inicializado no lifespan do FastAPI.
+- **Semáforo** limita a `PLAYWRIGHT_MAX_CONCURRENT` contexts simultâneos (padrão: 5 → máx ~30 req/min).
+- **Stealth**: injeta script JS que oculta `navigator.webdriver`, adiciona plugins Chrome e define `navigator.languages = ['pt-BR', 'pt', 'en-US', 'en']`.
+- **Bloqueio de recursos**: imagens, CSS, fontes e mídias são abortados (~40 % menos RAM por contexto).
+- **Memória**: ~200 MB por context Playwright. Use `--shm-size=2g` no Docker ou configure `PLAYWRIGHT_DISABLE_DEV_SHM=1`.
+
+---
+
 ## Pipeline de Parsing
 O pipeline sequencial e registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado por [`services/synergic_pipeline.py`](services/synergic_pipeline.py). A execução para no primeiro `StepResult.success` com payload valido.
 
-1. **FetchHTMLStep**: valida `robots.txt`, consulta cache HTML, aplica singleflight para coalescer requests simultaneas e baixa HTML quando necessario.
-2. **JsonLdParserStep**: tenta extrair dados estruturados (`application/ld+json`) com `extruct`.
-3. **HtmlMetadataParserStep**: tenta extrair nome/preco/metadados com BeautifulSoup.
-4. **DomainSpecificParserStep**: aplica parser dedicado quando o dominio bate com mapeamento conhecido.
-5. **GenericFallbackParserStep**: ultima tentativa com heuristicas genericas.
+1. **CascadeFetchStep**: rate limiter → robots.txt → cache → curl_cffi (Camada 1) → classificador → Playwright (Camada 3 se necessário).
+2. **AntiBotDetectionStep**: detecta páginas de challenge remanescentes e limpa `context.html` para evitar parsing de páginas inválidas.
+3. **JsonLdParserStep**: tenta extrair dados estruturados (`application/ld+json`) com `extruct`.
+4. **HtmlMetadataParserStep**: tenta extrair nome/preco/metadados com BeautifulSoup.
+5. **DomainSpecificParserStep**: aplica parser dedicado quando o dominio bate com mapeamento conhecido.
+6. **GenericFallbackParserStep**: ultima tentativa com heuristicas genericas.
 
 Tempo maximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline: `SCRAPER_PIPELINE_TIMEOUT_SECONDS`.
 
 ### Mapa do Pipeline de Parsing
 | Ordem | Etapa | Objetivo | Possivel saida |
 |-------|-------|----------|----------------|
-| `1` | `FetchHTMLStep` | Obter HTML (ou inferir indisponibilidade por status HTTP) | `success`, `error`, `empty` |
-| `2` | `JsonLdParserStep` | Extrair dados estruturados com maior confiabilidade | `success` com payload ou `empty` |
-| `3` | `HtmlMetadataParserStep` | Ler metadados e estrutura basica da pagina | `success` com payload ou `empty` |
-| `4` | `DomainSpecificParserStep` | Aplicar regras dedicadas por dominio quando disponiveis | `success` com payload ou `empty` |
-| `5` | `GenericFallbackParserStep` | Aplicar heuristicas genericas como ultimo fallback | `success` com payload ou `empty` |
+| `1` | `CascadeFetchStep` | Obter HTML em cascata (Camada 1 → 3) ou inferir indisponibilidade | `success`, `error` |
+| `2` | `AntiBotDetectionStep` | Detectar challenge pages remanescentes | `failure` ou `empty` |
+| `3` | `JsonLdParserStep` | Extrair dados estruturados com maior confiabilidade | `success` com payload ou `empty` |
+| `4` | `HtmlMetadataParserStep` | Ler metadados e estrutura basica da pagina | `success` com payload ou `empty` |
+| `5` | `DomainSpecificParserStep` | Aplicar regras dedicadas por dominio quando disponiveis | `success` com payload ou `empty` |
+| `6` | `GenericFallbackParserStep` | Aplicar heuristicas genericas como ultimo fallback | `success` com payload ou `empty` |
 
 ---
 
@@ -165,6 +274,7 @@ As configurações combinam base compartilhada em [`../shared/core/config_base.p
 | HTTP e rede | `SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, `SCRAPER_HTTP_MAX_*`, `SCRAPER_DNS_TIMEOUT`, `SCRAPER_DNS_CACHE_TTL` |
 | Headers e identidade | `SCRAPER_DEFAULT_USER_AGENT`, `SCRAPER_USER_AGENT_POOL`, `SCRAPER_HEADERS_*` |
 | Parsing e qualidade de dado | `SCRAPER_PRICE_TOLERANCE`, `SCRAPER_HTTP_DOMAIN_TIMEOUTS` |
+| **Playwright** | `PLAYWRIGHT_MAX_CONCURRENT` (padrão: `5`) — máximo de contexts simultâneos; `PLAYWRIGHT_DISABLE_DEV_SHM` (qualquer valor não-vazio) — usa `--disable-dev-shm-usage` em vez de `/dev/shm` |
 | Base compartilhada | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_OPERATIONAL_DB` (db 2 — locks, rate limiting e cache de robots), `LOG_LEVEL`, `LOG_FORMAT`, `ROBOTS_CACHE_*`, `CIRCUIT_*` |
 
 Exemplo minimo de `.env.market_scraper`:
@@ -231,7 +341,7 @@ Comandos de apoio operacional:
 - Novos parsers ou novos erros de fluxo devem vir acompanhados de cobertura minima em `unit` e `integration` antes de serem considerados prontos.
 
 ### Cobertura atual da suite
-- `unit`: configuracao, contratos do pipeline, etapas com mocks de I/O, helpers de resposta, utilitarios criticos e rota.
+- `unit`: configuracao, contratos do pipeline, etapas com mocks de I/O, helpers de resposta, utilitarios criticos e rota. Inclui cobertura dedicada para `CurlffiHTTPClient`, `ResponseClassifier`, `PlaywrightPool`, `AdaptiveRateLimiter` e `CascadeFetchStep`.
 - `integration`: `health`, sucesso do parse, `304`, `force_refresh`, erros de fluxo, fallback por etapas e compatibilidade com schemas compartilhados.
 - `stress`: timeout por etapa, timeout global e volume concorrente controlado com resposta estavel.
 
@@ -242,10 +352,12 @@ Comandos de apoio operacional:
   - Validação de URL e host publico em `shared/utils/url_validation.py` + `utils/http_utils.py` para reduzir risco de SSRF.
   - Bloqueio por `robots.txt` antes do download (`utils/robots.py`), com fallback restritivo quando o parser não pode ser validado.
   - Limites defensivos em download (`SCRAPER_HTTP_MAX_REDIRECTS`, `SCRAPER_HTTP_MAX_CONTENT_LENGTH`) e retries com backoff controlado.
+  - TLS impersonation via `curl_cffi` (Chrome124) — não utiliza proxy; sem credenciais externas necessárias.
   - Erros de dominio são retornados com `error_code` estável para tratamento previsivel no cliente.
 
 - **Observabilidade:**
   - Logs estruturados por `trace_id` em rota e pipeline (`routes_scraper`, `scraper_pipeline`), incluindo etapa, resultado e duracao.
+  - Campos `layer_used` (`curl_cffi` | `playwright`), `classification_reason` e `fallback_taken` presentes em cada coleta bem-sucedida.
   - `X-MarketScraper-Cache-Status` facilita diagnostico de decisoes de cache condicional.
   - Health check simples em `/health/ping` para probes de orquestracao.
 

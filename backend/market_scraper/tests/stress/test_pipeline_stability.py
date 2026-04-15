@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 from market_scraper.services.pipeline_factory import run_pipeline
 
@@ -25,6 +26,22 @@ async def test_controlled_concurrent_volume_keeps_response_stable(monkeypatch):
         await asyncio.sleep(0.01)
         return success_html
 
+    from market_scraper.services.response_classifier import (
+        ClassificationAction,
+        ClassificationResult,
+    )
+
+    fake_rl = MagicMock()
+    fake_rl.should_allow = AsyncMock(return_value=(True, 1))
+    fake_rl.update_history = AsyncMock()
+
+    fake_classifier = MagicMock()
+    fake_classifier.classify = MagicMock(return_value=ClassificationResult(
+        action=ClassificationAction.SUCCESS,
+        next_layer=None,
+        reason="html_ok",
+    ))
+
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.robots.is_allowed",
         fake_is_allowed,
@@ -32,6 +49,14 @@ async def test_controlled_concurrent_volume_keeps_response_stable(monkeypatch):
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.download_html",
         fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.adaptive_rate_limiter",
+        fake_rl,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps._response_classifier",
+        fake_classifier,
     )
 
     tasks = [

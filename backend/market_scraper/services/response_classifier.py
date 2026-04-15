@@ -1,0 +1,258 @@
+""" Classificador de resposta HTTP para decisões de escalonamento entre camadas.
+
+O classificador recebe o resultado de uma tentativa de aquisição de HTML e
+decide qual ação tomar: aceitar como sucesso, escalar para uma camada superior
+(Playwright) ou rejeitar definitivamente. A lógica é puramente funcional —
+sem I/O, sem efeitos colaterais — para facilitar testes e auditoria.
+
+Integração esperada (Fase 6):
+    1. ``FetchHTMLStep`` obtém HTML via Camada 1 (curl_cffi).
+    2. O classificador avalia o resultado.
+    3. Se action=SCALE e next_layer=3, o pipeline chama ``PlaywrightFetchStep``.
+    4. O resultado final é registrado com os campos de telemetria.
+"""
+
+from __future__ import annotations
+
+import enum
+from dataclasses import dataclass, field
+from typing import Any
+
+import httpx
+import structlog
+
+
+logger = structlog.get_logger("response_classifier")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Limiares de tamanho de HTML
+# ─────────────────────────────────────────────────────────────────────────────
+
+#HTML abaixo deste tamanho é tratado como "vazio" → escala para Camada 3
+_HTML_EMPTY_THRESHOLD_BYTES = 1 * 1024       # 1 KB
+
+#Padrões de anti-bot inspecionados pelo classificador (subset dos de AntiBotDetectionStep)
+_ANTI_BOT_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("suspicious-traffic-frontend", "mercadolivre_challenge"),
+    ("challenges.cloudflare.com",   "cloudflare_challenge"),
+    ("__cf_chl",                    "cloudflare_challenge"),
+    ("__cf_bm",                     "cloudflare_challenge"),
+    ("recaptcha/api.js",            "captcha_challenge"),
+    ("recaptcha",                   "captcha_challenge"),
+    ("_pxcaptcha",                  "perimeterx_challenge"),
+)
+
+#Status HTTP que indicam rejeição final (nunca escalar)
+_FINAL_REJECT_STATUSES: frozenset[int] = frozenset({404, 410})
+
+#Status HTTP que escalam para Camada 3
+_SCALE_TO_LAYER3_STATUSES: frozenset[int] = frozenset({403, 405, 406, *range(500, 600)})
+
+#Status HTTP que escalam para Camada 2 (futura — por enquanto redireciona para 3)
+_SCALE_TO_LAYER2_STATUSES: frozenset[int] = frozenset({429})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tipos públicos
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ClassificationAction(enum.Enum):
+    """ Ação decidida pelo classificador após avaliar a resposta."""
+    SUCCESS = "success"  # HTML válido, pode seguir para o parser
+    SCALE   = "scale"    # Escalar para camada indicada em ``next_layer``
+    REJECT  = "reject"   # Rejeição definitiva, sem nova tentativa
+
+
+@dataclass(frozen=True)
+class ClassificationResult:
+    """ Resultado imutável da classificação de uma resposta HTTP.
+
+    Attributes:
+        action: O que o pipeline deve fazer a seguir.
+        next_layer: Camada de destino quando ``action=SCALE`` (2 ou 3); ``None`` nos demais casos.
+        reason: Código legível por humanos que explica a decisão (ex: ``"html_empty"``).
+        telemetry: Campos extras prontos para ser adicionados ao log estruturado.
+    """
+    action: ClassificationAction
+    next_layer: int | None
+    reason: str
+    telemetry: dict[str, Any] = field(default_factory=dict)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Funções auxiliares públicas
+# ─────────────────────────────────────────────────────────────────────────────
+
+def detect_anti_bot_pattern(html: str) -> str | None:
+    """ Verifica se o HTML contém padrões conhecidos de proteção anti-bot.
+
+    Args:
+        html: Conteúdo HTML a ser inspecionado.
+
+    Returns:
+        Nome do padrão detectado (ex: ``"cloudflare_challenge"``) ou ``None``
+        se nenhum padrão for encontrado.
+    """
+    html_lower = html.lower()
+    for pattern, pattern_type in _ANTI_BOT_PATTERNS:
+        if pattern.lower() in html_lower:
+            logger.debug(
+                "anti_bot_pattern_detected",
+                pattern=pattern,
+                pattern_type=pattern_type,
+            )
+            return pattern_type
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Classificador principal
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ResponseClassifier:
+    """ Avalia respostas HTTP e decide a próxima ação do pipeline.
+
+    O classificador é stateless: pode ser instanciado uma vez e reutilizado
+    concorrentemente sem problemas de estado compartilhado.
+
+    Tabela de decisão implementada:
+
+    | HTTP Status   | HTML           | Erro             | Ação    | Next Layer |
+    |---------------|----------------|------------------|---------|------------|
+    | 200-299       | Normal (≥1KB)  | None             | SUCCESS | —          |
+    | 200-299       | Vazio (<1KB)   | None             | SCALE   | 3          |
+    | 200-299       | Anti-bot page  | None             | SCALE   | 3          |
+    | 429           | Qualquer       | Qualquer         | SCALE   | 3*         |
+    | 403, 405, 406 | Qualquer       | Qualquer         | SCALE   | 3          |
+    | 404, 410      | Qualquer       | Qualquer         | REJECT  | —          |
+    | 500-599       | Qualquer       | Qualquer         | SCALE   | 3          |
+    | —             | —              | Timeout          | SCALE   | 3          |
+    | —             | —              | Connection error | SCALE   | 3          |
+
+    *Camada 2 (proxy residencial) fica para pós-MVP; por ora escala para 3.
+    """
+
+    def classify(
+        self,
+        *,
+        http_status: int | None,
+        html: str | None,
+        error: Exception | None,
+    ) -> ClassificationResult:
+        """ Classifica o resultado de uma tentativa de aquisição de HTML.
+
+        Args:
+            http_status: Código HTTP da resposta; ``None`` se houve erro de rede.
+            html: Conteúdo HTML recebido; ``None`` ou string vazia se indisponível.
+            error: Exceção levantada durante o fetch; ``None`` em caso de sucesso.
+
+        Returns:
+            ``ClassificationResult`` descrevendo a ação recomendada.
+        """
+        # ── Erros de rede/transporte (sem status HTTP) ────────────────────
+        if error is not None and http_status is None:
+            return self._classify_transport_error(error)
+
+        # ── Erros de status HTTP ──────────────────────────────────────────
+        if http_status is not None and http_status >= 400:
+            return self._classify_http_error(http_status)
+
+        # ── Resposta 200-299 — avaliar qualidade do HTML ──────────────────
+        return self._classify_successful_response(html)
+
+    # ── Handlers internos ────────────────────────────────────────────────
+
+    def _classify_transport_error(self, error: Exception) -> ClassificationResult:
+        """ Mapeia erros de transporte para ação de escalonamento."""
+        if isinstance(error, (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.PoolTimeout)):
+            return ClassificationResult(
+                action=ClassificationAction.SCALE,
+                next_layer=3,
+                reason="timeout",
+                telemetry={"error_type": type(error).__name__},
+            )
+
+        if isinstance(error, (httpx.ConnectError, httpx.RemoteProtocolError)):
+            return ClassificationResult(
+                action=ClassificationAction.SCALE,
+                next_layer=3,
+                reason="connection_error",
+                telemetry={"error_type": type(error).__name__},
+            )
+
+        #Qualquer outro erro de rede → escala por precaução
+        return ClassificationResult(
+            action=ClassificationAction.SCALE,
+            next_layer=3,
+            reason="network_error",
+            telemetry={"error_type": type(error).__name__},
+        )
+
+    def _classify_http_error(self, http_status: int) -> ClassificationResult:
+        """ Mapeia status HTTP de erro para ação de escalonamento ou rejeição."""
+        if http_status in _FINAL_REJECT_STATUSES:
+            return ClassificationResult(
+                action=ClassificationAction.REJECT,
+                next_layer=None,
+                reason="not_found",
+                telemetry={"http_status": http_status},
+            )
+
+        if http_status in _SCALE_TO_LAYER2_STATUSES:
+            #Camada 2 (proxy) não implementada no MVP — escala para 3
+            return ClassificationResult(
+                action=ClassificationAction.SCALE,
+                next_layer=3,
+                reason="rate_limited",
+                telemetry={"http_status": http_status, "layer2_deferred": True},
+            )
+
+        if http_status in _SCALE_TO_LAYER3_STATUSES:
+            return ClassificationResult(
+                action=ClassificationAction.SCALE,
+                next_layer=3,
+                reason="access_denied" if http_status in {403, 405, 406} else "server_error",
+                telemetry={"http_status": http_status},
+            )
+
+        #Outros 4xx não mapeados → rejeição defensiva
+        return ClassificationResult(
+            action=ClassificationAction.REJECT,
+            next_layer=None,
+            reason="client_error",
+            telemetry={"http_status": http_status},
+        )
+
+    def _classify_successful_response(self, html: str | None) -> ClassificationResult:
+        """ Avalia qualidade do HTML em respostas 2xx."""
+        if not html or len(html.encode("utf-8", errors="replace")) < _HTML_EMPTY_THRESHOLD_BYTES:
+            return ClassificationResult(
+                action=ClassificationAction.SCALE,
+                next_layer=3,
+                reason="html_empty",
+                telemetry={"html_size_bytes": len(html.encode("utf-8", errors="replace")) if html else 0},
+            )
+
+        anti_bot = detect_anti_bot_pattern(html)
+        if anti_bot is not None:
+            return ClassificationResult(
+                action=ClassificationAction.SCALE,
+                next_layer=3,
+                reason="anti_bot_page",
+                telemetry={"anti_bot_pattern": anti_bot},
+            )
+
+        return ClassificationResult(
+            action=ClassificationAction.SUCCESS,
+            next_layer=None,
+            reason="html_valid",
+            telemetry={"html_size_bytes": len(html.encode("utf-8", errors="replace"))},
+        )
+
+
+__all__ = [
+    "ClassificationAction",
+    "ClassificationResult",
+    "ResponseClassifier",
+    "detect_anti_bot_pattern",
+]

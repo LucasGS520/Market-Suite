@@ -19,37 +19,79 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ### Resumo e Estratégia do Plano
 
-- **Objetivo:** Fechar contratos entre os módulos de scraping/coleta/orquestração, eliminar ambiguidades de responsabilidade e impedir vazamento de domínio durante a evolução do serviço de scraping (`market_scraper`).
+### **Objetivo**
+Implementar a arquitetura em cascata de **aquisição de HTML com TLS impersonation nativo** (curl_cffi) substituindo `httpx` na `FetchHTMLStep`, complementada com fallback Playwright para cenários com JavaScript, eliminando bloqueios de fingerprint TLS e aumentando taxa de sucesso em Mercado Livre e marketplaces similares.
 
-- **Resultado Esperado:** Fronteiras técnicas explícitas e testadas entre market_scraper, market_alert e market_orchestrator, com contratos versionados e matriz de responsabilidades validada.
+### **Resultado Esperado**
+1. `FetchHTMLStep` usando `curl_cffi` com impersonation Chrome (drop-in replacement de download_html)
+2. Classificador de resposta automatizando decisões de escalonamento entre camadas
+3. Rate limiter adaptativo com histórico em Redis
+4. Fallback Playwright com pool gerenciado
+5. Contrato HTTP intacto; integração com `market_alert` funcional
+6. Taxa de sucesso em Mercado Livre sem proxy externo
+7. Testes de validação cobrindo Camadas 1 e 3
 
-- **Estratégia de Execução:** Executar em fases curtas e verificáveis: governança de domínio -> contrato técnico -> semântica de erros -> observabilidade -> testes de contrato -> gates de mudança.
+### **Estratégia de Execução**
+- **Fases sequenciais**: Infraestrutura → Camada 1 (curl_cffi) → Camada 3 (Playwright) → Classificador → Testes
+- **MVP focado**: Priorizar curl_cffi + Playwright; Camada 2 (proxy residencial) fica para fase pós-MVP
+- **Integração incremental**: Cada camada validada isoladamente antes de integrar ao pipeline
+- **Preservação de contrato**: Nenhuma mudança em `ParserRequest`/`ParserResponse` ou endpoints
 
-- **Premissas:** O fluxo atual já está funcional na orquestração; o problema principal é consistência contratual e governança entre módulos, não ausência de componentes.
+### **Premissas**
+1. Infraestrutura Redis existente está funcional e acessível (db 2 disponível)
+2. Docker permite `--shm-size=2g` ou suporta `--disable-dev-shm-usage`
+3. Python 3.10+ disponível
+4. Curl com suporte SSL nativo (não WSL1 puro)
+5. CI/CD existente suporta novo passo: `playwright install chromium`
 
 ---
 
 ### Riscos, Impacto e Decisões
 
-- **Decisões Técnicas Principais**
-- Consolidar contrato de entrada/saída do scraper em torno de `shared_schemas_scraper.py` e `routes_scraper.py`.
-- Consolidar semântica de coleta em `collection_catalog.py` e mapeamento em `collector_result.py`.
-- Manter responsabilidade de extração no scraper, política operacional de coleta no alert e transição de estado no orchestrator.
+### **Decisões Técnicas Principais**
 
-- **Riscos Principais**
-- Divergência entre `error_code` emitido pelo scraper e `reason` usado pelo coletor.
-- Duplicação de retry/backoff em camadas diferentes gerando comportamento imprevisível.
-- Regressão silenciosa por ausência de testes de contrato ponta a ponta.
+| Decisão | Justificativa | Impacto |
+|---------|---|---|
+| **curl_cffi em Camada 1** | TLS JA3 impersonation nativo, 125ms, sem overhead | Drop-in para httpx, 80-90% casos resolvidos |
+| **Playwright em Camada 3** | Headless Chromium, JA3 real Chrome, suporta JS renderization | 10-20% casos restantes, 5-10s por requisição |
+| **Rate limiter com histórico Redis** | Adaptação por host/pattern, fallback automático | Reduz escalonamento desnecessário, melhora latência média |
+| **Classificador independente** | Lógica de decisão centralizada, auditável | Facilita ajustes e testes; código não opaco |
+| **Pool Playwright com Semaphore** | Limite de 5 contexts simultâneos | Proteção de OOM; throughput máximo 30req/min para fallback |
+| **Sem Proxy em MVP** | Complexidade de gerenciamento de proxies | Focado em resolver TLS fingerprint (raiz); proxy fica para fase 2 |
+| **Contrato HTTP inalterado** | Compatibilidade com consumers existentes (market_alert) | Zero breaking changes |
 
-- **Dependências**
-- Contratos compartilhados em schemas.
-- Cliente consumidor em `scraper_client.py`.
-- Activities de status/dispatch em `status_activity.py` e `dispatch_activity.py`.
+### **Riscos Principais**
 
-- **Impactos Arquiteturais**
-- Redução de acoplamento implícito.
-- Maior previsibilidade de evolução do scraper sem quebrar coleta/orquestração.
-- Melhoria de diagnósticos operacionais por padronização de sinais entre serviços.
+| Risco | Severidade | Prob. | Mitigação |
+|-------|---|---|---|
+| **TLS fingerprint curl_cffi detectada futuro** | Alta | 🔴 Baixa (curl_cffi + Chrome impersonation são padrão) | Fallback sempre disponível em Camada 3 |
+| **Memory leak Playwright (OOM)** | Alta | 🟡 Média | Reciclagem context a cada 50req; flag `--disable-dev-shm-usage` |
+| **Mudança estrutura HTML Mercado Livre** | Média | 🟡 Média (historicamente rara) | Parser genérico + `__NEXT_DATA__` JSON (mais estável) |
+| **Timeout Playwright bloqueia requisições** | Média | 🟡 Média | Timeout global 30s; circuit breaker em market_alert; rejeição com retry_after |
+| **Rate limiter não converge** | Baixa | 🟡 Média | Tuning iterativo em MVP+1; thresholds iniciais conservadores |
+| **Redis não responde em histórico** | Média | 🟠 Baixa | Fallback em-memória (não persistente) se Redis offline; logging de failure |
+| **Docker `/dev/shm` insuficiente** | Alta | 🟠 Baixa (com doc) | Documentação obrigatória; CI testa com flag `--disable-dev-shm-usage` |
+
+### **Dependências**
+
+| Dependência | Versão | Instalação |
+|---|---|---|
+| **curl_cffi** | >=0.15.0 | `pip install curl_cffi` |
+| **playwright** | >=1.40.0 | `pip install playwright` + `playwright install chromium` |
+| **tenacity** | >=8.0 (já existe) | — |
+| **httpx** | >=0.24 (já existe) | Mantém-se para fallback ou remoção futura |
+| **Redis** | (já existe) | Sem upgrade necessário |
+| **asyncio** | stdlib Python 3.10+ | — |
+| **structlog** | (já existe) | — |
+
+### **Impactos Arquiteturais**
+
+- **Redução de acoplamento**: `download_html()` deixa de ser específica de httpx
+- **Previsibilidade**: Taxa de sucesso sobe 75-80% (de 5-10% para 85-90%)
+- **Observabilidade**: Novos logs estruturados (camada usada, classificação, histórico)
+- **Capacidade**: Throughput Camada 1 cresce 3-5x (menos timeouts); Camada 3 limitada a 30req/min
+- **Custo operacional**: RAM ~200MB adicionais por context Playwright; sem infra nova necessária
+- **Latência p99**: Sobe de ~500ms para ~1s (Camada 1) + fallback Playwright (~10s) quando escala
 
 ---
 

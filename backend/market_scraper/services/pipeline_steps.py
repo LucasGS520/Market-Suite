@@ -18,16 +18,21 @@ from market_scraper.parsers import (
     parse_with_extruct,
 )
 from market_scraper.parsers.domain_parsers import get_domain_parser
-from market_scraper.services.parser_runner import (
-    ParserCallable,
-    run_parser_with_validation,
-)
+from market_scraper.services.parser_runner import ParserCallable, run_parser_with_validation
 from market_scraper.services.synergic_pipeline import (
     PipelineContext,
     PipelineStep,
     StepResult,
 )
 from market_scraper.services.availability_inference import infer_availability_from_http_status
+from market_scraper.infra.adaptive_rate_limiter import adaptive_rate_limiter
+from market_scraper.services.playwright_pool import (
+    PlaywrightFetchError,
+    PlaywrightPoolNotReadyError,
+    PlaywrightTimeoutError,
+    playwright_pool,
+)
+from market_scraper.services.response_classifier import ClassificationAction, ResponseClassifier
 from market_scraper.utils import cache, robots, singleflight
 from market_scraper.utils.http_download import download_html, extract_domain
 
@@ -297,10 +302,294 @@ class DomainSpecificParserStep(PipelineStep):
             )
         return StepResult.empty("Parser específico não retornou dados válidos")
     
+class PlaywrightFetchStep(PipelineStep):
+    """ Obtém HTML via Chromium headless (Camada 3 — fallback Playwright).
+
+    Consome: ``context.url``
+    Produz: ``context.html``
+
+    Deve ser chamada apenas quando o classificador de resposta indica
+    escalonamento para a Camada 3 (``ClassificationAction.SCALE``).
+    O passo preserva o HTML já presente no contexto caso seja executado
+    sem pool inicializado, tornando o fallback não-fatal.
+    """
+
+    def __init__(self, *, timeout: float | None = None) -> None:
+        super().__init__(name="playwright_fetch", timeout=timeout)
+
+    async def run(self, context: PipelineContext) -> StepResult:
+        timeout_value = self.timeout if self.timeout is not None else context.default_step_timeout
+
+        if not playwright_pool.is_ready:
+            logger.warning(
+                "playwright_pool_not_ready",
+                url=context.url,
+                domain=context.source,
+            )
+            return StepResult.failure(message="playwright_not_ready")
+
+        try:
+            html = await playwright_pool.fetch_html(context.url, timeout=timeout_value)
+        except PlaywrightPoolNotReadyError:
+            logger.warning(
+                "playwright_pool_not_ready",
+                url=context.url,
+                domain=context.source,
+            )
+            return StepResult.failure(message="playwright_not_ready")
+        except PlaywrightTimeoutError as exc:
+            logger.warning(
+                "playwright_fetch_timeout",
+                url=context.url,
+                domain=context.source,
+                timeout=exc.timeout,
+            )
+            return StepResult.failure(message="playwright_timeout")
+        except PlaywrightFetchError as exc:
+            logger.warning(
+                "playwright_fetch_error",
+                url=context.url,
+                domain=context.source,
+                reason=exc.reason,
+            )
+            return StepResult.failure(message="playwright_fetch_error")
+
+        context.set_html(html)
+        context.data["layer_used"] = "playwright"
+        logger.info(
+            "playwright_fetch_success",
+            url=context.url,
+            domain=context.source,
+            html_size=len(html),
+        )
+        return StepResult.success(message="html_fetched_via_playwright")
+
+
+_response_classifier = ResponseClassifier()
+
+class CascadeFetchStep(PipelineStep):
+    """ Aquisição em cascata: curl_cffi (Camada 1) → Playwright (Camada 3).
+
+    Consome: ``context.url``, ``context.source``
+    Produz: ``context.html``, ``context.data['layer_used']``,
+            ``context.data['classification_reason']``,
+            ``context.data['fallback_taken']``
+
+    Fluxo:
+        1. Rate limiter pré-requisição (``adaptive_rate_limiter.should_allow``).
+        2. Robots.txt check.
+        3. Cache hit → retorno imediato.
+        4. Camada 1 via ``download_html`` (curl_cffi) com singleflight.
+        5. ResponseClassifier → SUCCESS termina aqui, SCALE → Camada 3.
+        6. Camada 3 via ``playwright_pool.fetch_html`` quando disponível.
+        7. Rate limiter pós-requisição (``adaptive_rate_limiter.update_history``).
+    """
+
+    def __init__(self, *, timeout: float | None = None) -> None:
+        super().__init__(name="cascade_fetch", timeout=timeout)
+
+    async def run(self, context: PipelineContext) -> StepResult:
+        if context.html:
+            return StepResult.success(message="HTML já presente no contexto")
+
+        timeout_value = self.timeout if self.timeout is not None else context.default_step_timeout
+        domain = context.source or extract_domain(context.url) or ""
+
+        # ── 1. Rate limiter pre-check ─────────────────────────────────────
+        allowed, suggested_layer = await adaptive_rate_limiter.should_allow(domain)
+        if not allowed:
+            logger.warning(
+                "cascade_fetch_blocked_by_rate_limiter",
+                url=context.url,
+                domain=domain,
+            )
+            return StepResult.failure(message="rate_limiter_cooldown")
+
+        # ── 2. Robots.txt ─────────────────────────────────────────────────
+        if not await robots.is_allowed(context.url, timeout=timeout_value):
+            return StepResult.failure(message="unsupported_by_robots")
+
+        # ── 3. Cache ──────────────────────────────────────────────────────
+        if context.should_use_cache("html"):
+            cached_html: str | None = cache.get(context.url)
+            if cached_html is not None:
+                context.set_html(cached_html)
+                return StepResult.success(message="html_from_cache")
+
+        # ── 4. Camada 1 — curl_cffi ───────────────────────────────────────
+        layer1_html: str | None = None
+        layer1_exc: Exception | None = None
+        layer1_status: int | None = None
+
+        async def _download() -> str:
+            return await download_html(context.url, timeout=timeout_value)
+
+        singleflight_key = f"{context.url}|force_refresh={context.force_refresh}"
+        try:
+            layer1_html, is_leader = await singleflight.coalesce_with_leader(
+                singleflight_key, _download
+            )
+            if not is_leader:
+                logger.info("cascade_fetch_coalesced", url=context.url, domain=domain)
+            layer1_status = 200
+        except httpx.TooManyRedirects as exc:
+            context.data["http_status"] = 422
+            await adaptive_rate_limiter.update_history(
+                domain, success=False, error_code="too_many_redirects"
+            )
+            return StepResult.failure(message="too_many_redirects")
+        except (httpx.InvalidURL, httpx.UnsupportedProtocol) as exc:
+            context.data["http_status"] = 422
+            await adaptive_rate_limiter.update_history(
+                domain, success=False, error_code="invalid_url"
+            )
+            return StepResult.failure(message="invalid_url")
+        except httpx.HTTPStatusError as exc:
+            layer1_status = exc.response.status_code if exc.response is not None else None
+            context.data["http_status"] = layer1_status
+            layer1_exc = exc
+            if layer1_status is None:
+                await adaptive_rate_limiter.update_history(
+                    domain, success=False, error_code="unknown"
+                )
+                raise
+            inference = infer_availability_from_http_status(layer1_status, domain)
+            context.data["availability_inferred"] = inference.availability
+            context.data["last_status_inferred"] = inference.last_status
+            if inference.availability is False:
+                context.set_html("")
+                context.data["availability"] = inference.availability
+                context.data["last_status"] = inference.last_status
+                await adaptive_rate_limiter.update_history(
+                    domain,
+                    success=False,
+                    error_code=str(layer1_status),
+                    layer_used=1,
+                )
+                return StepResult.success(
+                    payload={
+                        "name": None,
+                        "current_price": None,
+                        "url": context.url,
+                        "source": context.source,
+                        "availability": inference.availability,
+                        "last_status": inference.last_status,
+                    },
+                    message="Disponibilidade inferida por código HTTP",
+                )
+        except Exception as exc:
+            layer1_exc = exc
+
+        # ── 5. ResponseClassifier ─────────────────────────────────────────
+        classification = _response_classifier.classify(
+            http_status=layer1_status,
+            html=layer1_html,
+            error=layer1_exc,
+        )
+        context.data["classification_reason"] = classification.reason
+
+        if classification.action == ClassificationAction.REJECT:
+            await adaptive_rate_limiter.update_history(
+                domain,
+                success=False,
+                error_code=str(layer1_status) if layer1_status else "rejected",
+                layer_used=1,
+            )
+            logger.info(
+                "cascade_fetch_rejected",
+                url=context.url,
+                domain=domain,
+                reason=classification.reason,
+            )
+            #Retorna o erro HTTP original para preservar inferência de disponibilidade
+            if layer1_exc is not None:
+                raise layer1_exc
+            return StepResult.failure(message=classification.reason)
+
+        if classification.action == ClassificationAction.SUCCESS:
+            #Camada 1 bem-sucedida
+            context.set_html(layer1_html)  # type: ignore[arg-type]
+            context.data["layer_used"] = "curl_cffi"
+            context.data["fallback_taken"] = False
+            context.data["http_status"] = context.data.get("http_status") or 200
+            cache.set(context.url, layer1_html, settings.SCRAPER_CACHE_TTL_SECONDS)
+            await adaptive_rate_limiter.update_history(
+                domain, success=True, layer_used=1
+            )
+            logger.info(
+                "cascade_fetch_layer1_success",
+                url=context.url,
+                domain=domain,
+                html_size=len(layer1_html),  # type: ignore[arg-type]
+            )
+            return StepResult.success(message="html_fetched_via_curl_cffi")
+
+        # ── 6. SCALE → Camada 3 — Playwright ─────────────────────────────
+        await adaptive_rate_limiter.update_history(
+            domain,
+            success=False,
+            error_code=str(layer1_status) if layer1_status else "scale",
+            layer_used=1,
+        )
+
+        if not playwright_pool.is_ready:
+            logger.warning(
+                "cascade_fetch_playwright_not_ready",
+                url=context.url,
+                domain=domain,
+                reason=classification.reason,
+            )
+            return StepResult.failure(message="playwright_not_ready")
+
+        try:
+            pw_html = await playwright_pool.fetch_html(context.url, timeout=timeout_value)
+        except PlaywrightPoolNotReadyError:
+            return StepResult.failure(message="playwright_not_ready")
+        except PlaywrightTimeoutError as exc:
+            logger.warning(
+                "cascade_fetch_playwright_timeout",
+                url=context.url,
+                domain=domain,
+                timeout=exc.timeout,
+            )
+            await adaptive_rate_limiter.update_history(
+                domain, success=False, error_code="timeout", layer_used=3
+            )
+            return StepResult.failure(message="playwright_timeout")
+        except PlaywrightFetchError as exc:
+            logger.warning(
+                "cascade_fetch_playwright_error",
+                url=context.url,
+                domain=domain,
+                reason=exc.reason,
+            )
+            await adaptive_rate_limiter.update_history(
+                domain, success=False, error_code="playwright_error", layer_used=3
+            )
+            return StepResult.failure(message="playwright_fetch_error")
+
+        context.set_html(pw_html)
+        context.data["layer_used"] = "playwright"
+        context.data["fallback_taken"] = True
+        context.data["http_status"] = context.data.get("http_status") or 200
+        cache.set(context.url, pw_html, settings.SCRAPER_CACHE_TTL_SECONDS)
+        await adaptive_rate_limiter.update_history(
+            domain, success=True, layer_used=3
+        )
+        logger.info(
+            "cascade_fetch_layer3_success",
+            url=context.url,
+            domain=domain,
+            html_size=len(pw_html),
+            l1_reason=classification.reason,
+        )
+        return StepResult.success(message="html_fetched_via_playwright")
+
+
 def default_pipeline_steps() -> list[PipelineStep]:
     """ Retorna a sequência padrão de etapas do pipeline enxuto """
     steps: list[PipelineStep] = [
-        FetchHTMLStep(),
+        CascadeFetchStep(),
         AntiBotDetectionStep(),
         JsonLdParserStep(),
         HtmlMetadataParserStep(),
@@ -312,6 +601,8 @@ def default_pipeline_steps() -> list[PipelineStep]:
 
 __all__ = [
     "FetchHTMLStep",
+    "CascadeFetchStep",
+    "PlaywrightFetchStep",
     "AntiBotDetectionStep",
     "JsonLdParserStep",
     "HtmlMetadataParserStep",

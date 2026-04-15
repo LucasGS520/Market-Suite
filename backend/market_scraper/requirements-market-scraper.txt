@@ -3,7 +3,7 @@
 
 # Parsing HTML
 beautifulsoup4==4.13.4
-lxml==4.9.4
+lxml==5.3.1
 parsel==1.9.1
 selectolax==0.4.0
 
@@ -17,6 +17,8 @@ Brotli==1.1.0
 brotlicffi==1.1.0.0
 cloudscraper==1.2.71
 mechanicalsoup==1.4.0
+curl_cffi>=0.15.0
+playwright>=1.40.0
 
 # Utilitarios
 PyYAML==6.0.2
