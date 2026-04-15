@@ -31,7 +31,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Instala navegador Chromium para fallback Playwright (Camada 3)
 # Requer --shm-size=2g no docker run, ou use --disable-dev-shm-usage via env
-RUN playwright install chromium
+RUN playwright install --only-shell-deps && \
+    playwright install chromium
 
 # ETAPA 3: Copiar shared/ (dependência compartilhada entre serviços)
 # Requer additional_contexts: shared_ctx: ./backend/shared no compose
