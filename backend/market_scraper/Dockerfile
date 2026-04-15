@@ -1,5 +1,5 @@
 # Dockerfile do serviço de scraping de produtos - OTIMIZADO
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 # Define o diretório de trabalho
 WORKDIR /app

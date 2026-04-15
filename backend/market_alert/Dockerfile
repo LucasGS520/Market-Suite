@@ -1,5 +1,5 @@
 # Dockerfile da API principal do MarketAlert - OTIMIZADO
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Define diretório de trabalho
 WORKDIR /market_alert
