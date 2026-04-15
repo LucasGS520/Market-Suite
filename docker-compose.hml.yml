@@ -261,6 +261,7 @@ services:
   # --- Microserviço de scraping ---
   market_scraper:
     image: market-suite/market_scraper:latest
+    shm_size: 2gb
     env_file:
       - .env.common
       - ./backend/market_scraper/.env.market_scraper
