@@ -1,10 +1,10 @@
-""" Utilitários de parsing baseados em extruct
+""" Utilitários de parsing de dados estruturados via selectolax
 
-O módulo encapsula o uso da ``extruct`` para ler metadados estruturados
-presentes no HTML de páginas de produtos. A interface exposta segue o 
-padrão adotado no restante das estratégias do projeto, retornando um 
-``dict`` com ``name``, ``current_price``, ``url`` e ``source`` quando
-os dados obrigatórios são encontrados.
+O módulo extrai metadados estruturados (JSON-LD, OpenGraph) presentes
+no HTML de páginas de produtos usando ``selectolax`` como motor de parsing.
+A interface exposta segue o padrão adotado no restante das estratégias do
+projeto, retornando um ``dict`` com ``name``, ``current_price``, ``url`` e
+``source`` quando os dados obrigatórios são encontrados.
 
 As funções aqui definidas priorizam JSON-LD, pois é a fonte mais comum
 entre marketplaces modernos. Metadados OpenGraph são utilizados como

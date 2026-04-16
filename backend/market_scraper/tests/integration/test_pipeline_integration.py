@@ -1,8 +1,33 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 from shared.schemas.shared_schemas_scraper import ParserResponse
 
 from market_scraper.services.pipeline_factory import run_pipeline
+from market_scraper.services.response_classifier import (
+    ClassificationAction,
+    ClassificationResult,
+)
+
+
+def _fake_rate_limiter() -> MagicMock:
+    rl = MagicMock()
+    rl.should_allow = AsyncMock(return_value=(True, 1))
+    rl.update_history = AsyncMock()
+    return rl
+
+
+def _fake_classifier_success() -> MagicMock:
+    cls = MagicMock()
+    cls.classify = MagicMock(
+        return_value=ClassificationResult(
+            action=ClassificationAction.SUCCESS,
+            next_layer=None,
+            reason="html_ok",
+        )
+    )
+    return cls
 
 
 async def test_pipeline_sequential_flow_falls_back_to_generic_parser(
@@ -24,6 +49,14 @@ async def test_pipeline_sequential_flow_falls_back_to_generic_parser(
         fake_download,
     )
     monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.adaptive_rate_limiter",
+        _fake_rate_limiter(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps._response_classifier",
+        _fake_classifier_success(),
+    )
+    monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.parse_with_extruct",
         lambda html, url: None,
     )
@@ -43,11 +76,12 @@ async def test_pipeline_sequential_flow_falls_back_to_generic_parser(
     assert outcome.payload["name"] == "Fallback Integrado"
     assert outcome.payload["current_price"] == "349.90"
     assert [step.status for step in outcome.steps] == [
-        "success",
-        "empty",
-        "empty",
-        "empty",
-        "success",
+        "success",  # CascadeFetchStep
+        "empty",    # AntiBotDetectionStep
+        "empty",    # JsonLdParserStep
+        "empty",    # HtmlMetadataParserStep
+        "empty",    # DomainSpecificParserStep
+        "success",  # GenericFallbackParserStep
     ]
 
 
@@ -68,6 +102,14 @@ async def test_pipeline_success_payload_is_compatible_with_shared_parser_respons
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.download_html",
         fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.adaptive_rate_limiter",
+        _fake_rate_limiter(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps._response_classifier",
+        _fake_classifier_success(),
     )
 
     outcome = await run_pipeline("https://example.com/product/contract")
