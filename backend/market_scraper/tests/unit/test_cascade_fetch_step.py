@@ -321,8 +321,8 @@ async def test_cascade_scales_to_playwright_on_anti_bot(monkeypatch):
     assert rl.update_history.await_count == 2
 
 
-async def test_cascade_playwright_not_ready_after_scale(monkeypatch):
-    """SCALE mas Playwright não inicializado → failure playwright_not_ready."""
+async def test_cascade_playwright_not_ready_anti_bot(monkeypatch):
+    """SCALE por anti_bot + Playwright indisponível → failure anti_bot_page (→ 429)."""
     step = CascadeFetchStep()
     context = _make_context()
 
@@ -335,7 +335,7 @@ async def test_cascade_playwright_not_ready_after_scale(monkeypatch):
     )
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps._response_classifier.classify",
-        MagicMock(return_value=_classify_scale()),
+        MagicMock(return_value=_classify_scale("anti_bot_page")),
     )
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.playwright_pool",
@@ -345,7 +345,34 @@ async def test_cascade_playwright_not_ready_after_scale(monkeypatch):
     result = await step.run(context)
 
     assert result.status == "error"
-    assert result.message == "playwright_not_ready"
+    assert result.message == "anti_bot_page"
+
+
+async def test_cascade_playwright_not_ready_other_scale(monkeypatch):
+    """SCALE por html_empty + Playwright indisponível → failure pipeline_degraded (→ 503)."""
+    step = CascadeFetchStep()
+    context = _make_context()
+
+    monkeypatch.setattr("market_scraper.services.pipeline_steps.adaptive_rate_limiter", _fake_rate_limiter())
+    monkeypatch.setattr("market_scraper.services.pipeline_steps.robots.is_allowed", AsyncMock(return_value=True))
+    monkeypatch.setattr("market_scraper.services.pipeline_steps.cache.get", MagicMock(return_value=None))
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.singleflight.coalesce_with_leader",
+        AsyncMock(return_value=(_HTML, True)),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps._response_classifier.classify",
+        MagicMock(return_value=_classify_scale("html_empty")),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.playwright_pool",
+        _fake_playwright_pool(ready=False),
+    )
+
+    result = await step.run(context)
+
+    assert result.status == "error"
+    assert result.message == "pipeline_degraded"
 
 
 async def test_cascade_playwright_timeout_after_scale(monkeypatch):

@@ -525,10 +525,12 @@ class CascadeFetchStep(PipelineStep):
             return StepResult.success(message="html_fetched_via_curl_cffi")
 
         # ── 6. SCALE → Camada 3 — Playwright ─────────────────────────────
+        # Fix #3: error_code reflete a razão real da classificação (ex: "anti_bot_page"),
+        # não o status HTTP 200 que induziria o rate limiter a interpretar como sucesso.
         await adaptive_rate_limiter.update_history(
             domain,
             success=False,
-            error_code=str(layer1_status) if layer1_status else "scale",
+            error_code=classification.reason,
             layer_used=1,
         )
 
@@ -539,7 +541,11 @@ class CascadeFetchStep(PipelineStep):
                 domain=domain,
                 reason=classification.reason,
             )
-            return StepResult.failure(message="playwright_not_ready")
+            # Fix #1: anti_bot detectado sem fallback → 429 (retry possível quando Playwright
+            # voltar). Qualquer outro motivo de SCALE sem fallback → 503 (pipeline degradado).
+            if classification.reason == "anti_bot_page":
+                return StepResult.failure(message="anti_bot_page")
+            return StepResult.failure(message="pipeline_degraded")
 
         try:
             pw_html = await playwright_pool.fetch_html(context.url, timeout=timeout_value)

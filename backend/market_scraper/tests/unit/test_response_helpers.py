@@ -246,3 +246,55 @@ def test_build_no_result_response_logs_validation_failure_metadata():
     assert parse_no_result_fields["reason_message"] == "Preco ausente ou invalido"
     assert parse_no_result_fields["parser_name"] == "parse_generic_html"
     assert parse_no_result_fields["dump_path"] == "/tmp/dump.html"
+
+
+def test_map_http_download_issue_pipeline_degraded_returns_503():
+    """pipeline_degraded (SCALE sem fallback de browser) → 503."""
+    context = PipelineContext(
+        url="https://example.com/product",
+        source="example.com",
+        default_step_timeout=1.0,
+    )
+    outcome = PipelineOutcome(
+        status="error",
+        context=context,
+        steps=[
+            StepExecution(
+                name="cascade_fetch",
+                status="error",
+                duration_seconds=0.1,
+                message="pipeline_degraded",
+            )
+        ],
+    )
+
+    issue, status_code = _map_http_download_issue(outcome)
+
+    assert issue.code == "pipeline_degraded"
+    assert status_code == 503
+
+
+def test_map_http_download_issue_playwright_not_ready_returns_503():
+    """playwright_not_ready legado (PlaywrightFetchStep) → 503 via mapeamento de salvaguarda."""
+    context = PipelineContext(
+        url="https://example.com/product",
+        source="example.com",
+        default_step_timeout=1.0,
+    )
+    outcome = PipelineOutcome(
+        status="error",
+        context=context,
+        steps=[
+            StepExecution(
+                name="playwright_fetch",
+                status="error",
+                duration_seconds=0.1,
+                message="playwright_not_ready",
+            )
+        ],
+    )
+
+    issue, status_code = _map_http_download_issue(outcome)
+
+    assert issue.code == "pipeline_degraded"
+    assert status_code == 503

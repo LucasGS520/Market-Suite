@@ -88,6 +88,11 @@ _PARSE_ROUTE_RESPONSES = {
         "description": "Pagina anti-bot detectada pelo scraper.",
         "headers": _CONTRACT_VERSION_HEADER_DOC,
     },
+    503: {
+        "model": ErrorResponse,
+        "description": "Servico degradado: fallback de browser indisponivel.",
+        "headers": _CONTRACT_VERSION_HEADER_DOC,
+    },
     504: {
         "model": ErrorResponse,
         "description": "Pipeline excedeu o tempo limite documentado.",

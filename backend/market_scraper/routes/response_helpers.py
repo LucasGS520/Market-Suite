@@ -54,6 +54,14 @@ def _map_http_download_issue(outcome: PipelineOutcome) -> tuple[UrlIssue, int] |
             message="Página de proteção anti-bot detectada; tente novamente mais tarde",
         )
         return issue, status.HTTP_429_TOO_MANY_REQUESTS
+    # Fix #2: "pipeline_degraded" cobre SCALE sem fallback (ex: html_empty + Playwright offline).
+    # "playwright_not_ready" permanece mapeado como salvaguarda para PlaywrightFetchStep legado.
+    if any(step.message in ("pipeline_degraded", "playwright_not_ready") for step in outcome.steps):
+        issue = UrlIssue(
+            code="pipeline_degraded",
+            message="Serviço temporariamente degradado; fallback de browser indisponível",
+        )
+        return issue, status.HTTP_503_SERVICE_UNAVAILABLE
     return None
 
 def _http_error(
