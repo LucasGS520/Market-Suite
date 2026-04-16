@@ -54,8 +54,32 @@ def _map_http_download_issue(outcome: PipelineOutcome) -> tuple[UrlIssue, int] |
             message="Página de proteção anti-bot detectada; tente novamente mais tarde",
         )
         return issue, status.HTTP_429_TOO_MANY_REQUESTS
+    if any(step.message == "challenge_detected_after_browser" for step in outcome.steps):
+        issue = UrlIssue(
+            code="challenge_detected_after_browser",
+            message="Proteção anti-bot persistiu após tentativa com browser; tente novamente mais tarde",
+        )
+        return issue, status.HTTP_429_TOO_MANY_REQUESTS
+    if any(step.message == "rate_limiter_cooldown" for step in outcome.steps):
+        issue = UrlIssue(
+            code="rate_limiter_cooldown",
+            message="Limite de requisições atingido para este domínio; tente novamente em instantes",
+        )
+        return issue, status.HTTP_429_TOO_MANY_REQUESTS
+    if any(step.message == "playwright_timeout" for step in outcome.steps):
+        issue = UrlIssue(
+            code="playwright_timeout",
+            message="Tempo limite excedido ao renderizar a página com browser",
+        )
+        return issue, status.HTTP_504_GATEWAY_TIMEOUT
+    if any(step.message == "playwright_fetch_error" for step in outcome.steps):
+        issue = UrlIssue(
+            code="playwright_fetch_error",
+            message="Erro ao obter conteúdo via browser; tente novamente",
+        )
+        return issue, status.HTTP_503_SERVICE_UNAVAILABLE
     # Fix #2: "pipeline_degraded" cobre SCALE sem fallback (ex: html_empty + Playwright offline).
-    # "playwright_not_ready" permanece mapeado como salvaguarda para PlaywrightFetchStep legado.
+    # "playwright_not_ready" permanece mapeado como salvaguarda operacional.
     if any(step.message in ("pipeline_degraded", "playwright_not_ready") for step in outcome.steps):
         issue = UrlIssue(
             code="pipeline_degraded",
@@ -164,6 +188,30 @@ def _extract_additional_payload(data: dict[str, Any]) -> dict[str, Any] | None:
     extras = {key: value for key, value in data.items() if key not in base_keys and value is not None}
     return extras or None
 
+def _extract_acquisition_payload(context_data: dict[str, Any]) -> dict[str, Any] | None:
+    """ Expõe telemetria de aquisição de forma aditiva no payload HTTP. """
+    acquisition_keys = (
+        "layer_used",
+        "fallback_taken",
+        "classification_reason",
+        "http_status",
+        "anti_bot_detected",
+        "anti_bot_pattern",
+        "anti_bot_bypassed",
+    )
+    if not any(key in context_data for key in acquisition_keys):
+        return None
+
+    return {
+        "layer_used": context_data.get("layer_used"),
+        "fallback_taken": bool(context_data.get("fallback_taken", False)),
+        "classification_reason": context_data.get("classification_reason"),
+        "http_status": context_data.get("http_status"),
+        "anti_bot_detected": bool(context_data.get("anti_bot_detected", False)),
+        "anti_bot_pattern": context_data.get("anti_bot_pattern"),
+        "anti_bot_bypassed": bool(context_data.get("anti_bot_bypassed", False)),
+    }
+
 def _merge_availability_and_status(
     payload: dict[str, Any],
     context_data: dict[str, Any],
@@ -193,6 +241,11 @@ def build_success_response(
 ) -> ParserResponse:
     """ Cria ``ParserResponse`` garantindo consistência de logs """
     merged_payload = _merge_availability_and_status(payload, outcome.context.data)
+    extra_payload = _extract_additional_payload(merged_payload) or {}
+    acquisition_payload = _extract_acquisition_payload(outcome.context.data)
+    if acquisition_payload is not None:
+        extra_payload["acquisition"] = acquisition_payload
+
     response = ParserResponse(
         name=merged_payload.get("name", ""),
         current_price=current_price,
@@ -203,7 +256,7 @@ def build_success_response(
         source=merged_payload.get("source")
         or merged_payload.get("marketplace")
         or outcome.context.source,
-        payload=_extract_additional_payload(merged_payload),
+        payload=extra_payload or None,
     )
     request_logger.info(
         "parse_success",
@@ -217,6 +270,7 @@ __all__ = [
     "_http_error",
     "_map_http_download_issue",
     "_extract_additional_payload",
+    "_extract_acquisition_payload",
     "_merge_availability_and_status",
     "_sanitize_payload",
     "build_no_result_response",

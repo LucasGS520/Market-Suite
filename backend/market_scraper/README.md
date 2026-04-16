@@ -59,10 +59,10 @@ As rotas publicas são registradas em [`main.py`](main.py), com foco em um endpo
 - [`services/availability_inference.py`](services/availability_inference.py) infere disponibilidade e `last_status` em cenarios HTTP sem payload de produto.
 
 ### Infraestrutura de Scraping e Cache
-- [`utils/http_download.py`](utils/http_download.py) implementa `CurlffiHTTPClient` com TLS impersonation Chrome124 via `curl_cffi`. Mapeia erros para `httpx.*` equivalentes para compatibilidade com `FetchHTMLStep` legado.
+- [`utils/http_download.py`](utils/http_download.py) implementa `CurlffiHTTPClient` com TLS impersonation Chrome124 via `curl_cffi`. Mapeia erros para `httpx.*` equivalentes para a tentativa HTTP primária executada pelo `FetchDecisionGate`.
 - [`services/response_classifier.py`](services/response_classifier.py) classifica cada resposta em `SUCCESS`, `SCALE` ou `REJECT` com base em status HTTP, tamanho do HTML e padrões anti-bot.
 - [`services/playwright_pool.py`](services/playwright_pool.py) gerencia pool singleton de Playwright com semáforo de concorrência, stealth injection e bloqueio de recursos pesados.
-- [`infra/adaptive_rate_limiter.py`](infra/adaptive_rate_limiter.py) rastreia taxa de sucesso por hostname no Redis e sugere camada de aquisição. Ativa cooldown automático em cenários de 429 recorrente.
+- [`infra/adaptive_rate_limiter.py`](infra/adaptive_rate_limiter.py) rastreia taxa de sucesso por hostname no Redis e sugere a estratégia de aquisição mais barata possível. Ativa cooldown automático em cenários de 429 recorrente.
 - [`utils/http_retry.py`](utils/http_retry.py) aplica politicas de retry com backoff para alvos HTTP.
 - [`utils/http_utils.py`](utils/http_utils.py) resolve DNS com cache e bloqueia hosts/IPs não publicos (protecao SSRF).
 - [`utils/robots.py`](utils/robots.py) valida `robots.txt` antes da coleta via Redis operacional (db 2); fallback atual e restritivo (bloqueia quando não consegue validar o parser).
@@ -81,73 +81,79 @@ As rotas publicas são registradas em [`main.py`](main.py), com foco em um endpo
 
 ---
 
-## Arquitetura de Aquisição HTML (Camadas 1–3)
+## Arquitetura de Aquisição HTML
 
-O serviço utiliza uma estratégia de aquisição em cascata para maximizar a taxa de sucesso em marketplaces com proteção anti-bot. A lógica de escalonamento é centralizada em `CascadeFetchStep`.
+O serviço continua usando aquisição em cascata, mas o ponto único de decisão agora é o [`FetchDecisionGate`](services/fetch_decision_gate.py). A etapa de pipeline `FetchHTMLStep` só faz três coisas: validar `robots.txt`, reutilizar cache quando permitido e delegar a aquisição ao gate.
 
-### Camadas de Aquisição
+### Responsabilidades por componente
 
-| Camada | Tecnologia | Latência típica | Uso |
-|--------|-----------|-----------------|-----|
-| **1** | `curl_cffi` (Chrome124 TLS impersonation) | ~125 ms | 80–90 % das requisições |
-| **2** | Proxy residencial *(pós-MVP)* | — | Reservado |
-| **3** | Playwright (Chromium headless) | 5–10 s | Fallback para JS e anti-bot |
+| Componente | Responsabilidade |
+|-----------|------------------|
+| `FetchHTMLStep` | Adaptar `PipelineContext` para `FetchResult`, preencher `context.html` e gravar telemetria em `context.data` |
+| `FetchDecisionGate` | Orquestrar rate limiter, tentativa HTTP, classificação da resposta, fallback para browser e mapeamento final do resultado |
+| `ResponseClassifier` | Decidir `SUCCESS`, `SCALE` ou `REJECT` sem I/O, com base em status HTTP, HTML e exceção |
+| `AdaptiveRateLimiter` | Definir se o host pode prosseguir e quando vale insistir na tentativa HTTP antes do browser |
+| `PlaywrightPool` | Executar o fallback de browser com Chromium, sem expor lifecycle do browser ao restante do pipeline |
 
-### Fluxo de Decisão (CascadeFetchStep)
+### Arquitetura do `FetchDecisionGate`
 
 ```
 POST /scraper/parse
         │
         ▼
- rate_limiter.should_allow(host)
-        │ blocked → 429 rate_limiter_cooldown
-        │ allowed ─────────────────────────────────────────────────────────┐
-        ▼                                                                  │
- robots.is_allowed(url)                                                    │
-        │ bloqueado → 403 unsupported_by_robots                            │
-        ▼                                                                  │
- cache.get(url) ──── hit ──► 200 html_from_cache                           │
-        │ miss                                                             │
-        ▼                                                                  │
- download_html() [curl_cffi, singleflight]                                 │
-        │                                                                  │
-        ▼                                                                  │
- ResponseClassifier.classify(status, html, error)                          │
-        │                                                                  │
-        ├── SUCCESS ──► cache.set + update_history(success)                │
-        │               ► 200 html_fetched_via_curl_cffi                   │
-        │                                                                  │
-        ├── REJECT ───► update_history(failure) ► 4xx/5xx                  │
-        │                                                                  │
-        └── SCALE ────► update_history(failure, layer=1)                   │
-                        │                                                  │
-                        ▼                                                  │
-                playwright_pool.fetch_html()                               │
-                        │                                                  │
-                        ├── sucesso ──► cache.set                          │
-                        │              update_history(success,3)           │
-                        │              ► 200 html_fetched_via_playwright   |
-                        │                                                  │
-                        └── erro ─────► update_history(failure,3)          |
-                                        ► erro mapeado                     │
-                                                                           │
-        ◄──────────────────────────────────────────────────────────────────┘
+FetchHTMLStep
+        │
+        ├── robots.is_allowed(url) = false → 403 unsupported_by_robots
+        ├── cache.get(url) = hit          → 200 html_from_cache
+        │
+        ▼
+FetchDecisionGate.fetch_with_fallback(...)
+        │
+        ├── adaptive_rate_limiter.should_allow(host) = false
+        │   └── REJECT(rate_limiter_cooldown)
+        │
+        ├── download_html() via curl_cffi + singleflight
+        │
+        ├── ResponseClassifier.classify(status, html, error)
+        │   ├── SUCCESS → HTML aceito via HTTP
+        │   ├── REJECT  → erro final ou indisponibilidade inferida
+        │   └── SCALE   → playwright_pool.fetch_html()
+        │               ├── sucesso → HTML aceito via browser
+        │               └── erro    → rejeição degradada ou challenge persistente
+        │
+        └── FetchResult(status, html, error_code, telemetry)
 ```
+
+### Fluxo de fallback HTTP → Browser
+
+1. A primeira tentativa sempre privilegia `curl_cffi`, porque é mais barata, mais rápida e já resolve a maioria dos casos.
+2. O `ResponseClassifier` olha para o resultado bruto dessa tentativa e decide se o HTML é utilizável, se deve ser descartado imediatamente ou se vale escalar.
+3. Só há fallback para `Playwright` quando o retorno sugere bloqueio, HTML vazio, erro transitório ou necessidade de renderização.
+4. O browser não roda em paralelo com a tentativa HTTP; ele é acionado somente quando a decisão `SCALE` torna isso necessário.
+5. O resultado devolvido ao pipeline já sai consolidado em `FetchResult`, sem lógica anti-bot duplicada em outras etapas.
 
 ### Classificador de Resposta (`ResponseClassifier`)
 
-Centraliza as regras de escalonamento — sem lógica espalhada nas etapas:
+Centraliza as regras de escalonamento sem lógica espalhada nas etapas:
 
-| Condição | Ação | Próxima camada |
-|----------|------|----------------|
-| 200 + HTML válido (≥ 1 KB, sem anti-bot) | `SUCCESS` | — |
-| 200 + HTML vazio ou anti-bot detectado | `SCALE` | 3 |
-| 429 | `SCALE` | 3 (layer 2 reservado pós-MVP) |
-| 403 / 405 / 5xx | `SCALE` | 3 |
-| 404 / 410 | `REJECT` | — |
-| Timeout / ConnectionError | `SCALE` | 3 |
+| Condição | Ação | Destino |
+|----------|------|---------|
+| 200 + HTML válido (≥ 1 KB, sem anti-bot) | `SUCCESS` | seguir para parsing |
+| 200 + HTML vazio ou anti-bot detectado | `SCALE` | fallback para browser |
+| 429 | `SCALE` | fallback para browser |
+| 403 / 405 / 5xx | `SCALE` | fallback para browser |
+| 404 / 410 | `REJECT` | encerrar |
+| Timeout / ConnectionError | `SCALE` | fallback para browser |
 
 Padrões anti-bot detectados: `suspicious-traffic-frontend` (Mercado Livre), `challenges.cloudflare.com`, `__cf_chl`, `__cf_bm`, `recaptcha/api.js`, `_pxcaptcha`.
+
+### Anti-bot: detecção vs bloqueio
+
+- **Detecção** significa que o classificador ou o gate encontraram evidência de challenge no HTML (`anti_bot_detected=true`, `anti_bot_pattern=...`). Isso não implica falha final por si só.
+- **Bloqueio** significa que, depois da decisão do gate, o endpoint realmente precisou devolver erro para o cliente (`429`, `503` ou `504`) porque não havia HTML utilizável.
+- Um `200` com HTML de challenge conta como detecção e normalmente leva a `SCALE`, não a erro imediato.
+- Se o browser consegue renderizar a página e o challenge desaparece, o gate marca `anti_bot_bypassed=true` e o pipeline segue normalmente.
+- Se o browser também falha, o problema vira bloqueio efetivo e é mapeado por `response_helpers.py` para um `error_code` estável.
 
 ### Rate Limiter Adaptativo (`AdaptiveRateLimiter`)
 
@@ -155,12 +161,12 @@ Rastreia taxa de sucesso por hostname com histórico em Redis (db 2) e ativa coo
 
 **Limiares de decisão:**
 
-| Taxa de sucesso | Camada sugerida | Ação de cooldown |
-|-----------------|-----------------|-----------------|
-| ≥ 90 % | 1 (curl_cffi) | — |
-| 50 – 89 % | 3 (Playwright) | — |
-| 20 – 49 % + 429 recorrente | 3 | Cooldown 300 s |
-| < 20 % | rejeitar | Cooldown 3600 s |
+| Taxa de sucesso | Estratégia sugerida | Ação de cooldown |
+|-----------------|---------------------|------------------|
+| ≥ 90 % | insistir na tentativa HTTP | — |
+| 50 – 89 % | aceitar escalonamento para browser quando necessário | — |
+| 20 – 49 % + 429 recorrente | aceitar escalonamento para browser | Cooldown 300 s |
+| < 20 % | rejeitar temporariamente | Cooldown 3600 s |
 
 **Chaves Redis** (prefixo `rate:ml:{hostname}`, TTL 1h, db 2):
 
@@ -169,7 +175,7 @@ Rastreia taxa de sucesso por hostname com histórico em Redis (db 2) e ativa coo
 | `rate:ml:{host}:success_count` | INCR | Requisições bem-sucedidas |
 | `rate:ml:{host}:failure_count` | INCR | Requisições com erro |
 | `rate:ml:{host}:cooldown_until` | SET | Timestamp Unix (float) de fim do cooldown |
-| `rate:ml:{host}:last_layer` | SET | Camada usada na última requisição |
+| `rate:ml:{host}:last_layer` | SET | Estratégia usada na última requisição (`1` HTTP, `3` browser; nome histórico preservado na chave) |
 | `rate:ml:{host}:last_error_code` | SET | Último código de erro (`429`, `timeout`, …) |
 
 Quando Redis está indisponível, o limiter usa fallback in-memory (não persistente) — degradação segura sem interromper o pipeline.
@@ -187,24 +193,52 @@ Quando Redis está indisponível, o limiter usa fallback in-memory (não persist
 ## Pipeline de Parsing
 O pipeline sequencial e registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado por [`services/synergic_pipeline.py`](services/synergic_pipeline.py). A execução para no primeiro `StepResult.success` com payload valido.
 
-1. **CascadeFetchStep**: rate limiter → robots.txt → cache → curl_cffi (Camada 1) → classificador → Playwright (Camada 3 se necessário).
-2. **AntiBotDetectionStep**: detecta páginas de challenge remanescentes e limpa `context.html` para evitar parsing de páginas inválidas.
-3. **JsonLdParserStep**: tenta extrair dados estruturados (`application/ld+json`) com `extruct`.
-4. **HtmlMetadataParserStep**: tenta extrair nome/preco/metadados com BeautifulSoup.
-5. **DomainSpecificParserStep**: aplica parser dedicado quando o dominio bate com mapeamento conhecido.
-6. **GenericFallbackParserStep**: ultima tentativa com heuristicas genericas.
+1. **FetchHTMLStep**: etapa oficial de aquisição de HTML. Ela delega ao `FetchDecisionGate`, que concentra rate limiter, tentativa HTTP, classificação e fallback para browser.
+2. **JsonLdParserStep**: tenta extrair dados estruturados (`application/ld+json`) com `extruct`.
+3. **HtmlMetadataParserStep**: tenta extrair nome/preco/metadados com BeautifulSoup.
+4. **DomainSpecificParserStep**: aplica parser dedicado quando o dominio bate com mapeamento conhecido.
+5. **GenericFallbackParserStep**: ultima tentativa com heuristicas genericas.
 
 Tempo maximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline: `SCRAPER_PIPELINE_TIMEOUT_SECONDS`.
 
 ### Mapa do Pipeline de Parsing
 | Ordem | Etapa | Objetivo | Possivel saida |
 |-------|-------|----------|----------------|
-| `1` | `CascadeFetchStep` | Obter HTML em cascata (Camada 1 → 3) ou inferir indisponibilidade | `success`, `error` |
-| `2` | `AntiBotDetectionStep` | Detectar challenge pages remanescentes | `failure` ou `empty` |
-| `3` | `JsonLdParserStep` | Extrair dados estruturados com maior confiabilidade | `success` com payload ou `empty` |
-| `4` | `HtmlMetadataParserStep` | Ler metadados e estrutura basica da pagina | `success` com payload ou `empty` |
-| `5` | `DomainSpecificParserStep` | Aplicar regras dedicadas por dominio quando disponiveis | `success` com payload ou `empty` |
-| `6` | `GenericFallbackParserStep` | Aplicar heuristicas genericas como ultimo fallback | `success` com payload ou `empty` |
+| `1` | `FetchHTMLStep` | Obter HTML ou inferir indisponibilidade, delegando a decisão de aquisição ao `FetchDecisionGate` | `success`, `error` |
+| `2` | `JsonLdParserStep` | Extrair dados estruturados com maior confiabilidade | `success` com payload ou `empty` |
+| `3` | `HtmlMetadataParserStep` | Ler metadados e estrutura basica da pagina | `success` com payload ou `empty` |
+| `4` | `DomainSpecificParserStep` | Aplicar regras dedicadas por dominio quando disponiveis | `success` com payload ou `empty` |
+| `5` | `GenericFallbackParserStep` | Aplicar heuristicas genericas como ultimo fallback | `success` com payload ou `empty` |
+
+### Telemetria no contrato HTTP
+
+**Headers garantidos pela rota `POST /scraper/parse`:**
+
+| Header | Quando aparece | Significado |
+|--------|----------------|-------------|
+| `X-MarketScraper-Contract-Version` | Todas as respostas do endpoint | Versão major do contrato HTTP compartilhado |
+| `X-MarketScraper-Cache-Status` | Respostas emitidas pela rota após lookup condicional | Estado do cache HTTP: `hit`, `miss`, `revalidated` ou `bypass` |
+| `ETag`, `Last-Modified`, `Cache-Control` | Quando existe metadata persistida para a resposta | Revalidação condicional e reaproveitamento pelo cliente |
+
+**Campos do corpo relevantes para rastreabilidade:**
+
+| Campo | Local | Observação |
+|------|-------|------------|
+| `availability` | topo do `ParserResponse` | Disponibilidade consolidada do anúncio |
+| `last_status` | topo do `ParserResponse` | Último estado conhecido ou inferido |
+| `payload` | `ParserResponse.payload` | Extras do parser preservados para auditoria sem quebrar o contrato, incluindo `acquisition` quando houver telemetria de coleta |
+
+**Telemetria interna de aquisição:**
+
+- `http_status`
+- `layer_used`
+- `fallback_taken`
+- `anti_bot_detected`
+- `anti_bot_pattern`
+- `anti_bot_bypassed`
+- `classification_reason`
+
+Esses campos são gravados em `PipelineContext.data` e em logs estruturados para auditoria operacional. O contrato HTTP atual não os expõe como headers dedicados nem os injeta automaticamente no `ParserResponse.payload`; qualquer futura exposição deve ser tratada como adição explícita e compatível de contrato.
 
 ---
 
@@ -341,7 +375,7 @@ Comandos de apoio operacional:
 - Novos parsers ou novos erros de fluxo devem vir acompanhados de cobertura minima em `unit` e `integration` antes de serem considerados prontos.
 
 ### Cobertura atual da suite
-- `unit`: configuracao, contratos do pipeline, etapas com mocks de I/O, helpers de resposta, utilitarios criticos e rota. Inclui cobertura dedicada para `CurlffiHTTPClient`, `ResponseClassifier`, `PlaywrightPool`, `AdaptiveRateLimiter` e `CascadeFetchStep`.
+- `unit`: configuracao, contratos do pipeline, etapas com mocks de I/O, helpers de resposta, utilitarios criticos e rota. Inclui cobertura dedicada para `CurlffiHTTPClient`, `ResponseClassifier`, `PlaywrightPool`, `AdaptiveRateLimiter` e `FetchHTMLStep`.
 - `integration`: `health`, sucesso do parse, `304`, `force_refresh`, erros de fluxo, fallback por etapas e compatibilidade com schemas compartilhados.
 - `stress`: timeout por etapa, timeout global e volume concorrente controlado com resposta estavel.
 
@@ -357,7 +391,7 @@ Comandos de apoio operacional:
 
 - **Observabilidade:**
   - Logs estruturados por `trace_id` em rota e pipeline (`routes_scraper`, `scraper_pipeline`), incluindo etapa, resultado e duracao.
-  - Campos `layer_used` (`curl_cffi` | `playwright`), `classification_reason` e `fallback_taken` presentes em cada coleta bem-sucedida.
+  - Telemetria de aquisição (`layer_used`, `classification_reason`, `fallback_taken`, `anti_bot_*`) fica centralizada em `context.data` e nos logs estruturados do gate.
   - `X-MarketScraper-Cache-Status` facilita diagnostico de decisoes de cache condicional.
   - Health check simples em `/health/ping` para probes de orquestracao.
 

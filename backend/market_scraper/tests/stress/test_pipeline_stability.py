@@ -47,15 +47,15 @@ async def test_controlled_concurrent_volume_keeps_response_stable(monkeypatch):
         fake_is_allowed,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.download_html",
+        "market_scraper.services.fetch_decision_gate.download_html",
         fake_download,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.adaptive_rate_limiter",
+        "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
         fake_rl,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps._response_classifier",
+        "market_scraper.services.fetch_decision_gate._classifier",
         fake_classifier,
     )
 

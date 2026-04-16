@@ -1,4 +1,4 @@
-"""Testes unitários para PlaywrightPool e PlaywrightFetchStep.
+"""Testes unitários para PlaywrightPool.
 
 Toda a API do Playwright é substituída por mocks assíncronos para que
 os testes rodem sem browser instalado. A estrutura de mocks reflete:
@@ -15,20 +15,16 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from market_scraper.services.playwright_pool import (
-    PlaywrightFetchError,
     PlaywrightPool,
     PlaywrightPoolNotReadyError,
     PlaywrightTimeoutError,
     _BLOCKED_RESOURCE_TYPES,
-    playwright_pool,
 )
-from market_scraper.services.pipeline_steps import PlaywrightFetchStep
-from market_scraper.services.synergic_pipeline import PipelineContext
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -309,115 +305,3 @@ async def test_pool_respects_max_concurrent_contexts(monkeypatch):
     await asyncio.gather(*tasks)
 
     assert max(max_seen) <= 2
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PlaywrightFetchStep
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _make_context(url: str = _URL) -> PipelineContext:
-    return PipelineContext(
-        url=url,
-        source="www.mercadolivre.com.br",
-        default_step_timeout=5.0,
-    )
-
-
-async def test_playwright_fetch_step_sets_html_on_success(monkeypatch):
-    """Step bem-sucedido define context.html e layer_used=playwright."""
-    step = PlaywrightFetchStep()
-    context = _make_context()
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.playwright_pool",
-        MagicMock(
-            is_ready=True,
-            fetch_html=AsyncMock(return_value=_HTML),
-        ),
-    )
-
-    result = await step.run(context)
-
-    assert result.status == "success"
-    assert context.html == _HTML
-    assert context.data.get("layer_used") == "playwright"
-
-
-async def test_playwright_fetch_step_returns_failure_when_pool_not_ready(monkeypatch):
-    """Step retorna failure quando pool não está inicializado."""
-    step = PlaywrightFetchStep()
-    context = _make_context()
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.playwright_pool",
-        MagicMock(is_ready=False),
-    )
-
-    result = await step.run(context)
-
-    assert result.status == "error"
-    assert result.message == "playwright_not_ready"
-    assert context.html is None
-
-
-async def test_playwright_fetch_step_returns_failure_on_timeout(monkeypatch):
-    """Step mapeia PlaywrightTimeoutError para failure com mensagem correta."""
-    step = PlaywrightFetchStep()
-    context = _make_context()
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.playwright_pool",
-        MagicMock(
-            is_ready=True,
-            fetch_html=AsyncMock(
-                side_effect=PlaywrightTimeoutError(url=_URL, timeout=5.0)
-            ),
-        ),
-    )
-
-    result = await step.run(context)
-
-    assert result.status == "error"
-    assert result.message == "playwright_timeout"
-
-
-async def test_playwright_fetch_step_returns_failure_on_fetch_error(monkeypatch):
-    """Step mapeia PlaywrightFetchError para failure."""
-    step = PlaywrightFetchStep()
-    context = _make_context()
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.playwright_pool",
-        MagicMock(
-            is_ready=True,
-            fetch_html=AsyncMock(
-                side_effect=PlaywrightFetchError(url=_URL, reason="navigation aborted")
-            ),
-        ),
-    )
-
-    result = await step.run(context)
-
-    assert result.status == "error"
-    assert result.message == "playwright_fetch_error"
-
-
-async def test_playwright_fetch_step_uses_step_timeout(monkeypatch):
-    """Step passa o timeout correto para playwright_pool.fetch_html."""
-    step = PlaywrightFetchStep(timeout=12.5)
-    context = _make_context()
-
-    captured: dict = {}
-
-    async def fake_fetch(url, *, timeout):
-        captured["timeout"] = timeout
-        return _HTML
-
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.playwright_pool",
-        MagicMock(is_ready=True, fetch_html=fake_fetch),
-    )
-
-    await step.run(context)
-
-    assert captured["timeout"] == 12.5

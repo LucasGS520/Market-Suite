@@ -2,17 +2,58 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 from shared.schemas.shared_schemas_scraper import ParserResponse
 from shared.utils.url_validation import UrlIssue
 
+from market_scraper.services.response_classifier import (
+    ClassificationAction,
+    ClassificationResult,
+)
 from market_scraper.services.synergic_pipeline import (
     PipelineContext,
     PipelineOutcome,
     PipelineStep,
     StepResult,
 )
+
+
+def _fake_rate_limiter() -> MagicMock:
+    rl = MagicMock()
+    rl.should_allow = AsyncMock(return_value=(True, 1))
+    rl.update_history = AsyncMock()
+    return rl
+
+
+def _fake_classifier_success() -> MagicMock:
+    cls = MagicMock()
+    cls.classify = MagicMock(
+        return_value=ClassificationResult(
+            action=ClassificationAction.SUCCESS,
+            next_layer=None,
+            reason="html_valid",
+        )
+    )
+    return cls
+
+
+def _fake_classifier_antibot() -> MagicMock:
+    cls = MagicMock()
+    cls.classify = MagicMock(
+        return_value=ClassificationResult(
+            action=ClassificationAction.SCALE,
+            next_layer=3,
+            reason="anti_bot_page",
+            telemetry={"anti_bot_pattern": "cloudflare_challenge"},
+        )
+    )
+    return cls
+
+
+def _pad_html(html: str) -> str:
+    return html + "<!--" + ("x" * 2048) + "-->"
 
 
 def test_parse_flow_returns_success_with_shared_contract(
@@ -24,7 +65,7 @@ def test_parse_flow_returns_success_with_shared_contract(
         return True
 
     async def fake_download(url: str, *, timeout: float) -> str:
-        return success_product_html
+        return _pad_html(success_product_html)
 
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.resolve_public_address",
@@ -35,8 +76,16 @@ def test_parse_flow_returns_success_with_shared_contract(
         fake_is_allowed,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.download_html",
+        "market_scraper.services.fetch_decision_gate.download_html",
         fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
+        _fake_rate_limiter(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate._classifier",
+        _fake_classifier_success(),
     )
 
     response = integration_client.post("/scraper/parse", json={"url": "example.com/product/1"})
@@ -50,6 +99,17 @@ def test_parse_flow_returns_success_with_shared_contract(
     assert payload.currency is None
     assert str(payload.url) == "https://example.com/product/1"
     assert payload.source == "example.com"
+    assert payload.payload == {
+        "acquisition": {
+            "layer_used": "curl_cffi",
+            "fallback_taken": False,
+            "classification_reason": "html_valid",
+            "http_status": 200,
+            "anti_bot_detected": False,
+            "anti_bot_pattern": None,
+            "anti_bot_bypassed": False,
+        }
+    }
 
 
 def test_parse_flow_returns_304_when_cached_response_matches_conditionals(
@@ -61,7 +121,7 @@ def test_parse_flow_returns_304_when_cached_response_matches_conditionals(
         return True
 
     async def fake_download(url: str, *, timeout: float) -> str:
-        return success_product_html
+        return _pad_html(success_product_html)
 
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.resolve_public_address",
@@ -72,8 +132,16 @@ def test_parse_flow_returns_304_when_cached_response_matches_conditionals(
         fake_is_allowed,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.download_html",
+        "market_scraper.services.fetch_decision_gate.download_html",
         fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
+        _fake_rate_limiter(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate._classifier",
+        _fake_classifier_success(),
     )
 
     first = integration_client.post("/scraper/parse", json={"url": "example.com/product/304"})
@@ -107,7 +175,7 @@ def test_parse_flow_force_refresh_bypasses_http_and_pipeline_cache(
 
     async def fake_download(url: str, *, timeout: float) -> str:
         calls["download"] += 1
-        return success_product_html
+        return _pad_html(success_product_html)
 
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.resolve_public_address",
@@ -118,8 +186,16 @@ def test_parse_flow_force_refresh_bypasses_http_and_pipeline_cache(
         fake_is_allowed,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.download_html",
+        "market_scraper.services.fetch_decision_gate.download_html",
         fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
+        _fake_rate_limiter(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate._classifier",
+        _fake_classifier_success(),
     )
 
     first = integration_client.post("/scraper/parse", json={"url": "example.com/product/cache"})
@@ -204,8 +280,16 @@ def test_parse_flow_returns_too_many_redirects(
         fake_is_allowed,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.download_html",
+        "market_scraper.services.fetch_decision_gate.download_html",
         fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
+        _fake_rate_limiter(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate._classifier",
+        _fake_classifier_success(),
     )
 
     response = integration_client.post("/scraper/parse", json={"url": "https://example.com/product"})
@@ -222,7 +306,7 @@ def test_parse_flow_returns_no_result_when_pipeline_cannot_extract_data(
         return True
 
     async def fake_download(url: str, *, timeout: float) -> str:
-        return "<html><body><p>sem nome e sem preco</p></body></html>"
+        return _pad_html("<html><body><p>sem nome e sem preco</p></body></html>")
 
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.resolve_public_address",
@@ -233,8 +317,12 @@ def test_parse_flow_returns_no_result_when_pipeline_cannot_extract_data(
         fake_is_allowed,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.download_html",
+        "market_scraper.services.fetch_decision_gate.download_html",
         fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
+        _fake_rate_limiter(),
     )
 
     response = integration_client.post("/scraper/parse", json={"url": "https://example.com/product"})
@@ -327,3 +415,116 @@ def test_parse_flow_normalizes_degraded_success_payload_without_breaking_contrac
     assert payload.last_status == "temporarily_unavailable"
     assert payload.source == "fallback.example.com"
     assert payload.payload == {"sku": "SKU-9"}
+
+
+def test_parse_flow_exposes_acquisition_payload_after_playwright_fallback(
+    integration_client,
+    monkeypatch,
+    success_product_html,
+    fixture_html_loader,
+):
+    challenge_html = _pad_html(fixture_html_loader("response_js_challenge.html"))
+
+    async def fake_is_allowed(url: str, *, timeout: float) -> bool:
+        return True
+
+    async def fake_download(url: str, *, timeout: float) -> str:
+        return challenge_html
+
+    fake_pw_pool = type(
+        "PoolStub",
+        (),
+        {
+            "is_ready": True,
+            "fetch_html": AsyncMock(return_value=success_product_html),
+        },
+    )()
+
+    monkeypatch.setattr(
+        "market_scraper.routes.routes_scraper.resolve_public_address",
+        lambda host: ["93.184.216.34"],
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.robots.is_allowed",
+        fake_is_allowed,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.download_html",
+        fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
+        _fake_rate_limiter(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate._classifier",
+        _fake_classifier_antibot(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.playwright_pool",
+        fake_pw_pool,
+    )
+
+    response = integration_client.post("/scraper/parse", json={"url": "example.com/product/challenge"})
+
+    assert response.status_code == 200
+    payload = ParserResponse.model_validate(response.json())
+    assert payload.payload == {
+        "acquisition": {
+            "layer_used": "playwright",
+            "fallback_taken": True,
+            "classification_reason": "anti_bot_page",
+            "http_status": 200,
+            "anti_bot_detected": True,
+            "anti_bot_pattern": "cloudflare_challenge",
+            "anti_bot_bypassed": True,
+        }
+    }
+
+
+def test_parse_flow_exposes_acquisition_payload_for_unavailable_product(
+    integration_client,
+    monkeypatch,
+):
+    async def fake_is_allowed(url: str, *, timeout: float) -> bool:
+        return True
+
+    async def fake_download(url: str, *, timeout: float) -> str:
+        request = httpx.Request("GET", url)
+        response = httpx.Response(status_code=404, request=request)
+        raise httpx.HTTPStatusError("not found", request=request, response=response)
+
+    monkeypatch.setattr(
+        "market_scraper.routes.routes_scraper.resolve_public_address",
+        lambda host: ["93.184.216.34"],
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.robots.is_allowed",
+        fake_is_allowed,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.download_html",
+        fake_download,
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
+        _fake_rate_limiter(),
+    )
+
+    response = integration_client.post("/scraper/parse", json={"url": "example.com/product/missing"})
+
+    assert response.status_code == 200
+    payload = ParserResponse.model_validate(response.json())
+    assert payload.availability is False
+    assert payload.last_status == "removed"
+    assert payload.payload == {
+        "acquisition": {
+            "layer_used": None,
+            "fallback_taken": False,
+            "classification_reason": None,
+            "http_status": 404,
+            "anti_bot_detected": False,
+            "anti_bot_pattern": None,
+            "anti_bot_bypassed": False,
+        }
+    }

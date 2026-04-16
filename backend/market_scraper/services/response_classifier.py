@@ -1,14 +1,14 @@
-""" Classificador de resposta HTTP para decisões de escalonamento entre camadas.
+""" Classificador de resposta HTTP para decisões de escalonamento.
 
 O classificador recebe o resultado de uma tentativa de aquisição de HTML e
-decide qual ação tomar: aceitar como sucesso, escalar para uma camada superior
-(Playwright) ou rejeitar definitivamente. A lógica é puramente funcional —
+decide qual ação tomar: aceitar como sucesso, escalar para o fallback de
+browser (Playwright) ou rejeitar definitivamente. A lógica é puramente funcional —
 sem I/O, sem efeitos colaterais — para facilitar testes e auditoria.
 
-Integração esperada (Fase 6):
-    1. ``FetchHTMLStep`` obtém HTML via Camada 1 (curl_cffi).
+Integração esperada:
+    1. ``FetchHTMLStep`` obtém HTML via curl_cffi.
     2. O classificador avalia o resultado.
-    3. Se action=SCALE e next_layer=3, o pipeline chama ``PlaywrightFetchStep``.
+    3. Se action=SCALE, o gate aciona ``playwright_pool``.
     4. O resultado final é registrado com os campos de telemetria.
 """
 
@@ -28,10 +28,10 @@ logger = structlog.get_logger("response_classifier")
 # Limiares de tamanho de HTML
 # ─────────────────────────────────────────────────────────────────────────────
 
-#HTML abaixo deste tamanho é tratado como "vazio" → escala para Camada 3
+#HTML abaixo deste tamanho é tratado como "vazio" → escala para browser
 _HTML_EMPTY_THRESHOLD_BYTES = 1 * 1024       # 1 KB
 
-#Padrões de anti-bot inspecionados pelo classificador (subset dos de AntiBotDetectionStep)
+#Padrões de anti-bot inspecionados pelo classificador e pelo fluxo de fetch
 _ANTI_BOT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("suspicious-traffic-frontend", "mercadolivre_challenge"),
     ("challenges.cloudflare.com",   "cloudflare_challenge"),
@@ -45,10 +45,10 @@ _ANTI_BOT_PATTERNS: tuple[tuple[str, str], ...] = (
 #Status HTTP que indicam rejeição final (nunca escalar)
 _FINAL_REJECT_STATUSES: frozenset[int] = frozenset({404, 410})
 
-#Status HTTP que escalam para Camada 3
+#Status HTTP que escalam para browser
 _SCALE_TO_LAYER3_STATUSES: frozenset[int] = frozenset({403, 405, 406, *range(500, 600)})
 
-#Status HTTP que escalam para Camada 2 (futura — por enquanto redireciona para 3)
+#Status HTTP reservados para estratégia futura; no MVP ainda escalam para browser
 _SCALE_TO_LAYER2_STATUSES: frozenset[int] = frozenset({429})
 
 
@@ -59,7 +59,7 @@ _SCALE_TO_LAYER2_STATUSES: frozenset[int] = frozenset({429})
 class ClassificationAction(enum.Enum):
     """ Ação decidida pelo classificador após avaliar a resposta."""
     SUCCESS = "success"  # HTML válido, pode seguir para o parser
-    SCALE   = "scale"    # Escalar para camada indicada em ``next_layer``
+    SCALE   = "scale"    # Escalar para a próxima estratégia indicada em ``next_layer``
     REJECT  = "reject"   # Rejeição definitiva, sem nova tentativa
 
 
@@ -69,7 +69,7 @@ class ClassificationResult:
 
     Attributes:
         action: O que o pipeline deve fazer a seguir.
-        next_layer: Camada de destino quando ``action=SCALE`` (2 ou 3); ``None`` nos demais casos.
+        next_layer: Estratégia de destino quando ``action=SCALE`` (2 ou 3 por compatibilidade); ``None`` nos demais casos.
         reason: Código legível por humanos que explica a decisão (ex: ``"html_empty"``).
         telemetry: Campos extras prontos para ser adicionados ao log estruturado.
     """
@@ -129,7 +129,7 @@ class ResponseClassifier:
     | —             | —              | Timeout          | SCALE   | 3          |
     | —             | —              | Connection error | SCALE   | 3          |
 
-    *Camada 2 (proxy residencial) fica para pós-MVP; por ora escala para 3.
+    *A estratégia intermediária com proxy residencial fica para pós-MVP; por ora 429 ainda escala para browser.
     """
 
     def classify(
@@ -199,7 +199,7 @@ class ResponseClassifier:
             )
 
         if http_status in _SCALE_TO_LAYER2_STATUSES:
-            #Camada 2 (proxy) não implementada no MVP — escala para 3
+            #Estratégia intermediária com proxy não implementada no MVP — escala para browser
             return ClassificationResult(
                 action=ClassificationAction.SCALE,
                 next_layer=3,

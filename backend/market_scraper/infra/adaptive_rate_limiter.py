@@ -1,23 +1,23 @@
 """ Rate limiter adaptativo com histórico em Redis para o market_scraper.
 
-Rastreia taxa de sucesso por hostname e ajusta automaticamente a camada
-de aquisição sugerida: Camada 1 (curl_cffi) quando o host coopera bem,
-Camada 3 (Playwright) quando detecta bloqueios recorrentes, e cooldown
-temporário quando 429s se acumulam.
+Rastreia taxa de sucesso por hostname e ajusta automaticamente a
+estratégia de aquisição sugerida: tentativa HTTP quando o host coopera
+bem, fallback de browser quando detecta bloqueios recorrentes, e
+cooldown temporário quando 429s se acumulam.
 
 Schema Redis (namespace ``rate:ml:{hostname}``):
 
     rate:ml:{host}:success_count    — INCR com TTL 1h
     rate:ml:{host}:failure_count    — INCR com TTL 1h
     rate:ml:{host}:cooldown_until   — timestamp Unix (float), TTL variável
-    rate:ml:{host}:last_layer       — camada usada na última req (1, 2, 3)
+    rate:ml:{host}:last_layer       — estratégia usada na última req (1, 2, 3; nome histórico preservado)
     rate:ml:{host}:last_error_code  — código do último erro ("429", "timeout"…)
 
 Fallback: se Redis estiver indisponível, um dicionário in-memory (não
 persistente) garante degradação segura — as decisões são tomadas com base
 no estado local do processo.
 
-Uso (Fase 6 — integração):
+Uso:
 
     limiter = adaptive_rate_limiter   # singleton global
 
@@ -50,8 +50,8 @@ _HISTORY_TTL_SECONDS: int   = 3600          #janela de histórico (1h)
 _NAMESPACE: str             = "rate:ml"
 
 #Limiares de taxa de sucesso
-_THRESHOLD_LAYER1: float    = 0.90          # ≥ 90% → Layer 1 (curl_cffi)
-_THRESHOLD_LAYER3: float    = 0.50          # ≥ 50% → Layer 3; < 50% → cooldown
+_THRESHOLD_LAYER1: float    = 0.90          # ≥ 90% → tentativa HTTP
+_THRESHOLD_LAYER3: float    = 0.50          # ≥ 50% → browser sob demanda; < 50% → cooldown
 _THRESHOLD_REJECT: float    = 0.20          # < 20% → rejeitar completamente
 
 #Durações de cooldown por severidade
@@ -82,7 +82,7 @@ class _HostState:
 # ────────────────────────────────────────────────────────────────────────────
 
 class AdaptiveRateLimiter:
-    """ Rastreia taxa de sucesso por host e sugere a camada mais adequada.
+    """ Rastreia taxa de sucesso por host e sugere a estratégia mais adequada.
 
     Todas as operações são assíncronas. O cliente Redis é criado
     sob demanda e reutilizado por instância. Em caso de falha Redis, o
@@ -139,7 +139,7 @@ class AdaptiveRateLimiter:
         *,
         force_layer: int | None = None,
     ) -> tuple[bool, int]:
-        """ Decide se a requisição deve prosseguir e qual camada usar.
+        """ Decide se a requisição deve prosseguir e qual estratégia usar.
 
         Args:
             host: Hostname alvo (ex: ``"www.mercadolivre.com.br"``).
@@ -149,7 +149,7 @@ class AdaptiveRateLimiter:
         Returns:
             ``(allowed, layer)`` onde:
             - ``allowed=False`` → cooldown ativo ou taxa de rejeição severa.
-            - ``layer`` ∈ {1, 3} — camada sugerida quando ``allowed=True``.
+            - ``layer`` ∈ {1, 3} — estratégia sugerida quando ``allowed=True``.
         """
         state = await self._load_state(host)
 
@@ -166,7 +166,7 @@ class AdaptiveRateLimiter:
         success, failure = state["success_count"], state["failure_count"]
         total = success + failure
 
-        # ── Sem histórico suficiente → Layer 1 (otimista) ─────────────────
+        # ── Sem histórico suficiente → tentativa HTTP otimista ────────────
         if total < _MIN_REQUESTS_FOR_DECISION:
             return True, force_layer or 1
 
@@ -218,7 +218,7 @@ class AdaptiveRateLimiter:
             success: ``True`` se o HTML foi obtido com sucesso.
             error_code: Código do erro quando ``success=False``
                         (ex: ``"429"``, ``"timeout"``, ``"403"``).
-            layer_used: Camada utilizada (1, 2 ou 3).
+            layer_used: Estratégia utilizada (1, 2 ou 3).
         """
         try:
             await self._update_redis(host, success=success, error_code=error_code, layer_used=layer_used)

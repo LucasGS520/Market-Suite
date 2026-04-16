@@ -6,6 +6,7 @@ from decimal import Decimal
 import structlog
 
 from market_scraper.routes.response_helpers import (
+    _extract_acquisition_payload,
     _extract_additional_payload,
     _map_http_download_issue,
     _sanitize_payload,
@@ -118,6 +119,10 @@ def test_extract_additional_payload_filters_standard_fields():
     assert extras == {"sku": "SKU-1", "rank": 3}
 
 
+def test_extract_acquisition_payload_returns_none_without_fetch_telemetry():
+    assert _extract_acquisition_payload({}) is None
+
+
 def test_build_success_response_merges_inferred_state_and_extra_payload():
     context = PipelineContext(
         url="https://example.com/product",
@@ -126,6 +131,13 @@ def test_build_success_response_merges_inferred_state_and_extra_payload():
     )
     context.data["availability_inferred"] = False
     context.data["last_status_inferred"] = "not_found"
+    context.data["layer_used"] = "curl_cffi"
+    context.data["fallback_taken"] = False
+    context.data["classification_reason"] = "html_valid"
+    context.data["http_status"] = 200
+    context.data["anti_bot_detected"] = False
+    context.data["anti_bot_pattern"] = None
+    context.data["anti_bot_bypassed"] = False
     outcome = PipelineOutcome(status="success", context=context)
 
     response = build_success_response(
@@ -144,7 +156,18 @@ def test_build_success_response_merges_inferred_state_and_extra_payload():
     assert response.name == "Produto X"
     assert response.availability is False
     assert response.last_status == "not_found"
-    assert response.payload == {"sku": "ABC-1"}
+    assert response.payload == {
+        "sku": "ABC-1",
+        "acquisition": {
+            "layer_used": "curl_cffi",
+            "fallback_taken": False,
+            "classification_reason": "html_valid",
+            "http_status": 200,
+            "anti_bot_detected": False,
+            "anti_bot_pattern": None,
+            "anti_bot_bypassed": False,
+        },
+    }
 
 
 def test_build_success_response_uses_marketplace_fallback_and_context_last_status():
@@ -275,7 +298,7 @@ def test_map_http_download_issue_pipeline_degraded_returns_503():
 
 
 def test_map_http_download_issue_playwright_not_ready_returns_503():
-    """playwright_not_ready legado (PlaywrightFetchStep) → 503 via mapeamento de salvaguarda."""
+    """playwright_not_ready continua mapeado para 503 via salvaguarda operacional."""
     context = PipelineContext(
         url="https://example.com/product",
         source="example.com",

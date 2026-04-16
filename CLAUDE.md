@@ -17,81 +17,65 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-### Resumo e Estratégia do Plano
+## Resumo e Estratégia do Plano
 
-### **Objetivo**
-Implementar a arquitetura em cascata de **aquisição de HTML com TLS impersonation nativo** (curl_cffi) substituindo `httpx` na `FetchHTMLStep`, complementada com fallback Playwright para cenários com JavaScript, eliminando bloqueios de fingerprint TLS e aumentando taxa de sucesso em Mercado Livre e marketplaces similares.
+### **Problema**
+O `market_scraper` possui **duplicação e dispersão de responsabilidades** em relação à detecção e decisão sobre proteção anti-bot:
 
-### **Resultado Esperado**
-1. `FetchHTMLStep` usando `curl_cffi` com impersonation Chrome (drop-in replacement de download_html)
-2. Classificador de resposta automatizando decisões de escalonamento entre camadas
-3. Rate limiter adaptativo com histórico em Redis
-4. Fallback Playwright com pool gerenciado
-5. Contrato HTTP intacto; integração com `market_alert` funcional
-6. Taxa de sucesso em Mercado Livre sem proxy externo
-7. Testes de validação cobrindo Camadas 1 e 3
+1. **Duplicação:** `AntiBotDetectionStep` (pipeline_steps.py) e `ResponseClassifier` (response_classifier.py) ambos testam padrões anti-bot independentemente.
+2. **Bloqueio prematuro:** `AntiBotDetectionStep` retorna `StepResult.failure(message="anti_bot_page")` **mesmo após Playwright ter sucesso na aquisição**, impedindo parsing.
+3. **Dispersão de decisão:** Decisão de escalonamento (HTTP → Playwright) está espalhada entre classificador, anti-bot detection e FetchHTMLStep, sem ponto único de controle.
+4. **Impacto operacional:** URLs com sinais anti-bot (ex: script Cloudflare, reCAPTCHA) que Playwright consegue resolver retornam erro 429 mesmo com HTML válido.
 
-### **Estratégia de Execução**
-- **Fases sequenciais**: Infraestrutura → Camada 1 (curl_cffi) → Camada 3 (Playwright) → Classificador → Testes
-- **MVP focado**: Priorizar curl_cffi + Playwright; Camada 2 (proxy residencial) fica para fase pós-MVP
-- **Integração incremental**: Cada camada validada isoladamente antes de integrar ao pipeline
-- **Preservação de contrato**: Nenhuma mudança em `ParserRequest`/`ParserResponse` ou endpoints
+### **Sintoma Observado**
+- Requisição para URL protegida: curl_cffi recebe HTML com challenge
+- ResponseClassifier classifica como `SCALE` → Playwright é acionado
+- Playwright navega e obtém HTML com conteúdo de produto válido
+- **Mas:** `AntiBotDetectionStep` detecta padrão legado do primeiro fetch → bloqueia com `failure`
+- **Resultado:** `ParserResponse` com erro 429 em vez de 200 com payload
+
+### **Objetivo da Correção**
+Reestruturar o `market_scraper` para:
+- **1 único DecisionGate:** Centralizar decisão de estratégia de aquisição (HTTP vs Browser)
+- **Anti-bot como sinal, não barreira:** Detectar, classificar severidade, mas prosseguir com parsing se dados existirem
+- **Limite de responsabilidade claro:** HTTPFetcher (curl_cffi) sinaliza apenas; BrowserFetcher (Playwright) executa; Parsers extraem; não se sobrepõem
 
 ### **Premissas**
-1. Infraestrutura Redis existente está funcional e acessível (db 2 disponível)
-2. Docker permite `--shm-size=2g` ou suporta `--disable-dev-shm-usage`
-3. Python 3.10+ disponível
-4. Curl com suporte SSL nativo (não WSL1 puro)
-5. CI/CD existente suporta novo passo: `playwright install chromium`
+1. `ResponseClassifier.classify()` e `detect_anti_bot_pattern()` já existem e funcionam
+2. `PlaywrightPool` está operacional e acessível em startup
+3. Redis está disponível para histórico de rate limiting
+4. Testes existentes cobrem casos isolados; novos testes validarão fluxo de fallback
 
 ---
 
 ### Riscos, Impacto e Decisões
 
-### **Decisões Técnicas Principais**
+### **Decisão Técnica Principal**
 
 | Decisão | Justificativa | Impacto |
 |---------|---|---|
-| **curl_cffi em Camada 1** | TLS JA3 impersonation nativo, 125ms, sem overhead | Drop-in para httpx, 80-90% casos resolvidos |
-| **Playwright em Camada 3** | Headless Chromium, JA3 real Chrome, suporta JS renderization | 10-20% casos restantes, 5-10s por requisição |
-| **Rate limiter com histórico Redis** | Adaptação por host/pattern, fallback automático | Reduz escalonamento desnecessário, melhora latência média |
-| **Classificador independente** | Lógica de decisão centralizada, auditável | Facilita ajustes e testes; código não opaco |
-| **Pool Playwright com Semaphore** | Limite de 5 contexts simultâneos | Proteção de OOM; throughput máximo 30req/min para fallback |
-| **Sem Proxy em MVP** | Complexidade de gerenciamento de proxies | Focado em resolver TLS fingerprint (raiz); proxy fica para fase 2 |
-| **Contrato HTTP inalterado** | Compatibilidade com consumers existentes (market_alert) | Zero breaking changes |
+| **Criar `FetchDecisionGate`** | Centralizar decisão de tentativa (HTTP → Browser); evitar duplicação | Um ponto de verdade; lógica testável isoladamente |
+| **Separar "detecção" de "bloqueio"** | Anti-bot é informação, não barreira absoluta | Permite parsing mesmo com sinais legados (ex: Playwright resolveu challenge) |
+| **Remover `AntiBotDetectionStep` como etapa** | Lógica de anti-bot fica pré-parsing, no DecisionGate | Pipeline linear: FetchDecision → Fetch → Parse (sem etapa intermediária que bloqueia) |
+| **Fallback automático em FetchHTMLStep** | Se curl_cffi classifica SCALE, tenta Playwright dentro da mesma etapa | Resposta final é sempre melhor tentativa disponível; simplifica pipeline |
+| **Parser não decide anti-bot** | Parsing é extração pura; se há HTML, tenta extrair | Reduz responsabilidade; falha de parsing é falha de parsing, não anti-bot |
 
-### **Riscos Principais**
+### **Risco Principal**
 
-| Risco | Severidade | Prob. | Mitigação |
+| Risco | Severidade | Probabilidade | Mitigação |
 |-------|---|---|---|
-| **TLS fingerprint curl_cffi detectada futuro** | Alta | 🔴 Baixa (curl_cffi + Chrome impersonation são padrão) | Fallback sempre disponível em Camada 3 |
-| **Memory leak Playwright (OOM)** | Alta | 🟡 Média | Reciclagem context a cada 50req; flag `--disable-dev-shm-usage` |
-| **Mudança estrutura HTML Mercado Livre** | Média | 🟡 Média (historicamente rara) | Parser genérico + `__NEXT_DATA__` JSON (mais estável) |
-| **Timeout Playwright bloqueia requisições** | Média | 🟡 Média | Timeout global 30s; circuit breaker em market_alert; rejeição com retry_after |
-| **Rate limiter não converge** | Baixa | 🟡 Média | Tuning iterativo em MVP+1; thresholds iniciais conservadores |
-| **Redis não responde em histórico** | Média | 🟠 Baixa | Fallback em-memória (não persistente) se Redis offline; logging de failure |
-| **Docker `/dev/shm` insuficiente** | Alta | 🟠 Baixa (com doc) | Documentação obrigatória; CI testa com flag `--disable-dev-shm-usage` |
+| **Regressão:** Perder detecção anti-bot existente | Média | 🔴 Baixa | Manter `detect_anti_bot_pattern()` como função pura; testes unitários reutilizam padrões atuais |
+| **Parser retorna lixo de challenge page** | Média | 🟡 Média | Validador de dados (`validator.py`) rejeita payloads vazios; logging de origem (curl_cffi vs Playwright) |
+| **Playwright fica sobrecarregado (OOM)** | Alta | 🟠 Baixa | Pool com semáforo (max 5 contexts) + reciclagem a cada 50 req já existem; documentação obrigatória em Docker |
+| **Timeout em Playwright bloqueia requisição** | Média | 🟡 Média | Timeout da etapa 15s + pipeline 20s; se Playwright timeout, retorna failure (não causa error 504) |
+| **Mudança quebra teste existente** | Média | 🟡 Média | Refatorar testes em conjunto; fixtures reutilizadas |
 
 ### **Dependências**
-
-| Dependência | Versão | Instalação |
-|---|---|---|
-| **curl_cffi** | >=0.15.0 | `pip install curl_cffi` |
-| **playwright** | >=1.40.0 | `pip install playwright` + `playwright install chromium` |
-| **tenacity** | >=8.0 (já existe) | — |
-| **httpx** | >=0.24 (já existe) | Mantém-se para fallback ou remoção futura |
-| **Redis** | (já existe) | Sem upgrade necessário |
-| **asyncio** | stdlib Python 3.10+ | — |
-| **structlog** | (já existe) | — |
-
-### **Impactos Arquiteturais**
-
-- **Redução de acoplamento**: `download_html()` deixa de ser específica de httpx
-- **Previsibilidade**: Taxa de sucesso sobe 75-80% (de 5-10% para 85-90%)
-- **Observabilidade**: Novos logs estruturados (camada usada, classificação, histórico)
-- **Capacidade**: Throughput Camada 1 cresce 3-5x (menos timeouts); Camada 3 limitada a 30req/min
-- **Custo operacional**: RAM ~200MB adicionais por context Playwright; sem infra nova necessária
-- **Latência p99**: Sobe de ~500ms para ~1s (Camada 1) + fallback Playwright (~10s) quando escala
+- `shared.utils.url_validation` (já existe)
+- `market_scraper.services.response_classifier.ResponseClassifier` (refatorado para ser pure)
+- `market_scraper.services.playwright_pool.playwright_pool` (singleton já ativo)
+- `market_scraper.utils.http_download.CurlffiHTTPClient` (continua igual)
+- `structlog` (logging já consolidado)
 
 ---
 

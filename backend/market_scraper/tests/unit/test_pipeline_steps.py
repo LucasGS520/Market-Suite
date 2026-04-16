@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import httpx
+from unittest.mock import AsyncMock
 
 from market_scraper.parsers import parse_amazon_html, parse_magalu_html, parse_meli_html
+from market_scraper.services.fetch_decision_gate import FetchResult, FetchStatus
 from market_scraper.services.pipeline_steps import (
-    AntiBotDetectionStep,
     DomainSpecificParserStep,
     FetchHTMLStep,
 )
@@ -85,13 +85,10 @@ async def test_fetch_html_step_reuses_cached_html(monkeypatch):
         "market_scraper.services.pipeline_steps.cache.get",
         lambda url: "<html>cached</html>",
     )
-
-    async def fail_coalesce(key, producer):
-        raise AssertionError("singleflight nao deveria ser usado com cache hit")
-
+    # gate não deve ser chamado quando cache retorna HTML
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.singleflight.coalesce_with_leader",
-        fail_coalesce,
+        "market_scraper.services.pipeline_steps.fetch_decision_gate.fetch_with_fallback",
+        AsyncMock(side_effect=AssertionError("gate não deveria ser chamado com cache hit")),
     )
 
     step = FetchHTMLStep()
@@ -103,36 +100,29 @@ async def test_fetch_html_step_reuses_cached_html(monkeypatch):
 
 
 async def test_fetch_html_step_infers_unavailability_from_http_status(monkeypatch):
+    """Gate retorna produto indisponível (404) → FetchHTMLStep mapeia para payload de availability."""
     context = PipelineContext(
         url="https://example.com/product",
         source="example.com",
         default_step_timeout=1.0,
     )
-    request = httpx.Request("GET", context.url)
-    response = httpx.Response(404, request=request)
 
     async def fake_is_allowed(url: str, *, timeout: float) -> bool:
         return True
-
-    async def fake_coalesce(key, producer):
-        raise httpx.HTTPStatusError("not found", request=request, response=response)
-
-    class _Inference:
-        availability = False
-        last_status = "not_found"
-        confidence = "high"
 
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.robots.is_allowed",
         fake_is_allowed,
     )
     monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.singleflight.coalesce_with_leader",
-        fake_coalesce,
-    )
-    monkeypatch.setattr(
-        "market_scraper.services.pipeline_steps.infer_availability_from_http_status",
-        lambda status_code, domain: _Inference(),
+        "market_scraper.services.pipeline_steps.fetch_decision_gate.fetch_with_fallback",
+        AsyncMock(return_value=FetchResult(
+            status=FetchStatus.REJECT,
+            error_code="product_unavailable",
+            http_status=404,
+            availability=False,
+            last_status="not_found",
+        )),
     )
 
     step = FetchHTMLStep()
@@ -246,34 +236,3 @@ def test_parse_magalu_html_returns_none_when_no_extractable_data():
     assert result is None
 
 
-async def test_anti_bot_detection_step_returns_failure_on_cloudflare_pattern():
-    """AntiBotDetectionStep detecta challenge Cloudflare e sinaliza contexto."""
-    context = PipelineContext(
-        url="https://example.com/product",
-        source="example.com",
-        default_step_timeout=1.0,
-        html="<html><body>challenges.cloudflare.com js challenge</body></html>",
-    )
-    step = AntiBotDetectionStep()
-    result = await step.run(context)
-
-    assert result.status == "error"
-    assert result.message == "anti_bot_page"
-    assert context.data["anti_bot_detected"] is True
-    assert context.data["anti_bot_pattern"] == "cloudflare_challenge"
-    assert context.html == ""
-
-
-async def test_anti_bot_detection_step_passes_clean_html():
-    """AntiBotDetectionStep retorna empty (sem falha) quando HTML é limpo."""
-    context = PipelineContext(
-        url="https://example.com/product",
-        source="example.com",
-        default_step_timeout=1.0,
-        html="<html><body><h1>Produto Normal</h1></body></html>",
-    )
-    step = AntiBotDetectionStep()
-    result = await step.run(context)
-
-    assert result.status == "empty"
-    assert context.data.get("anti_bot_detected") is None
