@@ -108,6 +108,7 @@ def test_parse_flow_returns_success_with_shared_contract(
             "anti_bot_detected": False,
             "anti_bot_pattern": None,
             "anti_bot_bypassed": False,
+            "data_quality": "normal",
         }
     }
 
@@ -245,6 +246,8 @@ def test_parse_flow_returns_unsupported_by_robots(
     async def fake_is_allowed(url: str, *, timeout: float) -> bool:
         return False
 
+    import market_scraper.services.pipeline_steps as _ps_module
+    monkeypatch.setattr(_ps_module.settings, "SCRAPER_ROBOTS_MODE", "block")
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.resolve_public_address",
         lambda host: ["93.184.216.34"],
@@ -305,8 +308,16 @@ def test_parse_flow_returns_no_result_when_pipeline_cannot_extract_data(
     async def fake_is_allowed(url: str, *, timeout: float) -> bool:
         return True
 
+    _empty_html = _pad_html("<html><body><p>sem nome e sem preco</p></body></html>")
+
     async def fake_download(url: str, *, timeout: float) -> str:
-        return _pad_html("<html><body><p>sem nome e sem preco</p></body></html>")
+        return _empty_html
+
+    # Late browser escalation fires after parsers fail; mock Playwright to also return
+    # HTML without useful data so the pipeline ends correctly with no_result.
+    fake_pw_pool = MagicMock()
+    fake_pw_pool.is_ready = True
+    fake_pw_pool.fetch_html = AsyncMock(return_value=_empty_html)
 
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.resolve_public_address",
@@ -323,6 +334,10 @@ def test_parse_flow_returns_no_result_when_pipeline_cannot_extract_data(
     monkeypatch.setattr(
         "market_scraper.services.fetch_decision_gate.adaptive_rate_limiter",
         _fake_rate_limiter(),
+    )
+    monkeypatch.setattr(
+        "market_scraper.services.pipeline_steps.playwright_pool",
+        fake_pw_pool,
     )
 
     response = integration_client.post("/scraper/parse", json={"url": "https://example.com/product"})
@@ -478,6 +493,7 @@ def test_parse_flow_exposes_acquisition_payload_after_playwright_fallback(
             "anti_bot_detected": True,
             "anti_bot_pattern": "cloudflare_challenge",
             "anti_bot_bypassed": True,
+            "data_quality": "browser_fallback",
         }
     }
 
@@ -526,5 +542,6 @@ def test_parse_flow_exposes_acquisition_payload_for_unavailable_product(
             "anti_bot_detected": False,
             "anti_bot_pattern": None,
             "anti_bot_bypassed": False,
+            "data_quality": "normal",
         }
     }

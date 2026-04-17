@@ -51,6 +51,14 @@ _SCALE_TO_LAYER3_STATUSES: frozenset[int] = frozenset({403, 405, 406, *range(500
 #Status HTTP reservados para estratégia futura; no MVP ainda escalam para browser
 _SCALE_TO_LAYER2_STATUSES: frozenset[int] = frozenset({429})
 
+# Padrões que indicam dados estruturados de produto no HTML — sinal de conteúdo útil mesmo
+# em páginas com overlay anti-bot (ex: Cloudflare que injeta script mas mantém JSON-LD)
+_PRODUCT_SIGNAL_PATTERNS: tuple[str, ...] = (
+    "application/ld+json",
+    'itemprop="price"',
+    '"offers"',
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tipos públicos
@@ -82,6 +90,16 @@ class ClassificationResult:
 # ─────────────────────────────────────────────────────────────────────────────
 # Funções auxiliares públicas
 # ─────────────────────────────────────────────────────────────────────────────
+
+def has_product_signals(html: str) -> bool:
+    """ Verifica se o HTML contém sinais de dados estruturados de produto.
+
+    Usado para distinguir páginas de challenge puro (sem conteúdo) de páginas
+    que têm anti-bot overlay mas ainda expõem JSON-LD ou microdata de produto.
+    """
+    html_lower = html.lower()
+    return any(p in html_lower for p in _PRODUCT_SIGNAL_PATTERNS)
+
 
 def detect_anti_bot_pattern(html: str) -> str | None:
     """ Verifica se o HTML contém padrões conhecidos de proteção anti-bot.
@@ -235,6 +253,15 @@ class ResponseClassifier:
 
         anti_bot = detect_anti_bot_pattern(html)
         if anti_bot is not None:
+            if has_product_signals(html):
+                # Anti-bot overlay presente, mas HTML contém sinais de produto (JSON-LD/microdata).
+                # Tratar como sucesso degradado: parsers têm chance real de extrair dados úteis.
+                return ClassificationResult(
+                    action=ClassificationAction.SUCCESS,
+                    next_layer=None,
+                    reason="anti_bot_degraded",
+                    telemetry={"anti_bot_pattern": anti_bot},
+                )
             return ClassificationResult(
                 action=ClassificationAction.SCALE,
                 next_layer=3,
@@ -255,4 +282,5 @@ __all__ = [
     "ClassificationResult",
     "ResponseClassifier",
     "detect_anti_bot_pattern",
+    "has_product_signals",
 ]

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from market_scraper.parsers import parse_amazon_html, parse_magalu_html, parse_meli_html
 from market_scraper.services.fetch_decision_gate import FetchResult, FetchStatus
 from market_scraper.services.pipeline_steps import (
     DomainSpecificParserStep,
     FetchHTMLStep,
+    LateBrowserEscalationStep,
 )
+from market_scraper.services.playwright_pool import PlaywrightFetchError, PlaywrightTimeoutError
 from market_scraper.services.synergic_pipeline import PipelineContext
 
 
@@ -55,6 +57,8 @@ async def test_fetch_html_step_returns_failure_when_robots_disallow(monkeypatch)
         assert timeout == 1.0
         return False
 
+    import market_scraper.services.pipeline_steps as _ps_module
+    monkeypatch.setattr(_ps_module.settings, "SCRAPER_ROBOTS_MODE", "block")
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.robots.is_allowed",
         fake_is_allowed,
@@ -236,3 +240,162 @@ def test_parse_magalu_html_returns_none_when_no_extractable_data():
     assert result is None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Ordem das etapas do pipeline padrão
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_default_pipeline_steps_order():
+    """Sequência: fetch → JSON-LD → domain → HTML metadata → generic fallback."""
+    from market_scraper.services.pipeline_steps import default_pipeline_steps
+
+    steps = default_pipeline_steps()
+    names = [s.name for s in steps]
+
+    assert names == [
+        "fetch_html",
+        "json_ld_parser",
+        "domain_specific_parser",
+        "html_metadata_parser",
+        "generic_fallback_parser",
+        "late_browser_escalation",
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LateBrowserEscalationStep
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_context(url: str = "https://example.com/p/1", source: str = "example.com", html: str | None = None) -> PipelineContext:
+    ctx = PipelineContext(url=url, source=source, default_step_timeout=10.0)
+    if html is not None:
+        ctx.set_html(html)
+    return ctx
+
+
+_USEFUL_HTML = (
+    '<html><body>'
+    '<script type="application/ld+json">{"@type":"Product","name":"Produto X","offers":{"price":"99.90","priceCurrency":"BRL"}}</script>'
+    '</body></html>'
+)
+
+
+def test_late_browser_escalation_skips_when_already_escalated():
+    """Guarda anti-loop: etapa não re-escala se browser_escalated_for_utility já True."""
+    ctx = _make_context(html="<html>qualquer</html>")
+    ctx.data["browser_escalated_for_utility"] = True
+
+    import asyncio
+    step = LateBrowserEscalationStep()
+    result = asyncio.run(step.run(ctx))
+
+    assert result.status == "empty"
+    assert "already_escalated" in (result.message or "")
+
+
+def test_late_browser_escalation_skips_when_fallback_already_taken():
+    """Não deve tentar browser se FetchHTMLStep já usou Playwright."""
+    ctx = _make_context(html="<html>qualquer</html>")
+    ctx.data["fallback_taken"] = True
+
+    import asyncio
+    step = LateBrowserEscalationStep()
+    result = asyncio.run(step.run(ctx))
+
+    assert result.status == "empty"
+    assert "fallback_taken" in (result.message or "")
+
+
+def test_late_browser_escalation_skips_when_no_html():
+    """Sem HTML no contexto, escalada não tem o que fazer."""
+    ctx = _make_context()
+
+    import asyncio
+    step = LateBrowserEscalationStep()
+    result = asyncio.run(step.run(ctx))
+
+    assert result.status == "empty"
+    assert "no_html" in (result.message or "")
+
+
+def test_late_browser_escalation_skips_when_playwright_not_ready():
+    """Sem Playwright disponível, a escalada retorna empty sem falha dura."""
+    ctx = _make_context(html="<html>algo</html>")
+
+    import asyncio
+    step = LateBrowserEscalationStep()
+    not_ready = MagicMock()
+    not_ready.is_ready = False
+    with patch("market_scraper.services.pipeline_steps.playwright_pool", not_ready):
+        result = asyncio.run(step.run(ctx))
+
+    assert result.status == "empty"
+    assert "playwright_not_ready" in (result.message or "")
+
+
+def test_late_browser_escalation_returns_empty_on_playwright_timeout():
+    """PlaywrightTimeoutError na escalada tardia não deve gerar falha dura (504)."""
+    ctx = _make_context(html="<html>algo</html>")
+
+    import asyncio
+    step = LateBrowserEscalationStep()
+    mock_pool = MagicMock()
+    mock_pool.is_ready = True
+    mock_pool.fetch_html = AsyncMock(side_effect=PlaywrightTimeoutError(url="https://example.com/p/1", timeout=30))
+    with patch("market_scraper.services.pipeline_steps.playwright_pool", mock_pool):
+        result = asyncio.run(step.run(ctx))
+
+    assert result.status == "empty"
+    assert "playwright_timeout" in (result.message or "")
+    assert ctx.data.get("browser_escalated_for_utility") is True
+
+
+def test_late_browser_escalation_returns_empty_on_playwright_fetch_error():
+    """PlaywrightFetchError na escalada tardia gera empty, não falha dura."""
+    ctx = _make_context(html="<html>algo</html>")
+
+    import asyncio
+    step = LateBrowserEscalationStep()
+    mock_pool = MagicMock()
+    mock_pool.is_ready = True
+    mock_pool.fetch_html = AsyncMock(side_effect=PlaywrightFetchError(url="https://example.com/p/1", reason="net_error"))
+    with patch("market_scraper.services.pipeline_steps.playwright_pool", mock_pool):
+        result = asyncio.run(step.run(ctx))
+
+    assert result.status == "empty"
+    assert "playwright_error" in (result.message or "")
+
+
+def test_late_browser_escalation_succeeds_when_browser_html_is_parseable():
+    """Browser retorna HTML com JSON-LD → parser extrai dado útil → sucesso."""
+    ctx = _make_context(html="<html>sem dados</html>")
+
+    import asyncio
+    step = LateBrowserEscalationStep()
+    mock_pool = MagicMock()
+    mock_pool.is_ready = True
+    mock_pool.fetch_html = AsyncMock(return_value=_USEFUL_HTML)
+    with patch("market_scraper.services.pipeline_steps.playwright_pool", mock_pool):
+        result = asyncio.run(step.run(ctx))
+
+    assert result.status == "success"
+    assert result.payload is not None
+    assert ctx.data.get("fallback_taken") is True
+    assert ctx.data.get("layer_used") == "playwright"
+    assert ctx.data.get("browser_escalated_for_utility") is True
+
+
+def test_late_browser_escalation_returns_empty_when_browser_html_not_parseable():
+    """Browser retorna HTML mas parsers não extraem dado útil → empty."""
+    ctx = _make_context(html="<html>sem dados</html>")
+
+    import asyncio
+    step = LateBrowserEscalationStep()
+    mock_pool = MagicMock()
+    mock_pool.is_ready = True
+    mock_pool.fetch_html = AsyncMock(return_value="<html>também sem dados</html>")
+    with patch("market_scraper.services.pipeline_steps.playwright_pool", mock_pool):
+        result = asyncio.run(step.run(ctx))
+
+    assert result.status == "empty"
+    assert ctx.data.get("browser_escalated_for_utility") is True
+    assert ctx.data.get("fallback_taken") is True

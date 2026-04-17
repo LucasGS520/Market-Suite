@@ -19,6 +19,29 @@ __all__ = ["Settings", "settings"]
 class Settings(ConfigBase):
     """ Organiza configurações essenciais expostas ao MarketScraper """
 
+    # --- Rate limiter por histórico ---
+    SCRAPER_RATE_LIMITER_BLOCK_ENABLED: bool = os.getenv(
+        "SCRAPER_RATE_LIMITER_BLOCK_ENABLED", "False"
+    ).lower() in {"1", "true", "on", "yes"}
+    # Padrão False (observação): cooldown registra log sem bloquear a coleta.
+    # Defina True em produção para bloquear domínios em cooldown severo.
+
+    # --- Política de robots.txt ---
+    SCRAPER_ROBOTS_MODE: str = os.getenv("SCRAPER_ROBOTS_MODE", "audit").lower()
+    # Padrão "audit": robots.txt é sinal observável; pipeline prossegue e
+    # context.data["robots_disallowed"] é marcado para telemetria.
+    # Defina "block" em produção para interromper a coleta em URLs disallowed.
+
+    # --- Orçamentos de aquisição (HTTP e browser) ---
+    # Dois orçamentos independentes substituem o timeout único por etapa para o FetchHTMLStep,
+    # eliminando a variabilidade causada por microetapas e interrupções prematuras.
+    SCRAPER_HTTP_BUDGET_SECONDS: float = float(
+        os.getenv("SCRAPER_HTTP_BUDGET_SECONDS", "10.0")
+    )  # Orçamento para curl_cffi, incluindo retries configurados
+    SCRAPER_BROWSER_BUDGET_SECONDS: float = float(
+        os.getenv("SCRAPER_BROWSER_BUDGET_SECONDS", "25.0")
+    )  # Orçamento para fallback Playwright (navegação + renderização)
+
     # --- Cache e execução do pipeline ---
     #Mantemos apenas controles numéricos necessários para previsibilidade.
     SCRAPER_CACHE_TTL_SECONDS: int = int(
@@ -30,10 +53,10 @@ class Settings(ConfigBase):
 
     SCRAPER_STEP_TIMEOUT_SECONDS: float = float(
         os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "15.0")
-    ) #Tempo máximo por etapa do pipeline
+    )  # Timeout para etapas de parsing; FetchHTMLStep usa os orçamentos acima
     SCRAPER_PIPELINE_TIMEOUT_SECONDS: float = float(
-        os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "20.0")
-    ) #Tempo máximo total do pipeline
+        os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "50.0")
+    )  # Segurança global: HTTP_BUDGET + BROWSER_BUDGET + overhead de parsing
 
     SCRAPER_SINGLEFLIGHT_LOCK_TTL: float = float(
         os.getenv("SCRAPER_SINGLEFLIGHT_LOCK_TTL", "15.0")

@@ -115,11 +115,12 @@ FetchDecisionGate.fetch_with_fallback(...)
         ├── download_html() via curl_cffi + singleflight
         │
         ├── ResponseClassifier.classify(status, html, error)
-        │   ├── SUCCESS → HTML aceito via HTTP
-        │   ├── REJECT  → erro final ou indisponibilidade inferida
-        │   └── SCALE   → playwright_pool.fetch_html()
-        │               ├── sucesso → HTML aceito via browser
-        │               └── erro    → rejeição degradada ou challenge persistente
+        │   ├── SUCCESS              → HTML aceito via HTTP
+        │   ├── SUCCESS(degradado)   → anti-bot + sinais de produto → parsers tentam diretamente
+        │   ├── REJECT               → erro final ou indisponibilidade inferida
+        │   └── SCALE                → playwright_pool.fetch_html()
+        │                            ├── sucesso → HTML aceito via browser
+        │                            └── erro    → rejeição degradada ou challenge persistente
         │
         └── FetchResult(status, html, error_code, telemetry)
 ```
@@ -136,23 +137,27 @@ FetchDecisionGate.fetch_with_fallback(...)
 
 Centraliza as regras de escalonamento sem lógica espalhada nas etapas:
 
-| Condição | Ação | Destino |
-|----------|------|---------|
-| 200 + HTML válido (≥ 1 KB, sem anti-bot) | `SUCCESS` | seguir para parsing |
-| 200 + HTML vazio ou anti-bot detectado | `SCALE` | fallback para browser |
-| 429 | `SCALE` | fallback para browser |
-| 403 / 405 / 5xx | `SCALE` | fallback para browser |
-| 404 / 410 | `REJECT` | encerrar |
-| Timeout / ConnectionError | `SCALE` | fallback para browser |
+| Condição | Ação | Reason | Destino |
+|----------|------|--------|---------|
+| 200 + HTML válido (≥ 1 KB, sem anti-bot) | `SUCCESS` | `html_valid` | seguir para parsing |
+| 200 + anti-bot + sinais de produto¹ | `SUCCESS` | `anti_bot_degraded` | parsing direto (sem Playwright) |
+| 200 + HTML vazio (< 1 KB) | `SCALE` | `html_empty` | fallback para browser |
+| 200 + anti-bot sem sinais de produto | `SCALE` | `anti_bot_page` | fallback para browser |
+| 429 | `SCALE` | `rate_limited` | fallback para browser |
+| 403 / 405 / 5xx | `SCALE` | `access_denied` / `server_error` | fallback para browser |
+| 404 / 410 | `REJECT` | `not_found` | encerrar |
+| Timeout / ConnectionError | `SCALE` | `timeout` / `connection_error` | fallback para browser |
+
+¹ Sinais de produto: presença de `application/ld+json`, `itemprop="price"` ou `"offers"` no HTML.
 
 Padrões anti-bot detectados: `suspicious-traffic-frontend` (Mercado Livre), `challenges.cloudflare.com`, `__cf_chl`, `__cf_bm`, `recaptcha/api.js`, `_pxcaptcha`.
 
 ### Anti-bot: detecção vs bloqueio
 
 - **Detecção** significa que o classificador ou o gate encontraram evidência de challenge no HTML (`anti_bot_detected=true`, `anti_bot_pattern=...`). Isso não implica falha final por si só.
+- **Sucesso degradado** (`reason=anti_bot_degraded`): challenge detectado, mas HTML expõe sinais de produto (JSON-LD/microdata). Parsers tentam extração diretamente sem Playwright. Telemetria `data_quality="degraded_anti_bot"` é adicionada ao payload.
 - **Bloqueio** significa que, depois da decisão do gate, o endpoint realmente precisou devolver erro para o cliente (`429`, `503` ou `504`) porque não havia HTML utilizável.
-- Um `200` com HTML de challenge conta como detecção e normalmente leva a `SCALE`, não a erro imediato.
-- Se o browser consegue renderizar a página e o challenge desaparece, o gate marca `anti_bot_bypassed=true` e o pipeline segue normalmente.
+- Se o browser consegue renderizar a página e o challenge desaparece, o gate marca `anti_bot_bypassed=true` e o pipeline segue normalmente com `data_quality="browser_fallback"`.
 - Se o browser também falha, o problema vira bloqueio efetivo e é mapeado por `response_helpers.py` para um `error_code` estável.
 
 ### Rate Limiter Adaptativo (`AdaptiveRateLimiter`)
@@ -194,20 +199,20 @@ Quando Redis está indisponível, o limiter usa fallback in-memory (não persist
 O pipeline sequencial e registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado por [`services/synergic_pipeline.py`](services/synergic_pipeline.py). A execução para no primeiro `StepResult.success` com payload valido.
 
 1. **FetchHTMLStep**: etapa oficial de aquisição de HTML. Ela delega ao `FetchDecisionGate`, que concentra rate limiter, tentativa HTTP, classificação e fallback para browser.
-2. **JsonLdParserStep**: tenta extrair dados estruturados (`application/ld+json`) com `extruct`.
-3. **HtmlMetadataParserStep**: tenta extrair nome/preco/metadados com BeautifulSoup.
-4. **DomainSpecificParserStep**: aplica parser dedicado quando o dominio bate com mapeamento conhecido.
+2. **JsonLdParserStep**: tenta extrair dados estruturados (`application/ld+json`) com `extruct` — maior taxa de acerto.
+3. **DomainSpecificParserStep**: aplica parser dedicado quando o dominio bate com mapeamento conhecido (mercadolivre, amazon, magazineluiza).
+4. **HtmlMetadataParserStep**: tenta extrair nome/preco/metadados com BeautifulSoup.
 5. **GenericFallbackParserStep**: ultima tentativa com heuristicas genericas.
 
-Tempo maximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline: `SCRAPER_PIPELINE_TIMEOUT_SECONDS`.
+Tempo maximo por etapa de parsing: `SCRAPER_STEP_TIMEOUT_SECONDS`. `FetchHTMLStep` usa orçamentos independentes (`SCRAPER_HTTP_BUDGET_SECONDS` + `SCRAPER_BROWSER_BUDGET_SECONDS`). Tempo total do pipeline: `SCRAPER_PIPELINE_TIMEOUT_SECONDS`.
 
 ### Mapa do Pipeline de Parsing
 | Ordem | Etapa | Objetivo | Possivel saida |
 |-------|-------|----------|----------------|
 | `1` | `FetchHTMLStep` | Obter HTML ou inferir indisponibilidade, delegando a decisão de aquisição ao `FetchDecisionGate` | `success`, `error` |
 | `2` | `JsonLdParserStep` | Extrair dados estruturados com maior confiabilidade | `success` com payload ou `empty` |
-| `3` | `HtmlMetadataParserStep` | Ler metadados e estrutura basica da pagina | `success` com payload ou `empty` |
-| `4` | `DomainSpecificParserStep` | Aplicar regras dedicadas por dominio quando disponiveis | `success` com payload ou `empty` |
+| `3` | `DomainSpecificParserStep` | Aplicar regras dedicadas por dominio quando disponiveis | `success` com payload ou `empty` |
+| `4` | `HtmlMetadataParserStep` | Ler metadados e estrutura basica da pagina | `success` com payload ou `empty` |
 | `5` | `GenericFallbackParserStep` | Aplicar heuristicas genericas como ultimo fallback | `success` com payload ou `empty` |
 
 ### Telemetria no contrato HTTP
@@ -228,17 +233,20 @@ Tempo maximo por etapa: `SCRAPER_STEP_TIMEOUT_SECONDS`. Tempo total do pipeline:
 | `last_status` | topo do `ParserResponse` | Último estado conhecido ou inferido |
 | `payload` | `ParserResponse.payload` | Extras do parser preservados para auditoria sem quebrar o contrato, incluindo `acquisition` quando houver telemetria de coleta |
 
-**Telemetria interna de aquisição:**
+**Telemetria de aquisição (exposta em `ParserResponse.payload.acquisition`):**
 
-- `http_status`
-- `layer_used`
-- `fallback_taken`
-- `anti_bot_detected`
-- `anti_bot_pattern`
-- `anti_bot_bypassed`
-- `classification_reason`
+| Campo | Tipo | Significado |
+|-------|------|-------------|
+| `layer_used` | string | `"curl_cffi"` ou `"playwright"` |
+| `fallback_taken` | bool | `true` se Playwright foi acionado |
+| `classification_reason` | string | Reason do `ResponseClassifier` (ex: `"html_valid"`, `"anti_bot_degraded"`) |
+| `http_status` | int | Último código HTTP da tentativa |
+| `anti_bot_detected` | bool | Padrão anti-bot encontrado em qualquer camada |
+| `anti_bot_pattern` | string | Nome do padrão (ex: `"cloudflare_challenge"`) |
+| `anti_bot_bypassed` | bool | `true` se Playwright resolveu o challenge sem padrão residual |
+| `data_quality` | string | `"normal"`, `"degraded_anti_bot"` ou `"browser_fallback"` |
 
-Esses campos são gravados em `PipelineContext.data` e em logs estruturados para auditoria operacional. O contrato HTTP atual não os expõe como headers dedicados nem os injeta automaticamente no `ParserResponse.payload`; qualquer futura exposição deve ser tratada como adição explícita e compatível de contrato.
+`data_quality` resume a qualidade de aquisição: `normal` = HTTP direto limpo; `degraded_anti_bot` = anti-bot detectado mas dados extraídos sem Playwright; `browser_fallback` = Playwright foi acionado.
 
 ---
 
@@ -304,7 +312,10 @@ As configurações combinam base compartilhada em [`../shared/core/config_base.p
 ### Categorias de variaveis
 | Categoria | Variaveis relevantes |
 |-----------|----------------------|
-| Pipeline e cache | `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES`, `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS`, `SCRAPER_SINGLEFLIGHT_*` |
+| **Orçamentos de aquisição** | `SCRAPER_HTTP_BUDGET_SECONDS` (padrão: `10.0`) — timeout da tentativa HTTP; `SCRAPER_BROWSER_BUDGET_SECONDS` (padrão: `25.0`) — timeout do fallback Playwright |
+| **Política de rate limiter** | `SCRAPER_RATE_LIMITER_BLOCK_ENABLED` (padrão: `false`) — quando `false`, cooldown gera apenas log observável; defina `true` em produção para bloquear domínios em cooldown severo |
+| **Política de robots.txt** | `SCRAPER_ROBOTS_MODE` (padrão: `audit`) — `audit` registra sinal observável e prossegue; defina `block` em produção para interromper a coleta em URLs disallowed |
+| Pipeline e cache | `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES`, `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` (padrão: `50.0`), `SCRAPER_SINGLEFLIGHT_*` |
 | HTTP e rede | `SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, `SCRAPER_HTTP_MAX_*`, `SCRAPER_DNS_TIMEOUT`, `SCRAPER_DNS_CACHE_TTL` |
 | Headers e identidade | `SCRAPER_DEFAULT_USER_AGENT`, `SCRAPER_USER_AGENT_POOL`, `SCRAPER_HEADERS_*` |
 | Parsing e qualidade de dado | `SCRAPER_PRICE_TOLERANCE`, `SCRAPER_HTTP_DOMAIN_TIMEOUTS` |
@@ -313,13 +324,18 @@ As configurações combinam base compartilhada em [`../shared/core/config_base.p
 
 Exemplo minimo de `.env.market_scraper`:
 ```env
+SCRAPER_HTTP_BUDGET_SECONDS=10.0
+SCRAPER_BROWSER_BUDGET_SECONDS=25.0
+SCRAPER_RATE_LIMITER_BLOCK_ENABLED=false  # true em produção para bloquear cooldown severo
+SCRAPER_ROBOTS_MODE=audit                 # block em produção para respeitar robots.txt
+
 SCRAPER_CACHE_TTL_SECONDS=3600
 SCRAPER_CACHE_MAX_ENTRIES=5000
 SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
 SCRAPER_SINGLEFLIGHT_MAX_ENTRIES=2000
 
-SCRAPER_STEP_TIMEOUT_SECONDS=8.0
-SCRAPER_PIPELINE_TIMEOUT_SECONDS=20.0
+SCRAPER_STEP_TIMEOUT_SECONDS=15.0
+SCRAPER_PIPELINE_TIMEOUT_SECONDS=50.0
 
 SCRAPER_HTTP_TIMEOUT_CONNECT=3.0
 SCRAPER_HTTP_TIMEOUT_READ=3.0

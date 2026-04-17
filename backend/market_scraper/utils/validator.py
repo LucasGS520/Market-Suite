@@ -36,6 +36,16 @@ class ValidationResult:
         """ Indica se o payload foi aceito pela validação de qualidade """
         return self.payload is not None
 
+    @property
+    def is_useful(self) -> bool:
+        """Dado útil = disponibilidade explicitamente falsa, ou nome + preço.
+
+        Disponibilidade falsa é critério autônomo — o consumidor precisa saber
+        que o produto está indisponível mesmo sem nome/preço extraídos.
+        Nome e preço são os critérios mínimos para produtos disponíveis.
+        """
+        return is_useful_payload(self.payload)
+
 def _normalize_url(raw_url: Any, fallback: str) -> str:
     """ Padroniza URL de saída priorizando o valor válido do contexto """
     candidate = ""
@@ -279,4 +289,22 @@ class DataQualityValidator:
                 yield None
 
 
-__all__ = ["DataQualityValidator", "ValidationResult"]
+def is_useful_payload(payload: dict | None) -> bool:
+    """Verifica se um dict de payload satisfaz o critério mínimo de dado útil.
+
+    Critério (single source of truth para toda a suite):
+      - ``availability is False``  → útil por si só (indisponibilidade explícita)
+      - caso contrário              → requer ``name`` AND ``current_price``
+    """
+    if not payload:
+        return False
+    if payload.get("availability") is False:
+        return True
+    return bool(payload.get("name")) and payload.get("current_price") is not None
+
+
+__all__ = [
+    "DataQualityValidator",
+    "ValidationResult",
+    "is_useful_payload",
+]

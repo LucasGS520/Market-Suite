@@ -1,9 +1,25 @@
 """ Fornece auxiliares para estruturar respostas das rotas do scraper
 
-O módulo mantém a formatação padronizada de erros HTTP, concentra o 
+O módulo mantém a formatação padronizada de erros HTTP, concentra o
 saneamento de campos sensíveis e centraliza traduções de problemas do
 pipeline para ``UrlIssue``. Dessa forma as rotas permanecem focadas na
 orquestração do fluxo.
+
+Matriz de decisão do endpoint /scraper/parse
+============================================
+| outcome.status | payload útil? | anti_bot | Resposta HTTP          |
+|----------------|---------------|----------|------------------------|
+| success        | sim           | não      | 200 OK (normal)        |
+| success        | sim           | sim      | 200 OK (degradado)*    |
+| no_result      | —             | —        | 422 no_result          |
+| error/timeout  | —             | —        | 4xx/5xx por tipo       |
+| —              | —             | bloqueio | 403/429/503/504        |
+
+*sucesso degradado = anti-bot detectado porém nome+preço extraídos com sucesso.
+Implementado na Fase 5 do plano de refatoração.
+
+Critério de dado útil (single source of truth): nome + preço, ou nome +
+disponibilidade explicitamente falsa. Ver ``has_useful_payload``.
 """
 
 from __future__ import annotations
@@ -21,6 +37,7 @@ from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.url_validation import UrlIssue
 
 from market_scraper.services.synergic_pipeline import PipelineOutcome
+from market_scraper.utils.validator import is_useful_payload
 
 
 def _sanitize_payload(url: str) -> dict[str, str]:
@@ -54,12 +71,6 @@ def _map_http_download_issue(outcome: PipelineOutcome) -> tuple[UrlIssue, int] |
             message="Página de proteção anti-bot detectada; tente novamente mais tarde",
         )
         return issue, status.HTTP_429_TOO_MANY_REQUESTS
-    if any(step.message == "challenge_detected_after_browser" for step in outcome.steps):
-        issue = UrlIssue(
-            code="challenge_detected_after_browser",
-            message="Proteção anti-bot persistiu após tentativa com browser; tente novamente mais tarde",
-        )
-        return issue, status.HTTP_429_TOO_MANY_REQUESTS
     if any(step.message == "rate_limiter_cooldown" for step in outcome.steps):
         issue = UrlIssue(
             code="rate_limiter_cooldown",
@@ -78,8 +89,6 @@ def _map_http_download_issue(outcome: PipelineOutcome) -> tuple[UrlIssue, int] |
             message="Erro ao obter conteúdo via browser; tente novamente",
         )
         return issue, status.HTTP_503_SERVICE_UNAVAILABLE
-    # Fix #2: "pipeline_degraded" cobre SCALE sem fallback (ex: html_empty + Playwright offline).
-    # "playwright_not_ready" permanece mapeado como salvaguarda operacional.
     if any(step.message in ("pipeline_degraded", "playwright_not_ready") for step in outcome.steps):
         issue = UrlIssue(
             code="pipeline_degraded",
@@ -188,6 +197,21 @@ def _extract_additional_payload(data: dict[str, Any]) -> dict[str, Any] | None:
     extras = {key: value for key, value in data.items() if key not in base_keys and value is not None}
     return extras or None
 
+def _derive_data_quality(context_data: dict[str, Any]) -> str:
+    """ Deriva indicador de qualidade de aquisição a partir do contexto do pipeline.
+
+    Valores possíveis:
+        ``"normal"``           — HTTP direto sem anti-bot.
+        ``"degraded_anti_bot"`` — Anti-bot detectado mas dados extraídos (sem Playwright).
+        ``"browser_fallback"``  — Playwright acionado (com ou sem anti-bot residual).
+    """
+    if context_data.get("fallback_taken"):
+        return "browser_fallback"
+    if context_data.get("anti_bot_detected"):
+        return "degraded_anti_bot"
+    return "normal"
+
+
 def _extract_acquisition_payload(context_data: dict[str, Any]) -> dict[str, Any] | None:
     """ Expõe telemetria de aquisição de forma aditiva no payload HTTP. """
     acquisition_keys = (
@@ -210,6 +234,7 @@ def _extract_acquisition_payload(context_data: dict[str, Any]) -> dict[str, Any]
         "anti_bot_detected": bool(context_data.get("anti_bot_detected", False)),
         "anti_bot_pattern": context_data.get("anti_bot_pattern"),
         "anti_bot_bypassed": bool(context_data.get("anti_bot_bypassed", False)),
+        "data_quality": _derive_data_quality(context_data),
     }
 
 def _merge_availability_and_status(
@@ -266,6 +291,14 @@ def build_success_response(
     return response
 
 
+def has_useful_payload(payload: dict) -> bool:
+    """Verifica se um payload contém dado útil (nome + preço ou indisponível explícito).
+
+    Delega para ``is_useful_payload`` do módulo ``validator`` — fonte canônica única.
+    """
+    return is_useful_payload(payload)
+
+
 __all__ = [
     "_http_error",
     "_map_http_download_issue",
@@ -275,4 +308,5 @@ __all__ = [
     "_sanitize_payload",
     "build_no_result_response",
     "build_success_response",
+    "has_useful_payload",
 ]

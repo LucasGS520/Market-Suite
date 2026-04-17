@@ -99,6 +99,27 @@ def run_parser_with_validation(
         context.data.setdefault("validation_failures", []).append(reason_entry)
         return False, None
 
+    # Critério de aceite: dado útil = nome + preço (ou indisponibilidade explícita).
+    # Payload estruturalmente válido sem preço não é suficiente para aceite final.
+    if not validated.is_useful:
+        logger.warning(
+            "parser_data_not_useful",
+            step=step_name,
+            domain=context.source,
+            reason_code="price_invalid",
+            url=sanitize_log_data(context.url),
+            parser_name=parser_name,
+        )
+        reason_entry = {
+            "step": step_name,
+            "reason_code": "price_invalid",
+            "reason_message": "Dado útil requer nome e preço (ou indisponibilidade explícita)",
+            "parser_name": parser_name,
+            "dump_path": dump_path,
+        }
+        context.data.setdefault("validation_failures", []).append(reason_entry)
+        return False, None
+
     payload = validated.payload or {}
     _update_shared_payload(context, payload)
     return True, payload

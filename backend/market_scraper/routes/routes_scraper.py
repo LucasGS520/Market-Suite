@@ -33,6 +33,7 @@ from market_scraper.routes.response_helpers import (
     _sanitize_payload,
     build_no_result_response,
     build_success_response,
+    has_useful_payload,
 )
 
 from market_scraper.services.pipeline_factory import run_pipeline
@@ -85,7 +86,7 @@ _PARSE_ROUTE_RESPONSES = {
     },
     429: {
         "model": ErrorResponse,
-        "description": "Pagina anti-bot detectada pelo scraper.",
+        "description": "Pagina anti-bot detectada ou limite de requisicoes atingido para o dominio.",
         "headers": _CONTRACT_VERSION_HEADER_DOC,
     },
     503: {
@@ -236,7 +237,10 @@ async def parse_endpoint(
             request_logger=request_logger,
         )
 
-    if outcome.status != "success" or not outcome.payload:
+    # Decisão de sucesso: pipeline concluiu E payload satisfaz critério canônico de utilidade.
+    # Critério: availability=False (indisponível explícito) OR (nome + preço).
+    # Centralizado em is_useful_payload (validator.py) — fonte única de verdade.
+    if outcome.status != "success" or not has_useful_payload(outcome.payload or {}):
         return build_no_result_response(
             outcome=outcome,
             request_logger=request_logger,
@@ -262,6 +266,7 @@ async def parse_endpoint(
         availability=payload_data.get("availability"),
         last_status=payload_data.get("last_status"),
         has_price=price is not None,
+        is_useful=True,  # critério canônico satisfeito neste ponto
     )
     
     parse_response = build_success_response(

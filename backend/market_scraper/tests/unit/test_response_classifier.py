@@ -15,6 +15,7 @@ from market_scraper.services.response_classifier import (
     ClassificationResult,
     ResponseClassifier,
     detect_anti_bot_pattern,
+    has_product_signals,
 )
 
 
@@ -25,6 +26,18 @@ from market_scraper.services.response_classifier import (
 _NORMAL_HTML = "<html><body>" + "x" * 2048 + "</body></html>"  # ~2 KB
 _SMALL_HTML  = "<html><body>ok</body></html>"                  # << 1 KB
 _EMPTY_HTML  = ""
+
+# Anti-bot com sinais de produto (JSON-LD presente) → sucesso degradado esperado
+_CHALLENGE_WITH_PRODUCT_HTML = (
+    "<html><head>"
+    '<script type="application/ld+json">{"@type":"Product","name":"Notebook","offers":{"price":"999"}}</script>'
+    '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>'
+    "</head><body>"
+    + "x" * 2048
+    + "</body></html>"
+)
+# Anti-bot sem sinais de produto → SCALE esperado
+_CHALLENGE_NO_PRODUCT_HTML = _NORMAL_HTML + '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>'
 
 
 @pytest.fixture
@@ -284,3 +297,62 @@ def test_telemetry_http_status_populated_on_error(classifier):
     result = classifier.classify(http_status=404, html=None, error=None)
 
     assert result.telemetry.get("http_status") == 404
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fase 5 — anti_bot_degraded: anti-bot + sinais de produto → SUCCESS degradado
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_classify_degraded_success_when_antibot_with_product_signals(classifier):
+    """Anti-bot + JSON-LD de produto → SUCCESS com reason='anti_bot_degraded'.
+
+    Página tem overlay de challenge mas expõe JSON-LD: parsers têm chance real de
+    extrair dados. Playwright não deve ser acionado.
+    """
+    result = classifier.classify(http_status=200, html=_CHALLENGE_WITH_PRODUCT_HTML, error=None)
+
+    assert result.action == ClassificationAction.SUCCESS
+    assert result.next_layer is None
+    assert result.reason == "anti_bot_degraded"
+    assert result.telemetry.get("anti_bot_pattern") == "cloudflare_challenge"
+
+
+def test_classify_scale_when_antibot_without_product_signals(classifier):
+    """Anti-bot sem sinais de produto → SCALE para Playwright (comportamento original)."""
+    result = classifier.classify(http_status=200, html=_CHALLENGE_NO_PRODUCT_HTML, error=None)
+
+    assert result.action == ClassificationAction.SCALE
+    assert result.next_layer == 3
+    assert result.reason == "anti_bot_page"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Testes de has_product_signals isolado
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_has_product_signals_detects_ld_json():
+    """HTML com application/ld+json → True."""
+    html = '<script type="application/ld+json">{"@type":"Product"}</script>'
+    assert has_product_signals(html) is True
+
+
+def test_has_product_signals_detects_itemprop_price():
+    """HTML com itemprop="price" → True."""
+    html = '<span itemprop="price">R$ 99,90</span>'
+    assert has_product_signals(html) is True
+
+
+def test_has_product_signals_detects_offers():
+    """HTML com "offers" em JSON → True."""
+    html = '{"offers": {"price": "100", "priceCurrency": "BRL"}}'
+    assert has_product_signals(html) is True
+
+
+def test_has_product_signals_false_for_plain_html():
+    """HTML sem nenhum sinal de produto → False."""
+    assert has_product_signals(_NORMAL_HTML) is False
+
+
+def test_has_product_signals_false_for_empty_html():
+    """HTML vazio → False."""
+    assert has_product_signals("") is False

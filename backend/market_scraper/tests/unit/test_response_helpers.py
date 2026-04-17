@@ -12,6 +12,7 @@ from market_scraper.routes.response_helpers import (
     _sanitize_payload,
     build_no_result_response,
     build_success_response,
+    has_useful_payload,
 )
 from market_scraper.services.synergic_pipeline import (
     PipelineContext,
@@ -166,6 +167,7 @@ def test_build_success_response_merges_inferred_state_and_extra_payload():
             "anti_bot_detected": False,
             "anti_bot_pattern": None,
             "anti_bot_bypassed": False,
+            "data_quality": "normal",
         },
     }
 
@@ -321,3 +323,22 @@ def test_map_http_download_issue_playwright_not_ready_returns_503():
 
     assert issue.code == "pipeline_degraded"
     assert status_code == 503
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# is_useful_payload — critério canônico (fonte única de verdade)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_has_useful_payload_true_with_name_and_price():
+    assert has_useful_payload({"name": "Produto X", "current_price": "99.90"}) is True
+
+def test_has_useful_payload_true_when_availability_false_without_name():
+    """availability=False é critério autônomo — não requer nome nem preço."""
+    assert has_useful_payload({"availability": False}) is True
+
+def test_has_useful_payload_false_when_name_only():
+    assert has_useful_payload({"name": "Produto X"}) is False
+
+def test_has_useful_payload_false_when_empty_or_none():
+    assert has_useful_payload({}) is False
+    assert has_useful_payload(None) is False  # type: ignore[arg-type]

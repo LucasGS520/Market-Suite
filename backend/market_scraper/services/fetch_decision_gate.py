@@ -7,9 +7,11 @@ mecanismo de aquisição.
 
 Fluxo de decisão::
 
-    Input: url, domain, force_refresh, timeout
+    Input: url, domain, force_refresh, http_timeout, browser_timeout
         ↓
-    [1] Rate limiter pré-check → host bloqueado? REJECT imediato
+    [1] Rate limiter pré-check → host bloqueado?
+        ├─ SCRAPER_RATE_LIMITER_BLOCK_ENABLED=True  → REJECT imediato (modo produção)
+        └─ SCRAPER_RATE_LIMITER_BLOCK_ENABLED=False → observa (log), continua (padrão)
         ↓
     [2] Tentativa HTTP primária — curl_cffi
         ├─ 404/410/451 → REJECT (produto indisponível, sem tentar Playwright)
@@ -35,6 +37,7 @@ from dataclasses import dataclass, field
 import httpx
 import structlog
 
+from market_scraper.core.config_scraper import settings
 from market_scraper.infra.adaptive_rate_limiter import adaptive_rate_limiter
 from market_scraper.services.availability_inference import (
     HTTP_STATUS_UNAVAILABLE,
@@ -122,7 +125,8 @@ class FetchDecisionGate:
         *,
         domain: str,
         force_refresh: bool,
-        timeout: float,
+        http_timeout: float,
+        browser_timeout: float,
     ) -> FetchResult:
         """ Executa a aquisição em cascata e retorna um ``FetchResult`` completo.
 
@@ -130,7 +134,8 @@ class FetchDecisionGate:
             url: URL do produto a raspar.
             domain: Hostname extraído (usado pelo rate limiter).
             force_refresh: Quando ``True``, ignora cache (passado ao singleflight key).
-            timeout: Timeout em segundos para cada tentativa individualmente.
+            http_timeout: Orçamento em segundos para a tentativa HTTP (curl_cffi).
+            browser_timeout: Orçamento em segundos para o fallback Playwright.
 
         Returns:
             ``FetchResult`` descrevendo o resultado final com telemetria.
@@ -138,14 +143,21 @@ class FetchDecisionGate:
         # ── 1. Rate limiter pré-check ─────────────────────────────────────
         allowed, _ = await adaptive_rate_limiter.should_allow(domain)
         if not allowed:
-            logger.warning(
-                "fetch_gate_blocked_by_rate_limiter",
+            if settings.SCRAPER_RATE_LIMITER_BLOCK_ENABLED:
+                logger.warning(
+                    "fetch_gate_blocked_by_rate_limiter",
+                    url=url,
+                    domain=domain,
+                )
+                return FetchResult(
+                    status=FetchStatus.REJECT,
+                    error_code="rate_limiter_cooldown",
+                )
+            # SCRAPER_RATE_LIMITER_BLOCK_ENABLED=False → apenas observa, não bloqueia
+            logger.info(
+                "fetch_gate_rate_limiter_cooldown_observed",
                 url=url,
                 domain=domain,
-            )
-            return FetchResult(
-                status=FetchStatus.REJECT,
-                error_code="rate_limiter_cooldown",
             )
 
         # ── 2. Tentativa HTTP primária — curl_cffi ────────────────────────
@@ -154,7 +166,7 @@ class FetchDecisionGate:
         layer1_status: int | None = None
 
         async def _download() -> str:
-            return await download_html(url, timeout=timeout)
+            return await download_html(url, timeout=http_timeout)
 
         singleflight_key = f"{url}|force_refresh={force_refresh}"
         try:
@@ -241,6 +253,9 @@ class FetchDecisionGate:
                 classification_reason=classification.reason,
             )
 
+        # Extraído antes dos checks de action para cobrir tanto SUCCESS degradado quanto SCALE
+        l1_anti_bot = classification.telemetry.get("anti_bot_pattern")
+
         if classification.action == ClassificationAction.SUCCESS:
             await adaptive_rate_limiter.update_history(
                 domain, success=True, layer_used=1
@@ -250,6 +265,8 @@ class FetchDecisionGate:
                 url=url,
                 domain=domain,
                 html_size=len(layer1_html),  # type: ignore[arg-type]
+                classification_reason=classification.reason,
+                anti_bot_pattern=l1_anti_bot,
             )
             return FetchResult(
                 status=FetchStatus.SUCCESS,
@@ -258,10 +275,20 @@ class FetchDecisionGate:
                 fallback_taken=False,
                 http_status=200,
                 classification_reason=classification.reason,
+                anti_bot_detected=l1_anti_bot is not None,
+                anti_bot_pattern=l1_anti_bot,
+                anti_bot_bypassed=False,
             )
 
         # ── 4. SCALE → fallback de browser — Playwright ───────────────────
-        l1_anti_bot = classification.telemetry.get("anti_bot_pattern")
+        logger.info(
+            "fetch_gate_scale_to_browser",
+            url=url,
+            domain=domain,
+            reason=classification.reason,
+            http_status=layer1_status,
+            anti_bot_pattern=l1_anti_bot,
+        )
         await adaptive_rate_limiter.update_history(
             domain,
             success=False,
@@ -291,7 +318,7 @@ class FetchDecisionGate:
             )
 
         try:
-            pw_html = await playwright_pool.fetch_html(url, timeout=timeout)
+            pw_html = await playwright_pool.fetch_html(url, timeout=browser_timeout)
         except PlaywrightPoolNotReadyError:
             return FetchResult(
                 status=FetchStatus.REJECT_AFTER_BROWSER,

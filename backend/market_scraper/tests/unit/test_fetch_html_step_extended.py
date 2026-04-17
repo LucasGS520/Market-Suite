@@ -84,10 +84,12 @@ async def test_fetch_html_step_skip_when_html_already_present(monkeypatch):
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def test_fetch_html_step_blocked_by_robots(monkeypatch):
-    """Robots.txt não permite → failure sem chamar o gate."""
+    """Robots.txt não permite em modo block → failure sem chamar o gate."""
     step = FetchHTMLStep()
     context = _make_context()
 
+    import market_scraper.services.pipeline_steps as _ps_module
+    monkeypatch.setattr(_ps_module.settings, "SCRAPER_ROBOTS_MODE", "block")
     monkeypatch.setattr(
         "market_scraper.services.pipeline_steps.robots.is_allowed",
         AsyncMock(return_value=False),
@@ -332,15 +334,18 @@ async def test_fetch_html_step_maps_anti_bot_page_without_playwright(monkeypatch
     assert context.data["anti_bot_detected"] is True
 
 
-async def test_fetch_html_step_passes_correct_timeout_to_gate(monkeypatch):
-    """Timeout configurado no step é repassado para fetch_decision_gate.fetch_with_fallback."""
-    step = FetchHTMLStep(timeout=12.5)
+async def test_fetch_html_step_passes_budget_timeouts_to_gate(monkeypatch):
+    """Gate recebe http_timeout e browser_timeout vindos dos orçamentos de configuração."""
+    from market_scraper.core.config_scraper import settings
+
+    step = FetchHTMLStep()
     context = _make_context()
 
     captured: dict = {}
 
-    async def fake_fetch(url, *, domain, force_refresh, timeout):
-        captured["timeout"] = timeout
+    async def fake_fetch(url, *, domain, force_refresh, http_timeout, browser_timeout):
+        captured["http_timeout"] = http_timeout
+        captured["browser_timeout"] = browser_timeout
         return FetchResult(
             status=FetchStatus.SUCCESS,
             html=_HTML,
@@ -358,4 +363,5 @@ async def test_fetch_html_step_passes_correct_timeout_to_gate(monkeypatch):
 
     await step.run(context)
 
-    assert captured["timeout"] == 12.5
+    assert captured["http_timeout"] == settings.SCRAPER_HTTP_BUDGET_SECONDS
+    assert captured["browser_timeout"] == settings.SCRAPER_BROWSER_BUDGET_SECONDS

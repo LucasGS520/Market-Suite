@@ -8,6 +8,8 @@ focado na orquestração das dependências entre etapas.
 
 from __future__ import annotations
 
+import structlog
+
 from market_scraper.core.config_scraper import settings
 from market_scraper.parsers import (
     parse_generic_html,
@@ -22,8 +24,17 @@ from market_scraper.services.synergic_pipeline import (
     StepResult,
 )
 from market_scraper.services.fetch_decision_gate import FetchStatus, fetch_decision_gate
+from market_scraper.services.playwright_pool import (
+    PlaywrightFetchError,
+    PlaywrightPoolNotReadyError,
+    PlaywrightTimeoutError,
+    playwright_pool,
+)
+from market_scraper.services.response_classifier import detect_anti_bot_pattern
 from market_scraper.utils import cache, robots
 from market_scraper.utils.http_download import extract_domain
+
+logger = structlog.get_logger("pipeline_steps")
 
 class FetchHTMLStep(PipelineStep):
     """ Obtém o HTML bruto e o disponibiliza no contexto compartilhado.
@@ -39,18 +50,35 @@ class FetchHTMLStep(PipelineStep):
     """
 
     def __init__(self, *, timeout: float | None = None) -> None:
-        super().__init__(name="fetch_html", timeout=timeout)
+        # Orçamento próprio = HTTP + browser + margem para robots/cache/setup.
+        # Parser steps usam SCRAPER_STEP_TIMEOUT_SECONDS; aqui os orçamentos são maiores.
+        fetch_timeout = timeout if timeout is not None else (
+            settings.SCRAPER_HTTP_BUDGET_SECONDS
+            + settings.SCRAPER_BROWSER_BUDGET_SECONDS
+            + 5.0
+        )
+        super().__init__(name="fetch_html", timeout=fetch_timeout)
 
     async def run(self, context: PipelineContext) -> StepResult:
         if context.html:
             return StepResult.success(message="HTML já presente no contexto")
 
-        timeout_value = self.timeout if self.timeout is not None else context.default_step_timeout
         domain = context.source or extract_domain(context.url) or ""
 
-        # ── 1. Robots.txt ─────────────────────────────────────────────────
-        if not await robots.is_allowed(context.url, timeout=timeout_value):
-            return StepResult.failure(message="unsupported_by_robots")
+        # ── 1. Robots.txt — timeout leve independente do orçamento de fetch ─
+        robots_allowed = await robots.is_allowed(
+            context.url, timeout=context.default_step_timeout
+        )
+        if not robots_allowed:
+            if settings.SCRAPER_ROBOTS_MODE == "block":
+                return StepResult.failure(message="unsupported_by_robots")
+            # audit: sinal observável — pipeline prossegue, context registra a ocorrência
+            logger.info(
+                "robots_disallowed_audit_mode",
+                url=context.url,
+                domain=context.source,
+            )
+            context.data["robots_disallowed"] = True
 
         # ── 2. Cache ──────────────────────────────────────────────────────
         if context.should_use_cache("html"):
@@ -59,12 +87,13 @@ class FetchHTMLStep(PipelineStep):
                 context.set_html(cached_html)
                 return StepResult.success(message="html_from_cache")
 
-        # ── 3. Delega decisão ao FetchDecisionGate ────────────────────────
+        # ── 3. Delega ao FetchDecisionGate com orçamentos independentes ───
         result = await fetch_decision_gate.fetch_with_fallback(
             context.url,
             domain=domain,
             force_refresh=context.force_refresh,
-            timeout=timeout_value,
+            http_timeout=settings.SCRAPER_HTTP_BUDGET_SECONDS,
+            browser_timeout=settings.SCRAPER_BROWSER_BUDGET_SECONDS,
         )
 
         # ── 4. Telemetria no contexto ─────────────────────────────────────
@@ -202,14 +231,106 @@ class DomainSpecificParserStep(PipelineStep):
         return StepResult.empty("Parser específico não retornou dados válidos")
 
 
+class LateBrowserEscalationStep(PipelineStep):
+    """ Segunda chance via browser quando HTTP extraiu HTML mas parsing não gerou dado útil.
+
+    Consome: ``context.html`` (obtido via HTTP), ``context.data["fallback_taken"]``
+    Produz: ``context.html`` (sobrescreve com HTML do browser) e payload via re-execução de parsers
+
+    Guarda anti-loop: dispara no máximo uma vez por requisição via
+    ``context.data["browser_escalated_for_utility"]``.
+    """
+
+    def __init__(self, *, timeout: float | None = None) -> None:
+        browser_budget = settings.SCRAPER_BROWSER_BUDGET_SECONDS
+        step_timeout = timeout if timeout is not None else (browser_budget + 10.0)
+        super().__init__(name="late_browser_escalation", timeout=step_timeout)
+
+    async def run(self, context: PipelineContext) -> StepResult:
+        if context.data.get("browser_escalated_for_utility"):
+            return StepResult.empty("late_escalation_skipped_already_escalated")
+        if context.data.get("fallback_taken"):
+            return StepResult.empty("late_escalation_skipped_fallback_taken")
+        if not context.html:
+            return StepResult.empty("late_escalation_skipped_no_html")
+
+        if not playwright_pool.is_ready:
+            logger.warning(
+                "late_browser_escalation_playwright_not_ready",
+                url=context.url,
+                domain=context.source,
+            )
+            return StepResult.empty("late_escalation_playwright_not_ready")
+
+        context.data["browser_escalated_for_utility"] = True
+        logger.info(
+            "late_browser_escalation_triggered",
+            url=context.url,
+            domain=context.source,
+            reason="no_useful_payload_after_http_parse",
+        )
+
+        try:
+            pw_html = await playwright_pool.fetch_html(
+                context.url,
+                timeout=settings.SCRAPER_BROWSER_BUDGET_SECONDS,
+            )
+        except PlaywrightPoolNotReadyError:
+            logger.warning("late_browser_escalation_playwright_not_ready_exc", url=context.url, domain=context.source)
+            return StepResult.empty("late_escalation_playwright_not_ready")
+        except PlaywrightTimeoutError:
+            logger.warning("late_browser_escalation_playwright_timeout", url=context.url, domain=context.source)
+            return StepResult.empty("late_escalation_playwright_timeout")
+        except PlaywrightFetchError as exc:
+            logger.warning("late_browser_escalation_playwright_error", url=context.url, domain=context.source, reason=exc.reason)
+            return StepResult.empty("late_escalation_playwright_error")
+
+        context.set_html(pw_html)
+        context.data["fallback_taken"] = True
+        context.data["layer_used"] = "playwright"
+        context.data["anti_bot_bypassed"] = detect_anti_bot_pattern(pw_html) is None
+        logger.info(
+            "late_browser_escalation_html_obtained",
+            url=context.url,
+            domain=context.source,
+            html_size=len(pw_html),
+        )
+
+        parsers: list[tuple[str, ParserCallable]] = [("late_browser_json_ld", parse_with_extruct)]
+        domain = context.source or extract_domain(context.url) or ""
+        matched = get_domain_parser(domain)
+        if matched:
+            suffix, domain_parser = matched
+            parsers.append((f"late_browser_domain_{suffix}", domain_parser))
+        parsers.extend([
+            ("late_browser_html_metadata", parse_with_beautifulsoup),
+            ("late_browser_generic_fallback", parse_generic_html),
+        ])
+
+        for step_name, parser in parsers:
+            ok, payload = run_parser_with_validation(parser=parser, context=context, step_name=step_name)
+            if ok and payload:
+                logger.info(
+                    "late_browser_escalation_success",
+                    url=context.url,
+                    domain=context.source,
+                    step=step_name,
+                )
+                return StepResult.success(payload=payload, message=f"late_browser_escalation:{step_name}")
+
+        logger.warning("late_browser_escalation_no_result", url=context.url, domain=context.source)
+        return StepResult.empty("late_escalation_no_result")
+
+
 def default_pipeline_steps() -> list[PipelineStep]:
     """ Retorna a sequência padrão de etapas do pipeline enxuto """
     steps: list[PipelineStep] = [
         FetchHTMLStep(),
         JsonLdParserStep(),
-        HtmlMetadataParserStep(),
         DomainSpecificParserStep(),
+        HtmlMetadataParserStep(),
         GenericFallbackParserStep(),
+        LateBrowserEscalationStep(),
     ]
     #Mantemos a ordem fixa para cumprir pipeline mínimo definido
     return steps
@@ -220,5 +341,6 @@ __all__ = [
     "HtmlMetadataParserStep",
     "DomainSpecificParserStep",
     "GenericFallbackParserStep",
+    "LateBrowserEscalationStep",
     "default_pipeline_steps",
 ]

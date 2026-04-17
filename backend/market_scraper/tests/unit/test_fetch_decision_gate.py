@@ -146,7 +146,7 @@ async def test_gate_layer1_success(monkeypatch):
     )
     _playwright_not_ready(monkeypatch)
 
-    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, timeout=5.0)
+    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, http_timeout=5.0, browser_timeout=10.0)
 
     assert result.status == FetchStatus.SUCCESS
     assert result.html == _VALID_HTML
@@ -180,7 +180,7 @@ async def test_gate_layer1_challenge_playwright_succeeds(monkeypatch):
     )
     _playwright_ready(monkeypatch, _CLEAN_PW_HTML)
 
-    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, timeout=5.0)
+    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, http_timeout=5.0, browser_timeout=10.0)
 
     assert result.status == FetchStatus.SUCCESS_AFTER_BROWSER
     assert result.html == _CLEAN_PW_HTML
@@ -209,7 +209,7 @@ async def test_gate_http_404_rejects_with_availability(monkeypatch):
     monkeypatch.setattr("market_scraper.services.fetch_decision_gate._classifier", cls_mock)
     _playwright_not_ready(monkeypatch)
 
-    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, timeout=5.0)
+    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, http_timeout=5.0, browser_timeout=10.0)
 
     assert result.status == FetchStatus.REJECT
     assert result.error_code == "product_unavailable"
@@ -242,7 +242,7 @@ async def test_gate_playwright_timeout(monkeypatch):
         PlaywrightTimeoutError(url=_URL, timeout=5.0),
     )
 
-    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, timeout=5.0)
+    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, http_timeout=5.0, browser_timeout=10.0)
 
     assert result.status == FetchStatus.REJECT_AFTER_BROWSER
     assert result.error_code == "playwright_timeout"
@@ -251,18 +251,57 @@ async def test_gate_playwright_timeout(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Caso 5 — Rate limiter bloqueia antes de qualquer download
+# Caso 5 — Anti-bot com sinais de produto → SUCCESS degradado (sem Playwright)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def test_gate_anti_bot_degraded_returns_success_without_playwright(monkeypatch):
+    """Classificador retorna SUCCESS(anti_bot_degraded) → gate retorna SUCCESS com
+    telemetria anti-bot propagada; Playwright não é acionado.
+    """
+    gate = _make_gate()
+    _rate_limiter_allow(monkeypatch)
+    _mock_download(monkeypatch, _VALID_HTML)
+    _mock_classifier(
+        monkeypatch,
+        ClassificationResult(
+            action=ClassificationAction.SUCCESS,
+            next_layer=None,
+            reason="anti_bot_degraded",
+            telemetry={"anti_bot_pattern": "cloudflare_challenge"},
+        ),
+    )
+    _playwright_not_ready(monkeypatch)  # garante que Playwright não é chamado
+
+    result = await gate.fetch_with_fallback(
+        _URL, domain=_DOMAIN, force_refresh=False, http_timeout=5.0, browser_timeout=10.0
+    )
+
+    assert result.status == FetchStatus.SUCCESS
+    assert result.html == _VALID_HTML
+    assert result.layer_used == "curl_cffi"
+    assert result.fallback_taken is False
+    assert result.anti_bot_detected is True
+    assert result.anti_bot_pattern == "cloudflare_challenge"
+    assert result.anti_bot_bypassed is False
+    assert result.classification_reason == "anti_bot_degraded"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Caso 6 — Rate limiter bloqueia antes de qualquer download
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def test_gate_rate_limiter_blocks(monkeypatch):
-    """Rate limiter retorna (False, 0) → REJECT imediato sem chamar download_html."""
+    """Rate limiter retorna (False, 0) → REJECT imediato quando BLOCK_ENABLED=True."""
+    import market_scraper.services.fetch_decision_gate as _fds_module
+    monkeypatch.setattr(_fds_module.settings, "SCRAPER_RATE_LIMITER_BLOCK_ENABLED", True)
+
     gate = _make_gate()
     _rate_limiter_block(monkeypatch)
 
     download_mock = AsyncMock(side_effect=AssertionError("download não deveria ser chamado"))
     monkeypatch.setattr("market_scraper.services.fetch_decision_gate.download_html", download_mock)
 
-    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, timeout=5.0)
+    result = await gate.fetch_with_fallback(_URL, domain=_DOMAIN, force_refresh=False, http_timeout=5.0, browser_timeout=10.0)
 
     assert result.status == FetchStatus.REJECT
     assert result.error_code == "rate_limiter_cooldown"
