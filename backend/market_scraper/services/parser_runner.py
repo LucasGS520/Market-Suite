@@ -44,6 +44,9 @@ def run_parser_with_validation(
 ) -> tuple[bool, dict[str, str] | None]:
     """ Executa parser, valida o resultado e atualiza o contexto quando válido """
     html = context.html or ""
+    parser_name = getattr(parser, "__name__", parser.__class__.__name__)
+    dump_path = context.data.get("dump_path")
+
     try:
         raw_payload = parser(html, context.url)
     except Exception as exc:
@@ -55,14 +58,26 @@ def run_parser_with_validation(
             result="error",
             url=sanitize_log_data(context.url),
             error=sanitize_log_data(str(exc)),
+            parser_name=parser_name,
         )
+        context.data.setdefault("validation_failures", []).append({
+            "step": step_name,
+            "reason_code": "parser_error",
+            "reason_message": "Erro interno durante execução do parser",
+            "parser_name": parser_name,
+            "dump_path": dump_path,
+        })
         return False, None
-    
+
     if not raw_payload:
+        context.data.setdefault("validation_failures", []).append({
+            "step": step_name,
+            "reason_code": "parser_no_data",
+            "reason_message": "Parser não encontrou dados extraíveis no HTML",
+            "parser_name": parser_name,
+            "dump_path": dump_path,
+        })
         return False, None
-    
-    parser_name = getattr(parser, "__name__", parser.__class__.__name__)
-    dump_path = context.data.get("dump_path")
     inferred_availability, inferred_last_status = detect_availability(
         html,
         status_code=context.data.get("http_status"),
@@ -99,8 +114,8 @@ def run_parser_with_validation(
         context.data.setdefault("validation_failures", []).append(reason_entry)
         return False, None
 
-    # Critério de aceite: dado útil = nome + preço (ou indisponibilidade explícita).
-    # Payload estruturalmente válido sem preço não é suficiente para aceite final.
+    #Critério de aceite: dado útil = nome + preço (ou indisponibilidade explícita).
+    #Payload estruturalmente válido sem preço não é suficiente para aceite final.
     if not validated.is_useful:
         logger.warning(
             "parser_data_not_useful",

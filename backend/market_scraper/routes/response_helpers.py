@@ -136,11 +136,14 @@ def _http_error(
 def _derive_no_result_reason(outcome: PipelineOutcome) -> str:
     """ Deriva motivo explícito quando nenhuma falha de validação foi registrada.
 
-    Distingue três causas: HTML indisponível, domínio sem parser dedicado,
-    e parsers executados mas sem dados extraíveis.
+    Distingue quatro causas: HTML indisponível, challenge anti-bot com produto
+    (sucesso degradado que parsers não conseguiram converter), domínio sem
+    parser dedicado e parsers executados sem dados extraíveis.
     """
     if not outcome.context.html:
         return "html_unavailable"
+    if outcome.context.data.get("challenge_residual"):
+        return "anti_bot_challenge"
     if outcome.context.data.get("no_domain_parser"):
         return "no_domain_parser"
     return "no_parser_data"
@@ -169,9 +172,11 @@ def build_no_result_response(
         step=last_failure.get("step") if last_failure else None,
         parser_name=last_failure.get("parser_name") if last_failure else None,
         dump_path=last_failure.get("dump_path") if last_failure else None,
+        anti_bot_pattern=outcome.context.data.get("anti_bot_pattern"),
+        challenge_residual=outcome.context.data.get("challenge_residual"),
+        parser_attempts=len(validation_failures),
     )
     issue = UrlIssue(code="no_result", message="Não foi possível extrair dados do produto")
-    # suppress_log=True porque parse_no_result acima já registrou o evento com contexto completo
     return _http_error(
         issue,
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -290,9 +295,8 @@ def build_success_response(
     )
     return response
 
-
 def has_useful_payload(payload: dict) -> bool:
-    """Verifica se um payload contém dado útil (nome + preço ou indisponível explícito).
+    """ Verifica se um payload contém dado útil (nome + preço ou indisponível explícito).
 
     Delega para ``is_useful_payload`` do módulo ``validator`` — fonte canônica única.
     """

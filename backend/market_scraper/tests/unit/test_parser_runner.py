@@ -154,3 +154,71 @@ def test_run_parser_with_validation_returns_false_when_parser_raises(monkeypatch
     assert fields["result"] == "error"
     assert fields["domain"] == "example.com"
     assert fields["error"] == "parser exploded"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regressão Fase 3: validation_failures populado em todos os casos de falha
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_parser_returning_none_registers_parser_no_data_in_validation_failures():
+    """Parser que retorna None deve registrar reason_code='parser_no_data' com parser_name.
+
+    Regressão: antes desta correção, parsers que não encontravam dados retornavam
+    silenciosamente (sem entrada em validation_failures), fazendo o log de
+    parse_no_result mostrar parser_name=None e step=None.
+    """
+    context = PipelineContext(
+        url="https://www.mercadolivre.com.br/produto/MLB123",
+        source="www.mercadolivre.com.br",
+        default_step_timeout=1.0,
+        html="<html><body>challenge page</body></html>",
+    )
+
+    def fake_parser_no_data(html: str, url: str):
+        return None
+
+    ok, payload = parser_runner_module.run_parser_with_validation(
+        parser=fake_parser_no_data,
+        context=context,
+        step_name="json_ld_parser",
+    )
+
+    assert ok is False
+    assert payload is None
+    failures = context.data.get("validation_failures", [])
+    assert len(failures) == 1
+    assert failures[0]["reason_code"] == "parser_no_data"
+    assert failures[0]["step"] == "json_ld_parser"
+    assert failures[0]["parser_name"] == "fake_parser_no_data"
+
+
+def test_parser_raising_exception_registers_parser_error_in_validation_failures(monkeypatch):
+    """Parser que levanta exceção deve registrar reason_code='parser_error' com parser_name.
+
+    Regressão: antes desta correção, exceções do parser geravam log mas não
+    registravam entrada em validation_failures, perdendo contexto de diagnóstico.
+    """
+    context = PipelineContext(
+        url="https://www.mercadolivre.com.br/produto/MLB456",
+        source="www.mercadolivre.com.br",
+        default_step_timeout=1.0,
+        html="<html><body>invalid</body></html>",
+    )
+    monkeypatch.setattr(parser_runner_module, "logger", _LoggerSpy())
+
+    def fake_parser_crashing(html: str, url: str):
+        raise ValueError("unexpected structure")
+
+    ok, payload = parser_runner_module.run_parser_with_validation(
+        parser=fake_parser_crashing,
+        context=context,
+        step_name="domain_specific_parser",
+    )
+
+    assert ok is False
+    assert payload is None
+    failures = context.data.get("validation_failures", [])
+    assert len(failures) == 1
+    assert failures[0]["reason_code"] == "parser_error"
+    assert failures[0]["step"] == "domain_specific_parser"
+    assert failures[0]["parser_name"] == "fake_parser_crashing"

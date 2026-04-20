@@ -6,6 +6,7 @@ from decimal import Decimal
 import structlog
 
 from market_scraper.routes.response_helpers import (
+    _derive_no_result_reason,
     _extract_acquisition_payload,
     _extract_additional_payload,
     _map_http_download_issue,
@@ -271,6 +272,58 @@ def test_build_no_result_response_logs_validation_failure_metadata():
     assert parse_no_result_fields["reason_message"] == "Preco ausente ou invalido"
     assert parse_no_result_fields["parser_name"] == "parse_generic_html"
     assert parse_no_result_fields["dump_path"] == "/tmp/dump.html"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regressão Fase 3: parser_attempts e reason anti_bot_challenge
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_build_no_result_response_includes_parser_attempts_count():
+    """Log de parse_no_result deve incluir parser_attempts=len(validation_failures).
+
+    Garante observabilidade de quantos parsers tentaram extrair dados antes do
+    no_result, distinguindo 'nenhum parser rodou' de 'N parsers rodaram sem sucesso'.
+    """
+    context = PipelineContext(
+        url="https://www.mercadolivre.com.br/produto/MLB123",
+        source="www.mercadolivre.com.br",
+        default_step_timeout=1.0,
+    )
+    context.data["validation_failures"] = [
+        {"step": "json_ld_parser",       "reason_code": "parser_no_data", "reason_message": "sem dados", "parser_name": "parse_with_extruct", "dump_path": None},
+        {"step": "domain_specific_parser","reason_code": "parser_no_data", "reason_message": "sem dados", "parser_name": "parse_meli_html",    "dump_path": None},
+        {"step": "generic_fallback_parser","reason_code": "parser_no_data","reason_message": "sem dados", "parser_name": "parse_generic_html", "dump_path": None},
+    ]
+    outcome = PipelineOutcome(status="no_result", context=context)
+    request_logger = _LoggerSpy()
+
+    build_no_result_response(outcome=outcome, request_logger=request_logger, trace_id="t1")
+
+    parse_no_result_fields = request_logger.warning_calls[0][1]
+    assert parse_no_result_fields["parser_attempts"] == 3
+    assert parse_no_result_fields["reason_code"] == "parser_no_data"
+    assert parse_no_result_fields["parser_name"] == "parse_generic_html"
+
+
+def test_derive_no_result_reason_returns_anti_bot_challenge_when_challenge_residual():
+    """challenge_residual no contexto → reason 'anti_bot_challenge'.
+
+    Distingue o caso de sucesso degradado (HTML com challenge residual mas com
+    sinais de produto, onde parsers tentaram mas não extraíram dados) dos demais
+    cenários de no_result.
+    """
+    context = PipelineContext(
+        url="https://www.mercadolivre.com.br/produto/MLB456",
+        source="www.mercadolivre.com.br",
+        default_step_timeout=1.0,
+        html="<html><body>challenge html com produto</body></html>",
+    )
+    context.data["challenge_residual"] = "mercadolivre_challenge"
+    outcome = PipelineOutcome(status="no_result", context=context)
+
+    reason = _derive_no_result_reason(outcome)
+
+    assert reason == "anti_bot_challenge"
 
 
 def test_map_http_download_issue_pipeline_degraded_returns_503():

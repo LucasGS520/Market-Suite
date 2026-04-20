@@ -50,8 +50,8 @@ class FetchHTMLStep(PipelineStep):
     """
 
     def __init__(self, *, timeout: float | None = None) -> None:
-        # Orçamento próprio = HTTP + browser + margem para robots/cache/setup.
-        # Parser steps usam SCRAPER_STEP_TIMEOUT_SECONDS; aqui os orçamentos são maiores.
+        #Orçamento próprio = HTTP + browser + margem para robots/cache/setup.
+        #Parser steps usam SCRAPER_STEP_TIMEOUT_SECONDS; aqui os orçamentos são maiores.
         fetch_timeout = timeout if timeout is not None else (
             settings.SCRAPER_HTTP_BUDGET_SECONDS
             + settings.SCRAPER_BROWSER_BUDGET_SECONDS
@@ -72,7 +72,7 @@ class FetchHTMLStep(PipelineStep):
         if not robots_allowed:
             if settings.SCRAPER_ROBOTS_MODE == "block":
                 return StepResult.failure(message="unsupported_by_robots")
-            # audit: sinal observável — pipeline prossegue, context registra a ocorrência
+            #audit: sinal observável — pipeline prossegue, context registra a ocorrência
             logger.info(
                 "robots_disallowed_audit_mode",
                 url=context.url,
@@ -109,9 +109,13 @@ class FetchHTMLStep(PipelineStep):
         if result.status in (FetchStatus.SUCCESS, FetchStatus.SUCCESS_AFTER_BROWSER):
             context.set_html(result.html)
             cache.set(context.url, result.html, settings.SCRAPER_CACHE_TTL_SECONDS)
+            #Sinaliza ao pipeline que o HTML veio com challenge residual (sucesso degradado).
+            #Parsers rodam mas o contexto downstream fica ciente da qualidade do HTML.
+            if not result.anti_bot_bypassed and result.anti_bot_pattern:
+                context.data["challenge_residual"] = result.anti_bot_pattern
             return StepResult.success(message=f"html_fetched_via_{result.layer_used}")
 
-        # Produto definitivamente indisponível (404/410/451) — retorna payload
+        #Produto definitivamente indisponível (404/410/451) — retorna payload
         if result.availability is not None:
             context.set_html("")
             context.data["availability"] = result.availability

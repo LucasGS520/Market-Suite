@@ -356,3 +356,60 @@ def test_has_product_signals_false_for_plain_html():
 def test_has_product_signals_false_for_empty_html():
     """HTML vazio → False."""
     assert has_product_signals("") is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Novos sinais de produto (Fase 2 — expansão de _PRODUCT_SIGNAL_PATTERNS)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_has_product_signals_detects_ui_pdp_title():
+    """Classe ui-pdp-title (título de produto do Mercado Livre) → True."""
+    html = '<h1 class="ui-pdp-title">Notebook Lenovo</h1>'
+    assert has_product_signals(html) is True
+
+
+def test_has_product_signals_detects_andes_money_amount():
+    """Componente andes-money-amount (preço do Mercado Livre) → True."""
+    html = '<span class="andes-money-amount__fraction">3.499</span>'
+    assert has_product_signals(html) is True
+
+
+def test_has_product_signals_detects_og_price_amount():
+    """Meta og:price:amount (Open Graph genérico) → True."""
+    html = '<meta property="og:price:amount" content="199.90" />'
+    assert has_product_signals(html) is True
+
+
+def test_has_product_signals_detects_json_price_key():
+    """Chave "price": em blob JSON de estado → True."""
+    html = '<script>window.__STATE__ = {"price": 999, "name": "Produto"}</script>'
+    assert has_product_signals(html) is True
+
+
+def test_has_product_signals_detects_productpage_schema():
+    """Referência a ProductPage (schema.org, case-insensitive) → True."""
+    html = '<body itemtype="https://schema.org/ProductPage">'
+    assert has_product_signals(html) is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Classificação degradada com sinal ML específico
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_classify_mercadolivre_challenge_with_product_class_returns_degraded(classifier):
+    """ML challenge (suspicious-traffic-frontend) + ui-pdp-title → SUCCESS degradado.
+
+    Regressão: o classificador NÃO deve escalar para Playwright quando o HTML
+    já tem sinais de produto, mesmo que tenha o padrão anti-bot do ML.
+    """
+    html = (
+        '<div id="suspicious-traffic-frontend"></div>'
+        '<h1 class="ui-pdp-title">Console PlayStation 5</h1>'
+        '<span class="andes-money-amount__fraction">4.499</span>'
+        + "x" * 2048
+    )
+    result = classifier.classify(http_status=200, html=html, error=None)
+
+    assert result.action == ClassificationAction.SUCCESS
+    assert result.reason == "anti_bot_degraded"
+    assert result.telemetry.get("anti_bot_pattern") == "mercadolivre_challenge"

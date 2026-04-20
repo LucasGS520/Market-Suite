@@ -19,25 +19,35 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Resumo e Estratégia do Plano
 
-### **Objetivo**
-Objetivo: fechar os gaps remanescentes sem perder os ganhos já obtidos, levando o fluxo para aderência total ao desenho ideal: previsível, auditável, com sucesso útil maximizado e contrato HTTP preservado.
+- **Problema**: O `market_scraper` está conseguindo navegar e renderizar páginas, mas não está convertendo isso em extração real de dados de produto; na prática, a maior parte das coletas termina em challenge anti-bot, `no_result`, 422 ou timeout 504.
 
-**Arquivos relevantes**
-- routes_scraper.py — Guarda final de sucesso útil e logs de aceite.  
-- response_helpers.py — Fonte canônica de utilidade e limpeza de mapeamentos de erro.  
-- pipeline_steps.py — Orquestração da segunda chance via browser e guarda anti-loop.  
-- fetch_decision_gate.py — Telemetria e reason de escalonamento.  
-- parser_runner.py — Consistência da validação de dado útil.  
-- validator.py — Regra de utilidade única e previsível.  
-- config_scraper.py — Defaults operacionais de robots/rate limiter.  
-- conditional_payload.py — Preservação de metadados de qualidade no cache condicional.  
-- test_response_helpers.py  
-- test_pipeline_steps.py  
-- test_fetch_decision_gate.py  
-- test_parse_flow.py  
-- test_pipeline_integration.py  
-- README.md  
-- plano_refatoracao_scraper.md
+- **Sintoma observado**: Nos logs, a Camada 1 retorna HTML com padrão `mercadolivre_challenge`, a Camada 3 também retorna HTML com challenge residual, e o pipeline encerra sem payload útil.
+
+- **Objetivo da correção**: Fazer o módulo priorizar coleta útil de produto, separando claramente sucesso de navegação de sucesso de extração, e aumentar a taxa de payload válido em páginas de produto.
+
+- **Premissas**
+  - O anti-bot do alvo continuará existindo e deve ser tratado como condição recorrente, não como exceção isolada.
+  - O contrato HTTP do endpoint deve permanecer compatível.
+  - O serviço já tem base técnica suficiente; o problema central é a orientação do fluxo para extração, não apenas navegação.
+
+---
+
+### Riscos, Dependências e Decisões
+
+- **Decisão Técnica Principal**: Reorientar o fluxo para tratar aquisição de HTML como etapa intermediária e extração de dados como objetivo final, com classificação baseada em sinal de produto e não apenas em “HTML obtido”.
+
+- **Risco Principal**: Relaxar demais a régua de qualidade e passar a aceitar payloads fracos ou ambíguos; o ajuste precisa evitar falso positivo de extração.
+
+- **Impacto atual**: Alta taxa de `no_result`, 422 frequente e 504 em parte dos casos; o módulo entrega infraestrutura de navegação, mas baixa entrega de dados úteis.
+
+- **Dependências**
+  - fetch_decision_gate.py
+  - response_classifier.py
+  - pipeline_steps.py
+  - parser_runner.py
+  - validator.py
+  - response_helpers.py
+  - routes_scraper.py
 
 ---
 

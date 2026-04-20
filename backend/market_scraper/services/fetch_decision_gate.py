@@ -24,9 +24,21 @@ Fluxo de decisão::
         └─ SCALE   → tenta Playwright
         ↓
     [4] Fallback de browser — Playwright
-        ├─ Sucesso → detecta padrão residual (informativo), anti_bot_bypassed
-        │            → FetchResult(status=SUCCESS_AFTER_BROWSER)
-        └─ Falha   → FetchResult(status=REJECT_AFTER_BROWSER)
+        ├─ Falha (timeout/erro) → FetchResult(status=REJECT_AFTER_BROWSER)
+        └─ Sucesso → detecta padrão residual → verifica sinais de produto
+            ├─ challenge residual + SEM sinais de produto
+            │   → navegação atingiu challenge, extração impossível
+            │   → FetchResult(status=REJECT_AFTER_BROWSER, error_code=anti_bot_page)
+            ├─ challenge residual + COM sinais de produto (sucesso degradado)
+            │   → parsers têm chance real de extrair dados do HTML
+            │   → FetchResult(status=SUCCESS_AFTER_BROWSER, anti_bot_bypassed=False)
+            └─ sem challenge residual (bypass completo)
+                → FetchResult(status=SUCCESS_AFTER_BROWSER, anti_bot_bypassed=True)
+
+Distinção fundamental:
+    - Sucesso de NAVEGAÇÃO: browser chegou à URL e retornou HTML (qualquer conteúdo).
+    - Sucesso de EXTRAÇÃO: HTML contém sinais de produto que os parsers podem usar.
+    Apenas quando ambos ocorrem o pipeline produz payload útil.
 """
 
 from __future__ import annotations
@@ -53,6 +65,7 @@ from market_scraper.services.response_classifier import (
     ClassificationAction,
     ResponseClassifier,
     detect_anti_bot_pattern,
+    has_product_signals,
 )
 from market_scraper.utils import singleflight
 from market_scraper.utils.http_download import download_html
@@ -153,7 +166,7 @@ class FetchDecisionGate:
                     status=FetchStatus.REJECT,
                     error_code="rate_limiter_cooldown",
                 )
-            # SCRAPER_RATE_LIMITER_BLOCK_ENABLED=False → apenas observa, não bloqueia
+            #SCRAPER_RATE_LIMITER_BLOCK_ENABLED=False → apenas observa, não bloqueia
             logger.info(
                 "fetch_gate_rate_limiter_cooldown_observed",
                 url=url,
@@ -206,7 +219,7 @@ class FetchDecisionGate:
                 )
                 raise
 
-            # Produto definitivamente indisponível — não vale acionar Playwright
+            #Produto definitivamente indisponível — não vale acionar Playwright
             if layer1_status in HTTP_STATUS_UNAVAILABLE:
                 inference = infer_availability_from_http_status(layer1_status, domain)
                 await adaptive_rate_limiter.update_history(
@@ -219,7 +232,7 @@ class FetchDecisionGate:
                     availability=inference.availability,
                     last_status=inference.last_status,
                 )
-            # Outros 4xx/5xx (429, 403, 500, …) — classificador decide escalonamento
+            #Outros 4xx/5xx (429, 403, 500, …) — classificador decide escalonamento
 
         except Exception as exc:
             layer1_exc = exc
@@ -253,7 +266,7 @@ class FetchDecisionGate:
                 classification_reason=classification.reason,
             )
 
-        # Extraído antes dos checks de action para cobrir tanto SUCCESS degradado quanto SCALE
+        #Extraído antes dos checks de action para cobrir tanto SUCCESS degradado quanto SCALE
         l1_anti_bot = classification.telemetry.get("anti_bot_pattern")
 
         if classification.action == ClassificationAction.SUCCESS:
@@ -356,9 +369,33 @@ class FetchDecisionGate:
                 classification_reason=classification.reason,
             )
 
-        # Playwright bem-sucedido — registra sinal anti-bot como informativo,
-        # não como barreira. Se padrão residual existir, é telemetria; parsers rodam.
         residual = detect_anti_bot_pattern(pw_html)
+
+        #Challenge residual sem sinais de produto: o browser navegou até a página de challenge mas não a bypassou.
+        #Tratar como rejeição real (429) em vez de sucesso de navegação sem dado útil (que geraria 422 no_result enganoso).
+        if residual is not None and not has_product_signals(pw_html):
+            await adaptive_rate_limiter.update_history(
+                domain, success=False, error_code="anti_bot_page", layer_used=3
+            )
+            logger.warning(
+                "fetch_gate_layer3_challenge_no_product_signals",
+                url=url,
+                domain=domain,
+                html_size=len(pw_html),
+                anti_bot_residual=residual,
+            )
+            return FetchResult(
+                status=FetchStatus.REJECT_AFTER_BROWSER,
+                error_code="anti_bot_page",
+                anti_bot_detected=True,
+                anti_bot_pattern=residual,
+                anti_bot_bypassed=False,
+                http_status=200,
+                classification_reason=classification.reason,
+            )
+
+        #Playwright bem-sucedido — HTML tem sinais de produto ou não tem anti-bot.
+        #Se padrão residual existir com produto, é sucesso degradado; parsers rodam.
         await adaptive_rate_limiter.update_history(domain, success=True, layer_used=3)
         logger.info(
             "fetch_gate_layer3_success",

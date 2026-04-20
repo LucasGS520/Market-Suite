@@ -290,6 +290,97 @@ async def test_gate_anti_bot_degraded_returns_success_without_playwright(monkeyp
 # Caso 6 — Rate limiter bloqueia antes de qualquer download
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Caso 7 — Playwright retorna challenge residual SEM sinais de produto
+# ─────────────────────────────────────────────────────────────────────────────
+
+# HTML de challenge do ML: ~33KB, sem qualquer sinal de produto
+_PW_CHALLENGE_ONLY_HTML = (
+    "<html><head></head><body>"
+    '<div id="suspicious-traffic-frontend"></div>'
+    + "x" * 32_000
+    + "</body></html>"
+)
+
+# HTML com challenge residual MAS com sinais de produto (sucesso degradado)
+_PW_CHALLENGE_WITH_PRODUCT_HTML = (
+    "<html><head>"
+    '<script type="application/ld+json">{"@type":"Product","name":"PS5","offers":{"price":"4999"}}</script>'
+    "</head><body>"
+    '<div id="suspicious-traffic-frontend"></div>'
+    + "x" * 2048
+    + "</body></html>"
+)
+
+
+async def test_gate_playwright_challenge_only_html_returns_reject_after_browser(monkeypatch):
+    """Playwright retorna HTML com challenge residual e sem sinais de produto.
+
+    Expectativa: REJECT_AFTER_BROWSER com error_code=anti_bot_page.
+    O gate não deve marcar isso como sucesso de navegação — o browser navegou
+    até a página de challenge mas não a bypassou.
+    """
+    gate = _make_gate()
+    _rate_limiter_allow(monkeypatch)
+    _mock_download(monkeypatch, _CHALLENGE_HTML)
+    _mock_classifier(
+        monkeypatch,
+        ClassificationResult(
+            action=ClassificationAction.SCALE,
+            next_layer=3,
+            reason="anti_bot_page",
+            telemetry={"anti_bot_pattern": "mercadolivre_challenge"},
+        ),
+    )
+    _playwright_ready(monkeypatch, _PW_CHALLENGE_ONLY_HTML)
+
+    result = await gate.fetch_with_fallback(
+        _URL, domain=_DOMAIN, force_refresh=False, http_timeout=5.0, browser_timeout=10.0
+    )
+
+    assert result.status == FetchStatus.REJECT_AFTER_BROWSER
+    assert result.error_code == "anti_bot_page"
+    assert result.anti_bot_detected is True
+    assert result.anti_bot_bypassed is False
+    assert result.html is None
+
+
+async def test_gate_playwright_challenge_with_product_signals_returns_success(monkeypatch):
+    """Playwright retorna HTML com challenge residual mas COM sinais de produto.
+
+    Expectativa: SUCCESS_AFTER_BROWSER — parsers têm chance real de extrair dados.
+    anti_bot_bypassed=False sinaliza que o challenge não foi completamente resolvido.
+    """
+    gate = _make_gate()
+    _rate_limiter_allow(monkeypatch)
+    _mock_download(monkeypatch, _CHALLENGE_HTML)
+    _mock_classifier(
+        monkeypatch,
+        ClassificationResult(
+            action=ClassificationAction.SCALE,
+            next_layer=3,
+            reason="anti_bot_page",
+            telemetry={"anti_bot_pattern": "mercadolivre_challenge"},
+        ),
+    )
+    _playwright_ready(monkeypatch, _PW_CHALLENGE_WITH_PRODUCT_HTML)
+
+    result = await gate.fetch_with_fallback(
+        _URL, domain=_DOMAIN, force_refresh=False, http_timeout=5.0, browser_timeout=10.0
+    )
+
+    assert result.status == FetchStatus.SUCCESS_AFTER_BROWSER
+    assert result.html == _PW_CHALLENGE_WITH_PRODUCT_HTML
+    assert result.layer_used == "playwright"
+    assert result.fallback_taken is True
+    assert result.anti_bot_detected is True
+    assert result.anti_bot_bypassed is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Caso 6 — Rate limiter bloqueia antes de qualquer download
+# ─────────────────────────────────────────────────────────────────────────────
+
 async def test_gate_rate_limiter_blocks(monkeypatch):
     """Rate limiter retorna (False, 0) → REJECT imediato quando BLOCK_ENABLED=True."""
     import market_scraper.services.fetch_decision_gate as _fds_module
