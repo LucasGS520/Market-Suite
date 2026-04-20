@@ -278,6 +278,7 @@ class LateBrowserEscalationStep(PipelineStep):
             pw_html = await playwright_pool.fetch_html(
                 context.url,
                 timeout=settings.SCRAPER_BROWSER_BUDGET_SECONDS,
+                domain=context.source or None,
             )
         except PlaywrightPoolNotReadyError:
             logger.warning("late_browser_escalation_playwright_not_ready_exc", url=context.url, domain=context.source)

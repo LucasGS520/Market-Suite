@@ -27,12 +27,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import structlog
 
 from shared.utils.logging_utils import sanitize_log_data
+from market_scraper.core.config_scraper import settings
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser, BrowserContext, Page, Playwright
@@ -104,6 +106,21 @@ _STEALTH_SCRIPT = """
 """
 
 
+# URLs de homepage usadas para aquecer sessão antes de acessar produto
+_BOOTSTRAP_URLS: dict[str, str] = {
+    "www.mercadolivre.com.br":     "https://www.mercadolivre.com.br/",
+    "produto.mercadolivre.com.br": "https://www.mercadolivre.com.br/",
+}
+
+
+@dataclass
+class _DomainSession:
+    """ Estado de sessão Playwright persistente por domínio."""
+    context: Any           # BrowserContext (importado apenas em TYPE_CHECKING)
+    request_count: int = 0
+    bootstrapped: bool = False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Exceções públicas
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,6 +162,8 @@ class PlaywrightPool:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._max_concurrent = max_concurrent
+        self._domain_sessions: dict[str, _DomainSession] = {}
+        self._domain_sessions_lock = asyncio.Lock()
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -174,6 +193,18 @@ class PlaywrightPool:
         """ Encerra o browser aguardando contexts pendentes (até ``grace_timeout`` s)."""
         logger.info("playwright_pool_shutdown_requested")
 
+        async with self._domain_sessions_lock:
+            for domain, session in list(self._domain_sessions.items()):
+                try:
+                    await session.context.close()
+                except Exception as exc:
+                    logger.warning(
+                        "playwright_domain_context_close_error",
+                        domain=domain,
+                        error=str(exc),
+                    )
+            self._domain_sessions.clear()
+
         if self._browser is not None:
             try:
                 await asyncio.wait_for(self._browser.close(), timeout=grace_timeout)
@@ -199,12 +230,20 @@ class PlaywrightPool:
 
     # ── Fetch público ─────────────────────────────────────────────────────
 
-    async def fetch_html(self, url: str, *, timeout: float = 30.0) -> str:
+    async def fetch_html(
+        self,
+        url: str,
+        *,
+        timeout: float = 30.0,
+        domain: str | None = None,
+    ) -> str:
         """ Obtém HTML renderizado pelo Chromium com stealth e bloqueio de recursos.
 
         Args:
             url: URL alvo.
             timeout: Tempo máximo em segundos (padrão: 30s).
+            domain: Quando fornecido e ``SCRAPER_PERSISTENT_SESSIONS_ENABLED=True``,
+                    reutiliza o contexto Playwright do domínio (cookies persistidos).
 
         Returns:
             HTML completo da página após ``domcontentloaded``.
@@ -220,7 +259,86 @@ class PlaywrightPool:
             )
 
         async with self._semaphore:
+            if domain and settings.SCRAPER_PERSISTENT_SESSIONS_ENABLED:
+                session = await self._get_or_create_session(domain)
+                return await self._fetch_in_persistent_context(session, url, timeout=timeout)
             return await self._fetch_in_context(url, timeout=timeout)
+
+    # ── Sessão persistente por domínio ───────────────────────────────────
+
+    async def _create_browser_context(self) -> Any:
+        """ Cria novo BrowserContext com configurações padrão."""
+        return await self._browser.new_context(
+            user_agent=_DEFAULT_USER_AGENT,
+            locale="pt-BR",
+            extra_http_headers={
+                "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            },
+        )
+
+    async def _get_or_create_session(self, domain: str) -> _DomainSession:
+        """ Retorna sessão persistente do domínio, reciclando quando atinge ``_RECYCLE_AFTER``."""
+        async with self._domain_sessions_lock:
+            if domain in self._domain_sessions:
+                session = self._domain_sessions[domain]
+                if session.request_count < _RECYCLE_AFTER:
+                    return session
+                try:
+                    await session.context.close()
+                except Exception:
+                    pass
+                del self._domain_sessions[domain]
+                logger.info(
+                    "playwright_domain_context_recycled",
+                    domain=domain,
+                    request_count=session.request_count,
+                )
+
+            context = await self._create_browser_context()
+            session = _DomainSession(context=context)
+            self._domain_sessions[domain] = session
+            logger.info("playwright_domain_context_created", domain=domain)
+            return session
+
+    async def _fetch_in_persistent_context(
+        self,
+        session: _DomainSession,
+        url: str,
+        *,
+        timeout: float,
+    ) -> str:
+        """ Cria page dentro do contexto persistente, navega e retorna o HTML."""
+        from playwright.async_api import Error as PlaywrightError
+        from playwright.async_api import TimeoutError as PlaywrightNativeTimeout
+
+        page = await session.context.new_page()
+        session.request_count += 1
+        try:
+            stealth_ok = await self._inject_stealth(page)
+            if not stealth_ok:
+                logger.warning("playwright_stealth_injection_failed", url=sanitize_log_data(url))
+
+            await page.route("**/*", self._block_resources)
+
+            timeout_ms = int(timeout * 1000)
+            try:
+                await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
+            except PlaywrightNativeTimeout as exc:
+                await self._maybe_screenshot(page, url=url, reason="timeout")
+                raise PlaywrightTimeoutError(url=url, timeout=timeout) from exc
+            except PlaywrightError as exc:
+                await self._maybe_screenshot(page, url=url, reason="navigation_error")
+                raise PlaywrightFetchError(url=url, reason=str(exc)) from exc
+
+            html = await page.content()
+            logger.debug(
+                "playwright_fetch_success",
+                url=sanitize_log_data(url),
+                html_size=len(html),
+            )
+            return html
+        finally:
+            await page.close()
 
     # ── Internos ─────────────────────────────────────────────────────────
 

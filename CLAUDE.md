@@ -19,35 +19,47 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Resumo e Estratégia do Plano
 
-- **Problema**: O `market_scraper` está conseguindo navegar e renderizar páginas, mas não está convertendo isso em extração real de dados de produto; na prática, a maior parte das coletas termina em challenge anti-bot, `no_result`, 422 ou timeout 504.
+### Problema
+O módulo `market_scraper` está conseguindo **navegar e acessar URLs de produto** em Mercado Livre, mas **não está extraindo dados úteis**; retorna 429 (anti-bot challenge) em praticamente todas das requisições a Mercado Livre, com taxa de sucesso **zero** para payload utilizável, enquanto Amazon e Magalu retornam dados mais "confiáveis".
 
-- **Sintoma observado**: Nos logs, a Camada 1 retorna HTML com padrão `mercadolivre_challenge`, a Camada 3 também retorna HTML com challenge residual, e o pipeline encerra sem payload útil.
+### Sintoma Observado
+- **Mercado Livre:** requisições retornam 429 `anti_bot_challenge` (challenge persistente em Camada 1 e Camada 3); HTML obtido (~34KB) contém padrão `suspicious-traffic-frontend`; sem sinais de produto; rate limiter ativa cooldown de 3600s após 3º fail, bloqueando novos testes
+- **Amazon/Magalu:** requisições retornam 200 OK com payload útil (name + price) extraído, alguns casos de erros ou falsos positivos também foram identificados.
+- **Logs:** eventos `fetch_gate_layer3_challenge_no_product_signals` indicam browser renderizando página de proteção, não página de produto
 
-- **Objetivo da correção**: Fazer o módulo priorizar coleta útil de produto, separando claramente sucesso de navegação de sucesso de extração, e aumentar a taxa de payload válido em páginas de produto.
-
-- **Premissas**
-  - O anti-bot do alvo continuará existindo e deve ser tratado como condição recorrente, não como exceção isolada.
-  - O contrato HTTP do endpoint deve permanecer compatível.
-  - O serviço já tem base técnica suficiente; o problema central é a orientação do fluxo para extração, não apenas navegação.
+### Objetivo da Correção
+Transformar `market_scraper` de um **serviço de navegação** para um **serviço de extração real**, desbloqueando coleta de dados de produtos em Mercado Livre através de:
+1. **Sessão persistente** para reutilizar cookies/state entre requisições
+2. **Bootstrap de domínio** antes de acessar URL de produto
+3. **Parser de estado JavaScript** para extrair dados de JSON inline mesmo com DOM degradado
+4. **Fingerprint unificada** para reduzir detecção anti-bot
+5. **Rate limiter adaptativo** para não bloquear fase de recuperação
 
 ---
 
 ### Riscos, Dependências e Decisões
 
-- **Decisão Técnica Principal**: Reorientar o fluxo para tratar aquisição de HTML como etapa intermediária e extração de dados como objetivo final, com classificação baseada em sinal de produto e não apenas em “HTML obtido”.
+### Decisão Técnica Principal
+**Sessão persistente de Playwright por domínio + parser de estado JavaScript** como caminho crítico para desbloqueio de Mercado Livre, substituindo abordagem stateless (novo contexto por requisição) por cache compartilhado com reutilização de cookies/localStorage.
 
-- **Risco Principal**: Relaxar demais a régua de qualidade e passar a aceitar payloads fracos ou ambíguos; o ajuste precisa evitar falso positivo de extração.
+| Aspecto | Detalhe |
+|--------|--------|
+| **Por que Sessão Persistente?** | Challenge anti-bot detecta contextos frescos; reutilizar cookie/session de navegação anterior reduz trigger de proteção |
+| **Por que Parser JS?** | Mercado Livre renderiza JSON state (`__NEXT_DATA__`, scripts inline) que contém nome/preço/moeda mesmo quando DOM visual é degradado; extração de JSON é imune a bloqueios visuais |
+| **Por que Bootstrap?** | Navegar primeiro para homepage/categoria do domínio aquece sessão + estabelece cookies antes de acessar URL específica do produto |
+| **Por que Fingerprint Unificada?** | User-Agent pool (Firefox, Safari, Chrome) vs TLS fixo (Chrome124) cria inconsistência detectável; alinhamento reduz falso positivo de anti-bot |
 
-- **Impacto atual**: Alta taxa de `no_result`, 422 frequente e 504 em parte dos casos; o módulo entrega infraestrutura de navegação, mas baixa entrega de dados úteis.
+### Risco Principal
 
-- **Dependências**
-  - fetch_decision_gate.py
-  - response_classifier.py
-  - pipeline_steps.py
-  - parser_runner.py
-  - validator.py
-  - response_helpers.py
-  - routes_scraper.py
+| Risco | Severidade | Probabilidade | Mitigação |
+|-------|-----------|--------------|-----------|
+| **OOM Playwright (memory leak)** | 🔴 Alta | 🟡 Média | Reciclagem context a cada 50 req; flag `--disable-dev-shm-usage`; monitoramento RAM em tempo real |
+| **Mudança contrato HTTP inadvertida** | 🔴 Alta | 🟠 Baixa | Usar feature flags; validação de `ParserResponse` schema; testes de contrato |
+| **Fingerprint ainda detectada** | 🟡 Média | 🟡 Média | Fallback: rate limiter voltará a ativar cooldown; documentar e iterar em MVP+1 |
+| **Rate limiter desligado = spam** | 🟡 Média | 🟠 Baixa | Usar flag temporal (`SCRAPER_RATE_LIMITER_BLOCK_ENABLED_UNTIL`) em produção; ligar automaticamente após fase de recuperação |
+| **Timeout Playwright bloqueia pipeline** | 🟡 Média | 🟡 Média | Timeout global 30s; circuit breaker em requisição; rejeição com 429 (não 504) |
+| **Parser JS quebra com mudança HTML Mercado Livre** | 🟠 Baixa | 🟠 Baixa | Parsers em cascata (JSON + DOM fallback); testes com HTML fixado (fixtures) |
+| **Redis offline → perda de cache sessão** | 🟠 Baixa | 🟠 Baixa | Fallback em-memória (não persistente); logging + alert operacional |
 
 ---
 

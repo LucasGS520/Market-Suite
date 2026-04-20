@@ -74,6 +74,12 @@ logger = structlog.get_logger("fetch_decision_gate")
 
 _classifier = ResponseClassifier()
 
+_BOOTSTRAP_TIMEOUT_SECONDS: float = 10.0
+_BOOTSTRAP_URLS: dict[str, str] = {
+    "www.mercadolivre.com.br":     "https://www.mercadolivre.com.br/",
+    "produto.mercadolivre.com.br": "https://www.mercadolivre.com.br/",
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tipos públicos
@@ -126,11 +132,44 @@ class FetchResult:
 class FetchDecisionGate:
     """ Decide e executa a estratégia de aquisição de HTML em cascata.
 
-    A classe é stateless — pode ser instanciada uma vez e reutilizada
-    concorrentemente. Toda a lógica de decisão (rate limiter, classify,
-    fallback Playwright) vive aqui; ``FetchHTMLStep`` delega para cá e
-    apenas faz o mapeamento para ``StepResult``.
+    Mantém estado mínimo: conjunto de domínios já aquecidos por bootstrap.
+    Pode ser instanciada uma vez e reutilizada concorrentemente — toda
+    lógica de decisão (rate limiter, classify, fallback Playwright) vive
+    aqui; ``FetchHTMLStep`` delega para cá.
     """
+
+    def __init__(self) -> None:
+        self._bootstrapped_domains: set[str] = set()
+
+    async def _bootstrap_domain(self, domain: str) -> None:
+        """ Aquece sessão Playwright do domínio navegando para a homepage.
+
+        Executado somente uma vez por domínio por ciclo de vida do processo.
+        Cookies e estado de sessão ficam no contexto persistente do pool.
+        """
+        if not settings.SCRAPER_DOMAIN_BOOTSTRAP_ENABLED:
+            return
+        if not playwright_pool.is_ready:
+            return
+        if domain in self._bootstrapped_domains:
+            return
+
+        bootstrap_url = _BOOTSTRAP_URLS.get(domain, f"https://{domain}/")
+        logger.info("bootstrap_started", domain=domain, bootstrap_url=bootstrap_url)
+        try:
+            await playwright_pool.fetch_html(
+                bootstrap_url,
+                timeout=_BOOTSTRAP_TIMEOUT_SECONDS,
+                domain=domain,
+            )
+            self._bootstrapped_domains.add(domain)
+            logger.info("bootstrap_success", domain=domain)
+        except PlaywrightTimeoutError:
+            logger.warning("bootstrap_timeout", domain=domain)
+        except (PlaywrightFetchError, PlaywrightPoolNotReadyError) as exc:
+            logger.warning("bootstrap_failed", domain=domain, error=str(exc))
+        except Exception as exc:
+            logger.warning("bootstrap_failed", domain=domain, error=str(exc))
 
     async def fetch_with_fallback(
         self,
@@ -172,6 +211,9 @@ class FetchDecisionGate:
                 url=url,
                 domain=domain,
             )
+
+        # ── 1.5. Bootstrap de domínio (aquece sessão antes da tentativa HTTP) ──
+        await self._bootstrap_domain(domain)
 
         # ── 2. Tentativa HTTP primária — curl_cffi ────────────────────────
         layer1_html: str | None = None
@@ -331,7 +373,7 @@ class FetchDecisionGate:
             )
 
         try:
-            pw_html = await playwright_pool.fetch_html(url, timeout=browser_timeout)
+            pw_html = await playwright_pool.fetch_html(url, timeout=browser_timeout, domain=domain)
         except PlaywrightPoolNotReadyError:
             return FetchResult(
                 status=FetchStatus.REJECT_AFTER_BROWSER,

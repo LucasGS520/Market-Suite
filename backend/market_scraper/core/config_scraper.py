@@ -165,6 +165,19 @@ class Settings(ConfigBase):
         "",
     ) #Headers adicionais enviados além do conjunto mínimo
 
+    # --- Sessão persistente e bootstrap de domínio ---
+    SCRAPER_PERSISTENT_SESSIONS_ENABLED: bool = os.getenv(
+        "SCRAPER_PERSISTENT_SESSIONS_ENABLED", "True"
+    ).lower() in {"1", "true", "on", "yes"}
+    # Padrão True: contextos Playwright reutilizados por domínio para preservar cookies
+    # entre requisições. Defina False para voltar ao comportamento stateless original.
+
+    SCRAPER_DOMAIN_BOOTSTRAP_ENABLED: bool = os.getenv(
+        "SCRAPER_DOMAIN_BOOTSTRAP_ENABLED", "True"
+    ).lower() in {"1", "true", "on", "yes"}
+    # Padrão True: navega para homepage do domínio antes da primeira requisição de produto
+    # para aquecer a sessão e reduzir falsos positivos anti-bot em Mercado Livre.
+
     # --- Observabilidade ---
     SCRAPER_LOG_4XX_BODY: bool = os.getenv("SCRAPER_LOG_4XX_BODY", "True").lower() in {
         "1",
