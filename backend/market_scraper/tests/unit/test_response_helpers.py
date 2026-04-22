@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
 
 import structlog
 
-from market_scraper.routes.response_helpers import (
+from market_scraper.routes.error_mapper import _map_http_download_issue
+from market_scraper.routes.response_mapper import (
     _derive_no_result_reason,
     _extract_acquisition_payload,
     _extract_additional_payload,
-    _map_http_download_issue,
     _sanitize_payload,
+)
+from market_scraper.routes.response_builder import (
     build_no_result_response,
     build_success_response,
     has_useful_payload,
@@ -152,7 +153,6 @@ def test_build_success_response_merges_inferred_state_and_extra_payload():
         normalized_url="https://example.com/product",
         outcome=outcome,
         request_logger=structlog.get_logger("test"),
-        current_price=Decimal("10.00"),
     )
 
     assert response.name == "Produto X"
@@ -194,7 +194,6 @@ def test_build_success_response_uses_marketplace_fallback_and_context_last_statu
         normalized_url="https://example.com/product",
         outcome=outcome,
         request_logger=request_logger,
-        current_price=None,
     )
 
     assert response.source == "fallback.example.com"

@@ -19,47 +19,46 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Resumo e Estratégia do Plano
 
-### Problema
-O módulo `market_scraper` está conseguindo **navegar e acessar URLs de produto** em Mercado Livre, mas **não está extraindo dados úteis**; retorna 429 (anti-bot challenge) em praticamente todas das requisições a Mercado Livre, com taxa de sucesso **zero** para payload utilizável, enquanto Amazon e Magalu retornam dados mais "confiáveis".
+- **Objetivo:** Reestruturar o módulo `market_scraper` para uma arquitetura simples, modular, auditável e determinística, reduzindo sobreposição de responsabilidades e mantendo compatibilidade total do contrato público.
 
-### Sintoma Observado
-- **Mercado Livre:** requisições retornam 429 `anti_bot_challenge` (challenge persistente em Camada 1 e Camada 3); HTML obtido (~34KB) contém padrão `suspicious-traffic-frontend`; sem sinais de produto; rate limiter ativa cooldown de 3600s após 3º fail, bloqueando novos testes
-- **Amazon/Magalu:** requisições retornam 200 OK com payload útil (name + price) extraído, alguns casos de erros ou falsos positivos também foram identificados.
-- **Logs:** eventos `fetch_gate_layer3_challenge_no_product_signals` indicam browser renderizando página de proteção, não página de produto
+- **Resultado Esperado:** Fluxo de scraping organizado em camadas rígidas (HTTP/Contrato, Orquestração, Coleta, Parsing, Pós-processamento, Infra), com cadeia de parsing fixa, escalonamento controlado HTTP→Browser, telemetria obrigatória consistente e previsibilidade de comportamento em sucesso/falha.
 
-### Objetivo da Correção
-Transformar `market_scraper` de um **serviço de navegação** para um **serviço de extração real**, desbloqueando coleta de dados de produtos em Mercado Livre através de:
-1. **Sessão persistente** para reutilizar cookies/state entre requisições
-2. **Bootstrap de domínio** antes de acessar URL de produto
-3. **Parser de estado JavaScript** para extrair dados de JSON inline mesmo com DOM degradado
-4. **Fingerprint unificada** para reduzir detecção anti-bot
-5. **Rate limiter adaptativo** para não bloquear fase de recuperação
+- **Estratégia de Execução:** Executar migração incremental com feature flags e “strangler pattern” (novo fluxo convivendo com o legado até estabilização), validando contrato e comportamento em cada fase com suíte de testes de contrato, integração e cenários críticos.
 
 ---
 
 ### Riscos, Dependências e Decisões
 
-### Decisão Técnica Principal
-**Sessão persistente de Playwright por domínio + parser de estado JavaScript** como caminho crítico para desbloqueio de Mercado Livre, substituindo abordagem stateless (novo contexto por requisição) por cache compartilhado com reutilização de cookies/localStorage.
+**Decisões Técnicas Principais**
+  - Migração incremental com **compatibilidade externa congelada**.
+  - Introdução de **camada Application/UseCase** para centralizar fluxo determinístico e tirar lógica da rota.
+  - **Coleta como etapa fechada** antes da extração; proibida reentrada tardia de browser dentro da cadeia de parsing.
+  - `FetchDecisionGate` mantido, mas reduzido a política de coleta (não orquestrador geral).
+  - Telemetria obrigatória produzida a partir de DTO de coleta/execução, sem depender de dicionário aberto.
+  - Reorganização estrutural: coleta em `services/http` e `services/browser`, infra em `infrastructure/*`, mapeadores/resposta em utilitários explícitos.
+  - `response_helpers` fatiado em responsabilidades únicas (`error_mapper`, `response_mapper`, `response_builder`).
+  - `validator`, `availability_inference` e trechos de runner convergem para pós-processamento único.
+  - Descontinuação de `LateBrowserEscalationStep` e eliminação gradual do uso central de `PipelineContext.data`.
 
-| Aspecto | Detalhe |
-|--------|--------|
-| **Por que Sessão Persistente?** | Challenge anti-bot detecta contextos frescos; reutilizar cookie/session de navegação anterior reduz trigger de proteção |
-| **Por que Parser JS?** | Mercado Livre renderiza JSON state (`__NEXT_DATA__`, scripts inline) que contém nome/preço/moeda mesmo quando DOM visual é degradado; extração de JSON é imune a bloqueios visuais |
-| **Por que Bootstrap?** | Navegar primeiro para homepage/categoria do domínio aquece sessão + estabelece cookies antes de acessar URL específica do produto |
-| **Por que Fingerprint Unificada?** | User-Agent pool (Firefox, Safari, Chrome) vs TLS fixo (Chrome124) cria inconsistência detectável; alinhamento reduz falso positivo de anti-bot |
+**Riscos Principais**
+  - Regressão silenciosa de contrato/semântica HTTP durante refatoração interna.
+  - Queda de taxa de extração útil por mudança na ordem/heurística de parsing.
+  - Aumento de latência no fallback browser e impacto em throughput.
+  - Complexidade de convivência entre fluxo legado e novo durante migração.
+  - Acoplamento excessivo caso Crawlee entre no núcleo, em vez de adaptador.
+  - Remoção precoce do legado sem critérios objetivos de estabilidade.
 
-### Risco Principal
+**Dependências**
+  - Dependências técnicas atuais: `curl_cffi`, `playwright`, parsers (extruct/parsel/bs4/lxml), Redis.
+  - Instrumentação de logs estruturados com `trace_id` e correlação.
+  - Feature flags para roteamento de fluxo (legado vs novo) e rollout gradual.
 
-| Risco | Severidade | Probabilidade | Mitigação |
-|-------|-----------|--------------|-----------|
-| **OOM Playwright (memory leak)** | 🔴 Alta | 🟡 Média | Reciclagem context a cada 50 req; flag `--disable-dev-shm-usage`; monitoramento RAM em tempo real |
-| **Mudança contrato HTTP inadvertida** | 🔴 Alta | 🟠 Baixa | Usar feature flags; validação de `ParserResponse` schema; testes de contrato |
-| **Fingerprint ainda detectada** | 🟡 Média | 🟡 Média | Fallback: rate limiter voltará a ativar cooldown; documentar e iterar em MVP+1 |
-| **Rate limiter desligado = spam** | 🟡 Média | 🟠 Baixa | Usar flag temporal (`SCRAPER_RATE_LIMITER_BLOCK_ENABLED_UNTIL`) em produção; ligar automaticamente após fase de recuperação |
-| **Timeout Playwright bloqueia pipeline** | 🟡 Média | 🟡 Média | Timeout global 30s; circuit breaker em requisição; rejeição com 429 (não 504) |
-| **Parser JS quebra com mudança HTML Mercado Livre** | 🟠 Baixa | 🟠 Baixa | Parsers em cascata (JSON + DOM fallback); testes com HTML fixado (fixtures) |
-| **Redis offline → perda de cache sessão** | 🟠 Baixa | 🟠 Baixa | Fallback em-memória (não persistente); logging + alert operacional |
+**Impactos Arquiteturais**
+  - Redução de acoplamento entre API, coleta e parsing.
+  - Aumento de previsibilidade por fluxo linear e política explícita.
+  - Melhor testabilidade por camadas com entradas/saídas fechadas.
+  - Menor dispersão de regra de negócio em helpers genéricos.
+  - Base pronta para evolução futura (proxy/crawlers adicionais) sem inflar o orquestrador.
 
 ---
 

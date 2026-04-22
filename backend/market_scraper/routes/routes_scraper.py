@@ -7,7 +7,6 @@ executar o pipeline sequencial de scraping.
 from __future__ import annotations
 
 from typing import Any
-from decimal import Decimal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Request, Response, status
@@ -27,13 +26,18 @@ from shared.schemas.shared_schemas_scraper import (
     SCRAPER_CONTRACT_VERSION_HEADER,
 )
 
-from market_scraper.routes.response_helpers import (
-    _http_error,
-    _map_http_download_issue,
-    _sanitize_payload,
+from market_scraper.core.config_scraper import settings
+from market_scraper.routes.error_mapper import _http_error, _map_http_download_issue
+from market_scraper.routes.response_builder import (
     build_no_result_response,
     build_success_response,
     has_useful_payload,
+)
+from market_scraper.routes.response_mapper import _sanitize_payload
+from market_scraper.use_cases.parse_product import (
+    ParseProductError,
+    ParseProductNoResult,
+    ParseProductUseCase,
 )
 
 from market_scraper.services.pipeline_factory import run_pipeline
@@ -47,7 +51,6 @@ from market_scraper.utils.conditional_payload import (
     store_response,
 )
 from market_scraper.utils.http_utils import HostResolutionError, resolve_public_address
-from market_scraper.utils.price import parse_price_str
 
 
 logger = structlog.get_logger("routes_scraper")
@@ -210,72 +213,80 @@ async def parse_endpoint(
     else:
         cache_status = "bypass"
 
-    try:
-        outcome = await run_pipeline(
+    if settings.SCRAPER_NEW_ORCHESTRATOR_ENABLED:
+        # ── Novo fluxo: ParseProductUseCase (collect → extract → post_process → build_response)
+        use_case_result = await ParseProductUseCase().execute(
             normalized_url,
+            request_logger=request_logger,
             force_refresh=force_refresh,
             trace_id=trace_id,
         )
-    except PipelineTimeoutError as exc:
-        issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline excedido")
-        return _http_error(
-            issue,
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            trace_id=trace_id,
-            request_logger=request_logger,
-            log_extra={"error": sanitize_log_data(str(exc))},
-        )
-    
-    http_issue = _map_http_download_issue(outcome)
-    if http_issue:
-        issue, status_code = http_issue
-        invalidate_cached_response(normalized_url)
-        return _http_error(
-            issue,
-            status_code=status_code,
-            trace_id=trace_id,
-            request_logger=request_logger,
-        )
+        if isinstance(use_case_result, ParseProductError):
+            if use_case_result.invalidate_cache:
+                invalidate_cached_response(normalized_url)
+            return _http_error(
+                use_case_result.issue,
+                status_code=use_case_result.http_status,
+                trace_id=trace_id,
+                request_logger=request_logger,
+            )
+        if isinstance(use_case_result, ParseProductNoResult):
+            return build_no_result_response(
+                outcome=use_case_result.outcome,
+                request_logger=request_logger,
+                trace_id=trace_id,
+            )
+        parse_response = use_case_result.parser_response
+    else:
+        # ── Fluxo legado: pipeline direto (mantido até Fase 4)
+        try:
+            outcome = await run_pipeline(
+                normalized_url,
+                force_refresh=force_refresh,
+                trace_id=trace_id,
+            )
+        except PipelineTimeoutError as exc:
+            issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline excedido")
+            return _http_error(
+                issue,
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                trace_id=trace_id,
+                request_logger=request_logger,
+                log_extra={"error": sanitize_log_data(str(exc))},
+            )
 
-    # Decisão de sucesso: pipeline concluiu E payload satisfaz critério canônico de utilidade.
-    # Critério: availability=False (indisponível explícito) OR (nome + preço).
-    # Centralizado em is_useful_payload (validator.py) — fonte única de verdade.
-    if outcome.status != "success" or not has_useful_payload(outcome.payload or {}):
-        return build_no_result_response(
+        http_issue = _map_http_download_issue(outcome)
+        if http_issue:
+            issue, http_status_code = http_issue
+            invalidate_cached_response(normalized_url)
+            return _http_error(
+                issue,
+                status_code=http_status_code,
+                trace_id=trace_id,
+                request_logger=request_logger,
+            )
+
+        if outcome.status != "success" or not has_useful_payload(outcome.payload or {}):
+            return build_no_result_response(
+                outcome=outcome,
+                request_logger=request_logger,
+                trace_id=trace_id,
+            )
+
+        payload_data = outcome.payload
+        request_logger.info(
+            "route_payload_ready",
+            url=sanitize_log_data(normalized_url),
+            availability=payload_data.get("availability"),
+            last_status=payload_data.get("last_status"),
+            is_useful=True,
+        )
+        parse_response = build_success_response(
+            payload_data,
+            normalized_url=normalized_url,
             outcome=outcome,
             request_logger=request_logger,
-            trace_id=trace_id,
         )
-    
-    payload_data = outcome.payload
-
-    price_value = payload_data.get("current_price")
-    price: Decimal | None = None
-    if price_value is not None:
-        try:
-            price = parse_price_str(
-                price_value,
-                normalized_url,
-            )
-        except ValueError:
-            price = None
-
-    request_logger.info(
-        "route_payload_ready",
-        url=sanitize_log_data(normalized_url),
-        availability=payload_data.get("availability"),
-        last_status=payload_data.get("last_status"),
-        has_price=price is not None,
-        is_useful=True,  # critério canônico satisfeito neste ponto
-    )
-    
-    parse_response = build_success_response(
-        payload_data,
-        normalized_url=normalized_url,
-        outcome=outcome,
-        request_logger=request_logger,
-        current_price=price,
-    )
     try:
         metadata = store_response(normalized_url, parse_response)
     except Exception as exc:

@@ -13,7 +13,7 @@ from shared.schemas.shared_schemas_scraper import (
 from shared.utils.url_validation import UrlIssue
 
 from market_scraper.main import app
-from market_scraper.routes.response_helpers import _derive_no_result_reason
+from market_scraper.routes.response_mapper import _derive_no_result_reason
 from market_scraper.services.synergic_pipeline import (
     PipelineContext,
     PipelineOutcome,
@@ -164,10 +164,6 @@ def test_parse_route_returns_success_and_sets_cache_headers(monkeypatch):
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.run_pipeline",
         fake_run_pipeline,
-    )
-    monkeypatch.setattr(
-        "market_scraper.routes.routes_scraper.parse_price_str",
-        lambda value, url: Decimal("12.34"),
     )
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.store_response",

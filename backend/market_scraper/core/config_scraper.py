@@ -165,6 +165,25 @@ class Settings(ConfigBase):
         "",
     ) #Headers adicionais enviados além do conjunto mínimo
 
+    # --- Feature flags de migração arquitetural ---
+    # Controlam roteamento gradual para nova arquitetura (Fase 3+).
+    # Padrão False: fluxo legado ativo; True ativa novo componente correspondente.
+    SCRAPER_NEW_ORCHESTRATOR_ENABLED: bool = os.getenv(
+        "SCRAPER_NEW_ORCHESTRATOR_ENABLED", "False"
+    ).lower() in {"1", "true", "on", "yes"}
+
+    SCRAPER_NEW_COLLECTION_ENABLED: bool = os.getenv(
+        "SCRAPER_NEW_COLLECTION_ENABLED", "False"
+    ).lower() in {"1", "true", "on", "yes"}
+
+    SCRAPER_NEW_PARSING_CHAIN_ENABLED: bool = os.getenv(
+        "SCRAPER_NEW_PARSING_CHAIN_ENABLED", "False"
+    ).lower() in {"1", "true", "on", "yes"}
+
+    SCRAPER_NEW_POST_PROCESSING_ENABLED: bool = os.getenv(
+        "SCRAPER_NEW_POST_PROCESSING_ENABLED", "False"
+    ).lower() in {"1", "true", "on", "yes"}
+
     # --- Sessão persistente e bootstrap de domínio ---
     SCRAPER_PERSISTENT_SESSIONS_ENABLED: bool = os.getenv(
         "SCRAPER_PERSISTENT_SESSIONS_ENABLED", "True"

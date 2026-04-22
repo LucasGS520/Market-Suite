@@ -236,7 +236,12 @@ class DomainSpecificParserStep(PipelineStep):
 
 
 class LateBrowserEscalationStep(PipelineStep):
-    """ Segunda chance via browser quando HTTP extraiu HTML mas parsing não gerou dado útil.
+    """Segunda chance via browser quando HTTP extraiu HTML mas parsing não gerou dado útil.
+
+    .. deprecated::
+        Será removida quando a nova cadeia de coleta (Phase 4+) estiver estável.
+        Substituída pela política explícita em FetchDecisionGate + ParseProductUseCase.
+        Não remover enquanto ``default_pipeline_steps()`` ainda a incluir.
 
     Consome: ``context.html`` (obtido via HTTP), ``context.data["fallback_taken"]``
     Produz: ``context.html`` (sobrescreve com HTML do browser) e payload via re-execução de parsers
