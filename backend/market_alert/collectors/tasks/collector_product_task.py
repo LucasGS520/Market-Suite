@@ -526,6 +526,35 @@ def collect_product_task(self, payload: Mapping[str, str | None] | None = None) 
                 logger_bound=logger.bind(task_id=getattr(self.request, "id", None)),
                 db=db,
             )
+        except ScraperClientError as exc:
+            if exc.status_code == 429:
+                reason = REASON_HTTP_429
+            elif exc.status_code in {503, 504}:
+                reason = REASON_SCRAPER_UNAVAILABLE
+            else:
+                reason = REASON_SCRAPER_CLIENT_ERROR
+
+            product_id = None
+            if payload:
+                product_id = payload.get("competitor_id") or payload.get("monitored_id")
+
+            logger.warning(
+                "collect_product_task_scraper_client_error",
+                task_id=getattr(self.request, "id", None),
+                trace_id=_trace_id,
+                payload_kind=payload.get("kind") if payload else None,
+                product_id=product_id,
+                http_status=exc.status_code,
+                error_code=exc.error_code or reason,
+                reason=reason,
+            )
+            return {
+                "outcome": "error",
+                "status": "error",
+                "reason": reason,
+                "next_retry_at": None,
+                "product_id": product_id,
+            }
         except Exception:
             logger.exception(
                 "collect_product_task_unhandled",
