@@ -29,8 +29,3 @@ def fixture_html_loader():
 @pytest.fixture
 def success_product_html(fixture_html_loader) -> str:
     return fixture_html_loader("product_success.html")
-
-
-@pytest.fixture
-def generic_fallback_html(fixture_html_loader) -> str:
-    return fixture_html_loader("product_generic_fallback.html")

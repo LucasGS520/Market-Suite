@@ -1,9 +1,8 @@
-""" Funções auxiliares para extração de dados estruturados via selectolax
+""" Funções auxiliares para extração de dados estruturados via Extruct
 
-O módulo extrai metadados como JSON-LD, Microdata e OpenGraph diretamente
-do HTML usando ``selectolax``, sem dependências externas que possam falhar
-em import-time. A API pública permanece inalterada para manter compatibilidade
-com o pipeline.
+O módulo usa a biblioteca ``extruct`` como caminho principal para JSON-LD,
+Microdata e OpenGraph. Um fallback local com ``selectolax`` permanece para
+preservar robustez quando a dependência externa falhar em runtime.
 """
 
 from __future__ import annotations
@@ -16,6 +15,11 @@ import structlog
 from selectolax.parser import HTMLParser
 
 from shared.utils.logging_utils import sanitize_log_data
+
+try:
+    from extruct import extract as _extruct_extract
+except ImportError:
+    _extruct_extract = None
 
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +40,25 @@ def extract_structured_data(html: str, _url: Optional[str] = None) -> Dict[str, 
         cada uma contendo uma lista de itens encontrados. Quando nenhum
         conteúdo é identificado, devolve listas vazias.
     """
+    if _extruct_extract is not None:
+        try:
+            data = _extruct_extract(
+                html,
+                base_url=_url,
+                syntaxes=["json-ld", "microdata", "opengraph"],
+                uniform=False,
+            )
+            return {
+                "json-ld": data.get("json-ld") or [],
+                "microdata": data.get("microdata") or [],
+                "opengraph": data.get("opengraph") or [],
+            }
+        except Exception as exc:
+            logger.warning(
+                "erro_extracao_extruct",
+                error=sanitize_log_data(str(exc)),
+            )
+
     try:
         parser = HTMLParser(html)
 

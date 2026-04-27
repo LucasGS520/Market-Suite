@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 #Importação relativa para execução como pacote
 from .routes import routes_health, routes_scraper
-from .services.playwright_pool import playwright_pool
+from .infra.browser.playwright_pool import playwright_pool
 
 
 logger = structlog.get_logger("market_scraper.main")

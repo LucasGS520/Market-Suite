@@ -15,14 +15,15 @@ from fastapi.testclient import TestClient
 from shared.schemas.shared_schemas_scraper import (
     SCRAPER_CONTRACT_VERSION,
     SCRAPER_CONTRACT_VERSION_HEADER,
+    ParserResponse,
 )
 from shared.utils.url_validation import UrlIssue
 
 from market_scraper.main import app
-from market_scraper.services.synergic_pipeline import (
-    PipelineContext,
-    PipelineOutcome,
-    StepExecution,
+from market_scraper.scraper_orchestrator.parse_product import (
+    ParseProductError,
+    ParseProductNoResult,
+    ParseProductSuccess,
 )
 
 
@@ -54,23 +55,42 @@ def _stub_prereqs(monkeypatch) -> None:
     )
 
 
-def _outcome_with_step(step_message: str) -> PipelineOutcome:
-    ctx = PipelineContext(
-        url="https://example.com/product",
-        source="example.com",
-        default_step_timeout=1.0,
+def _stub_use_case_error(monkeypatch, *, error_code: str, message: str, http_status: int) -> None:
+    """Stub do use case retornando ParseProductError com código canônico."""
+    result = ParseProductError(
+        kind="error",
+        issue=UrlIssue(code=error_code, message=message),
+        http_status=http_status,
+        stage_timings={},
     )
-    return PipelineOutcome(
-        status="error",
-        context=ctx,
-        steps=[
-            StepExecution(
-                name="fetch",
-                status="error",
-                duration_seconds=0.0,
-                message=step_message,
-            )
-        ],
+
+    async def fake_execute(self, *args, **kwargs):
+        return result
+
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product.ParseProduct.execute",
+        fake_execute,
+    )
+
+
+def _stub_use_case_error_with_invalidate(
+    monkeypatch, *, error_code: str, message: str, http_status: int
+) -> None:
+    """Stub do use case retornando ParseProductError com invalidate_cache=True."""
+    result = ParseProductError(
+        kind="error",
+        issue=UrlIssue(code=error_code, message=message),
+        http_status=http_status,
+        stage_timings={},
+        invalidate_cache=True,
+    )
+
+    async def fake_execute(self, *args, **kwargs):
+        return result
+
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product.ParseProduct.execute",
+        fake_execute,
     )
 
 
@@ -98,11 +118,12 @@ def test_contract_version_header_present_on_400(monkeypatch):
 
 def test_contract_version_header_present_on_422(monkeypatch):
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("too_many_redirects")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="too_many_redirects",
+        message="A URL entrou em loop de redirecionamento",
+        http_status=422,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -112,11 +133,12 @@ def test_contract_version_header_present_on_422(monkeypatch):
 
 def test_contract_version_header_present_on_429(monkeypatch):
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("anti_bot_page")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="anti_bot_page",
+        message="Página de proteção anti-bot detectada",
+        http_status=429,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -126,11 +148,12 @@ def test_contract_version_header_present_on_429(monkeypatch):
 
 def test_contract_version_header_present_on_503(monkeypatch):
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("playwright_not_ready")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="pipeline_degraded",
+        message="Serviço temporariamente degradado",
+        http_status=503,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -140,11 +163,12 @@ def test_contract_version_header_present_on_503(monkeypatch):
 
 def test_contract_version_header_present_on_504(monkeypatch):
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("playwright_timeout")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="playwright_timeout",
+        message="Tempo limite excedido ao renderizar a página com browser",
+        http_status=504,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -184,11 +208,12 @@ def test_error_response_schema_on_400(monkeypatch):
 
 def test_error_response_schema_on_403(monkeypatch):
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("unsupported_by_robots")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="unsupported_by_robots",
+        message="O acesso à URL foi bloqueado pelas regras de robots.txt",
+        http_status=403,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -198,17 +223,15 @@ def test_error_response_schema_on_403(monkeypatch):
 
 def test_error_response_schema_on_422_no_result(monkeypatch):
     _stub_prereqs(monkeypatch)
-    ctx = PipelineContext(
-        url="https://example.com/product",
-        source="example.com",
-        default_step_timeout=1.0,
+    result = ParseProductNoResult(kind="no_result", reason_code="extraction_empty", stage_timings={})
+
+    async def fake_execute(self, *args, **kwargs):
+        return result
+
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product.ParseProduct.execute",
+        fake_execute,
     )
-    outcome = PipelineOutcome(status="no_result", context=ctx)
-
-    async def fake_pipeline(*args, **kwargs):
-        return outcome
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -220,11 +243,12 @@ def test_error_response_schema_on_422_no_result(monkeypatch):
 
 def test_error_response_schema_on_504(monkeypatch):
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("playwright_timeout")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="playwright_timeout",
+        message="Tempo limite excedido ao renderizar a página com browser",
+        http_status=504,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -281,17 +305,18 @@ def test_trace_id_generated_when_absent_from_metadata(monkeypatch):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Cenários faltantes: 503 e 504 via mensagens do pipeline
+# Cenários de erro por código canônico
 # ──────────────────────────────────────────────────────────────────────────────
 
 def test_503_when_playwright_not_ready(monkeypatch):
-    """503 quando fallback browser não está disponível (playwright_not_ready)."""
+    """503 quando fallback browser não está disponível (playwright_not_ready → pipeline_degraded)."""
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("playwright_not_ready")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="pipeline_degraded",
+        message="Serviço temporariamente degradado; fallback de browser indisponível",
+        http_status=503,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -302,11 +327,12 @@ def test_503_when_playwright_not_ready(monkeypatch):
 def test_503_when_pipeline_degraded(monkeypatch):
     """503 quando pipeline sinaliza degradação geral (pipeline_degraded)."""
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("pipeline_degraded")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="pipeline_degraded",
+        message="Serviço temporariamente degradado; fallback de browser indisponível",
+        http_status=503,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -317,11 +343,12 @@ def test_503_when_pipeline_degraded(monkeypatch):
 def test_503_when_playwright_fetch_error(monkeypatch):
     """503 quando browser falha ao buscar conteúdo (playwright_fetch_error)."""
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("playwright_fetch_error")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="playwright_fetch_error",
+        message="Erro ao obter conteúdo via browser; tente novamente",
+        http_status=503,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -332,11 +359,12 @@ def test_503_when_playwright_fetch_error(monkeypatch):
 def test_504_when_playwright_timeout(monkeypatch):
     """504 quando browser excede timeout de renderização (playwright_timeout)."""
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("playwright_timeout")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="playwright_timeout",
+        message="Tempo limite excedido ao renderizar a página com browser",
+        http_status=504,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -347,11 +375,12 @@ def test_504_when_playwright_timeout(monkeypatch):
 def test_429_when_rate_limiter_cooldown(monkeypatch):
     """429 quando domínio está em cooldown pelo rate limiter."""
     _stub_prereqs(monkeypatch)
-
-    async def fake_pipeline(*args, **kwargs):
-        return _outcome_with_step("rate_limiter_cooldown")
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
+    _stub_use_case_error_with_invalidate(
+        monkeypatch,
+        error_code="rate_limiter_cooldown",
+        message="Limite de requisições atingido para este domínio; tente novamente em instantes",
+        http_status=429,
+    )
 
     response = _client().post("/scraper/parse", json={"url": "example.com/product"})
 
@@ -366,25 +395,22 @@ def test_429_when_rate_limiter_cooldown(monkeypatch):
 def test_cache_status_header_present_on_200(monkeypatch):
     """X-MarketScraper-Cache-Status deve estar presente em respostas 200."""
     _stub_prereqs(monkeypatch)
-    ctx = PipelineContext(
+
+    parser_response = ParserResponse(
+        name="Produto Teste",
+        availability=True,
         url="https://example.com/product",
         source="example.com",
-        default_step_timeout=1.0,
     )
-    outcome = PipelineOutcome(
-        status="success",
-        context=ctx,
-        payload={
-            "name": "Produto",
-            "current_price": "10.00",
-            "availability": True,
-        },
+    result = ParseProductSuccess(kind="success", parser_response=parser_response, stage_timings={})
+
+    async def fake_execute(self, *args, **kwargs):
+        return result
+
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product.ParseProduct.execute",
+        fake_execute,
     )
-
-    async def fake_pipeline(*args, **kwargs):
-        return outcome
-
-    monkeypatch.setattr("market_scraper.routes.routes_scraper.run_pipeline", fake_pipeline)
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.store_response",
         lambda url, response: None,

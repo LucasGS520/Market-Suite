@@ -6,9 +6,9 @@ browser (Playwright) ou rejeitar definitivamente. A lógica é puramente funcion
 sem I/O, sem efeitos colaterais — para facilitar testes e auditoria.
 
 Integração esperada:
-    1. ``FetchHTMLStep`` obtém HTML via curl_cffi.
+    1. ``CrawleeRuntime`` obtém HTML via curl_cffi.
     2. O classificador avalia o resultado.
-    3. Se action=SCALE, o gate aciona ``playwright_pool``.
+    3. Se action=SCALE, o runtime aciona ``playwright_pool``.
     4. O resultado final é registrado com os campos de telemetria.
 """
 

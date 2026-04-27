@@ -13,13 +13,11 @@ from shared.schemas.shared_schemas_scraper import (
 from shared.utils.url_validation import UrlIssue
 
 from market_scraper.main import app
-from market_scraper.routes.response_mapper import _derive_no_result_reason
-from market_scraper.services.synergic_pipeline import (
-    PipelineContext,
-    PipelineOutcome,
-    StepExecution,
+from market_scraper.scraper_orchestrator.parse_product import (
+    ParseProductError,
+    ParseProductSuccess,
 )
-from market_scraper.utils.conditional_payload import CachedResponseMetadata
+from market_scraper.infra.cache.conditional_payload import CachedResponseMetadata
 
 
 def test_parse_route_returns_cached_304_when_request_is_not_modified(monkeypatch):
@@ -65,26 +63,16 @@ def test_parse_route_returns_cached_304_when_request_is_not_modified(monkeypatch
 
 def test_parse_route_returns_mapped_http_issue_and_invalidates_cache(monkeypatch):
     invalidated = []
-    context = PipelineContext(
-        url="https://example.com/product",
-        source="example.com",
-        default_step_timeout=1.0,
-    )
-    outcome = PipelineOutcome(
-        status="error",
-        context=context,
-        steps=[
-            StepExecution(
-                name="fetch_html",
-                status="error",
-                duration_seconds=0.1,
-                message="unsupported_by_robots",
-            )
-        ],
+    result = ParseProductError(
+        kind="error",
+        issue=UrlIssue(code="unsupported_by_robots", message="Bloqueado por robots.txt"),
+        http_status=403,
+        stage_timings={},
+        invalidate_cache=True,
     )
 
-    async def fake_run_pipeline(*args, **kwargs):
-        return outcome
+    async def fake_execute(self, *args, **kwargs):
+        return result
 
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.shared_normalize_product_url",
@@ -99,8 +87,8 @@ def test_parse_route_returns_mapped_http_issue_and_invalidates_cache(monkeypatch
         lambda url: None,
     )
     monkeypatch.setattr(
-        "market_scraper.routes.routes_scraper.run_pipeline",
-        fake_run_pipeline,
+        "market_scraper.scraper_orchestrator.parse_product.ParseProduct.execute",
+        fake_execute,
     )
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.invalidate_cached_response",
@@ -118,36 +106,22 @@ def test_parse_route_returns_mapped_http_issue_and_invalidates_cache(monkeypatch
 
 def test_parse_route_returns_success_and_sets_cache_headers(monkeypatch):
     captured_kwargs: dict[str, object] = {}
-    context = PipelineContext(
+    parser_response = ParserResponse(
+        name="Produto",
+        current_price=Decimal("12.34"),
         url="https://example.com/product",
         source="example.com",
-        default_step_timeout=1.0,
-    )
-    outcome = PipelineOutcome(
-        status="success",
-        context=context,
-        payload={
-            "name": "Produto",
-            "current_price": "12.34",
-            "url": "https://example.com/product",
-            "source": "example.com",
-            "availability": True,
-        },
+        availability=True,
     )
     metadata = CachedResponseMetadata(
         etag="etag-2",
         last_modified=datetime.now(timezone.utc).replace(microsecond=0),
-        payload=ParserResponse(
-            name="Produto",
-            current_price=Decimal("12.34"),
-            url="https://example.com/product",
-            source="example.com",
-        ),
+        payload=parser_response,
     )
 
-    async def fake_run_pipeline(*args, **kwargs):
-        captured_kwargs.update(kwargs)
-        return outcome
+    async def fake_execute(self, url, *, request_logger, force_refresh, trace_id):
+        captured_kwargs["trace_id"] = trace_id
+        return ParseProductSuccess(kind="success", parser_response=parser_response, stage_timings={})
 
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.shared_normalize_product_url",
@@ -162,8 +136,8 @@ def test_parse_route_returns_success_and_sets_cache_headers(monkeypatch):
         lambda url: None,
     )
     monkeypatch.setattr(
-        "market_scraper.routes.routes_scraper.run_pipeline",
-        fake_run_pipeline,
+        "market_scraper.scraper_orchestrator.parse_product.ParseProduct.execute",
+        fake_execute,
     )
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.store_response",
@@ -212,75 +186,18 @@ def test_parse_route_returns_invalid_url_error_when_compatibility_fails(monkeypa
     assert response.headers[SCRAPER_CONTRACT_VERSION_HEADER] == SCRAPER_CONTRACT_VERSION
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Fase 2 — testes de regressão: reason_code derivado em build_no_result_response
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def _make_context(*, html: str | None = None, data: dict | None = None) -> PipelineContext:
-    ctx = PipelineContext(
-        url="https://example.com/product",
-        source="example.com",
-        default_step_timeout=1.0,
-    )
-    ctx.html = html
-    if data:
-        ctx.data.update(data)
-    return ctx
-
-
-def test_derive_no_result_reason_html_unavailable():
-    """reason_code é html_unavailable quando HTML está ausente."""
-    outcome = PipelineOutcome(
-        status="empty",
-        context=_make_context(html=None),
-    )
-    assert _derive_no_result_reason(outcome) == "html_unavailable"
-
-
-def test_derive_no_result_reason_no_domain_parser():
-    """reason_code é no_domain_parser quando domínio não tem parser dedicado."""
-    outcome = PipelineOutcome(
-        status="empty",
-        context=_make_context(
-            html="<html><body>conteúdo</body></html>",
-            data={"no_domain_parser": True},
-        ),
-    )
-    assert _derive_no_result_reason(outcome) == "no_domain_parser"
-
-
-def test_derive_no_result_reason_no_parser_data():
-    """reason_code é no_parser_data quando HTML está presente mas nenhum parser extraiu dados."""
-    outcome = PipelineOutcome(
-        status="empty",
-        context=_make_context(html="<html><body>conteúdo sem preço</body></html>"),
-    )
-    assert _derive_no_result_reason(outcome) == "no_parser_data"
-
-
 def test_parse_route_returns_429_for_anti_bot_page(monkeypatch):
-    """Endpoint retorna 429 quando pipeline detecta página de anti-bot."""
-    context = PipelineContext(
-        url="https://example.com/product",
-        source="example.com",
-        default_step_timeout=1.0,
-    )
-    outcome = PipelineOutcome(
-        status="error",
-        context=context,
-        steps=[
-            StepExecution(
-                name="anti_bot_detection",
-                status="error",
-                duration_seconds=0.0,
-                message="anti_bot_page",
-            )
-        ],
+    """Endpoint retorna 429 quando use case detecta página de anti-bot."""
+    result = ParseProductError(
+        kind="error",
+        issue=UrlIssue(code="anti_bot_page", message="Página de proteção anti-bot detectada"),
+        http_status=429,
+        stage_timings={},
+        invalidate_cache=True,
     )
 
-    async def fake_run_pipeline(*args, **kwargs):
-        return outcome
+    async def fake_execute(self, *args, **kwargs):
+        return result
 
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.shared_normalize_product_url",
@@ -295,8 +212,8 @@ def test_parse_route_returns_429_for_anti_bot_page(monkeypatch):
         lambda url: None,
     )
     monkeypatch.setattr(
-        "market_scraper.routes.routes_scraper.run_pipeline",
-        fake_run_pipeline,
+        "market_scraper.scraper_orchestrator.parse_product.ParseProduct.execute",
+        fake_execute,
     )
     monkeypatch.setattr(
         "market_scraper.routes.routes_scraper.invalidate_cached_response",

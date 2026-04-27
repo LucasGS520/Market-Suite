@@ -5,25 +5,22 @@ A Camada 1 usa ``curl_cffi`` com TLS impersonation Chrome para contornar
 bloqueios de fingerprint sem depender de proxy externo.
 
 Todas as exceções são mapeadas para equivalentes ``httpx`` para preservar
-o contrato com ``FetchHTMLStep`` sem nenhuma quebra de interface.
+o contrato de coleta HTTP sem nenhuma quebra de interface.
 """
 
 from __future__ import annotations
 
 import enum
+from typing import Dict, Tuple
 from urllib.parse import urlparse
 
 import httpx
 import structlog
 
+from shared.utils.user_agents import UserAgentProvider
 from shared.utils.logging_utils import sanitize_log_data
 
 from market_scraper.core.config_scraper import settings
-from market_scraper.utils import user_agents
-from market_scraper.utils.headers import (
-    REFERER_TEMPLATE_ERROR_EVENT,
-    build_referer,
-)
 from market_scraper.utils.http_utils import parse_retry_after
 
 
@@ -41,6 +38,76 @@ _CURL_TOO_MANY_REDIRECTS = 47 # CURLE_TOO_MANY_REDIRECTS
 
 #Tamanho mínimo esperado para um HTML útil (5 KB)
 _MIN_HTML_SIZE_BYTES = 5 * 1024
+_REFERER_TEMPLATE_ERROR_EVENT = "referer_template_error"
+_user_agent_provider: UserAgentProvider | None = None
+_user_agent_provider_config: Tuple[str, Tuple[str, ...], Dict[str, str]] | None = None
+
+
+def _build_base_headers() -> Dict[str, str]:
+    """Monta headers mínimos a partir das configurações ativas."""
+    return {
+        "Accept": settings.SCRAPER_HEADERS_ACCEPT,
+        "Accept-Language": settings.SCRAPER_HEADERS_ACCEPT_LANGUAGE,
+        "Connection": settings.SCRAPER_HEADERS_CONNECTION,
+        "Cache-Control": settings.SCRAPER_HEADERS_CACHE_CONTROL,
+    }
+
+
+def _current_user_agent_config() -> Tuple[str, Tuple[str, ...], Dict[str, str]]:
+    return (
+        settings.SCRAPER_DEFAULT_USER_AGENT,
+        settings.SCRAPER_USER_AGENT_POOL,
+        _build_base_headers(),
+    )
+
+
+def _ensure_user_agent_provider() -> UserAgentProvider:
+    """Garante provider sincronizado com as configurações atuais."""
+    global _user_agent_provider, _user_agent_provider_config
+    config = _current_user_agent_config()
+    if _user_agent_provider is None or _user_agent_provider_config != config:
+        _user_agent_provider = UserAgentProvider(
+            default_user_agent=settings.SCRAPER_DEFAULT_USER_AGENT,
+            user_agent_pool=settings.SCRAPER_USER_AGENT_POOL,
+            base_headers=_build_base_headers(),
+            additional_headers_factory=settings.get_additional_headers,
+        )
+        _user_agent_provider_config = config
+    return _user_agent_provider
+
+
+def _get_user_agent(domain_or_url: str | None = None) -> str:
+    return _ensure_user_agent_provider().get_user_agent(domain_or_url)
+
+
+def _compose_browser_headers(user_agent: str, *, referer: str | None) -> dict[str, str]:
+    headers = _ensure_user_agent_provider().compose_headers(user_agent, referer=referer)
+    accept_encoding = settings.SCRAPER_HEADERS_ACCEPT_ENCODING
+    if accept_encoding:
+        headers["Accept-Encoding"] = accept_encoding
+    return headers
+
+
+def _build_referer(url: str) -> str | None:
+    """Constrói o header Referer configurado para o download HTTP."""
+    template = settings.SCRAPER_HEADERS_REFERER_TEMPLATE
+    if not template:
+        return None
+
+    domain = urlparse(url).hostname
+    if not domain:
+        return None
+
+    try:
+        return template.format(domain=domain, url=url)
+    except Exception as exc:
+        logger.warning(
+            _REFERER_TEMPLATE_ERROR_EVENT,
+            template=sanitize_log_data(template),
+            url=sanitize_log_data(url),
+            error=sanitize_log_data(str(exc)),
+        )
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -71,7 +138,7 @@ class CurlffiHTTPClient:
     Cada chamada a ``fetch_html`` cria uma nova ``AsyncSession`` para
     garantir isolamento entre requisições concorrentes. Exceções internas
     do curl são convertidas para equivalentes ``httpx`` de forma que
-    ``FetchHTMLStep`` não perceba a troca de cliente HTTP.
+    os coletores HTTP não precisem conhecer detalhes do cliente concreto.
     """
 
     _CHROME_IMPERSONATION = "chrome124"
@@ -103,8 +170,8 @@ class CurlffiHTTPClient:
             ) from exc
 
         domain = extract_domain(url)
-        user_agent = user_agents.get_user_agent(url)
-        referer = build_referer(url, logger=logger, event_name=REFERER_TEMPLATE_ERROR_EVENT)
+        user_agent = _get_user_agent(url)
+        referer = _build_referer(url)
         headers = self._compose_headers(user_agent, referer=referer)
         cookies = settings.get_default_cookies()
         total_timeout = settings.resolve_domain_timeout(domain, timeout)
@@ -172,7 +239,7 @@ class CurlffiHTTPClient:
 
     def _compose_headers(self, user_agent: str, *, referer: str | None) -> dict[str, str]:
         """ Monta headers simulando Chrome com Accept-Language pt-BR."""
-        base = user_agents.compose_headers(user_agent, referer=referer)
+        base = _compose_browser_headers(user_agent, referer=referer)
         # curl_cffi gerencia Accept-Encoding automaticamente via libcurl,
         # mas declaramos explicitamente para maior fidelidade ao Chrome.
         base.setdefault("Accept-Encoding", settings.SCRAPER_HEADERS_ACCEPT_ENCODING)
@@ -272,7 +339,7 @@ class CurlffiHTTPClient:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# API pública — contrato inalterado para FetchHTMLStep
+# API pública — contrato usado pela camada de coleta HTTP
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_domain(url: str) -> str | None:

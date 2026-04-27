@@ -13,13 +13,15 @@ os testes rodem sem browser instalado. A estrutura de mocks reflete:
 
 from __future__ import annotations
 
+import asyncio
+import importlib
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from market_scraper.services.playwright_pool import (
+from market_scraper.infra.browser.playwright_pool import (
     PlaywrightPool,
     PlaywrightPoolNotReadyError,
     PlaywrightTimeoutError,
@@ -82,7 +84,7 @@ def _patch_async_playwright(playwright_ctx_mock: MagicMock):
     async_pw_mock.return_value.start = AsyncMock(return_value=playwright_ctx_mock)
 
     return patch(
-        "market_scraper.services.playwright_pool.async_playwright",
+        "market_scraper.infra.browser.playwright_pool.async_playwright",
         async_pw_mock,
     ) if False else patch(
         "playwright.async_api.async_playwright",
@@ -151,6 +153,23 @@ async def test_shutdown_is_idempotent():
 # PlaywrightPool — fetch_html (via _fetch_in_context mockado)
 # ─────────────────────────────────────────────────────────────────────────────
 
+async def test_pool_uses_canonical_browser_semaphore_factory(monkeypatch):
+    """O limite efetivo do pool vem da infra de concorrencia."""
+    captured: dict[str, int | None] = {}
+
+    def fake_create_browser_semaphore(max_concurrent=None):
+        captured["max_concurrent"] = max_concurrent
+        return asyncio.Semaphore(max_concurrent)
+
+    module = importlib.import_module("market_scraper.infra.browser.playwright_pool")
+    monkeypatch.setattr(module, "create_browser_semaphore", fake_create_browser_semaphore)
+
+    pool = PlaywrightPool(max_concurrent=2)
+
+    assert captured["max_concurrent"] == 2
+    assert pool._semaphore._value == 2
+
+
 async def test_fetch_html_returns_page_content():
     """``fetch_html`` retorna o HTML obtido pelo page.content()."""
     pool = PlaywrightPool()
@@ -160,7 +179,7 @@ async def test_fetch_html_returns_page_content():
     pool._browser.new_context = AsyncMock(return_value=context_mock)
 
     with patch(
-        "market_scraper.services.playwright_pool.PlaywrightPool._fetch_in_context",
+        "market_scraper.infra.browser.playwright_pool.PlaywrightPool._fetch_in_context",
         AsyncMock(return_value=_HTML),
     ):
         html = await pool.fetch_html(_URL)
@@ -177,7 +196,7 @@ async def test_fetch_html_closes_context_on_success():
     pool._browser.new_context = AsyncMock(return_value=context_mock)
 
     with patch(
-        "market_scraper.services.playwright_pool.PlaywrightPool._fetch_in_context",
+        "market_scraper.infra.browser.playwright_pool.PlaywrightPool._fetch_in_context",
         AsyncMock(return_value=_HTML),
     ):
         await pool.fetch_html(_URL)
@@ -193,7 +212,7 @@ async def test_fetch_html_semaphore_released_on_error():
     pool._browser = MagicMock()
 
     with patch(
-        "market_scraper.services.playwright_pool.PlaywrightPool._fetch_in_context",
+        "market_scraper.infra.browser.playwright_pool.PlaywrightPool._fetch_in_context",
         AsyncMock(side_effect=PlaywrightTimeoutError(url=_URL, timeout=5.0)),
     ):
         with pytest.raises(PlaywrightTimeoutError):

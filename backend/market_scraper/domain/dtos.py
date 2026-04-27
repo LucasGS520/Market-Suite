@@ -1,6 +1,6 @@
 """ DTOs fechados para as etapas do pipeline de scraping.
 
-Substituem o uso de ``PipelineContext.data`` como dicionário aberto.
+Substituem o compartilhamento de dicionários abertos entre camadas.
 Cada DTO representa a saída de uma etapa específica com campos tipados
 e imutáveis — facilitando testes unitários e rastreabilidade de telemetria.
 """
@@ -16,8 +16,8 @@ from typing import Any
 class AcquisitionTelemetry:
     """ Telemetria obrigatória da etapa de aquisição (HTTP ou browser).
 
-    Substitui os campos avulsos em ``PipelineContext.data`` relativos à camada
-    de coleta. Mapeado diretamente para o campo ``acquisition`` de ParserResponse.
+    Substitui campos avulsos de telemetria da camada de coleta. Mapeado
+    diretamente para o campo ``acquisition`` de ParserResponse.
     """
 
     layer_used: str | None
@@ -51,49 +51,17 @@ class AcquisitionTelemetry:
         }
 
     @classmethod
-    def from_context_data(cls, data: dict[str, Any]) -> AcquisitionTelemetry | None:
-        """ Constrói a partir do dict aberto de PipelineContext.data.
-
-        Retorna None quando os campos de aquisição estão ausentes (pipeline
-        não executou coleta — ex.: 304 via cache).
-        """
-        acquisition_keys = (
-            "layer_used",
-            "fallback_taken",
-            "classification_reason",
-            "http_status",
-            "anti_bot_detected",
-            "anti_bot_pattern",
-            "anti_bot_bypassed",
-        )
-        if not any(key in data for key in acquisition_keys):
-            return None
+    def from_collected_document(cls, doc: Any) -> "AcquisitionTelemetry":
+        """Constrói a partir de um CollectedDocument (camada de coleta canônica)."""
         return cls(
-            layer_used=data.get("layer_used"),
-            fallback_taken=bool(data.get("fallback_taken", False)),
-            classification_reason=data.get("classification_reason"),
-            http_status=data.get("http_status"),
-            anti_bot_detected=bool(data.get("anti_bot_detected", False)),
-            anti_bot_pattern=data.get("anti_bot_pattern"),
-            anti_bot_bypassed=bool(data.get("anti_bot_bypassed", False)),
+            layer_used=doc.layer_used,
+            fallback_taken=doc.fallback_taken,
+            classification_reason=doc.classification_reason,
+            http_status=doc.http_status,
+            anti_bot_detected=doc.anti_bot_detected,
+            anti_bot_pattern=doc.anti_bot_pattern,
+            anti_bot_bypassed=doc.anti_bot_bypassed,
         )
-
-
-@dataclass(frozen=True)
-class FetchResult:
-    """ Resultado da etapa de aquisição de HTML (HTTP ou browser).
-
-    Representa o output fechado do FetchHTMLStep / FetchDecisionGate.
-    html=None indica falha de aquisição (status registrado em error_code).
-    """
-
-    html: str | None
-    telemetry: AcquisitionTelemetry
-    error_code: str | None = None
-
-    @property
-    def succeeded(self) -> bool:
-        return self.html is not None and self.error_code is None
 
 
 @dataclass(frozen=True)
@@ -106,6 +74,7 @@ class ParseAttempt:
     reason_code: str | None = None
     reason_message: str | None = None
     dump_path: str | None = None
+    duration_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -113,13 +82,20 @@ class ParseResult:
     """ Resultado da etapa de parsing em cadeia (extruct → Parsel → BS4).
 
     payload=None indica que nenhum parser extraiu dados suficientes.
+    duration_ms registra o tempo total da cadeia completa de extração.
     """
 
     payload: dict[str, Any] | None
     attempts: tuple[ParseAttempt, ...] = field(default_factory=tuple)
+    duration_ms: float = 0.0
 
     @property
     def succeeded(self) -> bool:
+        return self.payload is not None
+
+    @property
+    def is_successful(self) -> bool:
+        """Alias canônico de ``succeeded`` alinhado ao spec da camada de extração."""
         return self.payload is not None
 
     @property
@@ -128,6 +104,11 @@ class ParseResult:
             if attempt.succeeded:
                 return attempt.parser_name
         return None
+
+    @property
+    def first_successful_parser(self) -> str | None:
+        """Alias canônico de ``parser_used`` alinhado ao spec da camada de extração."""
+        return self.parser_used
 
 
 @dataclass(frozen=True)
@@ -157,7 +138,6 @@ class PostProcessResult:
 
 __all__ = [
     "AcquisitionTelemetry",
-    "FetchResult",
     "ParseAttempt",
     "ParseResult",
     "PostProcessResult",

@@ -7,21 +7,16 @@ import httpx
 
 from shared.schemas import ParserResponse
 
-from market_scraper.utils import conditional_payload as conditional_payload_module
-from market_scraper.utils import http_retry as http_retry_module
+from market_scraper.infra.cache import conditional_payload as conditional_payload_module
 from market_scraper.utils import http_utils as http_utils_module
-from market_scraper.utils.conditional_payload import (
+from market_scraper.utils import robots as robots_module
+from market_scraper.infra.cache.conditional_payload import (
     build_cache_headers,
     get_cached_response,
     match_if_none_match,
     parse_if_modified_since,
     should_return_not_modified,
     store_response,
-)
-from market_scraper.utils.http_retry import (
-    RetryableHTTPError,
-    _raise_for_retryable_response,
-    build_retrying_operation,
 )
 from market_scraper.utils.http_utils import HostResolutionError, parse_retry_after
 from market_scraper.utils.price import format_decimal_to_str, parse_price_str
@@ -131,7 +126,7 @@ def test_resolve_public_address_uses_cache_and_blocks_private(monkeypatch):
         raise AssertionError("Era esperado bloquear IP nao publico")
 
 
-def test_raise_for_retryable_response_reads_retry_after():
+def test_robots_retryable_response_reads_retry_after():
     request = httpx.Request("GET", "https://example.com/product")
     response = httpx.Response(
         429,
@@ -140,17 +135,17 @@ def test_raise_for_retryable_response_reads_retry_after():
     )
 
     try:
-        _raise_for_retryable_response(response, target="product_page")
-    except RetryableHTTPError as exc:
+        robots_module._raise_for_retryable_robots_response(response)
+    except robots_module._RetryableRobotsHTTPError as exc:
         assert exc.reason == "too_many_requests"
         assert exc.retry_after == 2.0
     else:
-        raise AssertionError("Era esperado levantar RetryableHTTPError")
+        raise AssertionError("Era esperado levantar _RetryableRobotsHTTPError")
 
 
-async def test_build_retrying_operation_retries_request_error(monkeypatch):
-    monkeypatch.setattr(http_retry_module.settings, "SCRAPER_HTTP_RETRIES", 1)
-    monkeypatch.setattr(http_retry_module.settings, "SCRAPER_HTTP_RETRY_BACKOFF_BASE", 0.0)
+async def test_robots_retrying_operation_retries_request_error(monkeypatch):
+    monkeypatch.setattr(robots_module.settings, "SCRAPER_HTTP_RETRIES", 1)
+    monkeypatch.setattr(robots_module.settings, "SCRAPER_HTTP_RETRY_BACKOFF_BASE", 0.0)
 
     attempts = {"count": 0}
 
@@ -164,10 +159,7 @@ async def test_build_retrying_operation_retries_request_error(monkeypatch):
             request=httpx.Request("GET", "https://example.com/product"),
         )
 
-    wrapped = build_retrying_operation(
-        target="product_page",
-        operation=flaky_operation,
-    )
+    wrapped = robots_module._build_robots_retrying_operation(flaky_operation)
 
     response = await wrapped()
 

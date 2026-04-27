@@ -17,102 +17,87 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-### Resumo e Estratégia do Plano
-
 ### **Objetivo**
-Implementar a arquitetura em cascata de **aquisição de HTML com TLS impersonation nativo** (curl_cffi) substituindo `httpx` na `FetchHTMLStep`, complementada com fallback Playwright para cenários com JavaScript, eliminando bloqueios de fingerprint TLS e aumentando taxa de sucesso em Mercado Livre e marketplaces similares.
+Transformar o módulo `market_scraper` de uma arquitetura complexa e dispersa (com coexistência de fluxos legado/novo, responsabilidades sobrepostas e múltiplos caminhos de decisão) para uma arquitetura simples, modular e determinística, totalmente alinhada aos documentos `estrutura_redefinicao_ideal_scraper.md`, `requisitos_ideais_scraper.md` e `arquitetura_alvo_scraper.md`.
 
 ### **Resultado Esperado**
-1. `FetchHTMLStep` usando `curl_cffi` com impersonation Chrome (drop-in replacement de download_html)
-2. Classificador de resposta automatizando decisões de escalonamento entre camadas
-3. Rate limiter adaptativo com histórico em Redis
-4. Fallback Playwright com pool gerenciado
-5. Contrato HTTP intacto; integração com `market_alert` funcional
-6. Taxa de sucesso em Mercado Livre sem proxy externo
-7. Testes de validação cobrindo Camadas 1 e 3
+1. Módulo reorganizado em 6 camadas explícitas com responsabilidades rígidas e sem sobreposição
+2. Fluxo canônico único: validação → coleta finalizada → extração em cadeia fixa → pós-processamento → resposta HTTP
+3. Remoção de caminhos legados complexos, wrappers redundantes e decisões dispersas
+4. Ferramentas obrigatórias (Crawlee, curl_cffi, Playwright, Extruct, Parsel, BS4+lxml) integradas coesivamente
+5. DTOs fechados e tipados substituindo dicionários abertos compartilhados
+6. Telemetria obrigatória consolidada e rastreável
+7. Compatibilidade total com contrato externo mantida
+8. Taxa de sucesso mantida ou melhorada; latência reduzida por eliminar overhead arquitetural
 
 ### **Estratégia de Execução**
-- **Fases sequenciais**: Infraestrutura → Camada 1 (curl_cffi) → Camada 3 (Playwright) → Classificador → Testes
-- **MVP focado**: Priorizar curl_cffi + Playwright; Camada 2 (proxy residencial) fica para fase pós-MVP
-- **Integração incremental**: Cada camada validada isoladamente antes de integrar ao pipeline
-- **Preservação de contrato**: Nenhuma mudança em `ParserRequest`/`ParserResponse` ou endpoints
-
-### **Escopo**
-
-#### **IN**
-- Refatorar `utils/http_download.py` com curl_cffi
-- Criar `services/response_classifier.py` para decisão automática de escalonamento
-- Criar `services/playwright_pool.py` com pool de contexts
-- Criar `infra/adaptive_rate_limiter.py` com histórico Redis
-- Integrar classificador ao `routes/routes_scraper.py`
-- Atualizar `FetchHTMLStep` para usar nova estratégia
-- Testes de integração (Camada 1, Camada 3, decisões)
-- Documentar mudanças em README.md
-
-#### **OUT (Pós-MVP)**
-- ❌ Camada 2 (proxy residencial) — apenas design, sem implementação
-- ❌ Generalização para Amazon/Magalu (foco ML agora)
-- ❌ Mudanças no contrato HTTP
-- ❌ Otimizações de throughput beyond MVP
-- ❌ Internacionalização de user agents (manter pt-BR)
-
-### **Premissas**
-1. Infraestrutura Redis existente está funcional e acessível (db 2 disponível)
-2. Docker permite `--shm-size=2g` ou suporta `--disable-dev-shm-usage`
-3. Python 3.10+ disponível
-4. Curl com suporte SSL nativo (não WSL1 puro)
-5. CI/CD existente suporta novo passo: `playwright install chromium`
+- **Análise e Preparação** — validar mapeamento, definir dependências, preparar ambiente de teste
+- **Refatoração e Limpeza** — remover redundâncias, consolidar código disperso, eliminar coexistência novo/legado
+- **Reorganização Estrutural** — criar nova hierarquia de diretórios conforme arquitetura alvo
+- **Implementação de Coleta** — integrar Crawlee como framework para crawlers, curl_cffi + Playwright como executores
+- **Implementação de Extração** — cadeia determinística com Extruct → Parsel → BS4+lxml
+- **Implementação de Pós-processamento** — normalização, validação e preparação de resposta
+- **Integração de Orquestração** — unificar todas as camadas com use case canônico
+- **Integração HTTP/Contrato** — ajustar rota para ser casca fina e delegar ao use case
+- **Infraestrutura e Observabilidade** — consolidar cache, limites, pool, telemetria
+- **Testes e Validação** — suite completa cobrindo unitário, integração e regressão
+- **Remoção de Legado** — eliminar código antigo após paridade confirmada
+- **Documentação e Hardening** — finalizar documentação e ajustes finais
 
 ---
 
-### Riscos, Impacto e Decisões
+## Riscos, Dependências e Decisões
 
 ### **Decisões Técnicas Principais**
 
 | Decisão | Justificativa | Impacto |
 |---------|---|---|
-| **curl_cffi em Camada 1** | TLS JA3 impersonation nativo, 125ms, sem overhead | Drop-in para httpx, 80-90% casos resolvidos |
-| **Playwright em Camada 3** | Headless Chromium, JA3 real Chrome, suporta JS renderization | 10-20% casos restantes, 5-10s por requisição |
-| **Rate limiter com histórico Redis** | Adaptação por host/pattern, fallback automático | Reduz escalonamento desnecessário, melhora latência média |
-| **Classificador independente** | Lógica de decisão centralizada, auditável | Facilita ajustes e testes; código não opaco |
-| **Pool Playwright com Semaphore** | Limite de 5 contexts simultâneos | Proteção de OOM; throughput máximo 30req/min para fallback |
-| **Sem Proxy em MVP** | Complexidade de gerenciamento de proxies | Focado em resolver TLS fingerprint (raiz); proxy fica para fase 2 |
-| **Contrato HTTP inalterado** | Compatibilidade com consumers existentes (market_alert) | Zero breaking changes |
-
-### **Riscos Principais**
-
-| Risco | Severidade | Prob. | Mitigação |
-|-------|---|---|---|
-| **TLS fingerprint curl_cffi detectada futuro** | Alta | 🔴 Baixa (curl_cffi + Chrome impersonation são padrão) | Fallback sempre disponível em Camada 3 |
-| **Memory leak Playwright (OOM)** | Alta | 🟡 Média | Reciclagem context a cada 50req; flag `--disable-dev-shm-usage` |
-| **Mudança estrutura HTML Mercado Livre** | Média | 🟡 Média (historicamente rara) | Parser genérico + `__NEXT_DATA__` JSON (mais estável) |
-| **Timeout Playwright bloqueia requisições** | Média | 🟡 Média | Timeout global 30s; circuit breaker em market_alert; rejeição com retry_after |
-| **Rate limiter não converge** | Baixa | 🟡 Média | Tuning iterativo em MVP+1; thresholds iniciais conservadores |
-| **Redis não responde em histórico** | Média | 🟠 Baixa | Fallback em-memória (não persistente) se Redis offline; logging de failure |
-| **Docker `/dev/shm` insuficiente** | Alta | 🟠 Baixa (com doc) | Documentação obrigatória; CI testa com flag `--disable-dev-shm-usage` |
+| **Crawlee como framework para crawlers** | Oferece AdaptivePlaywrightCrawler, integra curl_cffi, Playwright e stealth nativo; elimina necessidade de múltiplos wrappers | Novas dependências; potencial breaking se Crawlee tiver limitações não previstas |
+| **Cadeia extração fixa (Extruct → Parsel → BS4)** | Ordem determinística melhora previsibilidade e facilita depuração; termina na primeira válida | Pode perder cenários onde segunda estratégia seria melhor; mitigado por ordem bem pensada |
+| **DTOs fechados em vez de dicionários abertos** | Type safety, documentação implícita, facilita testes; elimina surpresas de campos arbitrários | Maior verbosidade inicial; trade-off aceitável por ganho em previsibilidade |
+| **HTTP sempre precede browser, sem coexistência** | Reduz complexidade, eleva performance média; browser é fallback, não padrão | Casos raros onde browser seria melhor desde início; mitigado por política clara de escalonamento |
+| **Remoção total de legado após validação** | Clareza arquitetural e facilita manutenção futura | Requer validação rigorosa antes; impossível voltar a comportamento antigo sem refatoração |
+| **Telemetria estruturada obrigatória com trace_id** | Rastreabilidade de cada decisão; facilita auditoria de falhas | Overhead mínimo; trade-off aceitável |
 
 ### **Dependências**
 
-| Dependência | Versão | Instalação |
-|---|---|---|
-| **curl_cffi** | >=0.15.0 | `pip install curl_cffi` |
-| **playwright** | >=1.40.0 | `pip install playwright` + `playwright install chromium` |
-| **tenacity** | >=8.0 (já existe) | — |
-| **httpx** | >=0.24 (já existe) | Mantém-se para fallback ou remoção futura |
-| **Redis** | (já existe) | Sem upgrade necessário |
-| **asyncio** | stdlib Python 3.10+ | — |
-| **structlog** | (já existe) | — |
+1. **Crawlee**
+O Crawlee para Python expõe `BeautifulSoupCrawler`, `ParselCrawler` e `PlaywrightCrawler`, e também oferece `AdaptivePlaywrightCrawler` para alternar entre HTTP e browser quando isso trouxer ganho operacional. Isso encaixa bem com a estratégia “HTTP primeiro, browser quando necessário”, sem transformar browser em caminho padrão.
+- Deve estar na camada de descoberta (crawler)
+- Usada como framework principal para spiders escaláveis
+
+2. **curl_cffi**
+Cliente HTTP python, imita fingerprints de browsers reais para evitar detecção
+- Deve estar na camada de requisição/anti-detecção, camada mais leve de requisição e tratamento anti-bot
+
+3. **Playwright**
+Automatizador de browsers para conteudo dinâmico
+- Camada de Requisição, camada mais pesada quando necessário para tramento de anti-bloqueio
+
+4. **Extruct**
+Extrai metadados embutidos (JSON-LD, Microdata, Open Graph, RDFa) de HTML
+- Camada de Extração/Parsing
+- Aplicada pós-download para dados estruturados
+
+5. **Parsel**
+Biblioteca de seletores CSS/XPath otmizada, leve e rápida
+- Camada de Extração/Parsing
+- Integrar para queries precisas
+
+6. **Beautifulsoup**
+Parser tolerante de HTML/XML para navegação e extração simples
+- Camada de extração/Parsing
+- Integrado com **lxml**, para otmizar performance em grandes volumes
 
 ### **Impactos Arquiteturais**
 
-- **Redução de acoplamento**: `download_html()` deixa de ser específica de httpx
-- **Previsibilidade**: Taxa de sucesso sobe 75-80% (de 5-10% para 85-90%)
-- **Observabilidade**: Novos logs estruturados (camada usada, classificação, histórico)
-- **Capacidade**: Throughput Camada 1 cresce 3-5x (menos timeouts); Camada 3 limitada a 30req/min
-- **Custo operacional**: RAM ~200MB adicionais por context Playwright; sem infra nova necessária
-- **Latência p99**: Sobe de ~500ms para ~1s (Camada 1) + fallback Playwright (~10s) quando escala
-
-
+- **Redução de acoplamento:** Eliminação de dependências cíclicas entre routes, pipeline e utils; DTOs explícitos como fronteiras
+- **Melhoria de previsibilidade:** Fluxo linear determinístico vs múltiplos caminhos; decisões centralizadas no orquestrador
+- **Aumento de observabilidade:** Telemetria obrigatória em cada etapa; trace_id propagado; logs estruturados
+- **Redução de throughput overhead:** Eliminação de wrappers redundantes e decisões tardias dentro do parsing
+- **Melhoria de manutenibilidade:** Nomenclatura clara, organização coerente, responsabilidades rígidas
+- **Potencial impacto de latência:** p50/p95 deve cair (menos overhead); p99 pode flutuar (dependendo de falha rate)
+- **Impacto operacional:** Curva de aprendizado inicial para nova arquitetura; após estabilizar, manutenção simplificada
 
 ---
 

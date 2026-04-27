@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from market_scraper.services.playwright_pool import playwright_pool
+from market_scraper.infra.browser.playwright_pool import playwright_pool
 
 router = APIRouter(prefix="/health", tags=["Health"])
 

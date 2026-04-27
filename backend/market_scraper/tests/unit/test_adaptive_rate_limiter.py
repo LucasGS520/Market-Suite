@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from market_scraper.infra.adaptive_rate_limiter import (
+from market_scraper.infra.limits.adaptive_rate_limiter import (
     AdaptiveRateLimiter,
     _COOLDOWN_MODERATE_SECONDS,
     _COOLDOWN_SEVERE_SECONDS,

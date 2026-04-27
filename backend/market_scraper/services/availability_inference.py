@@ -19,6 +19,11 @@ logger = structlog.get_logger("availability_inference")
 HTTP_STATUS_UNAVAILABLE = {404, 410, 451} #Produto não existe
 HTTP_STATUS_TEMPORARILY_UNAVAILABLE = {503} #Pode voltar
 HTTP_STATUS_ACCESS_DENIED = {401, 403} #Bloqueado
+_HTTP_STATUS_INFERENCE_RULES: tuple[tuple[set[int], str, Literal["high", "medium", "low"]], ...] = (
+    (HTTP_STATUS_UNAVAILABLE, "removed", "high"),
+    (HTTP_STATUS_TEMPORARILY_UNAVAILABLE, "temporarily_unavailable", "medium"),
+    (HTTP_STATUS_ACCESS_DENIED, "access_denied", "medium"),
+)
 
 DetectorResult = Tuple[bool, str, str]
 DetectorCallable = Callable[[str], DetectorResult | None]
@@ -120,17 +125,14 @@ def infer_availability_from_http_status(status_code: int, domain: str) -> Infere
     claramente um anúncio removido, indisponível temporariamente ou bloqueio.
     A resposta é usada antes do validador, mas perde prioridade para o payload.
     """
-    if status_code in HTTP_STATUS_UNAVAILABLE:
-        _register_heuristic(f"http_status_{status_code}", domain=domain)
-        return InferenceResult(availability=False, last_status="removed", confidence="high")
-    
-    if status_code in HTTP_STATUS_TEMPORARILY_UNAVAILABLE:
-        _register_heuristic(f"http_status_{status_code}", domain=domain)
-        return InferenceResult(availability=False, last_status="temporarily_unavailable", confidence="medium")
-    
-    if status_code in HTTP_STATUS_ACCESS_DENIED:
-        _register_heuristic(f"http_status_{status_code}", domain=domain)
-        return InferenceResult(availability=False, last_status="access_denied", confidence="medium")
+    for statuses, last_status, confidence in _HTTP_STATUS_INFERENCE_RULES:
+        if status_code in statuses:
+            _register_heuristic(f"http_status_{status_code}", domain=domain)
+            return InferenceResult(
+                availability=False,
+                last_status=last_status,
+                confidence=confidence,
+            )
     
     return InferenceResult(availability=None, last_status="unknown", confidence="low")
 

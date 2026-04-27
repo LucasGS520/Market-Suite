@@ -1,435 +1,442 @@
 # Market Scraper
-Serviço FastAPI responsavel por transformar URLs de produto em um `ParserResponse` enxuto (`name`, `current_price`, `currency`, `availability`, `last_status`, `url`, `source`, `payload`). Utiliza aquisição de HTML em cascata com TLS impersonation (curl_cffi) e fallback Playwright para páginas com JavaScript, atingindo alta taxa de sucesso em Mercado Livre e marketplaces similares. O `market_alert` consome este servico via HTTP e não replica regras de parsing.
 
-## Relacoes e Referencias
+Serviço FastAPI responsável por transformar uma URL de produto em `ParserResponse`, executando um pipeline determinístico de coleta, extração e pós-processamento. Preserva o contrato HTTP compartilhado com `market_alert` e não mantém estado — cada requisição é autônoma.
+
+## Relações e Referências
+
 - Visão arquitetural da suite: [`../README.md`](../README.md)
-- API orquestradora e consumo oficial: [`../market_alert/README.md`](../market_alert/README.md)
-- Orquestrador responsável pelo controle durável: [`../market_orchestrator/README.md`](../market_orchestrator/README.md)
+- Consumidor principal: [`../market_alert/README.md`](../market_alert/README.md)
+- Orquestrador durável: [`../market_orchestrator/README.md`](../market_orchestrator/README.md)
+- Contratos compartilhados: [`../shared/README.md`](../shared/README.md)
+
+---
 
 ## Principais Responsabilidades
-- **Normalizar e validar URLs** (formato, esquema e host publico) antes de tentar scraping.
-- **Adquirir HTML em cascata** (curl_cffi → Playwright) com classificação automática de resposta e rate limiting adaptativo.
-- **Executar pipeline sequencial de parsing** com estrategia por etapas e parada no primeiro payload valido.
-- **Expor API REST sincrona** para parse (`POST /scraper/parse`) e health check (`GET /health/ping`).
-- **Aplicar cache HTTP condicional** com `ETag`/`Last-Modified` e suporte a `304 Not Modified`.
+
+- **Coletar HTML** de URLs de produto via HTTP (`curl_cffi`) com fallback para browser (`Playwright`) quando detectado anti-bot ou resposta inválida.
+- **Extrair dados estruturados** com cadeia determinística em ordem fixa: `extruct → parsel → bs4+lxml`.
+- **Normalizar e validar** preço, disponibilidade, fonte e telemetria de aquisição.
+- **Responder no contrato público** `ParserResponse` com headers de cache condicional (`ETag`, `Last-Modified`, `304`).
+- **Observar** cada etapa com `trace_id` obrigatório, logs estruturados e eventos de telemetria canônicos.
+
+---
 
 ## Estrutura do Diretório
+
 ```text
 market_scraper/
-|-- core/                     # Configuracao do servico
-|-- infra/                    # Infraestrutura de aquisição (rate limiter adaptativo)
-|-- main.py                   # Bootstrap FastAPI, lifespan Playwright e registro de rotas
-|-- routes/                   # Endpoints HTTP e mapeamento de respostas
-|-- services/                 # Orquestracao de pipeline, etapas, Playwright pool e classificador
-|-- parsers/                  # Parsers por estrategia e por dominio
-|-- utils/                    # HTTP (curl_cffi), cache, robots, DNS, retries, headers
-|-- schemas/                  # Schemas locais de apoio
-└──  tests/                   # Suite de testes
+├── routes/                    # Transporte HTTP — casca fina de entrada e saída
+├── scraper_orchestrator/      # Use case canônico e interface pública do pipeline
+├── collection/                # Coleta de HTML: política, coletores e DTOs
+│   ├── collectors/            #   HttpCollector (curl_cffi), BrowserCollector (Playwright)
+│   ├── crawler/               #   CrawleeRuntime — coordena HTTP → browser
+│   └── dto/                   #   CollectedDocument, CollectionAttempt
+├── extraction/                # Extração de dados: cadeia determinística e parsers
+│   ├── parsers/               #   extruct, parsel, beautifulsoup
+│   └── extraction_chain.py    #   cadeia fixa; usa ParseResult/ParseAttempt de domain.dtos
+├── post_processing/           # Normalização e validação pós-extração
+│   ├── normalizers/           #   PriceNormalizer, ProductNormalizer
+│   └── dto/                   #   PostProcessResult
+├── services/                  # Serviços de suporte compartilhados
+│   ├── availability_inference.py   # Inferência de disponibilidade por status HTTP
+│   ├── response_classifier.py      # Classificação de resposta HTTP / anti-bot
+│   └── telemetry_service.py        # Emissão de eventos estruturados
+├── infra/                     # Infraestrutura — cache, limites, browser pool, logging
+│   ├── browser/               #   PlaywrightPool (singleton)
+│   ├── cache/                 #   Cache condicional, robots cache, singleflight
+│   ├── limits/                #   AdaptiveRateLimiter, ConcurrencyLimits
+│   ├── logging/               #   StructuredLogger com contexto obrigatório
+│   └── errors_map.py          #   Taxonomia canônica: erro interno → (error_code, mensagem, http_status)
+├── domain/                    # DTOs de domínio compartilhados entre camadas
+├── utils/                     # Utilitários: HTTP, preço, builders de resposta, robots
+├── core/                      # Configuração do serviço (Settings)
+├── tests/                     # Suite de testes unitários e de integração
+└── main.py                    # Entry point FastAPI
 ```
 
 ---
 
-## Endpoints e Fluxos HTTP
-As rotas publicas são registradas em [`main.py`](main.py), com foco em um endpoint de parsing e um endpoint de saude. O fluxo principal da API combina validação de URL, revalidação condicional por cache e execução do pipeline de scraping.
+## Arquitetura e Fluxo Canônico
 
-### Fluxos HTTP mais relevantes
-- Parse sincrono: `POST /scraper/parse` recebe `ParserRequest`, normaliza a URL e valida compatibilidade minima antes do pipeline.
-- Revalidação condicional: se o cliente enviar `If-None-Match` e/ou `If-Modified-Since`, o endpoint pode responder `304` sem corpo.
-- Bypass de cache por metadata: `metadata.force_refresh=true` ignora cache condicional e forca nova coleta.
-- Mapeamento de erros operacionais: `invalid_url`, `blocked_host`, `unsupported_by_robots`, `too_many_redirects`, `no_result` e `pipeline_timeout` são traduzidos para status HTTP previsiveis.
-- Contrato de resposta consistente: em `200`, retorna `ParserResponse` e inclui `ETag`, `Last-Modified`, `Cache-Control` e `X-MarketScraper-Cache-Status`.
+### Diagrama de Camadas
 
-## Dominios e Componentes Chave
+```
+┌──────────────────────────────────────────────────────────┐
+│  routes/routes_scraper.py                                │
+│  Normaliza URL · valida DNS · verifica cache condicional │
+│  Emite trace_id · delega ao use case · mapeia resultado  │
+└────────────────────┬─────────────────────────────────────┘
+                     │ ParseProduct.execute()
+┌────────────────────▼─────────────────────────────────────┐
+│  scraper_orchestrator/parse_product.py                   │
+│  robots → rate limiter → collect → extract               │
+│  → post_process → build_parser_response                  │
+│  Retorna: ParseProductSuccess | NoResult | Error         │
+└──────┬──────────────────┬──────────────────┬─────────────┘
+       │                  │                  │
+┌──────▼──────┐  ┌────────▼──────┐  ┌────────▼────────────┐
+│ collection/ │  │ extraction/   │  │ post_processing/    │
+│             │  │               │  │                     │
+│ CrawleeRun- │  │ Extraction-   │  │ PostProcessor       │
+│ time        │  │ Chain         │  │ PriceNormalizer     │
+│ HTTP → brow-│  │ extruct       │  │ ProductNormalizer   │
+│ ser fallback│  │ → parsel      │  │ PayloadUsefulness-  │
+│             │  │ → bs4+lxml    │  │ Validator           │
+└──────┬──────┘  └───────────────┘  └─────────────────────┘
+       │
+┌──────▼──────────────────────────────┐
+│ collectors/                         │
+│ CurlCFFIHttpCollector (curl_cffi)   │
+│ PlaywrightBrowserCollector          │
+└──────┬──────────────────────────────┘
+       │
+┌──────▼──────────────────────────────────────────────────┐
+│  infra/                                                 │
+│  cache/ · limits/ · browser/ · logging/ · errors_map   │
+└─────────────────────────────────────────────────────────┘
+```
 
-### API HTTP e Contratos
-- [`main.py`](main.py) instancia o FastAPI e registra `routes_health` e `routes_scraper`.
-- [`routes/routes_scraper.py`](routes/routes_scraper.py) executa o fluxo HTTP completo: validação, cache condicional, pipeline e resposta.
-- [`routes/response_helpers.py`](routes/response_helpers.py) padroniza respostas de erro/sucesso e converte problemas de pipeline para `error_code` estável.
-- [`shared/schemas/shared_schemas_scraper.py`](../shared/schemas/shared_schemas_scraper.py) define os contratos compartilhados (`ParserRequest`, `ParserResponse`, `ErrorResponse`).
-
-### Orquestracao de Pipeline
-- [`services/pipeline_factory.py`](services/pipeline_factory.py) monta `PipelineContext`, cria pipeline padrao e oferece `run_pipeline`.
-- [`services/synergic_pipeline.py`](services/synergic_pipeline.py) executa as etapas em sequencia com timeout por etapa e timeout global.
-- [`services/pipeline_steps.py`](services/pipeline_steps.py) define as etapas concretas (`FetchHTMLStep`, `JsonLdParserStep`, `HtmlMetadataParserStep`, `DomainSpecificParserStep`, `GenericFallbackParserStep`).
-- [`services/parser_runner.py`](services/parser_runner.py) centraliza execução/validação de parser e sincronização dos dados no contexto.
-
-### Parsers e Inferencia
-- [`parsers/domain_parsers.py`](parsers/domain_parsers.py) mapeia parsers por sufixo de domínio (`mercadolivre`, `amazon`, `magalu`).
-- [`parsers/extruct.py`](parsers/extruct.py), [`parsers/beautifulsoup.py`](parsers/beautifulsoup.py) e [`parsers/html_static.py`](parsers/html_static.py) cobrem estratégias de parsing estrutural e fallback generico.
-- [`services/availability_inference.py`](services/availability_inference.py) infere disponibilidade e `last_status` em cenarios HTTP sem payload de produto.
-
-### Infraestrutura de Scraping e Cache
-- [`utils/http_download.py`](utils/http_download.py) implementa `CurlffiHTTPClient` com TLS impersonation Chrome124 via `curl_cffi`. Mapeia erros para `httpx.*` equivalentes para a tentativa HTTP primária executada pelo `FetchDecisionGate`.
-- [`services/response_classifier.py`](services/response_classifier.py) classifica cada resposta em `SUCCESS`, `SCALE` ou `REJECT` com base em status HTTP, tamanho do HTML e padrões anti-bot.
-- [`services/playwright_pool.py`](services/playwright_pool.py) gerencia pool singleton de Playwright com semáforo de concorrência, stealth injection e bloqueio de recursos pesados.
-- [`infra/adaptive_rate_limiter.py`](infra/adaptive_rate_limiter.py) rastreia taxa de sucesso por hostname no Redis e sugere a estratégia de aquisição mais barata possível. Ativa cooldown automático em cenários de 429 recorrente.
-- [`utils/http_retry.py`](utils/http_retry.py) aplica politicas de retry com backoff para alvos HTTP.
-- [`utils/http_utils.py`](utils/http_utils.py) resolve DNS com cache e bloqueia hosts/IPs não publicos (protecao SSRF).
-- [`utils/robots.py`](utils/robots.py) valida `robots.txt` antes da coleta via Redis operacional (db 2); fallback atual e restritivo (bloqueia quando não consegue validar o parser).
-- Rate limiting adaptativo usa chaves com prefixo `rate:ml:{host}` no Redis operacional (db 2), isolado do broker Celery (db 0) e do result backend (db 1).
-- [`utils/cache.py`](utils/cache.py), [`utils/singleflight.py`](utils/singleflight.py) e [`utils/conditional_payload.py`](utils/conditional_payload.py) suportam cache em memória, coalescing e revalidação condicional HTTP.
-
-#### Endpoints - Market Scraper
-| Metodo | Rota | Contrato principal | Codigos mais comuns |
-|--------|------|--------------------|---------------------|
-| `POST` | `/scraper/parse` | `ParserRequest` -> `ParserResponse` | `200`, `304`, `400`, `403`, `422`, `504` |
-| `GET` | `/health/ping` | sem payload -> `{ "status": "ok" }` | `200` |
-
-### Integracao com market_alert
-- O cliente oficial vive em [`../shared/clients/scraper/scraper_client.py`](../shared/clients/scraper/scraper_client.py).
-- O cliente encapsula retries, rate limit por host, circuit breaker, cabeçalhos condicionais e suporte opcional a header de autenticação de serviço (`SCRAPER_SERVICE_AUTH_*`).
-
----
-
-## Arquitetura de Aquisição HTML
-
-O serviço continua usando aquisição em cascata, mas o ponto único de decisão agora é o [`FetchDecisionGate`](services/fetch_decision_gate.py). A etapa de pipeline `FetchHTMLStep` só faz três coisas: validar `robots.txt`, reutilizar cache quando permitido e delegar a aquisição ao gate.
-
-### Responsabilidades por componente
-
-| Componente | Responsabilidade |
-|-----------|------------------|
-| `FetchHTMLStep` | Adaptar `PipelineContext` para `FetchResult`, preencher `context.html` e gravar telemetria em `context.data` |
-| `FetchDecisionGate` | Orquestrar rate limiter, tentativa HTTP, classificação da resposta, fallback para browser e mapeamento final do resultado |
-| `ResponseClassifier` | Decidir `SUCCESS`, `SCALE` ou `REJECT` sem I/O, com base em status HTTP, HTML e exceção |
-| `AdaptiveRateLimiter` | Definir se o host pode prosseguir e quando vale insistir na tentativa HTTP antes do browser |
-| `PlaywrightPool` | Executar o fallback de browser com Chromium, sem expor lifecycle do browser ao restante do pipeline |
-
-### Arquitetura do `FetchDecisionGate`
+### Fluxo de Execução (caminho feliz)
 
 ```
 POST /scraper/parse
-        │
-        ▼
-FetchHTMLStep
-        │
-        ├── robots.is_allowed(url) = false → 403 unsupported_by_robots
-        ├── cache.get(url) = hit          → 200 html_from_cache
-        │
-        ▼
-FetchDecisionGate.fetch_with_fallback(...)
-        │
-        ├── adaptive_rate_limiter.should_allow(host) = false
-        │   └── REJECT(rate_limiter_cooldown)
-        │
-        ├── download_html() via curl_cffi + singleflight
-        │
-        ├── ResponseClassifier.classify(status, html, error)
-        │   ├── SUCCESS              → HTML aceito via HTTP
-        │   ├── SUCCESS(degradado)   → anti-bot + sinais de produto → parsers tentam diretamente
-        │   ├── REJECT               → erro final ou indisponibilidade inferida
-        │   └── SCALE                → playwright_pool.fetch_html()
-        │                            ├── sucesso → HTML aceito via browser
-        │                            └── erro    → rejeição degradada ou challenge persistente
-        │
-        └── FetchResult(status, html, error_code, telemetry)
+    │
+    ├── [routes] Normaliza URL, resolve DNS público, verifica ETag/Last-Modified
+    │     └── cache hit → 304 Not Modified (responde imediatamente)
+    │
+    ├── [orchestrator] ParseProduct.execute(url, trace_id)
+    │
+    ├── [stage 1] robots check
+    │     └── mode=block + disallowed → 403 Forbidden
+    │
+    ├── [stage 2] rate limiter pre-check
+    │     └── domínio em cooldown → 429 Too Many Requests
+    │
+    ├── [stage 3] collect — CrawleeRuntime.fetch_with_fallback()
+    │     ├── HTTP via curl_cffi (budget: SCRAPER_HTTP_BUDGET_SECONDS)
+    │     │     ├── ACCEPT           → HTML válido, segue para extração
+    │     │     ├── ESCALATE_TO_BROWSER → aciona fallback Playwright
+    │     │     ├── STOP_UNAVAILABLE → 404/410/451 → payload de indisponibilidade
+    │     │     └── STOP_FAILURE     → 503/504
+    │     └── browser via Playwright (budget: SCRAPER_BROWSER_BUDGET_SECONDS)
+    │           └── falha → 503 pipeline_degraded
+    │
+    ├── [stage 4] extract — ExtractionChain.run(html)
+    │     ├── extruct  → payload útil? → para cadeia
+    │     ├── parsel   → payload útil? → para cadeia
+    │     └── bs4+lxml → payload útil? → para cadeia
+    │           └── nenhum extraiu → 422 no_result
+    │
+    ├── [stage 5] post_process — PostProcessor.run(payload, acquisition)
+    │     ├── normaliza preço (string → Decimal)
+    │     ├── infere disponibilidade
+    │     ├── merge de campos de produto
+    │     └── consolida telemetria de aquisição em extra_fields["acquisition"]
+    │
+    └── [stage 6] build_parser_response → ParserResponse → 200 OK
 ```
 
-### Fluxo de fallback HTTP → Browser
+### Cenários Alternativos
 
-1. A primeira tentativa sempre privilegia `curl_cffi`, porque é mais barata, mais rápida e já resolve a maioria dos casos.
-2. O `ResponseClassifier` olha para o resultado bruto dessa tentativa e decide se o HTML é utilizável, se deve ser descartado imediatamente ou se vale escalar.
-3. Só há fallback para `Playwright` quando o retorno sugere bloqueio, HTML vazio, erro transitório ou necessidade de renderização.
-4. O browser não roda em paralelo com a tentativa HTTP; ele é acionado somente quando a decisão `SCALE` torna isso necessário.
-5. O resultado devolvido ao pipeline já sai consolidado em `FetchResult`, sem lógica anti-bot duplicada em outras etapas.
-
-### Classificador de Resposta (`ResponseClassifier`)
-
-Centraliza as regras de escalonamento sem lógica espalhada nas etapas:
-
-| Condição | Ação | Reason | Destino |
-|----------|------|--------|---------|
-| 200 + HTML válido (≥ 1 KB, sem anti-bot) | `SUCCESS` | `html_valid` | seguir para parsing |
-| 200 + anti-bot + sinais de produto¹ | `SUCCESS` | `anti_bot_degraded` | parsing direto (sem Playwright) |
-| 200 + HTML vazio (< 1 KB) | `SCALE` | `html_empty` | fallback para browser |
-| 200 + anti-bot sem sinais de produto | `SCALE` | `anti_bot_page` | fallback para browser |
-| 429 | `SCALE` | `rate_limited` | fallback para browser |
-| 403 / 405 / 5xx | `SCALE` | `access_denied` / `server_error` | fallback para browser |
-| 404 / 410 | `REJECT` | `not_found` | encerrar |
-| Timeout / ConnectionError | `SCALE` | `timeout` / `connection_error` | fallback para browser |
-
-¹ Sinais de produto: presença de `application/ld+json`, `itemprop="price"` ou `"offers"` no HTML.
-
-Padrões anti-bot detectados: `suspicious-traffic-frontend` (Mercado Livre), `challenges.cloudflare.com`, `__cf_chl`, `__cf_bm`, `recaptcha/api.js`, `_pxcaptcha`.
-
-### Anti-bot: detecção vs bloqueio
-
-- **Detecção** significa que o classificador ou o gate encontraram evidência de challenge no HTML (`anti_bot_detected=true`, `anti_bot_pattern=...`). Isso não implica falha final por si só.
-- **Sucesso degradado** (`reason=anti_bot_degraded`): challenge detectado, mas HTML expõe sinais de produto (JSON-LD/microdata). Parsers tentam extração diretamente sem Playwright. Telemetria `data_quality="degraded_anti_bot"` é adicionada ao payload.
-- **Bloqueio** significa que, depois da decisão do gate, o endpoint realmente precisou devolver erro para o cliente (`429`, `503` ou `504`) porque não havia HTML utilizável.
-- Se o browser consegue renderizar a página e o challenge desaparece, o gate marca `anti_bot_bypassed=true` e o pipeline segue normalmente com `data_quality="browser_fallback"`.
-- Se o browser também falha, o problema vira bloqueio efetivo e é mapeado por `response_helpers.py` para um `error_code` estável.
-
-### Rate Limiter Adaptativo (`AdaptiveRateLimiter`)
-
-Rastreia taxa de sucesso por hostname com histórico em Redis (db 2) e ativa cooldown automático quando a taxa cai abaixo dos limiares.
-
-**Limiares de decisão:**
-
-| Taxa de sucesso | Estratégia sugerida | Ação de cooldown |
-|-----------------|---------------------|------------------|
-| ≥ 90 % | insistir na tentativa HTTP | — |
-| 50 – 89 % | aceitar escalonamento para browser quando necessário | — |
-| 20 – 49 % + 429 recorrente | aceitar escalonamento para browser | Cooldown 300 s |
-| < 20 % | rejeitar temporariamente | Cooldown 3600 s |
-
-**Chaves Redis** (prefixo `rate:ml:{hostname}`, TTL 1h, db 2):
-
-| Chave | Tipo | Conteúdo |
-|-------|------|----------|
-| `rate:ml:{host}:success_count` | INCR | Requisições bem-sucedidas |
-| `rate:ml:{host}:failure_count` | INCR | Requisições com erro |
-| `rate:ml:{host}:cooldown_until` | SET | Timestamp Unix (float) de fim do cooldown |
-| `rate:ml:{host}:last_layer` | SET | Estratégia usada na última requisição (`1` HTTP, `3` browser; nome histórico preservado na chave) |
-| `rate:ml:{host}:last_error_code` | SET | Último código de erro (`429`, `timeout`, …) |
-
-Quando Redis está indisponível, o limiter usa fallback in-memory (não persistente) — degradação segura sem interromper o pipeline.
-
-### Playwright Pool
-
-- **Pool singleton** (`playwright_pool`) inicializado no lifespan do FastAPI.
-- **Semáforo** limita a `PLAYWRIGHT_MAX_CONCURRENT` contexts simultâneos (padrão: 5 → máx ~30 req/min).
-- **Stealth**: injeta script JS que oculta `navigator.webdriver`, adiciona plugins Chrome e define `navigator.languages = ['pt-BR', 'pt', 'en-US', 'en']`.
-- **Bloqueio de recursos**: imagens, CSS, fontes e mídias são abortados (~40 % menos RAM por contexto).
-- **Memória**: ~200 MB por context Playwright. Use `--shm-size=2g` no Docker ou configure `PLAYWRIGHT_DISABLE_DEV_SHM=1`.
+| Cenário | Status | `error_code` |
+|---------|--------|--------------|
+| URL inválida ou host privado | `400` | `invalid_request` |
+| robots.txt disallowed (`mode=block`) | `403` | `robots_disallowed` |
+| Cache hit (ETag / Last-Modified) | `304` | — |
+| Anti-bot ativo, bypass falhou | `429` | `anti_bot_page` |
+| Rate limiter em cooldown | `429` | `rate_limiter_cooldown` |
+| Extração retornou vazio | `422` | `no_result` |
+| Browser pool indisponível | `503` | `pipeline_degraded` |
+| Timeout global do pipeline | `504` | `playwright_timeout` |
 
 ---
 
-## Pipeline de Parsing
-O pipeline sequencial e registrado em [`services/pipeline_steps.py`](services/pipeline_steps.py) e executado por [`services/synergic_pipeline.py`](services/synergic_pipeline.py). A execução para no primeiro `StepResult.success` com payload valido.
+## Contrato HTTP
 
-1. **FetchHTMLStep**: etapa oficial de aquisição de HTML. Ela delega ao `FetchDecisionGate`, que concentra rate limiter, tentativa HTTP, classificação e fallback para browser.
-2. **JsonLdParserStep**: tenta extrair dados estruturados (`application/ld+json`) com `extruct` — maior taxa de acerto.
-3. **DomainSpecificParserStep**: aplica parser dedicado quando o dominio bate com mapeamento conhecido (mercadolivre, amazon, magazineluiza).
-4. **HtmlMetadataParserStep**: tenta extrair nome/preco/metadados com BeautifulSoup.
-5. **GenericFallbackParserStep**: ultima tentativa com heuristicas genericas.
+### Endpoint Principal
 
-Tempo maximo por etapa de parsing: `SCRAPER_STEP_TIMEOUT_SECONDS`. `FetchHTMLStep` usa orçamentos independentes (`SCRAPER_HTTP_BUDGET_SECONDS` + `SCRAPER_BROWSER_BUDGET_SECONDS`). Tempo total do pipeline: `SCRAPER_PIPELINE_TIMEOUT_SECONDS`.
+```
+POST /scraper/parse
+Content-Type: application/json
 
-### Mapa do Pipeline de Parsing
-| Ordem | Etapa | Objetivo | Possivel saida |
-|-------|-------|----------|----------------|
-| `1` | `FetchHTMLStep` | Obter HTML ou inferir indisponibilidade, delegando a decisão de aquisição ao `FetchDecisionGate` | `success`, `error` |
-| `2` | `JsonLdParserStep` | Extrair dados estruturados com maior confiabilidade | `success` com payload ou `empty` |
-| `3` | `DomainSpecificParserStep` | Aplicar regras dedicadas por dominio quando disponiveis | `success` com payload ou `empty` |
-| `4` | `HtmlMetadataParserStep` | Ler metadados e estrutura basica da pagina | `success` com payload ou `empty` |
-| `5` | `GenericFallbackParserStep` | Aplicar heuristicas genericas como ultimo fallback | `success` com payload ou `empty` |
+{
+  "url": "https://www.mercadolivre.com.br/produto/MLBxxx",
+  "force_refresh": false,
+  "metadata": {}
+}
+```
 
-### Telemetria no contrato HTTP
+**Resposta de sucesso (`200 OK`):**
 
-**Headers garantidos pela rota `POST /scraper/parse`:**
+```json
+{
+  "name": "Nome do produto",
+  "current_price": 199.90,
+  "currency": "BRL",
+  "availability": true,
+  "last_status": "available",
+  "url": "https://...",
+  "source": "mercadolivre.com.br",
+  "payload": {
+    "acquisition": {
+      "layer_used": "http",
+      "fallback_taken": false,
+      "anti_bot_detected": false,
+      "http_status": 200
+    }
+  }
+}
+```
 
-| Header | Quando aparece | Significado |
-|--------|----------------|-------------|
-| `X-MarketScraper-Contract-Version` | Todas as respostas do endpoint | Versão major do contrato HTTP compartilhado |
-| `X-MarketScraper-Cache-Status` | Respostas emitidas pela rota após lookup condicional | Estado do cache HTTP: `hit`, `miss`, `revalidated` ou `bypass` |
-| `ETag`, `Last-Modified`, `Cache-Control` | Quando existe metadata persistida para a resposta | Revalidação condicional e reaproveitamento pelo cliente |
+**Resposta de erro:**
 
-**Campos do corpo relevantes para rastreabilidade:**
+```json
+{
+  "detail": "Página de proteção anti-bot detectada; tente novamente mais tarde",
+  "error_code": "anti_bot_page",
+  "trace_id": "abc-123-..."
+}
+```
 
-| Campo | Local | Observação |
-|------|-------|------------|
-| `availability` | topo do `ParserResponse` | Disponibilidade consolidada do anúncio |
-| `last_status` | topo do `ParserResponse` | Último estado conhecido ou inferido |
-| `payload` | `ParserResponse.payload` | Extras do parser preservados para auditoria sem quebrar o contrato, incluindo `acquisition` quando houver telemetria de coleta |
+### Status Codes
 
-**Telemetria de aquisição (exposta em `ParserResponse.payload.acquisition`):**
+| Status | Significado |
+|--------|-------------|
+| `200` | Parse concluído com payload normalizado |
+| `304` | Representação não modificada (ETag / Last-Modified) |
+| `400` | URL inválida, host privado ou request malformada |
+| `403` | URL bloqueada por robots.txt (`mode=block`) |
+| `422` | Nenhum parser extraiu dados suficientes (`no_result`) |
+| `429` | Anti-bot detectado ou domínio em cooldown |
+| `503` | Browser pool indisponível ou falha de coleta |
+| `504` | Timeout do pipeline (HTTP ou browser) |
 
-| Campo | Tipo | Significado |
-|-------|------|-------------|
-| `layer_used` | string | `"curl_cffi"` ou `"playwright"` |
-| `fallback_taken` | bool | `true` se Playwright foi acionado |
-| `classification_reason` | string | Reason do `ResponseClassifier` (ex: `"html_valid"`, `"anti_bot_degraded"`) |
-| `http_status` | int | Último código HTTP da tentativa |
-| `anti_bot_detected` | bool | Padrão anti-bot encontrado em qualquer camada |
-| `anti_bot_pattern` | string | Nome do padrão (ex: `"cloudflare_challenge"`) |
-| `anti_bot_bypassed` | bool | `true` se Playwright resolveu o challenge sem padrão residual |
-| `data_quality` | string | `"normal"`, `"degraded_anti_bot"` ou `"browser_fallback"` |
+### Headers de Resposta
 
-`data_quality` resume a qualidade de aquisição: `normal` = HTTP direto limpo; `degraded_anti_bot` = anti-bot detectado mas dados extraídos sem Playwright; `browser_fallback` = Playwright foi acionado.
+| Header | Descrição |
+|--------|-----------|
+| `ETag` | Hash do payload para cache condicional |
+| `Last-Modified` | Timestamp da última coleta bem-sucedida |
+| `Cache-Control` | Diretivas de cache para consumidores |
+| `X-MarketScraper-Contract-Version` | Versão major do contrato (`v1`) |
+
+**Headers de requisição suportados para cache condicional:**
+
+| Header | Efeito |
+|--------|--------|
+| `If-None-Match` | Responde `304` se ETag não mudou |
+| `If-Modified-Since` | Responde `304` se não houve atualização |
 
 ---
 
-## Fluxo de Trabalho
+## Camadas e Componentes-Chave
 
-### Fluxo sincrono de parse (request -> response)
-1. Cliente envia `POST /scraper/parse` com `ParserRequest`.
-2. A rota normaliza URL e aplica validacoes de compatibilidade (`invalid_url`, `blocked_host`, etc.).
-3. Se não houver `force_refresh`, o endpoint tenta usar metadados em cache para responder `304`.
-4. Sem `304`, o endpoint executa `run_pipeline(...)`.
-5. O pipeline percorre as etapas em ordem fixa ate encontrar payload valido.
-6. Em `success`, a rota monta `ParserResponse`, registra logs e persiste metadados condicionais (`ETag`/`Last-Modified`).
-7. Em `no_result` ou erros mapeados, retorna JSON de erro padronizado com `error_code` e `trace_id`.
+### Routes — [`routes/routes_scraper.py`](routes/routes_scraper.py)
 
-### Fluxo de cache condicional HTTP
-1. Em resposta `200`, o endpoint gera hash estável do payload e armazena metadados condicionais por URL.
-2. O cliente reaproveita `ETag` e `Last-Modified` em chamadas futuras.
-3. Se a condicao casar (`If-None-Match` ou `If-Modified-Since`), a resposta e `304 Not Modified`.
-4. Se houver `metadata.force_refresh=true`, a rota ignora cache condicional e executa coleta completa.
-5. O header `X-MarketScraper-Cache-Status` indica decisão (`hit`, `miss`, `revalidated`, `bypass`).
+Casca fina de transporte. Não contém lógica de negócio. Responsabilidades:
+- Normalizar e validar URL de entrada (DNS público, protocolo)
+- Verificar cache condicional (`ETag` / `Last-Modified`)
+- Emitir `trace_id` e delegar ao `ParseProduct`
+- Mapear `ParseProductResult` tipado para resposta HTTP
+
+### Orchestrator — [`scraper_orchestrator/parse_product.py`](scraper_orchestrator/parse_product.py)
+
+Use case canônico. Sequência fixa sem feature flags:
+
+```python
+result: ParseProductResult = await ParseProduct().execute(url, request_logger=logger)
+# ParseProductSuccess | ParseProductNoResult | ParseProductError
+```
+
+A interface pública do módulo é exposta por [`scraper_orchestrator/orchestrator.py`](scraper_orchestrator/orchestrator.py).
+
+### Collection — [`collection/`](collection/)
+
+| Componente | Arquivo | Papel |
+|-----------|---------|-------|
+| `CrawleeRuntime` | [`crawler/crawlee_runtime.py`](collection/crawler/crawlee_runtime.py) | Coordena HTTP → browser com política de decisão |
+| `CurlCFFIHttpCollector` | [`collectors/http_collector.py`](collection/collectors/http_collector.py) | Adapter fino para `curl_cffi` (fingerprinting delegado à lib) |
+| `PlaywrightBrowserCollector` | [`collectors/browser_collector.py`](collection/collectors/browser_collector.py) | Adapter para `PlaywrightPool` (lifecycle delegado ao pool) |
+| `ResponseClassifierPolicy` | [`policy.py`](collection/policy.py) | Decide `ACCEPT / ESCALATE_TO_BROWSER / STOP_UNAVAILABLE / STOP_FAILURE` |
+| `CollectedDocument` | [`dto/collected_document.py`](collection/dto/collected_document.py) | DTO imutável com HTML, status e telemetria de coleta |
+
+### Extraction — [`extraction/`](extraction/)
+
+Cadeia determinística em ordem fixa. Para na primeira extração válida e útil.
+
+| Parser | Arquivo | Estratégia |
+|--------|---------|------------|
+| `extruct` | [`parsers/extruct.py`](extraction/parsers/extruct.py) | JSON-LD, Microdata, OpenGraph, RDFa embutidos no HTML |
+| `parsel` | [`parsers/parsel.py`](extraction/parsers/parsel.py) | Seletores CSS/XPath otimizados para e-commerce |
+| `bs4+lxml` | [`parsers/beautifulsoup.py`](extraction/parsers/beautifulsoup.py) | Parsing tolerante de HTML para estruturas irregulares |
+
+### Post-Processing — [`post_processing/`](post_processing/)
+
+| Componente | Arquivo | Papel |
+|-----------|---------|-------|
+| `PostProcessor` | [`processor.py`](post_processing/processor.py) | Orquestra normalização, validação e consolidação de telemetria |
+| `PriceNormalizer` | [`normalizers/price_normalizer.py`](post_processing/normalizers/price_normalizer.py) | String de preço → `Decimal` |
+| `ProductNormalizer` | [`normalizers/product_normalizer.py`](post_processing/normalizers/product_normalizer.py) | Merge de campos de produto com precedência definida |
+| `PostProcessResult.is_useful` | [`domain/dtos.py`](domain/dtos.py) | Fonte canônica para utilidade do resultado pós-processado |
+
+### Services — [`services/`](services/)
+
+Serviços unitários compartilhados por múltiplas camadas do pipeline.
+
+| Componente | Arquivo | Papel |
+|-----------|---------|-------|
+| `TelemetryService` | [`telemetry_service.py`](services/telemetry_service.py) | Emite eventos estruturados com `trace_id` e `domain` |
+| `ResponseClassifier` | [`response_classifier.py`](services/response_classifier.py) | Classifica resposta HTTP e detecta padrões anti-bot |
+| `availability_inference` | [`availability_inference.py`](services/availability_inference.py) | Infere disponibilidade de produto a partir de status HTTP |
+
+### Infrastructure — [`infra/`](infra/)
+
+| Componente | Arquivo | Papel |
+|-----------|---------|-------|
+| `PlaywrightPool` | [`browser/playwright_pool.py`](infra/browser/playwright_pool.py) | Pool singleton de browsers Playwright com sessões por domínio |
+| Cache condicional | [`cache/conditional_payload.py`](infra/cache/conditional_payload.py) | ETag / Last-Modified / resposta 304 |
+| Robots | [`utils/robots.py`](utils/robots.py) | Validação de robots.txt com cache Redis por domínio |
+| Singleflight | [`cache/singleflight.py`](infra/cache/singleflight.py) | Coalesce de requisições paralelas à mesma URL |
+| `AdaptiveRateLimiter` | [`limits/adaptive_rate_limiter.py`](infra/limits/adaptive_rate_limiter.py) | Cooldown por domínio baseado em histórico de erros |
+| `ConcurrencyLimits` | [`limits/concurrency_limits.py`](infra/limits/concurrency_limits.py) | Semáforo para controle de concorrência do browser pool |
+| `StructuredLogger` | [`logging/structured_logger.py`](infra/logging/structured_logger.py) | Logger com contexto obrigatório (`trace_id`, `domain`, etapa) |
+| `COLLECTION_ERROR_MAP` | [`errors_map.py`](infra/errors_map.py) | Taxonomia interna → (`error_code`, mensagem, `http_status`) |
 
 ---
 
-## Fluxos de Negocio End-to-End
+## Telemetria
 
-### 1. Parse com snapshot novo (`200`)
-1. `market_alert` chama `POST /scraper/parse` com URL e contexto (`product_type`, `user_id`, `metadata`).
-2. O scraper valida URL/host publico e passa pelo pipeline.
-3. Uma etapa retorna payload valido (`name`, `current_price`, `availability`, etc.).
-4. A rota converte preco para decimal, normaliza resposta e devolve `200`.
-5. Metadados condicionais são persistidos para reuso nas proximas coletas.
+Cada execução do pipeline emite eventos estruturados via `TelemetryService`, sempre com `trace_id` e `domain` no contexto de log.
 
-### 2. Revalidação condicional (`304 Not Modified`)
-1. Cliente envia `If-None-Match`/`If-Modified-Since` com valores da coleta anterior.
-2. O scraper consulta metadados em cache da URL.
-3. Se não houver mudança, retorna `304` sem corpo.
-4. `market_alert` interpreta como `not_modified` e evita persistencia redundante.
+### Eventos em Ordem de Execução
 
-### 3. URL invalida ou bloqueada (`400`/`403`/`422`)
-1. URL malformada, protocolo invalido ou host não publico retorna erro controlado.
-2. Bloqueio por `robots.txt` retorna `403` com `error_code=unsupported_by_robots`.
-3. Loop de redirecionamento ou URL invalida em download retorna `422`.
-4. Em todos os casos, a resposta inclui `trace_id` para correlacao com logs.
+| Evento | Campos principais |
+|--------|-------------------|
+| `collection_started` | `url` |
+| `collection_completed` | `layer`, `duration_ms`, `fallback_taken`, `anti_bot_detected`, `http_status` |
+| `extraction_started` | — |
+| `extraction_completed` | `parser_used`, `duration_ms`, `succeeded` |
+| `post_processing_started` | — |
+| `post_processing_completed` | `duration_ms`, `has_price`, `availability` |
+| `pipeline_completed` | `outcome`, `total_duration_ms` |
 
-### 4. Pipeline sem dados confiaveis (`422` com `no_result`)
-1. O pipeline executa todas as etapas e nenhuma retorna payload valido.
-2. A rota retorna erro controlado `no_result`.
-3. O cliente chamador pode aplicar politica de retry/backoff sem quebrar contrato HTTP.
+### Rastreio por `trace_id`
+
+O `trace_id` é gerado na rota e propagado via `structlog.contextvars` por todo o pipeline. Todos os eventos e logs carregam o mesmo `trace_id`:
+
+```bash
+# Filtrar todos os logs de uma requisição específica
+docker logs market_scraper 2>&1 | grep '"trace_id": "abc-123"'
+```
+
+A telemetria de aquisição é consolidada em `PostProcessResult.extra_fields["acquisition"]` e propagada na `ParserResponse.payload` para auditoria pelo consumidor.
 
 ---
 
 ## Configuração
-As configurações combinam base compartilhada em [`../shared/core/config_base.py`](../shared/core/config_base.py) com overrides específicos em [`core/config_scraper.py`](core/config_scraper.py).
 
-### Ordem de carregamento de ambiente
-1. `ConfigBase` carrega `.env.common` com `override=False` (preenche apenas variaveis ausentes).
-2. Se `SERVICE_NAME` estiver definido, carrega `.env.<SERVICE_NAME>` com `override=True`.
-3. Caso contrario, usa `ENV_FILE` (ou `.env`) e carrega com `override=True`.
-4. Depois disso, `Settings` do scraper aplica defaults de codigo para chaves ainda ausentes.
-5. Nos compose ativos (`docker-compose.dev.yml` e `docker-compose.hml.yml`), `market_scraper` sobe com `env_file: ./backend/market_scraper/.env.market_scraper` e `ENV_FILE=.env.market_scraper`, mantendo o arquivo local do servico como fonte principal de override.
-6. Em teste (`PYTEST_RUNNING=1`), o bootstrap ignora completamente `.env.common`, `.env`, `.env.<service>` e `ENV_FILE`; a suite usa apenas defaults locais em `tests/conftest.py` e overrides explicitos do teste.
+Variáveis de ambiente controladas em [`core/config_scraper.py`](core/config_scraper.py).
 
-### Categorias de variaveis
-| Categoria | Variaveis relevantes |
-|-----------|----------------------|
-| **Orçamentos de aquisição** | `SCRAPER_HTTP_BUDGET_SECONDS` (padrão: `10.0`) — timeout da tentativa HTTP; `SCRAPER_BROWSER_BUDGET_SECONDS` (padrão: `25.0`) — timeout do fallback Playwright |
-| **Política de rate limiter** | `SCRAPER_RATE_LIMITER_BLOCK_ENABLED` (padrão: `false`) — quando `false`, cooldown gera apenas log observável; defina `true` em produção para bloquear domínios em cooldown severo |
-| **Política de robots.txt** | `SCRAPER_ROBOTS_MODE` (padrão: `audit`) — `audit` registra sinal observável e prossegue; defina `block` em produção para interromper a coleta em URLs disallowed |
-| Pipeline e cache | `SCRAPER_CACHE_TTL_SECONDS`, `SCRAPER_CACHE_MAX_ENTRIES`, `SCRAPER_STEP_TIMEOUT_SECONDS`, `SCRAPER_PIPELINE_TIMEOUT_SECONDS` (padrão: `50.0`), `SCRAPER_SINGLEFLIGHT_*` |
-| HTTP e rede | `SCRAPER_HTTP_TIMEOUT_*`, `SCRAPER_HTTP_RETRIES`, `SCRAPER_HTTP_RETRY_BACKOFF_BASE`, `SCRAPER_HTTP_MAX_*`, `SCRAPER_DNS_TIMEOUT`, `SCRAPER_DNS_CACHE_TTL` |
-| Headers e identidade | `SCRAPER_DEFAULT_USER_AGENT`, `SCRAPER_USER_AGENT_POOL`, `SCRAPER_HEADERS_*` |
-| Parsing e qualidade de dado | `SCRAPER_PRICE_TOLERANCE`, `SCRAPER_HTTP_DOMAIN_TIMEOUTS` |
-| **Playwright** | `PLAYWRIGHT_MAX_CONCURRENT` (padrão: `5`) — máximo de contexts simultâneos; `PLAYWRIGHT_DISABLE_DEV_SHM` (qualquer valor não-vazio) — usa `--disable-dev-shm-usage` em vez de `/dev/shm` |
-| Base compartilhada | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_OPERATIONAL_DB` (db 2 — locks, rate limiting e cache de robots), `LOG_LEVEL`, `LOG_FORMAT`, `ROBOTS_CACHE_*`, `CIRCUIT_*` |
+### Aquisição e Timeouts
 
-Exemplo minimo de `.env.market_scraper`:
-```env
-SCRAPER_HTTP_BUDGET_SECONDS=10.0
-SCRAPER_BROWSER_BUDGET_SECONDS=25.0
-SCRAPER_RATE_LIMITER_BLOCK_ENABLED=false  # true em produção para bloquear cooldown severo
-SCRAPER_ROBOTS_MODE=audit                 # block em produção para respeitar robots.txt
+| Variável | Padrão | Descrição |
+|----------|--------|-----------|
+| `SCRAPER_HTTP_BUDGET_SECONDS` | `10.0` | Orçamento total para coleta HTTP (curl_cffi + retries) |
+| `SCRAPER_BROWSER_BUDGET_SECONDS` | `25.0` | Orçamento para fallback Playwright |
+| `SCRAPER_PIPELINE_TIMEOUT_SECONDS` | `50.0` | Timeout global do pipeline (proteção de segurança) |
+| `SCRAPER_HTTP_RETRIES` | `2` | Tentativas extras para downloads HTTP |
+| `SCRAPER_HTTP_RETRY_BACKOFF_BASE` | `0.5` | Base do backoff exponencial entre retries |
+| `SCRAPER_HTTP_MAX_REDIRECTS` | `3` | Limite de redirecionamentos seguidos |
+| `SCRAPER_HTTP_MAX_CONNECTIONS` | `10` | Conexões simultâneas no client HTTP |
 
-SCRAPER_CACHE_TTL_SECONDS=3600
-SCRAPER_CACHE_MAX_ENTRIES=5000
-SCRAPER_SINGLEFLIGHT_LOCK_TTL=15.0
-SCRAPER_SINGLEFLIGHT_MAX_ENTRIES=2000
+### Comportamento de Produção
 
-SCRAPER_STEP_TIMEOUT_SECONDS=15.0
-SCRAPER_PIPELINE_TIMEOUT_SECONDS=50.0
+| Variável | Padrão | Descrição |
+|----------|--------|-----------|
+| `SCRAPER_ROBOTS_MODE` | `audit` | `audit` = observa e loga; `block` = rejeita com 403 |
+| `SCRAPER_RATE_LIMITER_BLOCK_ENABLED` | `False` | `True` = bloqueia domínios em cooldown severo em produção |
 
-SCRAPER_HTTP_TIMEOUT_CONNECT=3.0
-SCRAPER_HTTP_TIMEOUT_READ=3.0
-SCRAPER_HTTP_TIMEOUT_WRITE=3.0
-SCRAPER_HTTP_TIMEOUT_POOL=3.0
+### Cache
 
-SCRAPER_HTTP_RETRIES=2
-SCRAPER_HTTP_RETRY_BACKOFF_BASE=0.5
-SCRAPER_HTTP_MAX_REDIRECTS=3
-SCRAPER_HTTP_MAX_CONTENT_LENGTH=2000000
+| Variável | Padrão | Descrição |
+|----------|--------|-----------|
+| `SCRAPER_CACHE_TTL_SECONDS` | `3600` | TTL padrão por URL |
+| `SCRAPER_CACHE_MAX_ENTRIES` | `5000` | Limite de entradas em memória |
+| `SCRAPER_SINGLEFLIGHT_LOCK_TTL` | `15.0` | TTL dos locks de coalesce de requisições paralelas |
 
-SCRAPER_DEFAULT_USER_AGENT=Mozilla/5.0
-SCRAPER_PRICE_TOLERANCE=0.0
+---
+
+## Como Estender
+
+### Adicionar um novo parser de extração
+
+1. Criar `extraction/parsers/meu_parser.py` com a assinatura:
+   ```python
+   def parse_with_meu_parser(html: str, url: str) -> dict | None: ...
+   ```
+2. Registrar em [`extraction/parsers/__init__.py`](extraction/parsers/__init__.py).
+3. Inserir na lista `_STEPS` de [`extraction/extraction_chain.py`](extraction/extraction_chain.py) na posição desejada da cadeia.
+
+### Modificar a política de coleta
+
+A decisão `ACCEPT / ESCALATE_TO_BROWSER / STOP_UNAVAILABLE / STOP_FAILURE` é centralizada em [`collection/policy.py`](collection/policy.py) — método `ResponseClassifierPolicy.classify()`. Ajustar limiares de status HTTP ou padrões anti-bot apenas aqui; `CrawleeRuntime` e `ParseProduct` não precisam mudar.
+
+### Adicionar um normalizer de pós-processamento
+
+1. Criar `post_processing/normalizers/meu_normalizer.py`.
+2. Chamar no [`post_processing/processor.py`](post_processing/processor.py) dentro de `PostProcessor.run()`.
+3. Dados adicionais vão para `PostProcessResult.extra_fields`; substituições de campos canônicos atualizam `name`, `current_price`, `availability`, etc.
+
+### Suportar um novo domínio de e-commerce
+
+Parsers específicos de domínio ficam dentro dos parsers genéricos, condicionados ao `source` (domínio extraído da URL):
+1. Adicionar seletores CSS/XPath específicos em [`extraction/parsers/parsel.py`](extraction/parsers/parsel.py) ou [`beautifulsoup.py`](extraction/parsers/beautifulsoup.py).
+2. Validar com fixtures HTML em `tests/unit/` e cobrir com teste de integração em `tests/integration/`.
+
+---
+
+## Operação e Troubleshooting
+
+### Rodar testes
+
+```bash
+cd backend/market_scraper
+python -m pytest tests/ -q              # Suite completa
+python -m pytest tests/unit/ -q         # Somente unitários
+python -m pytest tests/integration/ -q  # Somente integração
+python -m pytest tests/ --tb=short -q   # Com detalhe em falhas
 ```
 
----
+### Iniciar o serviço localmente
 
-## Testes
-O `market_scraper` possui suite local isolada em [`tests/`](tests) e usa somente [`../pytest.ini`](../pytest.ini) como configuracao central do `pytest`. O bootstrap de teste nao usa `.env.test`: [`tests/conftest.py`](tests/conftest.py) define defaults locais em Python, reseta estado global do modulo e ativa o modo teste com `PYTEST_RUNNING=1`.
-
-### Estrutura da suite
-- [`tests/unit`](tests/unit): regras isoladas, sem I/O real, com mocks e fakes para cache, rede, parsers e rotas.
-- [`tests/integration`](tests/integration): fluxos ponta a ponta internos do modulo usando `TestClient`, pipeline real e HTML de fixture deterministico.
-- [`tests/stress`](tests/stress): testes tecnicos de timeout e volume controlado sem acesso externo real.
-- [`tests/fixtures`](tests/fixtures): HTMLs fixos usados para manter cenarios repetiveis e sem flakiness.
-
-### Comandos oficiais
-Executar a partir da raiz do repositorio `market_suite`:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/unit -q
-.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/integration -q
-.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/stress -q
-.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests -m unit -q
-.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests --cov=market_scraper --cov-report=term -q
+```bash
+cd backend
+uvicorn market_scraper.main:app --reload --port 8001
 ```
 
-Comandos de apoio operacional:
+### Logs — Eventos Principais
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests/stress -q
-.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/market_scraper/tests --collect-only -q
-```
+| Evento de log | Significado | Ação recomendada |
+|---------------|-------------|-----------------|
+| `playwright_pool_startup_failed` | Browser pool não iniciou; HTTP continua disponível | Verificar instalação do Playwright (`playwright install chromium`) |
+| `collection_completed` com `fallback_taken=true` | HTTP falhou e browser foi acionado | Normal em sites com proteção anti-bot |
+| `parse_no_result` | Nenhum parser extraiu dados úteis | Verificar se o HTML retornado contém a página do produto |
+| `rate_limiter_cooldown` | Domínio em cooldown por erros consecutivos | Aguardar cooldown ou revisar frequência de coleta |
+| `robots_disallowed` | URL bloqueada por robots.txt | Em modo `audit` é log; em modo `block` retorna 403 |
+| `use_case_completed` | Pipeline concluído com sucesso | Monitorar `duration_collect_ms`, `duration_extract_ms` |
 
-### Politica de manutencao da suite
-- Toda mudanca em contrato HTTP, mapeamento de `error_code`, ordem do pipeline, timeouts ou cache condicional deve atualizar ao menos uma suite relevante (`unit`, `integration` ou `stress`).
-- Testes `unit` nao devem fazer rede, DNS, Redis ou acesso externo real; usar `monkeypatch`, fakes e fixtures locais.
-- Testes `integration` devem exercitar somente fluxos internos do modulo com infraestrutura controlada e HTML fixo em `tests/fixtures`.
-- Testes `stress` devem permanecer pequenos, deterministas e limitados a timeout, concorrencia controlada e estabilidade de resposta.
-- Estado global do modulo (`cache`, `singleflight` e settings carregados) deve continuar sendo resetado por teste via [`tests/conftest.py`](tests/conftest.py).
-- A configuracao canônica do `pytest` segue centralizada em [`../pytest.ini`](../pytest.ini), sem `pytest.ini` local no modulo.
-- Nenhum teste deve depender de `.env.market_scraper.test`, `ENV_FILE` ou leitura implícita de `.env` operacional.
-- Novos parsers ou novos erros de fluxo devem vir acompanhados de cobertura minima em `unit` e `integration` antes de serem considerados prontos.
+### Debug de Falhas
 
-### Cobertura atual da suite
-- `unit`: configuracao, contratos do pipeline, etapas com mocks de I/O, helpers de resposta, utilitarios criticos e rota. Inclui cobertura dedicada para `CurlffiHTTPClient`, `ResponseClassifier`, `PlaywrightPool`, `AdaptiveRateLimiter` e `FetchHTMLStep`.
-- `integration`: `health`, sucesso do parse, `304`, `force_refresh`, erros de fluxo, fallback por etapas e compatibilidade com schemas compartilhados.
-- `stress`: timeout por etapa, timeout global e volume concorrente controlado com resposta estavel.
+1. **Obter `trace_id`** do campo `trace_id` na resposta de erro JSON.
+2. **Filtrar logs** pelo `trace_id` para ver toda a sequência de eventos da requisição.
+3. **Inspecionar `payload.acquisition`** na `ParserResponse` para identificar qual camada falhou.
+4. **Forçar nova coleta** com `"force_refresh": true` na request para ignorar cache.
 
----
+### Alertas Recomendados
 
-## Seguranca e Observabilidade
-- **Seguranca:**
-  - Validação de URL e host publico em `shared/utils/url_validation.py` + `utils/http_utils.py` para reduzir risco de SSRF.
-  - Bloqueio por `robots.txt` antes do download (`utils/robots.py`), com fallback restritivo quando o parser não pode ser validado.
-  - Limites defensivos em download (`SCRAPER_HTTP_MAX_REDIRECTS`, `SCRAPER_HTTP_MAX_CONTENT_LENGTH`) e retries com backoff controlado.
-  - TLS impersonation via `curl_cffi` (Chrome124) — não utiliza proxy; sem credenciais externas necessárias.
-  - Erros de dominio são retornados com `error_code` estável para tratamento previsivel no cliente.
-
-- **Observabilidade:**
-  - Logs estruturados por `trace_id` em rota e pipeline (`routes_scraper`, `scraper_pipeline`), incluindo etapa, resultado e duracao.
-  - Telemetria de aquisição (`layer_used`, `classification_reason`, `fallback_taken`, `anti_bot_*`) fica centralizada em `context.data` e nos logs estruturados do gate.
-  - `X-MarketScraper-Cache-Status` facilita diagnostico de decisoes de cache condicional.
-  - Health check simples em `/health/ping` para probes de orquestracao.
-
----
-
-## Fronteiras de Domínio
-
-### Matriz de Responsabilidade
-
-| Módulo | Pode depender de | NÃO pode depender de |
-|--------|-----------------|----------------------|
-| `market_scraper` | `shared` (contratos neutros) | `market_alert`; `market_orchestrator` |
-| `market_alert` | `market_scraper` via HTTP apenas | — |
-| `shared` | bibliotecas externas | `market_scraper`; `market_alert`; `market_orchestrator` |
-
-### Regras Obrigatórias
-
-- **`market_scraper` NÃO importa `market_alert`** — é um microserviço independente consumido via HTTP.
-- **`market_scraper` NÃO importa `market_orchestrator`** — não tem conhecimento do ciclo de orquestração.
-- **Contratos de entrada/saída** são definidos exclusivamente em `shared/schemas/shared_schemas_scraper.py` (`ParserRequest`, `ParserResponse`, `ErrorResponse`).
-- **Configuração interna** (`core/`) é isolada; sem uso de `shared.core.config_base` que carregue segredos de outros serviços.
-
----
-
-> Nota final: mantenha este README do `market_scraper` atualizado sempre que houver mudança de endpoint, contrato HTTP, ordem do pipeline, regras de parser ou configuracao operacional do servico.
+| Métrica | Limiar sugerido | Causa provável |
+|---------|-----------------|----------------|
+| Taxa `422 no_result` | > 10% | Mudança de layout no e-commerce alvo |
+| Taxa `429 anti_bot` | > 5% | Aumento de detecção; revisar headers e fingerprint |
+| Taxa `503 pipeline_degraded` | > 1% | Problema no browser pool; verificar Playwright |
+| Latência P95 | > 40s | Budget de browser sendo consumido sistematicamente |

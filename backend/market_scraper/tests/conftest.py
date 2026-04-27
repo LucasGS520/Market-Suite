@@ -68,11 +68,11 @@ def _seed_scraper_test_env() -> None:
 
 
 def _reset_loaded_runtime_state() -> None:
-    cache_module = sys.modules.get("market_scraper.utils.cache")
+    cache_module = sys.modules.get("market_scraper.infra.cache.cache")
     if cache_module is not None:
         cache_module.clear()
 
-    singleflight_module = sys.modules.get("market_scraper.utils.singleflight")
+    singleflight_module = sys.modules.get("market_scraper.infra.cache.singleflight")
     if singleflight_module is not None:
         asyncio.run(singleflight_module.reset())
 
@@ -115,8 +115,8 @@ def reload_scraper_modules():
         names = module_names or (
             "shared.core.config_base",
             "market_scraper.core.config_scraper",
-            "market_scraper.utils.cache",
-            "market_scraper.utils.singleflight",
+            "market_scraper.infra.cache.cache",
+            "market_scraper.infra.cache.singleflight",
         )
         return {module_name: _reload_module(module_name) for module_name in names}
 
@@ -137,8 +137,8 @@ def fresh_scraper_settings(
         modules = reload_scraper_modules(
             "shared.core.config_base",
             "market_scraper.core.config_scraper",
-            "market_scraper.utils.cache",
-            "market_scraper.utils.singleflight",
+            "market_scraper.infra.cache.cache",
+            "market_scraper.infra.cache.singleflight",
         )
         _reset_loaded_runtime_state()
         return modules["market_scraper.core.config_scraper"].settings

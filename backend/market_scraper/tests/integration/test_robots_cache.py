@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from importlib import import_module
+
 import pytest
 
-from market_scraper.utils import robots as robots_module
+from market_scraper.utils import robots
 
 
 class _FakeRedis:
@@ -22,6 +24,7 @@ class _FakeRedis:
 async def test_robots_uses_operational_redis_cache_between_calls(monkeypatch):
     fake_redis = _FakeRedis()
     download_calls = {"count": 0}
+    robots_impl = import_module("market_scraper.utils.robots")
 
     async def fake_download_robots(robots_url: str, *, timeout: float):
         download_calls["count"] += 1
@@ -29,11 +32,11 @@ async def test_robots_uses_operational_redis_cache_between_calls(monkeypatch):
         assert timeout == 0.5
         return "User-agent: *\nAllow: /\n"
 
-    monkeypatch.setattr(robots_module, "get_redis_operational", lambda: fake_redis)
-    monkeypatch.setattr(robots_module, "_download_robots", fake_download_robots)
+    monkeypatch.setattr(robots_impl, "get_redis_operational", lambda: fake_redis)
+    monkeypatch.setattr(robots_impl, "_download_robots", fake_download_robots)
 
-    first = await robots_module.is_allowed("https://example.com/product", timeout=0.5)
-    second = await robots_module.is_allowed("https://example.com/product", timeout=0.5)
+    first = await robots.is_allowed("https://example.com/product", timeout=0.5)
+    second = await robots.is_allowed("https://example.com/product", timeout=0.5)
 
     assert first is True
     assert second is True

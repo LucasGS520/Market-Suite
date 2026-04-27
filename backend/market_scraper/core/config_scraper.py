@@ -23,24 +23,22 @@ class Settings(ConfigBase):
     SCRAPER_RATE_LIMITER_BLOCK_ENABLED: bool = os.getenv(
         "SCRAPER_RATE_LIMITER_BLOCK_ENABLED", "False"
     ).lower() in {"1", "true", "on", "yes"}
-    # Padrão False (observação): cooldown registra log sem bloquear a coleta.
-    # Defina True em produção para bloquear domínios em cooldown severo.
+    #Padrão False (observação): cooldown registra log sem bloquear a coleta.
+    #Defina True em produção para bloquear domínios em cooldown severo.
 
     # --- Política de robots.txt ---
     SCRAPER_ROBOTS_MODE: str = os.getenv("SCRAPER_ROBOTS_MODE", "audit").lower()
-    # Padrão "audit": robots.txt é sinal observável; pipeline prossegue e
-    # context.data["robots_disallowed"] é marcado para telemetria.
-    # Defina "block" em produção para interromper a coleta em URLs disallowed.
+    #Padrão "audit": robots.txt é sinal observável; pipeline prossegue e context.data["robots_disallowed"] é marcado para telemetria.
+    #Defina "block" em produção para interromper a coleta em URLs disallowed.
 
     # --- Orçamentos de aquisição (HTTP e browser) ---
-    # Dois orçamentos independentes substituem o timeout único por etapa para o FetchHTMLStep,
-    # eliminando a variabilidade causada por microetapas e interrupções prematuras.
+    #Dois orçamentos independentes substituem o timeout único de aquisição, eliminando a variabilidade causada por microetapas e interrupções prematuras.
     SCRAPER_HTTP_BUDGET_SECONDS: float = float(
         os.getenv("SCRAPER_HTTP_BUDGET_SECONDS", "10.0")
-    )  # Orçamento para curl_cffi, incluindo retries configurados
+    ) #Orçamento para curl_cffi, incluindo retries configurados
     SCRAPER_BROWSER_BUDGET_SECONDS: float = float(
         os.getenv("SCRAPER_BROWSER_BUDGET_SECONDS", "25.0")
-    )  # Orçamento para fallback Playwright (navegação + renderização)
+    ) #Orçamento para fallback Playwright (navegação + renderização)
 
     # --- Cache e execução do pipeline ---
     #Mantemos apenas controles numéricos necessários para previsibilidade.
@@ -53,10 +51,10 @@ class Settings(ConfigBase):
 
     SCRAPER_STEP_TIMEOUT_SECONDS: float = float(
         os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "15.0")
-    )  # Timeout para etapas de parsing; FetchHTMLStep usa os orçamentos acima
+    ) #Timeout para etapas de parsing; coleta usa os orçamentos acima
     SCRAPER_PIPELINE_TIMEOUT_SECONDS: float = float(
         os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "50.0")
-    )  # Segurança global: HTTP_BUDGET + BROWSER_BUDGET + overhead de parsing
+    ) #Segurança global: HTTP_BUDGET + BROWSER_BUDGET + overhead de parsing
 
     SCRAPER_SINGLEFLIGHT_LOCK_TTL: float = float(
         os.getenv("SCRAPER_SINGLEFLIGHT_LOCK_TTL", "15.0")
@@ -165,25 +163,6 @@ class Settings(ConfigBase):
         "",
     ) #Headers adicionais enviados além do conjunto mínimo
 
-    # --- Feature flags de migração arquitetural ---
-    # Controlam roteamento gradual para nova arquitetura (Fase 3+).
-    # Padrão False: fluxo legado ativo; True ativa novo componente correspondente.
-    SCRAPER_NEW_ORCHESTRATOR_ENABLED: bool = os.getenv(
-        "SCRAPER_NEW_ORCHESTRATOR_ENABLED", "False"
-    ).lower() in {"1", "true", "on", "yes"}
-
-    SCRAPER_NEW_COLLECTION_ENABLED: bool = os.getenv(
-        "SCRAPER_NEW_COLLECTION_ENABLED", "False"
-    ).lower() in {"1", "true", "on", "yes"}
-
-    SCRAPER_NEW_PARSING_CHAIN_ENABLED: bool = os.getenv(
-        "SCRAPER_NEW_PARSING_CHAIN_ENABLED", "False"
-    ).lower() in {"1", "true", "on", "yes"}
-
-    SCRAPER_NEW_POST_PROCESSING_ENABLED: bool = os.getenv(
-        "SCRAPER_NEW_POST_PROCESSING_ENABLED", "False"
-    ).lower() in {"1", "true", "on", "yes"}
-
     # --- Sessão persistente e bootstrap de domínio ---
     SCRAPER_PERSISTENT_SESSIONS_ENABLED: bool = os.getenv(
         "SCRAPER_PERSISTENT_SESSIONS_ENABLED", "True"
@@ -194,8 +173,7 @@ class Settings(ConfigBase):
     SCRAPER_DOMAIN_BOOTSTRAP_ENABLED: bool = os.getenv(
         "SCRAPER_DOMAIN_BOOTSTRAP_ENABLED", "True"
     ).lower() in {"1", "true", "on", "yes"}
-    # Padrão True: navega para homepage do domínio antes da primeira requisição de produto
-    # para aquecer a sessão e reduzir falsos positivos anti-bot em Mercado Livre.
+    #Padrão True: navega para homepage do domínio antes da primeira requisição de produto para aquecer a sessão e reduzir falsos positivos anti-bot em Mercado Livre.
 
     # --- Observabilidade ---
     SCRAPER_LOG_4XX_BODY: bool = os.getenv("SCRAPER_LOG_4XX_BODY", "True").lower() in {

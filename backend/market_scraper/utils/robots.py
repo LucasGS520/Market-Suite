@@ -14,21 +14,21 @@ Cache:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Awaitable, Callable
 from urllib import robotparser
 from urllib.parse import urlparse
 
 import httpx
 import structlog
+from tenacity import RetryCallState, retry, retry_if_exception_type, stop_after_attempt
+from tenacity.wait import wait_base
 
 from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.redis_client import get_redis_operational
 from shared.enums.cache_keys import CacheKey
 
-from market_scraper.utils.http_retry import (
-    RetryableHTTPError,
-    build_retrying_operation,
-)
-from market_scraper.utils.http_utils import build_timeout
+from market_scraper.utils.http_utils import build_timeout, parse_retry_after
 from market_scraper.core.config_scraper import settings
 
 
@@ -42,6 +42,108 @@ _ROBOTS_HEADERS = {
     "User-Agent": "marketsuite-scraper/1.0",
     "Accept": "text/plain",
 }
+_RETRYABLE_STATUS = {429, *range(500, 600)}
+
+
+@dataclass
+class _RetryableRobotsHTTPError(Exception):
+    """Erro transitório elegível para nova tentativa no download de robots.txt."""
+
+    reason: str
+    status_code: int | None = None
+    retry_after: float | None = None
+
+
+def _compute_retry_wait_seconds(*, retry_state: RetryCallState, multiplier: float) -> float:
+    attempt_index = max(retry_state.attempt_number - 1, 0)
+    base_wait = max(0.0, multiplier) * (2 ** attempt_index)
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if isinstance(exc, _RetryableRobotsHTTPError) and exc.retry_after is not None:
+        return exc.retry_after
+    return base_wait
+
+
+class _WaitRobotsRetryAfter(wait_base):
+    """Combina backoff exponencial simples com prioridade ao Retry-After."""
+
+    def __init__(self, *, multiplier: float) -> None:
+        self._multiplier = multiplier
+
+    def __call__(self, retry_state: RetryCallState) -> float:
+        return _compute_retry_wait_seconds(
+            retry_state=retry_state,
+            multiplier=self._multiplier,
+        )
+
+
+def _categorize_retry_reason(status_code: int | None) -> str:
+    if status_code == 429:
+        return "too_many_requests"
+    if status_code is not None and 500 <= status_code < 600:
+        return "server_error"
+    return "network_error"
+
+
+def _before_robots_retry_sleep(retry_state: RetryCallState) -> None:
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    if not isinstance(exc, _RetryableRobotsHTTPError):
+        return
+    wait_seconds = _compute_retry_wait_seconds(
+        retry_state=retry_state,
+        multiplier=max(0.0, settings.SCRAPER_HTTP_RETRY_BACKOFF_BASE),
+    )
+    logger.warning(
+        "http_retry_scheduled",
+        target="robots",
+        reason=exc.reason,
+        wait_seconds=wait_seconds,
+    )
+
+
+def _raise_for_retryable_robots_response(response: httpx.Response) -> None:
+    if response.status_code not in _RETRYABLE_STATUS:
+        return
+    retry_after = parse_retry_after(response.headers.get("Retry-After"))
+    reason = _categorize_retry_reason(response.status_code)
+    exc = httpx.HTTPStatusError(
+        "Download HTTP elegível para nova tentativa",
+        request=response.request,
+        response=response,
+    )
+    raise _RetryableRobotsHTTPError(
+        reason=reason,
+        status_code=response.status_code,
+        retry_after=retry_after,
+    ) from exc
+
+
+def _build_robots_retrying_operation(
+    operation: Callable[[], Awaitable[httpx.Response]],
+) -> Callable[[], Awaitable[httpx.Response]]:
+    attempts = max(1, settings.SCRAPER_HTTP_RETRIES + 1)
+    wait_strategy = _WaitRobotsRetryAfter(
+        multiplier=max(0.0, settings.SCRAPER_HTTP_RETRY_BACKOFF_BASE),
+    )
+
+    @retry(
+        retry=retry_if_exception_type(_RetryableRobotsHTTPError),
+        stop=stop_after_attempt(attempts),
+        wait=wait_strategy,
+        before_sleep=_before_robots_retry_sleep,
+        reraise=True,
+    )
+    async def _wrapped_operation() -> httpx.Response:
+        try:
+            response = await operation()
+        except httpx.RequestError as exc:
+            raise _RetryableRobotsHTTPError(
+                reason=_categorize_retry_reason(None),
+            ) from exc
+
+        _raise_for_retryable_robots_response(response)
+        return response
+
+    return _wrapped_operation
 
 def _prepare_urls(url: str) -> tuple[str, str, str]:
     """ Normaliza a URL recebida e retorna informações úteis para o cache """
@@ -78,14 +180,11 @@ async def _download_robots(robots_url: str, *, timeout: float) -> str | None:
         ) as client:
             return await client.get(robots_url, headers=_ROBOTS_HEADERS)
         
-    wrapped_operation = build_retrying_operation(
-        target="robots",
-        operation=_execute_request,
-    )
+    wrapped_operation = _build_robots_retrying_operation(_execute_request)
 
     try:
         response = await wrapped_operation()
-    except RetryableHTTPError as exc:
+    except _RetryableRobotsHTTPError as exc:
         logger.warning(
             "robots_fetch_retry_exhausted",
             robots_url=sanitize_log_data(robots_url),

@@ -6,6 +6,7 @@ beautifulsoup4==4.13.4
 lxml==5.3.1
 parsel==1.9.1
 selectolax==0.4.0
+extruct==0.18.0
 
 # Extracao de metadados e precos
 price-parser==0.5.0
@@ -14,6 +15,7 @@ price-parser==0.5.0
 aiohttp==3.12.15
 Brotli==1.1.0
 brotlicffi==1.1.0.0
+crawlee>=0.6.0,<1.0.0
 cloudscraper==1.2.71
 mechanicalsoup==1.4.0
 curl_cffi>=0.15.0

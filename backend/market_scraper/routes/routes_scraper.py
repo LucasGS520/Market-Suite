@@ -10,7 +10,8 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Request, Response, status
-import structlog
+from fastapi.responses import JSONResponse
+from structlog.stdlib import BoundLogger
 
 from shared.utils.logging_utils import sanitize_log_data
 from shared.utils.url_validation import (
@@ -26,23 +27,12 @@ from shared.schemas.shared_schemas_scraper import (
     SCRAPER_CONTRACT_VERSION_HEADER,
 )
 
-from market_scraper.core.config_scraper import settings
-from market_scraper.routes.error_mapper import _http_error, _map_http_download_issue
-from market_scraper.routes.response_builder import (
-    build_no_result_response,
-    build_success_response,
-    has_useful_payload,
-)
-from market_scraper.routes.response_mapper import _sanitize_payload
-from market_scraper.use_cases.parse_product import (
+from market_scraper.scraper_orchestrator.parse_product import (
     ParseProductError,
     ParseProductNoResult,
-    ParseProductUseCase,
+    ParseProduct,
 )
-
-from market_scraper.services.pipeline_factory import run_pipeline
-from market_scraper.services.synergic_pipeline import PipelineTimeoutError
-from market_scraper.utils.conditional_payload import (
+from market_scraper.infra.cache.conditional_payload import (
     build_cache_headers,
     get_cached_response,
     invalidate_cached_response,
@@ -50,10 +40,12 @@ from market_scraper.utils.conditional_payload import (
     should_return_not_modified,
     store_response,
 )
+from market_scraper.infra.logging.structured_logger import get_scraper_logger
 from market_scraper.utils.http_utils import HostResolutionError, resolve_public_address
+from market_scraper.utils.response_builder import build_no_result_response
 
 
-logger = structlog.get_logger("routes_scraper")
+logger = get_scraper_logger("routes_scraper")
 
 _CONTRACT_VERSION_HEADER_DOC = {
     SCRAPER_CONTRACT_VERSION_HEADER: {
@@ -130,6 +122,36 @@ def _ensure_public_endpoint(host: str) -> UrlIssue | None:
         return UrlIssue(code="blocked_host", message=str(exc))
     return None
 
+def _sanitize_invalid_url_log_payload(url: str) -> dict[str, str]:
+    """Normaliza URL inválida antes do registro em log."""
+    return {"url": sanitize_log_data(url)}
+
+def _build_error_response(
+    issue: UrlIssue,
+    *,
+    status_code: int,
+    trace_id: str,
+    request_logger: BoundLogger,
+    log_extra: dict[str, Any] | None = None,
+) -> JSONResponse:
+    """Monta resposta JSON padronizada para erros do endpoint."""
+    request_logger.warning(
+        "parse_error",
+        error_code=issue.code,
+        http_status=status_code,
+        message=issue.message,
+        **dict(log_extra or {}),
+    )
+    return JSONResponse(
+        status_code=status_code,
+        headers={SCRAPER_CONTRACT_VERSION_HEADER: SCRAPER_CONTRACT_VERSION},
+        content={
+            "message": issue.message,
+            "error_code": issue.code,
+            "trace_id": trace_id,
+        },
+    )
+
 router = APIRouter(tags=["scraper"])
 
 @router.post(
@@ -153,12 +175,12 @@ async def parse_endpoint(
         normalized_url = shared_normalize_product_url(raw_url)
     except ValueError as exc:
         issue = UrlIssue(code="invalid_url", message=str(exc))
-        return _http_error(
+        return _build_error_response(
             issue,
             status_code=status.HTTP_400_BAD_REQUEST,
             trace_id=trace_id,
             request_logger=request_logger,
-            log_extra=_sanitize_payload(raw_url),
+            log_extra=_sanitize_invalid_url_log_payload(raw_url),
         )
     
     request_logger = request_logger.bind(url=sanitize_log_data(normalized_url))
@@ -168,7 +190,7 @@ async def parse_endpoint(
         ensure_public_endpoint=_ensure_public_endpoint,    
     )
     if compatibility:
-        return _http_error(
+        return _build_error_response(
             compatibility,
             status_code=status.HTTP_400_BAD_REQUEST,
             trace_id=trace_id,
@@ -213,80 +235,28 @@ async def parse_endpoint(
     else:
         cache_status = "bypass"
 
-    if settings.SCRAPER_NEW_ORCHESTRATOR_ENABLED:
-        # ── Novo fluxo: ParseProductUseCase (collect → extract → post_process → build_response)
-        use_case_result = await ParseProductUseCase().execute(
-            normalized_url,
-            request_logger=request_logger,
-            force_refresh=force_refresh,
-            trace_id=trace_id,
-        )
-        if isinstance(use_case_result, ParseProductError):
-            if use_case_result.invalidate_cache:
-                invalidate_cached_response(normalized_url)
-            return _http_error(
-                use_case_result.issue,
-                status_code=use_case_result.http_status,
-                trace_id=trace_id,
-                request_logger=request_logger,
-            )
-        if isinstance(use_case_result, ParseProductNoResult):
-            return build_no_result_response(
-                outcome=use_case_result.outcome,
-                request_logger=request_logger,
-                trace_id=trace_id,
-            )
-        parse_response = use_case_result.parser_response
-    else:
-        # ── Fluxo legado: pipeline direto (mantido até Fase 4)
-        try:
-            outcome = await run_pipeline(
-                normalized_url,
-                force_refresh=force_refresh,
-                trace_id=trace_id,
-            )
-        except PipelineTimeoutError as exc:
-            issue = UrlIssue(code="pipeline_timeout", message="Tempo limite do pipeline excedido")
-            return _http_error(
-                issue,
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                trace_id=trace_id,
-                request_logger=request_logger,
-                log_extra={"error": sanitize_log_data(str(exc))},
-            )
-
-        http_issue = _map_http_download_issue(outcome)
-        if http_issue:
-            issue, http_status_code = http_issue
+    use_case_result = await ParseProduct().execute(
+        normalized_url,
+        request_logger=request_logger,
+        force_refresh=force_refresh,
+        trace_id=trace_id,
+    )
+    if isinstance(use_case_result, ParseProductError):
+        if use_case_result.invalidate_cache:
             invalidate_cached_response(normalized_url)
-            return _http_error(
-                issue,
-                status_code=http_status_code,
-                trace_id=trace_id,
-                request_logger=request_logger,
-            )
-
-        if outcome.status != "success" or not has_useful_payload(outcome.payload or {}):
-            return build_no_result_response(
-                outcome=outcome,
-                request_logger=request_logger,
-                trace_id=trace_id,
-            )
-
-        payload_data = outcome.payload
-        request_logger.info(
-            "route_payload_ready",
-            url=sanitize_log_data(normalized_url),
-            availability=payload_data.get("availability"),
-            last_status=payload_data.get("last_status"),
-            is_useful=True,
-        )
-        parse_response = build_success_response(
-            payload_data,
-            normalized_url=normalized_url,
-            outcome=outcome,
+        return _build_error_response(
+            use_case_result.issue,
+            status_code=use_case_result.http_status,
+            trace_id=trace_id,
             request_logger=request_logger,
         )
+    if isinstance(use_case_result, ParseProductNoResult):
+        return build_no_result_response(
+            reason_code=use_case_result.reason_code,
+            trace_id=trace_id,
+            request_logger=request_logger.bind(url=sanitize_log_data(normalized_url)),
+        )
+    parse_response = use_case_result.parser_response
     try:
         metadata = store_response(normalized_url, parse_response)
     except Exception as exc:
