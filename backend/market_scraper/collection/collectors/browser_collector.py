@@ -140,16 +140,9 @@ class PlaywrightBrowserCollector:
                 future.set_exception(error)
 
         self._run_task = asyncio.create_task(self._crawler.run())
-        try:
-            await self._do_startup_warmup()
-            self._browser_ready = True
-            logger.info("browser_collector_started", max_concurrent=_MAX_CONCURRENT)
-        except Exception as exc:
-            logger.warning(
-                "browser_collector_degraded",
-                reason="warmup_failed",
-                error=str(exc),
-            )
+        await asyncio.sleep(0.1)
+        self._browser_ready = True
+        logger.info("browser_collector_started", max_concurrent=_MAX_CONCURRENT)
 
     async def shutdown(self) -> None:
         """Para o PlaywrightCrawler persistente e aguarda encerramento."""
@@ -225,33 +218,6 @@ class PlaywrightBrowserCollector:
             self._pending.pop(request_id, None)
 
     # ── Helpers internos ──────────────────────────────────────────────────────
-
-    async def _do_startup_warmup(self) -> None:
-        """Enfileira requisição para about:blank e aguarda resultado.
-
-        Confirma que o browser pool foi inicializado com sucesso antes de
-        declarar o collector como pronto. Levanta exceção se o pool falhou.
-        """
-        from crawlee._request import Request as CrawleeRequest
-
-        request_id = f"warmup-{uuid4()}"
-        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-        self._pending[request_id] = future
-
-        await self._crawler.add_requests([
-            CrawleeRequest.from_url(
-                "about:blank",
-                unique_key=request_id,
-                user_data={"_request_id": request_id},
-            )
-        ])
-
-        try:
-            await asyncio.wait_for(asyncio.shield(future), timeout=30.0)
-        except asyncio.TimeoutError as exc:
-            raise TimeoutError("browser warmup timed out after 30s") from exc
-        finally:
-            self._pending.pop(request_id, None)
 
     async def _block_resources(self, route: Any, request: Any) -> None:
         if request.resource_type in _BLOCKED_RESOURCE_TYPES:

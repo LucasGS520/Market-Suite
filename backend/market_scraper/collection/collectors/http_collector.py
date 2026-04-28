@@ -65,6 +65,7 @@ class HttpCollector:
             request_handler_timeout=timedelta(seconds=settings.SCRAPER_HTTP_BUDGET_SECONDS),
             storage_client=MemoryStorageClient(),
             configure_logging=False,
+            keep_alive=True,
         )
 
         @self._crawler.router.default_handler

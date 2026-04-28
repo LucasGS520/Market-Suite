@@ -23,13 +23,6 @@ O `market_scraper` está **operacional no nível de API**, mas **não está func
 
 O módulo **não está extraindo produtos após a reestruturação**. A API e a orquestração estão funcionando, mas o pipeline está em estado **degradado/incompleto**:
 
-* **Disponibilidade da API:** OK.
-* **Validação/normalização de rota:** OK.
-* **Coleta HTTP:** parcialmente OK, mas classifica HTML ruim como válido.
-* **Extração:** falhando em todos os testes registrados.
-* **Fallback browser:** não operacional.
-* **Resultado de negócio:** zero produtos extraídos.
-
 ---
 
 ## Regras e Instruções de Execução
