@@ -1,12 +1,9 @@
-""" Implementações concretas de coletores HTTP e browser. """
+"""Implementações concretas de coletores browser."""
 
 from market_scraper.collection.collectors.browser_collector import PlaywrightBrowserCollector
-from market_scraper.collection.collectors.http_collector import CurlCFFIHttpCollector
-from market_scraper.collection.collectors.protocols import BrowserCollector, HttpCollector
+from market_scraper.collection.collectors.protocols import BrowserCollector
 
 __all__ = [
-    "HttpCollector",
     "BrowserCollector",
-    "CurlCFFIHttpCollector",
     "PlaywrightBrowserCollector",
 ]

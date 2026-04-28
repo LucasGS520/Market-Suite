@@ -255,7 +255,7 @@ def test_parse_flow_returns_blocked_host_when_public_resolution_fails(
     assert response.json()["error_code"] == "blocked_host"
 
 
-def test_parse_flow_returns_unsupported_by_robots(
+def test_parse_flow_returns_robots_disallowed(
     integration_client,
     monkeypatch,
 ):
@@ -276,7 +276,7 @@ def test_parse_flow_returns_unsupported_by_robots(
     response = integration_client.post("/scraper/parse", json={"url": "https://example.com/product"})
 
     assert response.status_code == 403
-    assert response.json()["error_code"] == "unsupported_by_robots"
+    assert response.json()["error_code"] == "robots_disallowed"
 
 
 def test_parse_flow_returns_too_many_redirects(

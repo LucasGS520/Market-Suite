@@ -93,7 +93,14 @@ def map_collection_error(error_code: str | None) -> tuple[UrlIssue, int]:
     return _UPSTREAM_ERROR_DEFAULT
 
 
+#Erros que indicam problema de conteúdo (não infra transitória) → invalidam cache.
+CACHE_INVALIDATING_ERROR_CODES: frozenset[str] = frozenset(
+    {"anti_bot_page", "too_many_redirects", "invalid_url"}
+)
+
+
 __all__ = [
+    "CACHE_INVALIDATING_ERROR_CODES",
     "COLLECTION_ERROR_MAP",
     "map_collection_error",
 ]

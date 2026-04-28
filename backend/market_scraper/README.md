@@ -28,8 +28,8 @@ market_scraper/
 ├── routes/                    # Transporte HTTP — casca fina de entrada e saída
 ├── scraper_orchestrator/      # Use case canônico e interface pública do pipeline
 ├── collection/                # Coleta de HTML: política, coletores e DTOs
-│   ├── collectors/            #   HttpCollector (curl_cffi), BrowserCollector (Playwright)
-│   ├── crawler/               #   CrawleeRuntime — coordena HTTP → browser
+│   ├── collectors/            #   HttpCollector (curl_cffi via Crawlee), BrowserCollector (Playwright)
+│   ├── crawler/               #   CrawleeRuntime — coordena HTTP → browser com política de decisão
 │   └── dto/                   #   CollectedDocument, CollectionAttempt
 ├── extraction/                # Extração de dados: cadeia determinística e parsers
 │   ├── parsers/               #   extruct, parsel, beautifulsoup
@@ -41,11 +41,11 @@ market_scraper/
 │   ├── availability_inference.py   # Inferência de disponibilidade por status HTTP
 │   ├── response_classifier.py      # Classificação de resposta HTTP / anti-bot
 │   └── telemetry_service.py        # Emissão de eventos estruturados
-├── infra/                     # Infraestrutura — cache, limites, browser pool, logging
-│   ├── browser/               #   PlaywrightPool (singleton)
-│   ├── cache/                 #   Cache condicional, robots cache, singleflight
-│   ├── limits/                #   AdaptiveRateLimiter, ConcurrencyLimits
+├── infra/                     # Infraestrutura — cache, limites, logging, robots, erros
+│   ├── cache/                 #   Cache condicional, singleflight, TTL
+│   ├── limits/                #   AdaptiveRateLimiter por domínio
 │   ├── logging/               #   StructuredLogger com contexto obrigatório
+│   ├── robots.py              #   Validação robots.txt com cache Redis
 │   └── errors_map.py          #   Taxonomia canônica: erro interno → (error_code, mensagem, http_status)
 ├── domain/                    # DTOs de domínio compartilhados entre camadas
 ├── utils/                     # Utilitários: HTTP, preço, builders de resposta, robots
@@ -86,13 +86,13 @@ market_scraper/
        │
 ┌──────▼──────────────────────────────┐
 │ collectors/                         │
-│ CurlCFFIHttpCollector (curl_cffi)   │
+│ HttpCollector (curl_cffi/Crawlee)   │
 │ PlaywrightBrowserCollector          │
 └──────┬──────────────────────────────┘
        │
 ┌──────▼──────────────────────────────────────────────────┐
 │  infra/                                                 │
-│  cache/ · limits/ · browser/ · logging/ · errors_map   │
+│  cache/ · limits/ · logging/ · robots · errors_map     │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -161,8 +161,9 @@ Content-Type: application/json
 
 {
   "url": "https://www.mercadolivre.com.br/produto/MLBxxx",
-  "force_refresh": false,
-  "metadata": {}
+  "metadata": {
+    "force_refresh": false
+  }
 }
 ```
 
@@ -254,9 +255,9 @@ A interface pública do módulo é exposta por [`scraper_orchestrator/orchestrat
 
 | Componente | Arquivo | Papel |
 |-----------|---------|-------|
-| `CrawleeRuntime` | [`crawler/crawlee_runtime.py`](collection/crawler/crawlee_runtime.py) | Coordena HTTP → browser com política de decisão |
-| `CurlCFFIHttpCollector` | [`collectors/http_collector.py`](collection/collectors/http_collector.py) | Adapter fino para `curl_cffi` (fingerprinting delegado à lib) |
-| `PlaywrightBrowserCollector` | [`collectors/browser_collector.py`](collection/collectors/browser_collector.py) | Adapter para `PlaywrightPool` (lifecycle delegado ao pool) |
+| `CrawleeRuntime` | [`crawler/crawlee_runtime.py`](collection/crawler/crawlee_runtime.py) | Coordena HTTP → browser com política de decisão; lifecycle via `startup()`/`shutdown()` |
+| `HttpCollector` | [`collectors/http_collector.py`](collection/collectors/http_collector.py) | Wrapper fino sobre `CurlImpersonateHttpClient` do Crawlee (curl_cffi com impersonation) |
+| `PlaywrightBrowserCollector` | [`collectors/browser_collector.py`](collection/collectors/browser_collector.py) | Fallback browser via Playwright; stealth + resource blocking |
 | `ResponseClassifierPolicy` | [`policy.py`](collection/policy.py) | Decide `ACCEPT / ESCALATE_TO_BROWSER / STOP_UNAVAILABLE / STOP_FAILURE` |
 | `CollectedDocument` | [`dto/collected_document.py`](collection/dto/collected_document.py) | DTO imutável com HTML, status e telemetria de coleta |
 
@@ -293,14 +294,13 @@ Serviços unitários compartilhados por múltiplas camadas do pipeline.
 
 | Componente | Arquivo | Papel |
 |-----------|---------|-------|
-| `PlaywrightPool` | [`browser/playwright_pool.py`](infra/browser/playwright_pool.py) | Pool singleton de browsers Playwright com sessões por domínio |
 | Cache condicional | [`cache/conditional_payload.py`](infra/cache/conditional_payload.py) | ETag / Last-Modified / resposta 304 |
-| Robots | [`utils/robots.py`](utils/robots.py) | Validação de robots.txt com cache Redis por domínio |
 | Singleflight | [`cache/singleflight.py`](infra/cache/singleflight.py) | Coalesce de requisições paralelas à mesma URL |
+| Robots | [`infra/robots.py`](infra/robots.py) | Validação de robots.txt com cache Redis por domínio |
 | `AdaptiveRateLimiter` | [`limits/adaptive_rate_limiter.py`](infra/limits/adaptive_rate_limiter.py) | Cooldown por domínio baseado em histórico de erros |
-| `ConcurrencyLimits` | [`limits/concurrency_limits.py`](infra/limits/concurrency_limits.py) | Semáforo para controle de concorrência do browser pool |
 | `StructuredLogger` | [`logging/structured_logger.py`](infra/logging/structured_logger.py) | Logger com contexto obrigatório (`trace_id`, `domain`, etapa) |
 | `COLLECTION_ERROR_MAP` | [`errors_map.py`](infra/errors_map.py) | Taxonomia interna → (`error_code`, mensagem, `http_status`) |
+| `CACHE_INVALIDATING_ERROR_CODES` | [`errors_map.py`](infra/errors_map.py) | Erros de conteúdo que invalidam cache (ex.: `anti_bot_page`) |
 
 ---
 
@@ -313,7 +313,7 @@ Cada execução do pipeline emite eventos estruturados via `TelemetryService`, s
 | Evento | Campos principais |
 |--------|-------------------|
 | `collection_started` | `url` |
-| `collection_completed` | `layer`, `duration_ms`, `fallback_taken`, `anti_bot_detected`, `http_status` |
+| `collection_completed` | `layer`, `duration_ms`, `fallback_taken`, `anti_bot_detected`, `http_status`, `runtime`, `classification_reason` |
 | `extraction_started` | — |
 | `extraction_completed` | `parser_used`, `duration_ms`, `succeeded` |
 | `post_processing_started` | — |
@@ -343,6 +343,7 @@ Variáveis de ambiente controladas em [`core/config_scraper.py`](core/config_scr
 |----------|--------|-----------|
 | `SCRAPER_HTTP_BUDGET_SECONDS` | `10.0` | Orçamento total para coleta HTTP (curl_cffi + retries) |
 | `SCRAPER_BROWSER_BUDGET_SECONDS` | `25.0` | Orçamento para fallback Playwright |
+| `SCRAPER_STEP_TIMEOUT_SECONDS` | `15.0` | Timeout para etapas de parsing (extração/pós-processamento) |
 | `SCRAPER_PIPELINE_TIMEOUT_SECONDS` | `50.0` | Timeout global do pipeline (proteção de segurança) |
 | `SCRAPER_HTTP_RETRIES` | `2` | Tentativas extras para downloads HTTP |
 | `SCRAPER_HTTP_RETRY_BACKOFF_BASE` | `0.5` | Base do backoff exponencial entre retries |
@@ -430,7 +431,7 @@ uvicorn market_scraper.main:app --reload --port 8001
 1. **Obter `trace_id`** do campo `trace_id` na resposta de erro JSON.
 2. **Filtrar logs** pelo `trace_id` para ver toda a sequência de eventos da requisição.
 3. **Inspecionar `payload.acquisition`** na `ParserResponse` para identificar qual camada falhou.
-4. **Forçar nova coleta** com `"force_refresh": true` na request para ignorar cache.
+4. **Forçar nova coleta** com `"force_refresh": true` dentro do campo `metadata` da request para ignorar cache.
 
 ### Alertas Recomendados
 

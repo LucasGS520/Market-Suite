@@ -25,6 +25,7 @@ class CollectedDocument:
         timestamp: Unix timestamp de início da operação (time.time()).
         duration_ms: Duração total da coleta em milissegundos.
         attempts: Registro imutável de todas as tentativas realizadas.
+        final_url: URL final após redirecionamentos; ``None`` se não rastreado (Crawlee preenche na Fase 4).
     """
 
     html: str | None
@@ -40,6 +41,7 @@ class CollectedDocument:
     error_code: str | None = None
     classification_reason: str | None = None
     anti_bot_bypassed: bool = False
+    final_url: str | None = None
 
     @property
     def is_successful(self) -> bool:

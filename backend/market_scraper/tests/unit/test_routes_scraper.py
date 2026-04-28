@@ -65,7 +65,7 @@ def test_parse_route_returns_mapped_http_issue_and_invalidates_cache(monkeypatch
     invalidated = []
     result = ParseProductError(
         kind="error",
-        issue=UrlIssue(code="unsupported_by_robots", message="Bloqueado por robots.txt"),
+        issue=UrlIssue(code="robots_disallowed", message="Bloqueado por robots.txt"),
         http_status=403,
         stage_timings={},
         invalidate_cache=True,
@@ -99,7 +99,7 @@ def test_parse_route_returns_mapped_http_issue_and_invalidates_cache(monkeypatch
     response = client.post("/scraper/parse", json={"url": "example.com/product"})
 
     assert response.status_code == 403
-    assert response.json()["error_code"] == "unsupported_by_robots"
+    assert response.json()["error_code"] == "robots_disallowed"
     assert response.headers[SCRAPER_CONTRACT_VERSION_HEADER] == SCRAPER_CONTRACT_VERSION
     assert invalidated == ["https://example.com/product"]
 

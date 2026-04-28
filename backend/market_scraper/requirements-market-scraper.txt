@@ -12,14 +12,12 @@ extruct==0.18.0
 price-parser==0.5.0
 
 # HTTP e scraping
-aiohttp==3.12.15
 Brotli==1.1.0
 brotlicffi==1.1.0.0
-crawlee>=0.6.0,<1.0.0
-cloudscraper==1.2.71
-mechanicalsoup==1.4.0
-curl_cffi>=0.15.0
-playwright>=1.40.0
+crawlee[curl-impersonate,playwright]>=1.6.3,<2.0.0
+# remover: browserforge==0.4.4
+curl_cffi>=0.7.0,<1.0.0
+playwright>=1.40.0,<2.0.0
 
 # Utilitarios
 PyYAML==6.0.2

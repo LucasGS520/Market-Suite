@@ -22,7 +22,7 @@ from market_scraper.extraction.parsers import (
     parse_with_parsel,
 )
 from market_scraper.services.availability_inference import detect_availability
-from market_scraper.utils.http_download import extract_domain
+from market_scraper.utils.http_utils import extract_domain
 from market_scraper.utils.validator import DataQualityValidator
 
 

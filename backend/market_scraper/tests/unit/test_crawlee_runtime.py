@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 from market_scraper.collection.crawler.crawlee_runtime import CrawleeRuntime
@@ -28,17 +27,23 @@ _BROWSER_HTML = "<html><body>" + "y" * 3000 + "</body></html>"
 def _make_runtime(
     *,
     http_html: str | None = _VALID_HTML,
-    http_exc: Exception | None = None,
+    http_status: int = 200,
+    http_error_tuple: tuple | None = None,
     browser_html: str | None = _BROWSER_HTML,
     browser_exc: Exception | None = None,
     policy_decision: CollectionDecision | None = None,
+    browser_antibot_result: dict | None = None,
 ) -> CrawleeRuntime:
-    http_mock = AsyncMock()
-    if http_exc is not None:
-        http_mock.fetch.side_effect = http_exc
+    # Mock do HttpCollector — retorna tupla (html, status, error, error_code)
+    http_collector_mock = AsyncMock()
+    http_collector_mock.is_ready = True
+    if http_error_tuple is not None:
+        http_collector_mock.fetch.return_value = http_error_tuple
     else:
-        http_mock.fetch.return_value = http_html
+        html = http_html if http_html is not None else ""
+        http_collector_mock.fetch.return_value = (html, http_status, None, None)
 
+    # Mock do browser
     browser_mock = AsyncMock()
     browser_mock.is_ready = True
     if browser_exc is not None:
@@ -46,6 +51,7 @@ def _make_runtime(
     else:
         browser_mock.fetch.return_value = browser_html
 
+    # Mock da política
     policy_mock = MagicMock()
     if policy_decision is not None:
         policy_mock.classify.return_value = policy_decision
@@ -55,9 +61,14 @@ def _make_runtime(
             reason="html_ok",
             telemetry={},
         )
+    policy_mock.classify_browser_result.return_value = (
+        browser_antibot_result
+        if browser_antibot_result is not None
+        else {"anti_bot_pattern": None, "anti_bot_detected": False}
+    )
 
     return CrawleeRuntime(
-        http_collector=http_mock,
+        http_collector=http_collector_mock,
         browser_collector=browser_mock,
         policy=policy_mock,
     )
@@ -107,13 +118,9 @@ async def test_accept_with_anti_bot_in_telemetry():
 
 @pytest.mark.asyncio
 async def test_stop_unavailable_returns_no_html_without_browser():
-    http_exc = httpx.HTTPStatusError(
-        "HTTP 404",
-        request=httpx.Request("GET", "https://exemplo.com/produto/1"),
-        response=httpx.Response(404),
-    )
     runtime = _make_runtime(
-        http_exc=http_exc,
+        http_html=None,
+        http_status=404,
         policy_decision=CollectionDecision(
             action=CollectionPolicyAction.STOP_UNAVAILABLE,
             reason="http_404_unavailable",
@@ -240,13 +247,10 @@ async def test_browser_residual_antibot_detected():
             reason="html_empty",
             telemetry={},
         ),
+        browser_antibot_result={"anti_bot_pattern": "cloudflare_challenge", "anti_bot_detected": True},
     )
 
-    with patch(
-        "market_scraper.collection.crawler.crawlee_runtime.detect_anti_bot_pattern",
-        return_value="cloudflare_challenge",
-    ):
-        doc = await runtime.fetch_with_fallback("https://exemplo.com/produto/1")
+    doc = await runtime.fetch_with_fallback("https://exemplo.com/produto/1")
 
     assert doc.anti_bot_detected is True
     assert doc.anti_bot_pattern == "cloudflare_challenge"

@@ -31,7 +31,7 @@ from market_scraper.core.config_scraper import settings
 from market_scraper.domain.dtos import AcquisitionTelemetry, ParseResult, PostProcessResult
 from market_scraper.extraction import get_extraction_chain
 from market_scraper.infra.cache import singleflight
-from market_scraper.infra.errors_map import map_collection_error
+from market_scraper.infra.errors_map import CACHE_INVALIDATING_ERROR_CODES, map_collection_error
 from market_scraper.infra.logging.structured_logger import (
     bind_request_context,
     get_scraper_logger,
@@ -43,9 +43,9 @@ from market_scraper.services.availability_inference import (
     HTTP_STATUS_UNAVAILABLE,
     infer_availability_from_http_status,
 )
-from market_scraper.utils.http_download import extract_domain
+from market_scraper.utils.http_utils import extract_domain
 from market_scraper.utils.response_builder import build_parser_response
-from market_scraper.utils import robots as _robots
+from market_scraper.infra import robots as _robots
 
 
 logger = get_scraper_logger("parse_product_orchestrator")
@@ -55,7 +55,7 @@ logger = get_scraper_logger("parse_product_orchestrator")
 
 @dataclass(frozen=True)
 class ParseProductSuccess:
-    """Use case concluiu com payload válido para o contrato público."""
+    """ Use case concluiu com payload válido para o contrato público."""
 
     kind: Literal["success"]
     parser_response: object  # shared.schemas.ParserResponse
@@ -64,7 +64,7 @@ class ParseProductSuccess:
 
 @dataclass(frozen=True)
 class ParseProductNoResult:
-    """Pipeline concluiu mas nenhum parser extraiu dados suficientes."""
+    """ Pipeline concluiu mas nenhum parser extraiu dados suficientes."""
 
     kind: Literal["no_result"]
     reason_code: str | None = None
@@ -73,7 +73,7 @@ class ParseProductNoResult:
 
 @dataclass(frozen=True)
 class ParseProductError:
-    """Erro de aquisição ou timeout — produz resposta HTTP de erro."""
+    """ Erro de aquisição ou timeout — produz resposta HTTP de erro."""
 
     kind: Literal["error"]
     issue: UrlIssue
@@ -90,7 +90,7 @@ ParseProductResult = ParseProductSuccess | ParseProductNoResult | ParseProductEr
 # ── Use case ──────────────────────────────────────────────────────────────────
 
 class ParseProduct:
-    """Fluxo determinístico canônico: collect → extract → post_process → response.
+    """ Fluxo determinístico canônico: collect → extract → post_process → response.
 
     Sem feature flags, sem caminhos legados, sem loops ou retries internos.
     Cada estágio recebe saída tipada do anterior e produz saída tipada própria.
@@ -104,7 +104,7 @@ class ParseProduct:
         force_refresh: bool = False,
         trace_id: str | None = None,
     ) -> ParseProductResult:
-        """Executa o fluxo completo e retorna resultado tipado por cenário."""
+        """ Executa o fluxo completo e retorna resultado tipado por cenário."""
         effective_trace_id = trace_id or str(uuid4())
         structlog.contextvars.bind_contextvars(trace_id=effective_trace_id)
 
@@ -134,19 +134,19 @@ class ParseProduct:
             telemetry.pipeline_completed(
                 outcome="error",
                 total_duration_ms=int((perf_counter() - pipeline_started) * 1000),
-                extra={"reason": "unsupported_by_robots"},
+                extra={"reason": "robots_disallowed"},
             )
             return ParseProductError(
                 kind="error",
                 issue=UrlIssue(
-                    code="unsupported_by_robots",
+                    code="robots_disallowed",
                     message="O acesso à URL foi bloqueado pelas regras de robots.txt",
                 ),
                 http_status=http_status.HTTP_403_FORBIDDEN,
                 stage_timings=stage_timings,
             )
 
-        # Rate limiter pre-check
+        #Rate limiter pre-check
         allowed, _ = await adaptive_rate_limiter.should_allow(domain)
         if not allowed and settings.SCRAPER_RATE_LIMITER_BLOCK_ENABLED:
             stage_timings["collect"] = perf_counter() - t
@@ -184,6 +184,7 @@ class ParseProduct:
                     domain=domain,
                     http_timeout=settings.SCRAPER_HTTP_BUDGET_SECONDS,
                     browser_timeout=settings.SCRAPER_BROWSER_BUDGET_SECONDS,
+                    trace_id=effective_trace_id,
                 )
 
             doc, _ = await asyncio.wait_for(
@@ -224,9 +225,10 @@ class ParseProduct:
             fallback_taken=doc.fallback_taken,
             anti_bot_detected=doc.anti_bot_detected,
             http_status=doc.http_status,
+            classification_reason=doc.classification_reason,
         )
 
-        # Produto definitivamente indisponível (404/410/451) — sem extração
+        #Produto definitivamente indisponível (404/410/451) — sem extração
         if (
             not doc.is_successful
             and doc.http_status is not None
@@ -241,7 +243,7 @@ class ParseProduct:
                 doc, url, domain, stage_timings, request_logger
             )
 
-        # Erro de coleta — mapeia para resposta de erro HTTP
+        #Erro de coleta — mapeia para resposta de erro HTTP
         if not doc.is_successful:
             issue, status_code = map_collection_error(doc.error_code)
             telemetry.pipeline_completed(
@@ -261,7 +263,7 @@ class ParseProduct:
                 issue=issue,
                 http_status=status_code,
                 stage_timings=stage_timings,
-                invalidate_cache=True,
+                invalidate_cache=doc.error_code in CACHE_INVALIDATING_ERROR_CODES,
             )
 
         # ── Estágio 2: extract ────────────────────────────────────────────────
@@ -359,7 +361,7 @@ class ParseProduct:
         stage_timings: dict[str, float],
         request_logger: BoundLogger,
     ) -> ParseProductSuccess:
-        """Constrói resposta canônica para produto definitivamente indisponível.
+        """ Constrói resposta canônica para produto definitivamente indisponível.
 
         HTTP 404/410/451: sem extração, disponibilidade inferida do status HTTP.
         """

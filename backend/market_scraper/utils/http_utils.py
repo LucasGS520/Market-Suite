@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -186,10 +187,15 @@ def _validate_public_addresses(host: str, addresses: list[str]) -> list[str]:
 
     return sorted(set(validated))
 
+def extract_domain(url: str) -> str | None:
+    """ Extrai hostname normalizado da URL."""
+    return urlparse(url).hostname
+
 
 __all__ = [
     "HostResolutionError",
     "build_timeout",
+    "extract_domain",
     "parse_retry_after",
     "resolve_public_address",
 ]

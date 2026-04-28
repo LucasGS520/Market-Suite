@@ -114,7 +114,7 @@ def _patch_full_flow(monkeypatch, *, doc: CollectedDocument | None = None, post_
         return await producer(), True
 
     class StubRuntime:
-        async def fetch_with_fallback(self, url, *, domain, http_timeout, browser_timeout):
+        async def fetch_with_fallback(self, url, *, domain, http_timeout, browser_timeout, trace_id=None):
             return _doc
 
     class StubChain:
@@ -156,7 +156,7 @@ def test_parse_product_executes_canonical_stage_order(monkeypatch):
         return result, True
 
     class StubRuntime:
-        async def fetch_with_fallback(self, url, *, domain, http_timeout, browser_timeout):
+        async def fetch_with_fallback(self, url, *, domain, http_timeout, browser_timeout, trace_id=None):
             return _make_doc()
 
     class StubChain:
@@ -273,6 +273,7 @@ def test_parse_product_emits_canonical_telemetry(monkeypatch):
     assert events[0][1] == {"trace_id": "trace-1", "domain": _DOMAIN}
     assert events[2][1]["layer"] == "browser"
     assert events[2][1]["fallback_taken"] is True
+    assert events[2][1]["classification_reason"] == "html_valid"
     assert events[-1][1]["outcome"] == "success"
 
 
@@ -297,7 +298,7 @@ def test_parse_product_handles_unavailable_http_status(monkeypatch, status_code)
         return await producer(), True
 
     class StubRuntime:
-        async def fetch_with_fallback(self, url, *, domain, http_timeout, browser_timeout):
+        async def fetch_with_fallback(self, url, *, domain, http_timeout, browser_timeout, trace_id=None):
             return unavailable_doc
 
     monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product._robots.is_allowed", fake_is_allowed)
@@ -366,7 +367,7 @@ def test_parse_product_maps_collection_errors(monkeypatch, error_code, expected_
     error_doc = _make_doc(html=None, http_status=None, error_code=error_code)
 
     class StubRuntime:
-        async def fetch_with_fallback(self, url, *, domain, http_timeout, browser_timeout):
+        async def fetch_with_fallback(self, url, *, domain, http_timeout, browser_timeout, trace_id=None):
             return error_doc
 
     monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product._robots.is_allowed", fake_is_allowed)
@@ -393,7 +394,7 @@ def test_parse_product_robots_block(monkeypatch):
 
     assert isinstance(result, ParseProductError)
     assert result.http_status == 403
-    assert result.issue.code == "unsupported_by_robots"
+    assert result.issue.code == "robots_disallowed"
 
 
 # ── Stage timings ─────────────────────────────────────────────────────────────

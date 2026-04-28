@@ -1,8 +1,7 @@
-""" Ponto de entrada da aplicação FastAPI do serviço de scraping
+""" Ponto de entrada da aplicação FastAPI do serviço de scraping.
 
-O módulo cria a instância principal do FastAPI, registra as rotas
-de saúde e scraping, e gerencia o ciclo de vida do PlaywrightPool
-(Camada 3 de aquisição de HTML).
+Cria a instância do FastAPI, registra rotas de saúde e scraping,
+e gerencia o lifecycle do CrawleeRuntime (HTTP + browser fallback).
 """
 
 from contextlib import asynccontextmanager
@@ -12,9 +11,8 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-#Importação relativa para execução como pacote
 from .routes import routes_health, routes_scraper
-from .infra.browser.playwright_pool import playwright_pool
+from .collection import crawlee_runtime
 
 
 logger = structlog.get_logger("market_scraper.main")
@@ -24,17 +22,12 @@ logger = structlog.get_logger("market_scraper.main")
 async def _lifespan(app: FastAPI):
     """ Gerencia recursos de longa duração da aplicação."""
     # ── Startup ──────────────────────────────────────────────────────────
-    try:
-        await playwright_pool.startup()
-    except Exception as exc:
-        #Pool indisponível não impede o serviço de funcionar —
-        #Camada PLaywright simplesmente retornará PlaywrightPoolNotReadyError.
-        logger.warning("playwright_pool_startup_failed", error=str(exc))
+    await crawlee_runtime.startup()
 
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────────
-    await playwright_pool.shutdown()
+    await crawlee_runtime.shutdown()
 
 
 #Instância principal do aplicativo FastAPI
@@ -51,7 +44,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 #Registro das rotas de saúde e de scraping
 app.include_router(routes_health.router)
-#Disponibiliza o endpoint com dois prefixos por compatibilidade ("/scraper" e "/scrape")
+#Endpoint público único: POST /scraper/parse
 app.include_router(routes_scraper.router, prefix="/scraper")
 
 #A variável `app` é exposta para uso pelo Uvicorn

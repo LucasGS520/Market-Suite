@@ -17,7 +17,7 @@ Mako==1.3.10
 
 # Validacao e configuracao (Pydantic)
 pydantic==2.11.4
-pydantic-settings==2.9.1
+pydantic-settings==2.12.0
 pydantic_core==2.33.2
 python-dotenv==1.1.0
 python-dateutil==2.9.0.post0

@@ -4,7 +4,7 @@ from importlib import import_module
 
 import pytest
 
-from market_scraper.utils import robots
+from market_scraper.infra import robots
 
 
 class _FakeRedis:
@@ -24,7 +24,7 @@ class _FakeRedis:
 async def test_robots_uses_operational_redis_cache_between_calls(monkeypatch):
     fake_redis = _FakeRedis()
     download_calls = {"count": 0}
-    robots_impl = import_module("market_scraper.utils.robots")
+    robots_impl = import_module("market_scraper.infra.robots")
 
     async def fake_download_robots(robots_url: str, *, timeout: float):
         download_calls["count"] += 1

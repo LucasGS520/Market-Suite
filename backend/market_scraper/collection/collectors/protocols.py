@@ -1,9 +1,4 @@
-""" Portas (interfaces) da camada de coleta.
-
-Define os contratos que qualquer implementação de coletor HTTP ou browser
-deve satisfazer. A camada de domínio (use case, pipeline) depende apenas
-destas interfaces — nunca de curl_cffi, Playwright ou Crawlee diretamente.
-"""
+""" Portas (interfaces) da camada de coleta — HTTP e browser collectors. """
 
 from __future__ import annotations
 
@@ -12,25 +7,26 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class HttpCollector(Protocol):
-    """ Porta para coleta de HTML via HTTP.
+    """ Porta para coleta de HTML via HTTP com impersonation.
 
-    Implementações concretas: CurlCFFIHttpCollector.
+    Implementação concreta: HttpCollector em http_collector.py.
     """
 
-    async def fetch(self, url: str, *, timeout: float) -> str:
-        """ Obtém o HTML bruto da URL.
+    @property
+    def is_ready(self) -> bool:
+        """ Indica se o client HTTP está disponível."""
+        ...
 
-        Args:
-            url: URL do produto.
-            timeout: Orçamento em segundos para a requisição.
+    async def fetch(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        bound_logger: object | None = None,
+    ) -> tuple[str | None, int | None, Exception | None, str | None]:
+        """ Executa requisição HTTP.
 
-        Returns:
-            HTML como string.
-
-        Raises:
-            httpx.HTTPStatusError: Resposta com status de erro.
-            httpx.TooManyRedirects: Loop de redirecionamento.
-            httpx.InvalidURL | httpx.UnsupportedProtocol: URL inválida.
+        Retorna (html, http_status, error, error_code).
         """
         ...
 
@@ -39,12 +35,12 @@ class HttpCollector(Protocol):
 class BrowserCollector(Protocol):
     """ Porta para coleta de HTML via browser headless.
 
-    Implementações concretas: PlaywrightBrowserCollector.
+    Implementação concreta: PlaywrightBrowserCollector.
     """
 
     @property
     def is_ready(self) -> bool:
-        """ Indica se o pool de browser está disponível para receber requisições."""
+        """ Indica se o browser está disponível para receber requisições."""
         ...
 
     async def fetch(
@@ -56,16 +52,8 @@ class BrowserCollector(Protocol):
     ) -> str:
         """ Obtém o HTML renderizado pelo browser.
 
-        Args:
-            url: URL do produto.
-            timeout: Orçamento em segundos para renderização.
-            domain: Hostname para reutilização de sessão persistente.
-
-        Returns:
-            HTML renderizado como string.
-
         Raises:
-            PlaywrightPoolNotReadyError: Pool não está pronto.
+            PlaywrightPoolNotReadyError: Browser não está pronto.
             PlaywrightTimeoutError: Timeout de renderização.
             PlaywrightFetchError: Erro de navegação.
         """

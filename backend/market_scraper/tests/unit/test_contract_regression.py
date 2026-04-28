@@ -210,7 +210,7 @@ def test_error_response_schema_on_403(monkeypatch):
     _stub_prereqs(monkeypatch)
     _stub_use_case_error_with_invalidate(
         monkeypatch,
-        error_code="unsupported_by_robots",
+        error_code="robots_disallowed",
         message="O acesso à URL foi bloqueado pelas regras de robots.txt",
         http_status=403,
     )

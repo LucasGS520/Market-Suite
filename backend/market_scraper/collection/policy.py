@@ -22,33 +22,35 @@ from market_scraper.services.availability_inference import HTTP_STATUS_UNAVAILAB
 from market_scraper.services.response_classifier import (
     ClassificationAction,
     ResponseClassifier,
+    detect_anti_bot_pattern,
 )
 
 
 class CollectionPolicyAction(str, enum.Enum):
-    """Ação canônica decidida pela política de coleção.
+    """ Ação canônica decidida pela política de coleção.
 
     Quatro casos exaustivos — a camada de orquestração ramifica apenas aqui,
     sem precisar conhecer status HTTP ou padrões anti-bot internamente.
     """
 
     ACCEPT = "accept"
-    """HTML válido obtido — segue para a cadeia de parsing."""
+    """ HTML válido obtido — segue para a cadeia de parsing."""
 
     ESCALATE_TO_BROWSER = "escalate_to_browser"
-    """HTTP não foi suficiente; acionar browser como fallback."""
+    """ HTTP não foi suficiente; acionar browser como fallback."""
 
     STOP_UNAVAILABLE = "stop_unavailable"
-    """Produto definitivamente indisponível (404 / 410 / 451).
-    Retornar payload de disponibilidade sem tentar parsing."""
+    """ Produto definitivamente indisponível (404 / 410 / 451).
+    Retornar payload de disponibilidade sem tentar parsing.
+    """
 
     STOP_FAILURE = "stop_failure"
-    """Falha definitiva sem possibilidade de retry útil neste ciclo."""
+    """ Falha definitiva sem possibilidade de retry útil neste ciclo."""
 
 
 @dataclass(frozen=True)
 class CollectionDecision:
-    """Resultado tipado da política de coleção com telemetria auditável."""
+    """ Resultado tipado da política de coleção com telemetria auditável."""
 
     action: CollectionPolicyAction
     reason: str
@@ -56,7 +58,7 @@ class CollectionDecision:
 
 
 class ResponseClassifierPolicy:
-    """Adapta ResponseClassifier para o contrato CollectionDecision.
+    """ Adapta ResponseClassifier para o contrato CollectionDecision.
 
     Consolida a decisão de indisponibilidade (pré-classificador) e a
     decisão de escalonamento (pós-classificador) em um único ponto de
@@ -75,7 +77,7 @@ class ResponseClassifierPolicy:
         html: str | None,
         error: Exception | None,
     ) -> CollectionDecision:
-        """Classifica o resultado de uma tentativa HTTP.
+        """ Classifica o resultado de uma tentativa HTTP.
 
         Args:
             http_status: Código HTTP recebido; ``None`` se houve exceção antes.
@@ -85,7 +87,7 @@ class ResponseClassifierPolicy:
         Returns:
             CollectionDecision com ação canônica e telemetria.
         """
-        # Produto definitivamente indisponível — não vale acionar browser
+        #Produto definitivamente indisponível — não vale acionar browser
         if http_status is not None and http_status in HTTP_STATUS_UNAVAILABLE:
             return CollectionDecision(
                 action=CollectionPolicyAction.STOP_UNAVAILABLE,
@@ -113,12 +115,27 @@ class ResponseClassifierPolicy:
                 telemetry=result.telemetry,
             )
 
-        # ClassificationAction.REJECT — tudo mais é falha definitiva
+        #ClassificationAction.REJECT — tudo mais é falha definitiva
         return CollectionDecision(
             action=CollectionPolicyAction.STOP_FAILURE,
             reason=result.reason,
             telemetry=result.telemetry,
         )
+
+    def classify_browser_result(self, html: str | None) -> dict[str, Any]:
+        """ Classifica o HTML obtido via browser para anti-bot residual.
+
+        Centraliza a detecção de padrões anti-bot pós-browser na política,
+        mantendo essa decisão fora do runtime de coleta.
+
+        Returns:
+            Dict com 'anti_bot_pattern' (str|None) e 'anti_bot_detected' (bool).
+        """
+        pattern = detect_anti_bot_pattern(html) if html else None
+        return {
+            "anti_bot_pattern": pattern,
+            "anti_bot_detected": bool(pattern),
+        }
 
 
 __all__ = [

@@ -19,8 +19,8 @@ from market_scraper.infra.limits.adaptive_rate_limiter import (
     _COOLDOWN_SEVERE_SECONDS,
     _HISTORY_TTL_SECONDS,
     _MIN_REQUESTS_FOR_DECISION,
-    _THRESHOLD_LAYER1,
-    _THRESHOLD_LAYER3,
+    _THRESHOLD_HTTP,
+    _THRESHOLD_BROWSER,
     _THRESHOLD_REJECT,
 )
 
@@ -341,7 +341,7 @@ async def test_limiter_redis_fallback_allows_when_redis_fails_on_load():
 
 def test_threshold_values_are_consistent():
     """Limiares formam hierarquia válida: REJECT < LAYER3 < LAYER1."""
-    assert 0.0 < _THRESHOLD_REJECT < _THRESHOLD_LAYER3 < _THRESHOLD_LAYER1 < 1.0
+    assert 0.0 < _THRESHOLD_REJECT < _THRESHOLD_BROWSER < _THRESHOLD_HTTP < 1.0
 
 
 def test_history_ttl_is_one_hour():

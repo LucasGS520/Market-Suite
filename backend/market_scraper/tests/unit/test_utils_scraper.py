@@ -9,7 +9,7 @@ from shared.schemas import ParserResponse
 
 from market_scraper.infra.cache import conditional_payload as conditional_payload_module
 from market_scraper.utils import http_utils as http_utils_module
-from market_scraper.utils import robots as robots_module
+from market_scraper.infra import robots as robots_module
 from market_scraper.infra.cache.conditional_payload import (
     build_cache_headers,
     get_cached_response,

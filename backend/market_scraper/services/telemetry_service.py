@@ -20,7 +20,7 @@ Uso:
 
     tel = TelemetryService(trace_id="abc-123", domain="example.com")
     tel.collection_started(url=url)
-    tel.collection_completed(layer="curl_cffi", duration_ms=120)
+    tel.collection_completed(layer="curl_cffi", duration_ms=120, runtime="custom")
 """
 
 from __future__ import annotations
@@ -76,6 +76,8 @@ class TelemetryService:
         fallback_taken: bool = False,
         anti_bot_detected: bool = False,
         http_status: int | None = None,
+        runtime: str = "crawlee",
+        classification_reason: str | None = None,
     ) -> None:
         self._logger.info(
             EV_COLLECTION_COMPLETED,
@@ -84,6 +86,8 @@ class TelemetryService:
             fallback_taken=fallback_taken,
             anti_bot_detected=anti_bot_detected,
             http_status=http_status,
+            runtime=runtime,
+            classification_reason=classification_reason,
         )
 
     # ── Extração ─────────────────────────────────────────────────────────────

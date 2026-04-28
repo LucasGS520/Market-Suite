@@ -1,4 +1,4 @@
-"""Infraestrutura de cache (condicional, singleflight, robots e TTL)."""
+""" Infraestrutura de cache (condicional, singleflight, TTL). """
 
 from market_scraper.infra.cache import cache, singleflight
 
