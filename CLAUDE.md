@@ -17,41 +17,18 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-### **Objetivo**
-Transformar o módulo `market_scraper` de uma arquitetura complexa e dispersa (com coexistência de fluxos legado/novo, responsabilidades sobrepostas e múltiplos caminhos de decisão) para uma arquitetura simples, modular e determinística.
-1. Módulo reorganizado em 6 camadas explícitas com responsabilidades rígidas e sem sobreposição
-2. Fluxo canônico único: validação → coleta finalizada → extração em cadeia fixa → pós-processamento → resposta HTTP
-3. Ferramentas obrigatórias (Crawlee, curl_cffi, Playwright, Extruct, Parsel, BS4+lxml) integradas coesivamente
-4. Compatibilidade total com contrato externo mantida
+## **Diagnóstico Scraper Atual**
 
-**O que está bem alinhado com o espelho ideal `regras_scraper_ideal.md`**
+O `market_scraper` está **operacional no nível de API**, mas **não está funcional como scraper de produto** no teste registrado. O serviço sobe, expõe `/docs` e `/openapi.json`, inicializa o HTTP collector e tenta iniciar o browser collector; porém, após as requisições reais, **não houve nenhuma resposta 200 com produto extraído** no log enviado .
 
-- Fluxo canônico determinístico está implementado no caso de uso, com sequência clara de coleta → extração → pós-processamento → resposta: `parse_product.py`
-- Cadeia fixa de extração na ordem exigida (extruct → parsel → bs4+lxml): `extraction_chain.py`
-- DTOs fechados e tipados entre camadas: `dtos.py`
-- Taxonomia de erro centralizada e mapeamento canônico: `errors_map.py`
-- Telemetria estruturada por estágio com trace_id/domain: `telemetry_service.py`, `parse_product.py`
-- Cache condicional HTTP (ETag/Last-Modified/304) preservado: `conditional_payload.py`, `routes_scraper.py`
-- Integração das ferramentas obrigatórias está presente no módulo:
-  - Crawlee + curl impersonation + Playwright: `requirements-market-scraper.txt`
-  - Uso na coleta: `http_collector.py`, `browser_collector.py`
+O módulo **não está extraindo produtos após a reestruturação**. A API e a orquestração estão funcionando, mas o pipeline está em estado **degradado/incompleto**:
 
----
-
-**Diagnóstico de aderência (estado atual x espelho ideal)**
-
-- Regras, comportamento e fluxo de scraping: **alto alinhamento**
-- Arquitetura em camadas e contratos: **alto alinhamento**
-- Integração de ferramentas obrigatórias: **alto alinhamento**
-- Infra operacional “delegar vs customizar”: **alinhamento parcial** (principal gap)
-- Resultado geral: **módulo bem próximo do alvo ideal, com desvios pontuais concentrados na camada operacional de coleta**
-
----
-
-**Perguntas abertas para fechar aderência total**
-1. A decisão arquitetural é manter stealth e bloqueio de recursos manualmente no coletor browser, ou migrar isso para configuração mais nativa do runtime Crawlee? R: Migrar isso para configuração mais nativa do runtime Crawlee
-2. O loop de retry do HTTP collector deve permanecer como política de produto explícita, ou virar configuração do crawler/runtime para reduzir código operacional próprio? R: Virar configuração do crawler para reduzir código operacional próprio
-3. A rota deve passar a usar a fachada de orquestração para consolidar uma única porta interna? R: sim, consolidar única porta interna
+* **Disponibilidade da API:** OK.
+* **Validação/normalização de rota:** OK.
+* **Coleta HTTP:** parcialmente OK, mas classifica HTML ruim como válido.
+* **Extração:** falhando em todos os testes registrados.
+* **Fallback browser:** não operacional.
+* **Resultado de negócio:** zero produtos extraídos.
 
 ---
 

@@ -59,6 +59,7 @@ _PRODUCT_SIGNAL_PATTERNS: tuple[str, ...] = (
     '"offers"',                   # schema.org offers (JSON-LD)
     "ui-pdp-title",               # classe de título de produto do Mercado Livre
     "andes-money-amount",         # componente de preço do Mercado Livre
+    "price-tag",                  # componente de preço do Mercado Livre (variante)
     "og:price:amount",            # Open Graph — preço do produto
     "productpage",                # schema.org ProductPage (match case-insensitive)
     '"price":',                   # chave JSON de preço em blobs de estado (ex: __PRELOADED_STATE__)
@@ -270,6 +271,16 @@ class ResponseClassifier:
                 next_layer=3,
                 reason="anti_bot_page",
                 telemetry={"anti_bot_pattern": anti_bot},
+            )
+
+        #HTML 2xx de tamanho adequado, sem anti-bot, mas sem sinais de produto.
+        #Provavelmente shell JS (SPA sem SSR) — escalar para browser que renderiza o DOM real.
+        if not has_product_signals(html):
+            return ClassificationResult(
+                action=ClassificationAction.SCALE,
+                next_layer=3,
+                reason="html_without_product_signals",
+                telemetry={"html_size_bytes": len(html.encode("utf-8", errors="replace"))},
             )
 
         return ClassificationResult(

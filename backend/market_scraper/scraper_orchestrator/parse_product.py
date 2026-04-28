@@ -315,6 +315,16 @@ class ParseProduct:
                 total_duration_ms=int((perf_counter() - pipeline_started) * 1000),
                 extra={"reason": "extraction_empty"},
             )
+            if settings.SCRAPER_DEBUG_HTML_DUMP and doc.html:
+                html_bytes = doc.html.encode("utf-8", errors="replace")
+                request_logger.debug(
+                    "extraction_empty_html_dump",
+                    url=sanitize_log_data(url),
+                    layer=doc.layer_used,
+                    classification_reason=doc.classification_reason,
+                    html_size_bytes=len(html_bytes),
+                    html_sample=doc.html[:settings.SCRAPER_DEBUG_HTML_MAX_BYTES],
+                )
             request_logger.info(
                 "use_case_stage_no_result",
                 stage="post_process",

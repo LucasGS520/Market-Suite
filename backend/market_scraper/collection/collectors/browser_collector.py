@@ -38,33 +38,6 @@ _BLOCKED_RESOURCE_TYPES: frozenset[str] = frozenset({
     "image", "stylesheet", "font", "media", "other"
 })
 
-_STEALTH_SCRIPT = """
-(function () {
-    Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined,
-        configurable: true,
-    });
-    Object.defineProperty(navigator, 'plugins', {
-        get: () => [
-            { name: 'Chrome PDF Plugin' },
-            { name: 'Chrome PDF Viewer' },
-            { name: 'Native Client' },
-        ],
-        configurable: true,
-    });
-    Object.defineProperty(navigator, 'languages', {
-        get: () => ['pt-BR', 'pt', 'en-US', 'en'],
-        configurable: true,
-    });
-    if (!window.chrome) {
-        window.chrome = { runtime: {} };
-    }
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-})();
-"""
-
 
 # ── Exceções públicas ─────────────────────────────────────────────────────────
 
@@ -105,6 +78,7 @@ class PlaywrightBrowserCollector:
         self._crawler: Any = None
         self._pending: dict[str, asyncio.Future[str]] = {}
         self._run_task: asyncio.Task[Any] | None = None
+        self._browser_ready: bool = False
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -127,12 +101,14 @@ class PlaywrightBrowserCollector:
         self._crawler = PlaywrightCrawler(
             browser_type="chromium",
             headless=True,
+            fingerprint_generator="default",
             browser_launch_options={"args": args},
             goto_options={"wait_until": "domcontentloaded"},
             keep_alive=True,
             max_request_retries=0,
             concurrency_settings=ConcurrencySettings(
                 min_concurrency=1,
+                desired_concurrency=1,
                 max_concurrency=_MAX_CONCURRENT,
             ),
             storage_client=MemoryStorageClient(),
@@ -141,7 +117,6 @@ class PlaywrightBrowserCollector:
 
         @self._crawler.pre_navigation_hook
         async def _pre_nav(context: PlaywrightPreNavCrawlingContext) -> None:
-            await context.page.add_init_script(_STEALTH_SCRIPT)
             await context.page.route("**/*", collector._block_resources)
 
         @self._crawler.router.default_handler
@@ -165,8 +140,16 @@ class PlaywrightBrowserCollector:
                 future.set_exception(error)
 
         self._run_task = asyncio.create_task(self._crawler.run())
-        await asyncio.sleep(0.1)
-        logger.info("browser_collector_started", max_concurrent=_MAX_CONCURRENT)
+        try:
+            await self._do_startup_warmup()
+            self._browser_ready = True
+            logger.info("browser_collector_started", max_concurrent=_MAX_CONCURRENT)
+        except Exception as exc:
+            logger.warning(
+                "browser_collector_degraded",
+                reason="warmup_failed",
+                error=str(exc),
+            )
 
     async def shutdown(self) -> None:
         """Para o PlaywrightCrawler persistente e aguarda encerramento."""
@@ -177,16 +160,18 @@ class PlaywrightBrowserCollector:
                 await asyncio.wait_for(self._run_task, timeout=10.0)
         self._crawler = None
         self._run_task = None
+        self._browser_ready = False
         self._pending.clear()
         logger.info("browser_collector_stopped")
 
     @property
     def is_ready(self) -> bool:
-        """True quando o PlaywrightCrawler está rodando e pronto para requisições."""
+        """True quando o PlaywrightCrawler está rodando e o browser pool está pronto."""
         return (
             self._run_task is not None
             and not self._run_task.done()
             and self._crawler is not None
+            and self._browser_ready
         )
 
     # ── Fetch público ─────────────────────────────────────────────────────────
@@ -240,6 +225,33 @@ class PlaywrightBrowserCollector:
             self._pending.pop(request_id, None)
 
     # ── Helpers internos ──────────────────────────────────────────────────────
+
+    async def _do_startup_warmup(self) -> None:
+        """Enfileira requisição para about:blank e aguarda resultado.
+
+        Confirma que o browser pool foi inicializado com sucesso antes de
+        declarar o collector como pronto. Levanta exceção se o pool falhou.
+        """
+        from crawlee._request import Request as CrawleeRequest
+
+        request_id = f"warmup-{uuid4()}"
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        self._pending[request_id] = future
+
+        await self._crawler.add_requests([
+            CrawleeRequest.from_url(
+                "about:blank",
+                unique_key=request_id,
+                user_data={"_request_id": request_id},
+            )
+        ])
+
+        try:
+            await asyncio.wait_for(asyncio.shield(future), timeout=30.0)
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError("browser warmup timed out after 30s") from exc
+        finally:
+            self._pending.pop(request_id, None)
 
     async def _block_resources(self, route: Any, request: Any) -> None:
         if request.resource_type in _BLOCKED_RESOURCE_TYPES:

@@ -66,40 +66,41 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_PRICE_TOLERANCE", "0.0")
     )  #Tolerância percentual na comparação de preços
 
-    # --- Configurações HTTP ---
+    # --- Configurações HTTP (cliente httpx — robots.py + http_utils.py) ---
     SCRAPER_HTTP_TIMEOUT_CONNECT: float = float(
         os.getenv("SCRAPER_HTTP_TIMEOUT_CONNECT", "3.0")
-    ) #Tempo máximo para estabelecer conexão
+    ) #Tempo máximo para estabelecer conexão (httpx — robots.py)
     SCRAPER_HTTP_TIMEOUT_READ: float = float(
         os.getenv("SCRAPER_HTTP_TIMEOUT_READ", "3.0")
-    ) #Tempo limite de leitura por requisição
+    ) #Tempo limite de leitura por requisição (httpx — robots.py)
     SCRAPER_HTTP_TIMEOUT_WRITE: float = float(
         os.getenv("SCRAPER_HTTP_TIMEOUT_WRITE", "3.0")
-    ) #Tempo limite de escrita/envio
+    ) #Tempo limite de escrita/envio (httpx — robots.py)
     SCRAPER_HTTP_TIMEOUT_POOL: float = float(
         os.getenv("SCRAPER_HTTP_TIMEOUT_POOL", "3.0")
-    ) #Tempo máximo aguardando conexão no pool
+    ) #Tempo máximo aguardando conexão no pool (httpx — robots.py)
 
     SCRAPER_HTTP_RETRIES: int = int(
         os.getenv("SCRAPER_HTTP_RETRIES", "2")
-    ) #Tentativas extras para downloads HTTP
+    ) #Tentativas extras para downloads HTTP (max_request_retries no HttpCrawler)
     SCRAPER_HTTP_RETRY_BACKOFF_BASE: float = float(
         os.getenv("SCRAPER_HTTP_RETRY_BACKOFF_BASE", "0.5")
-    ) #Base do backoff exponencial aplicado aos retries
-    
+    ) #Base do backoff exponencial aplicado aos retries (httpx — robots.py)
+
     SCRAPER_HTTP_MAX_REDIRECTS: int = int(
         os.getenv("SCRAPER_HTTP_MAX_REDIRECTS", "3")
-    ) #Limite de redirecionamentos seguidos
+    ) #Limite de redirecionamentos seguidos (max_redirects no CurlImpersonateHttpClient)
     SCRAPER_HTTP_MAX_CONNECTIONS: int = int(
         os.getenv("SCRAPER_HTTP_MAX_CONNECTIONS", "10")
-    ) #Conexões simultâneas no client HTTP
+    ) #Conexões simultâneas no client HTTP (httpx — robots.py)
     SCRAPER_HTTP_MAX_KEEPALIVE: int = int(
         os.getenv("SCRAPER_HTTP_MAX_KEEPALIVE", "5")
-    ) #Conexões preservadas em keep-alive
+    ) #Conexões preservadas em keep-alive (httpx — robots.py)
     SCRAPER_HTTP_MAX_CONTENT_LENGTH: int = int(
         os.getenv("SCRAPER_HTTP_MAX_CONTENT_LENGTH", "2000000")
-    ) #Tamanho máximo permitido para payloads
+    ) #Tamanho máximo permitido para payloads (truncagem em http_collector)
 
+    # --- DNS (http_utils.py) ---
     SCRAPER_DNS_TIMEOUT: float = float(
         os.getenv("SCRAPER_DNS_TIMEOUT", "2.0")
     ) #Tempo limite das resoluções DNS
@@ -179,6 +180,15 @@ class Settings(ConfigBase):
     SCRAPER_LOG_4XX_MAX_BYTES: int = int(
         os.getenv("SCRAPER_LOG_4XX_MAX_BYTES", "1024")
     ) #Limite de bytes registrados em logs de 4xx
+
+    SCRAPER_DEBUG_HTML_DUMP: bool = os.getenv(
+        "SCRAPER_DEBUG_HTML_DUMP", "false"
+    ).lower() in {"1", "true", "on", "yes"}
+    #Padrão False: sem efeito em produção.
+    #Defina True para registrar amostra do HTML coletado em cada extraction_empty.
+    SCRAPER_DEBUG_HTML_MAX_BYTES: int = int(
+        os.getenv("SCRAPER_DEBUG_HTML_MAX_BYTES", "8192")
+    ) #Tamanho máximo da amostra de HTML registrada no dump (bytes)
 
     SCRAPER_HTTP_FOLLOW_REDIRECTS: bool = os.getenv(
         "SCRAPER_HTTP_FOLLOW_REDIRECTS",

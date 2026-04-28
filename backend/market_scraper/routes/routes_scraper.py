@@ -27,10 +27,10 @@ from shared.schemas.shared_schemas_scraper import (
     SCRAPER_CONTRACT_VERSION_HEADER,
 )
 
-from market_scraper.scraper_orchestrator.parse_product import (
+from market_scraper.scraper_orchestrator import (
     ParseProductError,
     ParseProductNoResult,
-    ParseProduct,
+    get_scraper_orchestrator,
 )
 from market_scraper.infra.cache.conditional_payload import (
     build_cache_headers,
@@ -235,7 +235,7 @@ async def parse_endpoint(
     else:
         cache_status = "bypass"
 
-    use_case_result = await ParseProduct().execute(
+    use_case_result = await get_scraper_orchestrator().parse_product(
         normalized_url,
         request_logger=request_logger,
         force_refresh=force_refresh,

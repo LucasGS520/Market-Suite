@@ -23,7 +23,12 @@ from market_scraper.services.response_classifier import (
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
 
-_NORMAL_HTML = "<html><body>" + "x" * 2048 + "</body></html>"  # ~2 KB
+_NORMAL_HTML = "<html><body>" + "x" * 2048 + "</body></html>"  # ~2 KB sem sinais de produto
+_PRODUCT_HTML = (
+    "<html><head>"
+    '<script type="application/ld+json">{"@type":"Product","name":"Produto","offers":{"price":"999"}}</script>'
+    "</head><body>" + "x" * 2048 + "</body></html>"
+)  # ~2 KB com JSON-LD de produto
 _SMALL_HTML  = "<html><body>ok</body></html>"                  # << 1 KB
 _EMPTY_HTML  = ""
 
@@ -50,12 +55,21 @@ def classifier() -> ResponseClassifier:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_classify_success_normal_html(classifier):
-    """200 + HTML normal (≥1KB) → SUCCESS."""
-    result = classifier.classify(http_status=200, html=_NORMAL_HTML, error=None)
+    """200 + HTML com sinais de produto (≥1KB) → SUCCESS."""
+    result = classifier.classify(http_status=200, html=_PRODUCT_HTML, error=None)
 
     assert result.action == ClassificationAction.SUCCESS
     assert result.next_layer is None
     assert result.reason == "html_valid"
+
+
+def test_classify_scale_when_html_valid_but_no_product_signals(classifier):
+    """200 + HTML grande sem sinais de produto → SCALE (provavelmente shell JS)."""
+    result = classifier.classify(http_status=200, html=_NORMAL_HTML, error=None)
+
+    assert result.action == ClassificationAction.SCALE
+    assert result.next_layer == 3
+    assert result.reason == "html_without_product_signals"
 
 
 def test_classify_scale_to_layer3_when_html_empty(classifier):
@@ -278,7 +292,7 @@ def test_detect_anti_bot_pattern_is_case_insensitive():
 
 def test_classification_result_is_immutable(classifier):
     """ClassificationResult é frozen — não permite mutação acidental."""
-    result = classifier.classify(http_status=200, html=_NORMAL_HTML, error=None)
+    result = classifier.classify(http_status=200, html=_PRODUCT_HTML, error=None)
 
     with pytest.raises((AttributeError, TypeError)):
         result.action = ClassificationAction.REJECT  # type: ignore[misc]
@@ -286,7 +300,7 @@ def test_classification_result_is_immutable(classifier):
 
 def test_telemetry_html_size_populated_on_success(classifier):
     """Telemetria de sucesso inclui html_size_bytes."""
-    result = classifier.classify(http_status=200, html=_NORMAL_HTML, error=None)
+    result = classifier.classify(http_status=200, html=_PRODUCT_HTML, error=None)
 
     assert "html_size_bytes" in result.telemetry
     assert result.telemetry["html_size_bytes"] > 0
@@ -389,6 +403,12 @@ def test_has_product_signals_detects_json_price_key():
 def test_has_product_signals_detects_productpage_schema():
     """Referência a ProductPage (schema.org, case-insensitive) → True."""
     html = '<body itemtype="https://schema.org/ProductPage">'
+    assert has_product_signals(html) is True
+
+
+def test_has_product_signals_detects_price_tag():
+    """Componente price-tag (Mercado Livre, variante) → True."""
+    html = '<span class="price-tag-fraction">3499</span>'
     assert has_product_signals(html) is True
 
 
