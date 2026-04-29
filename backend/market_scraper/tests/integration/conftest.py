@@ -29,3 +29,8 @@ def fixture_html_loader():
 @pytest.fixture
 def success_product_html(fixture_html_loader) -> str:
     return fixture_html_loader("product_success.html")
+
+
+@pytest.fixture
+def js_challenge_html(fixture_html_loader) -> str:
+    return fixture_html_loader("response_js_challenge.html")

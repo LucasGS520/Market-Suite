@@ -11,7 +11,8 @@ from __future__ import annotations
 import os
 from typing import Dict, Tuple
 
-from shared.core.config_base import ConfigBase
+from pydantic import model_validator
+from shared.core.config_base import ConfigBase, PYTEST_RUNNING
 
 
 __all__ = ["Settings", "settings"]
@@ -67,7 +68,7 @@ class Settings(ConfigBase):
     ) #Timeout para etapas de parsing; coleta usa os orçamentos acima
     SCRAPER_PIPELINE_TIMEOUT_SECONDS: float = float(
         os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "50.0")
-    ) #Segurança global: HTTP_BUDGET + BROWSER_BUDGET + overhead de parsing
+    ) #Segurança global: deve ser >= HTTP_BUDGET + BROWSER_BUDGET + 5s (validado no startup)
 
     SCRAPER_SINGLEFLIGHT_LOCK_TTL: float = float(
         os.getenv("SCRAPER_SINGLEFLIGHT_LOCK_TTL", "15.0")
@@ -211,6 +212,25 @@ class Settings(ConfigBase):
         "SCRAPER_HTTP_DOMAIN_TIMEOUTS",
         "",
     ) #Permite sobreescrever timeout total por domínio
+
+    @model_validator(mode="after")
+    def _validate_timeout_hierarchy(self) -> "Settings":
+        if PYTEST_RUNNING:
+            return self
+        # pipeline deve acomodar HTTP + browser + overhead mínimo de 5s de parsing
+        min_pipeline = self.SCRAPER_HTTP_BUDGET_SECONDS + self.SCRAPER_BROWSER_BUDGET_SECONDS + 5.0
+        if self.SCRAPER_PIPELINE_TIMEOUT_SECONDS < min_pipeline:
+            raise ValueError(
+                f"SCRAPER_PIPELINE_TIMEOUT_SECONDS ({self.SCRAPER_PIPELINE_TIMEOUT_SECONDS}s) "
+                f"deve ser >= HTTP_BUDGET + BROWSER_BUDGET + 5s = {min_pipeline}s. "
+                "Ajuste o .env ou aumente SCRAPER_PIPELINE_TIMEOUT_SECONDS."
+            )
+        if self.SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS >= self.SCRAPER_BROWSER_BUDGET_SECONDS:
+            raise ValueError(
+                f"SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS ({self.SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS}s) "
+                f"deve ser < SCRAPER_BROWSER_BUDGET_SECONDS ({self.SCRAPER_BROWSER_BUDGET_SECONDS}s)."
+            )
+        return self
 
     def get_default_cookies(self) -> Dict[str, str]:
         """ Retorna cookies básicos enviados em todas as requisições 

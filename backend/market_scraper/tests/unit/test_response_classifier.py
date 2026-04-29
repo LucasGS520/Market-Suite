@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from pathlib import Path
 
 from market_scraper.services.response_classifier import (
     ClassificationAction,
@@ -356,10 +357,14 @@ def test_has_product_signals_detects_itemprop_price():
     assert has_product_signals(html) is True
 
 
-def test_has_product_signals_detects_offers():
-    """HTML com "offers" em JSON → True."""
+def test_has_product_signals_ignores_offers_key():
+    """'"offers"' sozinho é genérico demais (analytics/config) → False.
+
+    Padrão removido para evitar falso-positivo em challenge pages que incluem
+    JSON de configuração com chave "offers". Usar 'application/ld+json' + @type.
+    """
     html = '{"offers": {"price": "100", "priceCurrency": "BRL"}}'
-    assert has_product_signals(html) is True
+    assert has_product_signals(html) is False
 
 
 def test_has_product_signals_false_for_plain_html():
@@ -394,22 +399,34 @@ def test_has_product_signals_detects_og_price_amount():
     assert has_product_signals(html) is True
 
 
-def test_has_product_signals_detects_json_price_key():
-    """Chave "price": em blob JSON de estado → True."""
+def test_has_product_signals_ignores_json_price_key():
+    """'"price":' genérico não é sinal suficiente → False.
+
+    Chave "price" aparece em scripts de analytics, configuração e challenge pages.
+    Falso-positivo confirmado em staging (Mercado Livre challenge).
+    """
     html = '<script>window.__STATE__ = {"price": 999, "name": "Produto"}</script>'
-    assert has_product_signals(html) is True
+    assert has_product_signals(html) is False
 
 
-def test_has_product_signals_detects_productpage_schema():
-    """Referência a ProductPage (schema.org, case-insensitive) → True."""
+def test_has_product_signals_ignores_productpage_schema():
+    """'productpage' sozinho é genérico demais → False.
+
+    Padrão removido: aparece em títulos, textos de página e SEO sem relação
+    com dados estruturados de produto extraíveis pelos parsers.
+    """
     html = '<body itemtype="https://schema.org/ProductPage">'
-    assert has_product_signals(html) is True
+    assert has_product_signals(html) is False
 
 
-def test_has_product_signals_detects_price_tag():
-    """Componente price-tag (Mercado Livre, variante) → True."""
+def test_has_product_signals_ignores_price_tag():
+    """'price-tag' é classe CSS genérica, não sinal de produto confiável → False.
+
+    Classe presente em temas/templates de e-commerce sem vínculo direto
+    com dados estruturados; removida para reduzir falso-positivos.
+    """
     html = '<span class="price-tag-fraction">3499</span>'
-    assert has_product_signals(html) is True
+    assert has_product_signals(html) is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -433,3 +450,45 @@ def test_classify_mercadolivre_challenge_with_product_class_returns_degraded(cla
     assert result.action == ClassificationAction.SUCCESS
     assert result.reason == "anti_bot_degraded"
     assert result.telemetry.get("anti_bot_pattern") == "mercadolivre_challenge"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regressão — fixtures HTML reais (Fase 3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
+
+
+def _load_fixture(name: str) -> str:
+    return (_FIXTURES_DIR / name).read_text(encoding="utf-8")
+
+
+def test_fixture_js_challenge_detected_as_anti_bot():
+    """response_js_challenge.html → detect_anti_bot_pattern retorna padrão cloudflare.
+
+    Regressão: garante que a fixture de challenge é sempre detectada como anti-bot
+    e não escapa como HTML válido de produto.
+    """
+    html = _load_fixture("response_js_challenge.html")
+    pattern = detect_anti_bot_pattern(html)
+    assert pattern is not None
+    assert "cloudflare" in pattern
+
+
+def test_fixture_js_challenge_has_no_product_signals():
+    """response_js_challenge.html NÃO contém sinais de produto de alta confiança.
+
+    Regressão: padrões genéricos removidos em Fase 2 não devem causar falso-positivo
+    neste HTML de challenge (que pode ter scripts com chaves JSON genéricas).
+    """
+    html = _load_fixture("response_js_challenge.html")
+    assert has_product_signals(html) is False
+
+
+def test_fixture_product_success_has_product_signals():
+    """product_success.html contém itemprop="price" → has_product_signals retorna True.
+
+    Regressão: HTML de produto real deve sempre ativar early-exit pelo sinal itemprop.
+    """
+    html = _load_fixture("product_success.html")
+    assert has_product_signals(html) is True

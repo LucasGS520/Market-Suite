@@ -19,25 +19,7 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## **Diagnóstico Scraper Atual**
 
-O `market_scraper` está **operacional no nível de API**, mas **não está funcional como scraper de produto** no teste registrado. O serviço sobe, expõe `/docs` e `/openapi.json`, inicializa o HTTP collector e tenta iniciar o browser collector; porém, após as requisições reais, **não houve nenhuma resposta 200 com produto extraído** no log enviado .
-
-O `market_scraper` não está mais degradado por falha de startup. Agora ele está **funcional em infraestrutura**, mas **não está funcional em extração**.
-
-O gargalo atual é a navegação/renderização com Playwright contra páginas do Mercado Livre.
-
-Causas prováveis, com base no log:
-
-1. **Timeout de renderização insuficiente ou mal coordenado**
-   O wrapper reporta timeout após `25s`, enquanto aparece exceção interna de Playwright com quase `60s`. Isso indica possível conflito entre timeout externo, timeout do Crawlee e timeout de navegação do Playwright.
-
-2. **Resposta anti-bot do Mercado Livre**
-   Em uma das requisições houve detecção explícita de `mercadolivre_challenge`. Nesse cenário, o browser pode receber uma página válida do ponto de vista HTTP, mas inválida para scraping.
-
-3. **Condição de espera inadequada**
-   O Playwright está aguardando navegação/carregamento até `domcontentloaded` em pelo menos uma falha. Em páginas pesadas ou com challenge, trackers, recursos bloqueados ou navegação client-side, essa espera pode nunca concluir dentro do limite.
-
-4. **Coleta parcial sem aproveitamento**
-   O log mostra `browser_fetch_success html_size=35030`, mas o pipeline ainda descarta o resultado por timeout posterior. Isso indica que o scraper talvez precise encerrar a coleta assim que obtiver HTML útil, em vez de depender da conclusão completa do fluxo de navegação.
+O `market_scraper` está estruturado como serviço de scraping por pipeline, com arquitetura em camadas (transporte, orquestração, coleta, extração, pós-processamento, infraestrutura), contratos tipados entre etapas, suporte operacional para cache/robots/rate limiting/telemetria.
 
 ---
 

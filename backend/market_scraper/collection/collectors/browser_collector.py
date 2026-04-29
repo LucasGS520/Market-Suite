@@ -107,7 +107,7 @@ class PlaywrightBrowserCollector:
             headless=True,
             fingerprint_generator="default",
             browser_launch_options={"args": args},
-            goto_options={"wait_until": "networkidle"},
+            goto_options={"wait_until": "load"},  # "networkidle" bloqueava indefinidamente em challenge pages
             request_handler_timeout=timedelta(seconds=_nav_timeout + 3),
             keep_alive=True,
             max_request_retries=settings.SCRAPER_BROWSER_MAX_RETRIES,

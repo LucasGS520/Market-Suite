@@ -290,17 +290,36 @@ class CrawleeRuntime:
         browser_succeeded = html_browser is not None and not browser_error_code
         anti_bot_bypassed = browser_succeeded and not browser_anti_bot
 
+        # Razão final reflete o que o browser encontrou, não a razão de escalamento HTTP
+        if doc_error_code == "playwright_timeout":
+            final_reason = "browser_timeout"
+        elif doc_error_code == "playwright_not_ready":
+            final_reason = "browser_not_available"
+        elif doc_error_code:
+            final_reason = "browser_fetch_failed"
+        elif browser_anti_bot:
+            final_reason = "anti_bot_page"
+        elif browser_succeeded:
+            final_reason = "browser_fetch_success"
+        else:
+            final_reason = decision.reason
+
+        # Se HTTP falhou por transporte (status None) mas browser obteve HTML, status efetivo é 200
+        effective_http_status = http_status
+        if effective_http_status is None and html_browser is not None:
+            effective_http_status = 200
+
         attempts.append(CollectionAttempt(
             layer="browser",
             status="success" if browser_succeeded else "failure",
             error_code=browser_error_code,
             duration_ms=browser_ms,
-            reason=residual_pattern,
+            reason=residual_pattern or final_reason,
         ))
 
         return CollectedDocument(
             html=html_browser,
-            http_status=http_status,
+            http_status=effective_http_status,
             headers={},
             layer_used="browser" if html_browser is not None else "http",
             fallback_taken=True,
@@ -310,7 +329,7 @@ class CrawleeRuntime:
             duration_ms=(time.monotonic() - t_start) * 1000,
             attempts=tuple(attempts),
             error_code=doc_error_code,
-            classification_reason=decision.reason,
+            classification_reason=final_reason,
             anti_bot_bypassed=anti_bot_bypassed,
             final_url=url,
         )

@@ -51,21 +51,18 @@ _SCALE_TO_LAYER3_STATUSES: frozenset[int] = frozenset({403, 405, 406, *range(500
 #Status HTTP reservados para estratégia futura; no MVP ainda escalam para browser
 _SCALE_TO_LAYER2_STATUSES: frozenset[int] = frozenset({429})
 
-#Padrões que indicam dados estruturados de produto no HTML — sinal de conteúdo útil mesmo em páginas com overlay anti-bot (ex: Cloudflare que injeta script mas mantém JSON-LD).
-#Ordenados do mais específico para o mais genérico para minimizar falsos positivos.
+#Padrões de alta confiança que indicam dados estruturados de produto no HTML.
+#Deliberadamente restritivos: padrões genéricos ('"price":', '"offers"', "productpage",
+#"price-tag", "price_currency_pair") foram removidos pois aparecem em challenge pages
+#com scripts de analytics/configuração e causam falso-positivo.
 _PRODUCT_SIGNAL_PATTERNS: tuple[str, ...] = (
-    "application/ld+json",        # bloco JSON-LD explícito
-    'itemprop="price"',           # microdata de preço
-    '"offers"',                   # schema.org offers (JSON-LD)
+    "application/ld+json",        # bloco JSON-LD explícito (alta confiança com @type Product/Offer)
+    'itemprop="price"',           # microdata de preço (específico de schema.org)
     "ui-pdp-title",               # classe de título de produto do Mercado Livre
     "andes-money-amount",         # componente de preço do Mercado Livre
-    "price-tag",                  # componente de preço do Mercado Livre (variante)
-    "og:price:amount",            # Open Graph — preço do produto
-    "productpage",                # schema.org ProductPage (match case-insensitive)
-    '"price":',                   # chave JSON de preço em blobs de estado (ex: __PRELOADED_STATE__)
-    "__preloaded_state__",        # estado JSON pré-carregado do React
-    '"productId"',                # ID de produto em JSON
-    "price_currency_pair",        # padrão interno de e-commerce
+    "og:price:amount",            # Open Graph — preço do produto (meta tag específica)
+    "__preloaded_state__",        # estado JSON pré-carregado do React (Mercado Livre/Shopify)
+    '"productId"',                # ID de produto em JSON (e-commerce padrão)
 )
 
 

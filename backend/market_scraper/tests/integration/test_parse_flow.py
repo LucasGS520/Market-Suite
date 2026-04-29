@@ -616,3 +616,94 @@ def test_parse_flow_returns_503_when_playwright_not_ready(
     body = response.json()
     assert body["error_code"] == "pipeline_degraded"
     assert "trace_id" in body
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regressão Fase 2/3 — novos caminhos de browser e fixtures reais
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_parse_flow_returns_504_when_playwright_times_out(
+    integration_client,
+    monkeypatch,
+):
+    """504 quando browser Playwright atinge timeout (playwright_timeout).
+
+    Regressão: garante mapeamento correto de playwright_timeout → HTTP 504.
+    """
+    async def fake_is_allowed(url: str, *, timeout: float) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        "market_scraper.routes.routes_scraper.resolve_public_address",
+        lambda host: ["93.184.216.34"],
+    )
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product._robots.is_allowed",
+        fake_is_allowed,
+    )
+    _stub_runtime(
+        monkeypatch,
+        _collected_document(
+            html=None,
+            http_status=None,
+            layer_used="playwright",
+            fallback_taken=True,
+            classification_reason="browser_timeout",
+            error_code="playwright_timeout",
+        ),
+    )
+
+    response = integration_client.post("/scraper/parse", json={"url": "example.com/product/timeout"})
+
+    assert response.status_code == 504
+    body = response.json()
+    assert body["error_code"] == "playwright_timeout"
+    assert "trace_id" in body
+
+
+def test_parse_flow_returns_success_with_browser_fallback_and_product_fixture(
+    integration_client,
+    monkeypatch,
+    success_product_html,
+):
+    """Browser fallback com product_success.html → 200 com dados extraídos e acquisition correto.
+
+    Regressão: garante que classification_reason='browser_fetch_success' (Fase 2)
+    é propagado corretamente para o payload de aquisição.
+    """
+    async def fake_is_allowed(url: str, *, timeout: float) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        "market_scraper.routes.routes_scraper.resolve_public_address",
+        lambda host: ["93.184.216.34"],
+    )
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product._robots.is_allowed",
+        fake_is_allowed,
+    )
+    _stub_runtime(
+        monkeypatch,
+        _collected_document(
+            html=_pad_html(success_product_html),
+            http_status=200,
+            layer_used="playwright",
+            fallback_taken=True,
+            classification_reason="browser_fetch_success",
+            anti_bot_bypassed=True,
+        ),
+    )
+
+    response = integration_client.post(
+        "/scraper/parse", json={"url": "example.com/product/browser-fallback"}
+    )
+
+    assert response.status_code == 200
+    payload = ParserResponse.model_validate(response.json())
+    assert payload.name == "Notebook Integrado"
+    assert payload.current_price == Decimal("1999.90")
+    acq = payload.payload["acquisition"]
+    assert acq["layer_used"] == "playwright"
+    assert acq["fallback_taken"] is True
+    assert acq["classification_reason"] == "browser_fetch_success"
+    assert acq["anti_bot_bypassed"] is True

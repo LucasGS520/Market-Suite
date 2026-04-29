@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from market_scraper.collection.collectors.browser_collector import PlaywrightTimeoutError
 from market_scraper.collection.crawler.crawlee_runtime import CrawleeRuntime
 from market_scraper.collection.dto.collected_document import CollectedDocument
 from market_scraper.collection.policy import CollectionDecision, CollectionPolicyAction
@@ -255,3 +256,91 @@ async def test_browser_residual_antibot_detected():
     assert doc.anti_bot_detected is True
     assert doc.anti_bot_pattern == "cloudflare_challenge"
     assert doc.data_quality == "browser_fallback"
+
+
+# ── Regressão Fase 2 — classification_reason explícita pós-browser ────────────
+
+@pytest.mark.asyncio
+async def test_playwright_timeout_sets_browser_timeout_reason():
+    """PlaywrightTimeoutError → classification_reason='browser_timeout', error_code='playwright_timeout'.
+
+    Regressão: antes da Fase 2, o campo ficava com a razão de escalamento HTTP
+    (ex: 'html_without_product_signals') mesmo quando o browser timeoutou.
+    """
+    runtime = _make_runtime(
+        http_html="<html></html>",
+        browser_exc=PlaywrightTimeoutError(url="https://exemplo.com/produto/1", timeout=25.0),
+        policy_decision=CollectionDecision(
+            action=CollectionPolicyAction.ESCALATE_TO_BROWSER,
+            reason="html_without_product_signals",
+            telemetry={},
+        ),
+    )
+    doc = await runtime.fetch_with_fallback("https://exemplo.com/produto/1")
+
+    assert doc.classification_reason == "browser_timeout"
+    assert doc.error_code == "playwright_timeout"
+    assert doc.html is None
+
+
+@pytest.mark.asyncio
+async def test_browser_antibot_result_sets_anti_bot_page_reason():
+    """Browser retorna HTML com anti-bot residual → classification_reason='anti_bot_page'.
+
+    Regressão: classification_reason deve refletir o que o browser encontrou,
+    não a razão de escalamento HTTP original.
+    """
+    runtime = _make_runtime(
+        http_html="<html></html>",
+        browser_html=_BROWSER_HTML,
+        policy_decision=CollectionDecision(
+            action=CollectionPolicyAction.ESCALATE_TO_BROWSER,
+            reason="html_empty",
+            telemetry={},
+        ),
+        browser_antibot_result={"anti_bot_pattern": "cloudflare_challenge", "anti_bot_detected": True},
+    )
+    doc = await runtime.fetch_with_fallback("https://exemplo.com/produto/1")
+
+    assert doc.classification_reason == "anti_bot_page"
+    assert doc.html == _BROWSER_HTML
+
+
+@pytest.mark.asyncio
+async def test_browser_success_sets_browser_fetch_success_reason():
+    """Browser retorna HTML limpo → classification_reason='browser_fetch_success'."""
+    runtime = _make_runtime(
+        http_html="<html></html>",
+        browser_html=_BROWSER_HTML,
+        policy_decision=CollectionDecision(
+            action=CollectionPolicyAction.ESCALATE_TO_BROWSER,
+            reason="html_without_product_signals",
+            telemetry={},
+        ),
+    )
+    doc = await runtime.fetch_with_fallback("https://exemplo.com/produto/1")
+
+    assert doc.classification_reason == "browser_fetch_success"
+    assert doc.html == _BROWSER_HTML
+
+
+@pytest.mark.asyncio
+async def test_transport_error_with_browser_success_normalizes_http_status_to_200():
+    """Erro de transporte HTTP (http_status=None) + browser sucede → http_status efetivo=200.
+
+    Regressão: antes da Fase 2, http_status=None chegava para telemetria quando
+    o HTTP falhava por transporte mas o browser obtinha HTML com sucesso.
+    """
+    runtime = _make_runtime(
+        http_error_tuple=(None, None, Exception("connection refused"), "connection_error"),
+        browser_html=_BROWSER_HTML,
+        policy_decision=CollectionDecision(
+            action=CollectionPolicyAction.ESCALATE_TO_BROWSER,
+            reason="connection_error",
+            telemetry={},
+        ),
+    )
+    doc = await runtime.fetch_with_fallback("https://exemplo.com/produto/1")
+
+    assert doc.http_status == 200
+    assert doc.html == _BROWSER_HTML
