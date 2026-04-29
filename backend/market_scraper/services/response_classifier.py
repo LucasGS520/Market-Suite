@@ -63,6 +63,10 @@ _PRODUCT_SIGNAL_PATTERNS: tuple[str, ...] = (
     "og:price:amount",            # Open Graph — preço do produto
     "productpage",                # schema.org ProductPage (match case-insensitive)
     '"price":',                   # chave JSON de preço em blobs de estado (ex: __PRELOADED_STATE__)
+    "__preloaded_state__",        # estado JSON pré-carregado do React (novo)
+    "window.__",                  # estado global do React/Next.js (novo)
+    '"productId"',                # ID de produto em JSON (novo)
+    "price_currency_pair",        # padrão interno de e-commerce (novo)
 )
 
 
@@ -102,9 +106,34 @@ def has_product_signals(html: str) -> bool:
 
     Usado para distinguir páginas de challenge puro (sem conteúdo) de páginas
     que têm anti-bot overlay mas ainda expõem JSON-LD ou microdata de produto.
+    Registra em debug se sinais foram encontrados ou não.
     """
     html_lower = html.lower()
-    return any(p in html_lower for p in _PRODUCT_SIGNAL_PATTERNS)
+    found_patterns = []
+    
+    for pattern in _PRODUCT_SIGNAL_PATTERNS:
+        if pattern.lower() in html_lower:
+            found_patterns.append(pattern)
+    
+    has_signals = bool(found_patterns)
+    
+    #Log detalhado para debug e diagnóstico
+    if found_patterns:
+        logger.debug(
+            "product_signals_found",
+            patterns=found_patterns,
+            html_size=len(html),
+        )
+    else:
+        #Log sem sinal mostra padrões esperados e preview do HTML
+        logger.debug(
+            "product_signals_not_found",
+            expected_patterns=list(_PRODUCT_SIGNAL_PATTERNS)[:4],
+            html_size=len(html),
+            html_preview=html_lower[:300] if len(html) > 0 else "",
+        )
+    
+    return has_signals
 
 
 def detect_anti_bot_pattern(html: str) -> str | None:

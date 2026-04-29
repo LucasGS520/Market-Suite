@@ -132,32 +132,39 @@ class PlaywrightBrowserCollector:
 
             async def _try_early_exit() -> None:
                 try:
+                    #Aguardar pequeno delay para React/Vue renderizar componentes iniciais
+                    await asyncio.sleep(0.3)
                     html = await context.page.content()
-                except Exception:
+                except Exception as exc:
+                    logger.debug("early_exit_get_content_failed", error=str(exc))
                     return
 
                 future = collector._pending.get(request_id)
                 if not future or future.done():
                     return
 
-                # Caminho 1: sinais de produto no DOM → early success
-                if len(html) >= min_bytes and has_product_signals(html):
+                html_size = len(html)
+
+                #Caminho 1: sinais de produto no DOM → early success
+                if html_size >= min_bytes and has_product_signals(html):
                     logger.debug(
                         "browser_early_exit",
+                        reason="product_signals_found",
                         url=sanitize_log_data(context.request.url),
-                        html_size=len(html),
+                        html_size=html_size,
                     )
                     future.set_result(html)
+                    await _cancel_navigation(context)
                     return
 
-                # Caminho 2: challenge anti-bot sem produto → fast-fail
+                #Caminho 2: challenge anti-bot sem produto → fast-fail
                 anti_bot = detect_anti_bot_pattern(html)
                 if anti_bot:
                     logger.debug(
                         "browser_early_exit_anti_bot",
                         url=sanitize_log_data(context.request.url),
                         pattern=anti_bot,
-                        html_size=len(html),
+                        html_size=html_size,
                     )
                     if _DEBUG_SCREENSHOTS:
                         await collector._maybe_screenshot(
@@ -166,11 +173,44 @@ class PlaywrightBrowserCollector:
                             reason="anti_bot",
                         )
                     future.set_result(html)
+                    await _cancel_navigation(context)
+                    return
+
+                #Caminho 3: NOVO — fallback permissivo (HTML >= 5KB)
+                #Para Mercado Livre/domínios dinâmicos, 35KB de HTML é significativo
+                if html_size >= 5 * 1024:
+                    logger.debug(
+                        "browser_early_exit_permissive",
+                        reason="html_size_large",
+                        url=sanitize_log_data(context.request.url),
+                        html_size=html_size,
+                    )
+                    future.set_result(html)
+                    await _cancel_navigation(context)
+                    return
+
+                #Se nenhuma condição de early-exit, deixa navegação continuar
+                logger.debug(
+                    "early_exit_not_triggered",
+                    reason="html_too_small_and_no_signals",
+                    html_size=html_size,
+                    min_bytes=min_bytes,
+                    url=sanitize_log_data(context.request.url),
+                )
 
             context.page.once(
                 "domcontentloaded",
                 lambda: asyncio.create_task(_try_early_exit()),
             )
+
+            async def _cancel_navigation(ctx: PlaywrightPreNavCrawlingContext) -> None:
+                """ Tenta encerrar navegação Playwright gracefully após early-exit."""
+                try:
+                    if hasattr(ctx.page, "stop_loading"):
+                        await ctx.page.stop_loading()
+                    logger.debug("navigation_stopped", url=sanitize_log_data(ctx.request.url))
+                except Exception as exc:
+                    logger.debug("cancel_navigation_failed", error=str(exc))
 
         @self._crawler.router.default_handler
         async def _handler(context: PlaywrightCrawlingContext) -> None:

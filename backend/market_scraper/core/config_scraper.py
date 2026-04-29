@@ -37,14 +37,14 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_HTTP_BUDGET_SECONDS", "10.0")
     ) #Orçamento para curl_cffi, incluindo retries configurados
     SCRAPER_BROWSER_BUDGET_SECONDS: float = float(
-        os.getenv("SCRAPER_BROWSER_BUDGET_SECONDS", "25.0")
-    ) #Orçamento para fallback Playwright (navegação + renderização)
+        os.getenv("SCRAPER_BROWSER_BUDGET_SECONDS", "40.0")
+    ) #Orçamento para fallback Playwright (navegação + renderização); aumentado para retries
     SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS: float = float(
-        os.getenv("SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS", "20.0")
-    ) #Timeout de navegação por tentativa; deve ser < SCRAPER_BROWSER_BUDGET_SECONDS
+        os.getenv("SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS", "10.0")
+    ) #Timeout de navegação por tentativa reduzido; deve ser < SCRAPER_BROWSER_BUDGET_SECONDS
     SCRAPER_BROWSER_MAX_RETRIES: int = int(
-        os.getenv("SCRAPER_BROWSER_MAX_RETRIES", "0")
-    ) #Tentativas extras de browser (0 = nenhuma; ativar exige aumentar SCRAPER_BROWSER_BUDGET_SECONDS)
+        os.getenv("SCRAPER_BROWSER_MAX_RETRIES", "2")
+    ) #Tentativas extras de browser com backoff (2 retries para máximo de 3 tentativas totais)
     SCRAPER_BROWSER_EARLY_EXIT_ENABLED: bool = os.getenv(
         "SCRAPER_BROWSER_EARLY_EXIT_ENABLED", "True"
     ).lower() in {"1", "true", "on", "yes"}
