@@ -63,10 +63,9 @@ _PRODUCT_SIGNAL_PATTERNS: tuple[str, ...] = (
     "og:price:amount",            # Open Graph — preço do produto
     "productpage",                # schema.org ProductPage (match case-insensitive)
     '"price":',                   # chave JSON de preço em blobs de estado (ex: __PRELOADED_STATE__)
-    "__preloaded_state__",        # estado JSON pré-carregado do React (novo)
-    "window.__",                  # estado global do React/Next.js (novo)
-    '"productId"',                # ID de produto em JSON (novo)
-    "price_currency_pair",        # padrão interno de e-commerce (novo)
+    "__preloaded_state__",        # estado JSON pré-carregado do React
+    '"productId"',                # ID de produto em JSON
+    "price_currency_pair",        # padrão interno de e-commerce
 )
 
 
