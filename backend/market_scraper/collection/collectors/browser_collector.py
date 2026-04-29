@@ -13,12 +13,15 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import suppress
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import structlog
 
+from market_scraper.core.config_scraper import settings
+from market_scraper.services.response_classifier import detect_anti_bot_pattern, has_product_signals
 from shared.utils.logging_utils import sanitize_log_data
 
 logger = structlog.get_logger("browser_collector")
@@ -98,14 +101,16 @@ class PlaywrightBrowserCollector:
         if _DISABLE_DEV_SHM:
             args.append("--disable-dev-shm-usage")
 
+        _nav_timeout = settings.SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS
         self._crawler = PlaywrightCrawler(
             browser_type="chromium",
             headless=True,
             fingerprint_generator="default",
             browser_launch_options={"args": args},
             goto_options={"wait_until": "domcontentloaded"},
+            request_handler_timeout=timedelta(seconds=_nav_timeout + 3),
             keep_alive=True,
-            max_request_retries=0,
+            max_request_retries=settings.SCRAPER_BROWSER_MAX_RETRIES,
             concurrency_settings=ConcurrencySettings(
                 min_concurrency=1,
                 desired_concurrency=1,
@@ -118,6 +123,54 @@ class PlaywrightBrowserCollector:
         @self._crawler.pre_navigation_hook
         async def _pre_nav(context: PlaywrightPreNavCrawlingContext) -> None:
             await context.page.route("**/*", collector._block_resources)
+
+            if not settings.SCRAPER_BROWSER_EARLY_EXIT_ENABLED:
+                return
+
+            request_id: str = context.request.user_data.get("_request_id", "")
+            min_bytes: int = settings.SCRAPER_BROWSER_EARLY_EXIT_MIN_HTML_BYTES
+
+            async def _try_early_exit() -> None:
+                try:
+                    html = await context.page.content()
+                except Exception:
+                    return
+
+                future = collector._pending.get(request_id)
+                if not future or future.done():
+                    return
+
+                # Caminho 1: sinais de produto no DOM → early success
+                if len(html) >= min_bytes and has_product_signals(html):
+                    logger.debug(
+                        "browser_early_exit",
+                        url=sanitize_log_data(context.request.url),
+                        html_size=len(html),
+                    )
+                    future.set_result(html)
+                    return
+
+                # Caminho 2: challenge anti-bot sem produto → fast-fail
+                anti_bot = detect_anti_bot_pattern(html)
+                if anti_bot:
+                    logger.debug(
+                        "browser_early_exit_anti_bot",
+                        url=sanitize_log_data(context.request.url),
+                        pattern=anti_bot,
+                        html_size=len(html),
+                    )
+                    if _DEBUG_SCREENSHOTS:
+                        await collector._maybe_screenshot(
+                            context.page,
+                            url=context.request.url,
+                            reason="anti_bot",
+                        )
+                    future.set_result(html)
+
+            context.page.once(
+                "domcontentloaded",
+                lambda: asyncio.create_task(_try_early_exit()),
+            )
 
         @self._crawler.router.default_handler
         async def _handler(context: PlaywrightCrawlingContext) -> None:
@@ -209,7 +262,7 @@ class PlaywrightBrowserCollector:
         ])
 
         try:
-            return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+            return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError as exc:
             raise PlaywrightTimeoutError(url=url, timeout=timeout) from exc
         except Exception as exc:

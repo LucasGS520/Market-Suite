@@ -39,6 +39,19 @@ class Settings(ConfigBase):
     SCRAPER_BROWSER_BUDGET_SECONDS: float = float(
         os.getenv("SCRAPER_BROWSER_BUDGET_SECONDS", "25.0")
     ) #Orçamento para fallback Playwright (navegação + renderização)
+    SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS: float = float(
+        os.getenv("SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS", "20.0")
+    ) #Timeout de navegação por tentativa; deve ser < SCRAPER_BROWSER_BUDGET_SECONDS
+    SCRAPER_BROWSER_MAX_RETRIES: int = int(
+        os.getenv("SCRAPER_BROWSER_MAX_RETRIES", "0")
+    ) #Tentativas extras de browser (0 = nenhuma; ativar exige aumentar SCRAPER_BROWSER_BUDGET_SECONDS)
+    SCRAPER_BROWSER_EARLY_EXIT_ENABLED: bool = os.getenv(
+        "SCRAPER_BROWSER_EARLY_EXIT_ENABLED", "True"
+    ).lower() in {"1", "true", "on", "yes"}
+    #Encerra navegação assim que HTML com sinais de produto for obtido
+    SCRAPER_BROWSER_EARLY_EXIT_MIN_HTML_BYTES: int = int(
+        os.getenv("SCRAPER_BROWSER_EARLY_EXIT_MIN_HTML_BYTES", "1024")
+    ) #Tamanho mínimo (bytes) para considerar HTML útil no early-exit
 
     # --- Cache e execução do pipeline ---
     #Mantemos apenas controles numéricos necessários para previsibilidade.
