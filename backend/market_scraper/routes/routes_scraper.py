@@ -255,6 +255,7 @@ async def parse_endpoint(
             reason_code=use_case_result.reason_code,
             trace_id=trace_id,
             request_logger=request_logger.bind(url=sanitize_log_data(normalized_url)),
+            classification_reason=use_case_result.classification_reason,
         )
     parse_response = use_case_result.parser_response
     try:

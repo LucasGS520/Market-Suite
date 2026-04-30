@@ -29,7 +29,7 @@ COPY backend/market_scraper/requirements-market-scraper.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-base.txt -r requirements-market-scraper.txt
 
-# Instala navegador Chromium para fallback Playwright (Camada 3)
+# Instala navegador Chromium para fallback Playwright
 # Requer --shm-size=2g no docker run, ou use --disable-dev-shm-usage via env
 RUN playwright install --with-deps chromium
 

@@ -57,6 +57,7 @@ def build_no_result_response(
     trace_id: str,
     request_logger: BoundLogger,
     log_extra: dict[str, Any] | None = None,
+    classification_reason: str | None = None,
 ) -> JSONResponse:
     """Monta resposta 422 padronizada quando o pipeline não extrai dados úteis.
 
@@ -65,16 +66,20 @@ def build_no_result_response(
     request_logger.warning(
         "parse_no_result",
         reason_code=reason_code,
+        classification_reason=classification_reason,
         **(log_extra or {}),
     )
+    content: dict[str, Any] = {
+        "message": "Não foi possível extrair dados do produto",
+        "error_code": "no_result",
+        "trace_id": trace_id,
+    }
+    if classification_reason is not None:
+        content["classification_reason"] = classification_reason
     return JSONResponse(
         status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
         headers={SCRAPER_CONTRACT_VERSION_HEADER: SCRAPER_CONTRACT_VERSION},
-        content={
-            "message": "Não foi possível extrair dados do produto",
-            "error_code": "no_result",
-            "trace_id": trace_id,
-        },
+        content=content,
     )
 
 

@@ -27,6 +27,7 @@ from market_scraper.collection.dto.collected_document import CollectedDocument
 from market_scraper.collection.dto.collection_attempt import CollectionAttempt
 from market_scraper.collection.policy import CollectionPolicyAction, ResponseClassifierPolicy
 from market_scraper.core.config_scraper import settings
+from market_scraper.domain.enums import ClassificationReason
 
 if TYPE_CHECKING:
     from market_scraper.collection.collectors.protocols import BrowserCollector
@@ -167,8 +168,17 @@ class CrawleeRuntime:
             anti_bot_pattern or decision.telemetry.get("anti_bot_detected", False)
         )
 
+        bound_logger.debug(
+            "http_collection_complete",
+            action=decision.action.value,
+            classification_reason=decision.reason,
+            http_status=http_status,
+            url=url,
+        )
+
         # ── Aceito via HTTP ───────────────────────────────────────────────────
         if decision.action == CollectionPolicyAction.ACCEPT:
+            is_degraded = decision.reason == ClassificationReason.ANTI_BOT_DEGRADED
             attempts.append(CollectionAttempt(
                 layer="http",
                 status="success",
@@ -191,6 +201,8 @@ class CrawleeRuntime:
                 classification_reason=decision.reason,
                 anti_bot_bypassed=False,
                 final_url=url,
+                is_degraded=is_degraded,
+                degradation_reason=decision.reason if is_degraded else None,
             )
 
         # ── Produto indisponível — sem acionar browser ─────────────────────
@@ -248,6 +260,12 @@ class CrawleeRuntime:
             )
 
         # ── Escalamento para browser ───────────────────────────────────────
+        bound_logger.info(
+            "browser_escalation_triggered",
+            http_reason=decision.reason,
+            http_status=http_status,
+            url=url,
+        )
         attempts.append(CollectionAttempt(
             layer="http",
             status="escalated",
@@ -292,17 +310,25 @@ class CrawleeRuntime:
 
         # Razão final reflete o que o browser encontrou, não a razão de escalamento HTTP
         if doc_error_code == "playwright_timeout":
-            final_reason = "browser_timeout"
+            final_reason: str | None = ClassificationReason.BROWSER_TIMEOUT
         elif doc_error_code == "playwright_not_ready":
-            final_reason = "browser_not_available"
+            final_reason = ClassificationReason.BROWSER_NOT_AVAILABLE
         elif doc_error_code:
-            final_reason = "browser_fetch_failed"
+            final_reason = ClassificationReason.BROWSER_FETCH_FAILED
         elif browser_anti_bot:
-            final_reason = "anti_bot_page"
+            final_reason = ClassificationReason.ANTI_BOT_PAGE
         elif browser_succeeded:
-            final_reason = "browser_fetch_success"
+            final_reason = ClassificationReason.BROWSER_FETCH_SUCCESS
         else:
             final_reason = decision.reason
+
+        bound_logger.info(
+            "browser_collection_complete",
+            final_reason=final_reason,
+            browser_succeeded=browser_succeeded,
+            anti_bot_bypassed=anti_bot_bypassed,
+            url=url,
+        )
 
         # Se HTTP falhou por transporte (status None) mas browser obteve HTML, status efetivo é 200
         effective_http_status = http_status

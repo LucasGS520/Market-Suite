@@ -42,6 +42,8 @@ class CollectedDocument:
     classification_reason: str | None = None
     anti_bot_bypassed: bool = False
     final_url: str | None = None
+    is_degraded: bool = False
+    degradation_reason: str | None = None
 
     @property
     def is_successful(self) -> bool:

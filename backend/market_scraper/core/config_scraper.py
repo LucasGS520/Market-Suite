@@ -53,6 +53,16 @@ class Settings(ConfigBase):
     SCRAPER_BROWSER_EARLY_EXIT_MIN_HTML_BYTES: int = int(
         os.getenv("SCRAPER_BROWSER_EARLY_EXIT_MIN_HTML_BYTES", "1024")
     ) #Tamanho mínimo (bytes) para considerar HTML útil no early-exit
+    SCRAPER_BROWSER_CONCURRENCY: int = int(
+        os.getenv("SCRAPER_BROWSER_CONCURRENCY", "5")
+    ) #Máximo de instâncias Playwright simultâneas; usar 1 em staging para debug previsível
+
+    # --- Observabilidade aprimorada ---
+    SCRAPER_TELEMETRY_VERBOSE: bool = os.getenv(
+        "SCRAPER_TELEMETRY_VERBOSE", "false"
+    ).lower() in {"1", "true", "on", "yes"}
+    #Padrão False. True = loga session_id, attempt_number e timestamps em cada fetch do browser.
+    #Ativar em staging/debug para rastrear race conditions e lifecycle de sessão.
 
     # --- Cache e execução do pipeline ---
     #Mantemos apenas controles numéricos necessários para previsibilidade.
@@ -178,6 +188,18 @@ class Settings(ConfigBase):
         "",
     ) #Headers adicionais enviados além do conjunto mínimo
 
+    # --- Identidade operacional (proxy + sessão) ---
+    SCRAPER_PROXY_URLS: str = os.getenv("SCRAPER_PROXY_URLS", "")
+    #Lista de URLs de proxy separada por "||". Vazio = sem proxy (coleta sem rotação de IP).
+    #Exemplo: "http://user:pass@proxy1:8080||http://user:pass@proxy2:8080"
+    SCRAPER_SESSION_POOL_ENABLED: bool = os.getenv(
+        "SCRAPER_SESSION_POOL_ENABLED", "true"
+    ).lower() in {"1", "true", "on", "yes"}
+    #Padrão True. Controla se sessões ruins são aposentadas (retire) em anti_bot/timeout/403/429.
+    #Já habilitado por padrão no Crawlee (use_session_pool=True); este flag habilita o retirement ativo nas Fases 3+.
+    SCRAPER_SESSION_POOL_MAX_SIZE: int = int(
+        os.getenv("SCRAPER_SESSION_POOL_MAX_SIZE", "20")
+    ) #Número máximo de sessões no pool (padrão Crawlee = 1000; reduzido para scraping direcionado)
 
     SCRAPER_DOMAIN_BOOTSTRAP_ENABLED: bool = os.getenv(
         "SCRAPER_DOMAIN_BOOTSTRAP_ENABLED", "True"

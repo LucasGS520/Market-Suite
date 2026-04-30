@@ -53,9 +53,19 @@ class HttpCollector:
 
         from crawlee.crawlers import HttpCrawler, HttpCrawlingContext
         from crawlee.http_clients import CurlImpersonateHttpClient
+        from crawlee.proxy_configuration import ProxyConfiguration
+        from crawlee.sessions import SessionPool
         from crawlee.storage_clients import MemoryStorageClient
 
         collector = self
+
+        proxy_cfg: ProxyConfiguration | None = None
+        if settings.SCRAPER_PROXY_URLS:
+            proxy_urls = [u.strip() for u in settings.SCRAPER_PROXY_URLS.split("||") if u.strip()]
+            if proxy_urls:
+                proxy_cfg = ProxyConfiguration(proxy_urls=proxy_urls)
+
+        session_pool = SessionPool(max_pool_size=settings.SCRAPER_SESSION_POOL_MAX_SIZE)
 
         self._crawler = HttpCrawler(
             http_client=CurlImpersonateHttpClient(
@@ -66,27 +76,50 @@ class HttpCollector:
             storage_client=MemoryStorageClient(),
             configure_logging=False,
             keep_alive=True,
+            proxy_configuration=proxy_cfg,
+            session_pool=session_pool,
         )
 
         @self._crawler.router.default_handler
         async def _handler(context: HttpCrawlingContext) -> None:
             request_id: str = context.request.user_data.get("_request_id", "")
+            session_id = context.session.id if context.session else "none"
             future = collector._pending.get(request_id)
             if future and not future.done():
                 body = await context.http_response.read()
                 html = body[:_MAX_CONTENT_BYTES].decode("utf-8", errors="replace")
                 future.set_result((html, context.http_response.status_code))
+                logger.debug(
+                    "http_collect",
+                    request_id=request_id,
+                    session_id=session_id,
+                    url=context.request.url,
+                    status=context.http_response.status_code,
+                    html_size=len(html),
+                )
 
         @self._crawler.failed_request_handler
         async def _failed(context: Any, error: Exception) -> None:
             request_id: str = context.request.user_data.get("_request_id", "")
+            session_id = context.session.id if context.session else "none"
             future = collector._pending.get(request_id)
             if future and not future.done():
                 future.set_exception(error)
+                logger.debug(
+                    "http_collect_failed",
+                    request_id=request_id,
+                    session_id=session_id,
+                    url=context.request.url,
+                    error=type(error).__name__,
+                )
 
         self._run_task = asyncio.create_task(self._crawler.run())
         await asyncio.sleep(0.1)
-        logger.info("http_collector_started")
+        logger.info(
+            "http_collector_started",
+            proxy_enabled=proxy_cfg is not None,
+            session_pool_size=settings.SCRAPER_SESSION_POOL_MAX_SIZE,
+        )
 
     async def shutdown(self) -> None:
         if self._crawler is not None:

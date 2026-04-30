@@ -69,6 +69,7 @@ class ParseProductNoResult:
     kind: Literal["no_result"]
     reason_code: str | None = None
     stage_timings: dict[str, float] = field(default_factory=dict)
+    classification_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -335,6 +336,7 @@ class ParseProduct:
                 kind="no_result",
                 reason_code="extraction_empty",
                 stage_timings=stage_timings,
+                classification_reason=doc.classification_reason,
             )
 
         # ── Estágio 4: build_response ─────────────────────────────────────────

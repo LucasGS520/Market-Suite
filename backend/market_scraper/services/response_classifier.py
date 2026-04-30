@@ -132,6 +132,12 @@ def has_product_signals(html: str) -> bool:
     return has_signals
 
 
+def count_product_signals(html: str) -> int:
+    """Retorna quantos padrões distintos de produto foram encontrados no HTML."""
+    html_lower = html.lower()
+    return sum(1 for p in _PRODUCT_SIGNAL_PATTERNS if p.lower() in html_lower)
+
+
 def detect_anti_bot_pattern(html: str) -> str | None:
     """ Verifica se o HTML contém padrões conhecidos de proteção anti-bot.
 
@@ -322,4 +328,5 @@ __all__ = [
     "ResponseClassifier",
     "detect_anti_bot_pattern",
     "has_product_signals",
+    "count_product_signals",
 ]

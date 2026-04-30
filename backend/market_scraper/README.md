@@ -342,9 +342,12 @@ Variáveis de ambiente controladas em [`core/config_scraper.py`](core/config_scr
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `SCRAPER_HTTP_BUDGET_SECONDS` | `10.0` | Orçamento total para coleta HTTP (curl_cffi + retries) |
-| `SCRAPER_BROWSER_BUDGET_SECONDS` | `25.0` | Orçamento para fallback Playwright |
+| `SCRAPER_BROWSER_BUDGET_SECONDS` | `40.0` | Orçamento para fallback Playwright (navegação + renderização) |
+| `SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS` | `10.0` | Timeout de navegação por tentativa; deve ser < BROWSER_BUDGET |
+| `SCRAPER_BROWSER_MAX_RETRIES` | `2` | Tentativas extras do browser com backoff |
+| `SCRAPER_BROWSER_CONCURRENCY` | `5` | Máximo de instâncias Playwright simultâneas (1 em staging) |
 | `SCRAPER_STEP_TIMEOUT_SECONDS` | `15.0` | Timeout para etapas de parsing (extração/pós-processamento) |
-| `SCRAPER_PIPELINE_TIMEOUT_SECONDS` | `50.0` | Timeout global do pipeline (proteção de segurança) |
+| `SCRAPER_PIPELINE_TIMEOUT_SECONDS` | `50.0` | Timeout global do pipeline — deve ser >= HTTP_BUDGET + BROWSER_BUDGET + 5s |
 | `SCRAPER_HTTP_RETRIES` | `2` | Tentativas extras para downloads HTTP |
 | `SCRAPER_HTTP_RETRY_BACKOFF_BASE` | `0.5` | Base do backoff exponencial entre retries |
 | `SCRAPER_HTTP_MAX_REDIRECTS` | `3` | Limite de redirecionamentos seguidos |
@@ -356,6 +359,7 @@ Variáveis de ambiente controladas em [`core/config_scraper.py`](core/config_scr
 |----------|--------|-----------|
 | `SCRAPER_ROBOTS_MODE` | `audit` | `audit` = observa e loga; `block` = rejeita com 403 |
 | `SCRAPER_RATE_LIMITER_BLOCK_ENABLED` | `False` | `True` = bloqueia domínios em cooldown severo em produção |
+| `SCRAPER_TELEMETRY_VERBOSE` | `False` | `True` = loga session_id, attempt e timestamps em cada coleta (staging/debug) |
 
 ### Cache
 

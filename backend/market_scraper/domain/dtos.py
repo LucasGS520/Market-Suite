@@ -27,6 +27,7 @@ class AcquisitionTelemetry:
     anti_bot_detected: bool
     anti_bot_pattern: str | None
     anti_bot_bypassed: bool
+    is_degraded: bool = False
 
     @property
     def data_quality(self) -> str:
@@ -48,6 +49,7 @@ class AcquisitionTelemetry:
             "anti_bot_pattern": self.anti_bot_pattern,
             "anti_bot_bypassed": self.anti_bot_bypassed,
             "data_quality": self.data_quality,
+            "is_degraded": self.is_degraded,
         }
 
     @classmethod
@@ -61,6 +63,7 @@ class AcquisitionTelemetry:
             anti_bot_detected=doc.anti_bot_detected,
             anti_bot_pattern=doc.anti_bot_pattern,
             anti_bot_bypassed=doc.anti_bot_bypassed,
+            is_degraded=getattr(doc, "is_degraded", False),
         )
 
 
