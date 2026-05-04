@@ -44,9 +44,9 @@ def _contains_any(haystack: str, needles: Iterable[str]) -> bool:
 
 def _detect_meli(html: str) -> DetectorResult | None:
     """ Identifica banners de anúncio pausado ou indisponível no Mercado Livre """
-    if _contains_any(html, ("anúncio pausado", "produto não disponível", "indisponível no momento")):
+    if "anúncio pausado" in html:
         return False, "paused", "meli_paused"
-    if _contains_any(html, ("produto indisponível", "produto não disponível", "indisponível no momento")):
+    if _contains_any(html, ("produto não disponível", "produto indisponível", "indisponível no momento")):
         return False, "unavailable", "meli_unavailable"
     return None
 

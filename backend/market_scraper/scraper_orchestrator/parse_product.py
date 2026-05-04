@@ -118,6 +118,7 @@ class ParseProduct:
         )
         telemetry = TelemetryService(trace_id=effective_trace_id, domain=domain)
         pipeline_started = perf_counter()
+        robots_policy_decision: str | None = None
 
         # ── Estágio 1: collect ────────────────────────────────────────────────
         t = perf_counter()
@@ -176,9 +177,11 @@ class ParseProduct:
                         stage_timings=stage_timings,
                     )
                 else:
+                    robots_policy_decision = "warn_proceed"
                     request_logger.warning(
                         "robots_disallowed_warn",
                         url=sanitize_log_data(url),
+                        robots_policy_decision=robots_policy_decision,
                     )
 
         #Rate limiter pre-check
@@ -329,7 +332,9 @@ class ParseProduct:
         # ── Estágio 3: post_process ───────────────────────────────────────────
         t = perf_counter()
         telemetry.post_processing_started()
-        acquisition = AcquisitionTelemetry.from_collected_document(doc)
+        acquisition = AcquisitionTelemetry.from_collected_document(
+            doc, robots_policy_decision=robots_policy_decision
+        )
         processor = get_post_processor()
         post_result: PostProcessResult = processor.run(
             parse_result.payload,

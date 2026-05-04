@@ -57,6 +57,48 @@ COLLECTION_ERROR_MAP: dict[str, tuple[str, str, int]] = {
         "A URL informada é inválida ou usa protocolo não suportado",
         http_status.HTTP_422_UNPROCESSABLE_ENTITY,
     ),
+    # ── Erros de transporte HTTP (antes do browser) ───────────────────────
+    #Estes códigos vêm de ClassificationReason via STOP_FAILURE na policy.
+    "network_error": (
+        "network_error",
+        "Falha de rede ao acessar a URL; tente novamente",
+        http_status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
+    "connection_error": (
+        "connection_error",
+        "Não foi possível conectar ao servidor; tente novamente",
+        http_status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
+    "timeout": (
+        "timeout",
+        "Tempo limite de conexão HTTP excedido; tente novamente",
+        http_status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
+    "server_error": (
+        "server_error",
+        "Servidor retornou erro interno (5xx); tente novamente",
+        http_status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
+    "access_denied": (
+        "access_denied",
+        "Acesso negado pelo servidor ao scraper",
+        http_status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
+    "rate_limited": (
+        "rate_limited",
+        "Servidor retornou limitação de taxa (429); tente novamente",
+        http_status.HTTP_429_TOO_MANY_REQUESTS,
+    ),
+    "client_error": (
+        "client_error",
+        "Requisição rejeitada pelo servidor (4xx)",
+        http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ),
+    "html_empty": (
+        "html_empty",
+        "Servidor retornou resposta vazia; URL pode estar inválida ou protegida",
+        http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ),
     # ── Browser (Playwright) ─────────────────────────────────────────────
     "playwright_timeout": (
         "playwright_timeout",
@@ -78,9 +120,14 @@ COLLECTION_ERROR_MAP: dict[str, tuple[str, str, int]] = {
         "Serviço temporariamente degradado; fallback de browser indisponível",
         http_status.HTTP_503_SERVICE_UNAVAILABLE,
     ),
+    "browser_fetch_failed": (
+        "browser_fetch_failed",
+        "Erro inesperado ao obter conteúdo via browser; tente novamente",
+        http_status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
 }
 
-# Resposta padrão quando o error_code não está na taxonomia.
+#Resposta padrão quando o error_code não está na taxonomia.
 _UPSTREAM_ERROR_DEFAULT = (
     UrlIssue(
         code="upstream_error",
@@ -91,7 +138,7 @@ _UPSTREAM_ERROR_DEFAULT = (
 
 
 def map_collection_error(error_code: str | None) -> tuple[UrlIssue, int]:
-    """Mapeia error_code interno → (UrlIssue, http_status) para transporte HTTP.
+    """ Mapeia error_code interno → (UrlIssue, http_status) para transporte HTTP.
 
     Sempre retorna um par válido; usa upstream_error/503 como fallback para
     códigos desconhecidos.

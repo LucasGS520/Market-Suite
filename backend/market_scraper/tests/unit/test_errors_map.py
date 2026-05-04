@@ -18,14 +18,27 @@ from market_scraper.infra.errors_map import COLLECTION_ERROR_MAP, map_collection
 @pytest.mark.parametrize(
     "error_code, expected_issue_code, expected_status",
     [
+        # Anti-bot / rate limit (nosso rate limiter e proteção anti-bot)
         ("anti_bot_page", "anti_bot_page", http_status.HTTP_429_TOO_MANY_REQUESTS),
         ("rate_limiter_cooldown", "rate_limiter_cooldown", http_status.HTTP_429_TOO_MANY_REQUESTS),
+        # URL
         ("too_many_redirects", "too_many_redirects", http_status.HTTP_422_UNPROCESSABLE_ENTITY),
         ("invalid_url", "invalid_url", http_status.HTTP_422_UNPROCESSABLE_ENTITY),
+        # Transporte HTTP (ClassificationReason via STOP_FAILURE)
+        ("network_error", "network_error", http_status.HTTP_503_SERVICE_UNAVAILABLE),
+        ("connection_error", "connection_error", http_status.HTTP_503_SERVICE_UNAVAILABLE),
+        ("timeout", "timeout", http_status.HTTP_503_SERVICE_UNAVAILABLE),
+        ("server_error", "server_error", http_status.HTTP_503_SERVICE_UNAVAILABLE),
+        ("access_denied", "access_denied", http_status.HTTP_503_SERVICE_UNAVAILABLE),
+        ("rate_limited", "rate_limited", http_status.HTTP_429_TOO_MANY_REQUESTS),
+        ("client_error", "client_error", http_status.HTTP_422_UNPROCESSABLE_ENTITY),
+        ("html_empty", "html_empty", http_status.HTTP_422_UNPROCESSABLE_ENTITY),
+        # Browser
         ("playwright_timeout", "playwright_timeout", http_status.HTTP_504_GATEWAY_TIMEOUT),
         ("playwright_fetch_error", "playwright_fetch_error", http_status.HTTP_503_SERVICE_UNAVAILABLE),
         ("playwright_not_ready", "pipeline_degraded", http_status.HTTP_503_SERVICE_UNAVAILABLE),
         ("pipeline_degraded", "pipeline_degraded", http_status.HTTP_503_SERVICE_UNAVAILABLE),
+        ("browser_fetch_failed", "browser_fetch_failed", http_status.HTTP_503_SERVICE_UNAVAILABLE),
     ],
 )
 def test_map_collection_error_known_codes(error_code, expected_issue_code, expected_status):
@@ -62,15 +75,29 @@ def test_map_collection_error_returns_issue_with_message():
 def test_collection_error_map_covers_all_expected_codes():
     """Garante que a taxonomia não perde entradas silenciosamente."""
     expected_codes = {
+        # Configuração
         "missing_proxy_config",
+        # Anti-bot / rate limit
         "anti_bot_blocked",
         "anti_bot_page",
         "rate_limiter_cooldown",
+        # URL
         "too_many_redirects",
         "invalid_url",
+        # Transporte HTTP (ClassificationReason via STOP_FAILURE)
+        "network_error",
+        "connection_error",
+        "timeout",
+        "server_error",
+        "access_denied",
+        "rate_limited",
+        "client_error",
+        "html_empty",
+        # Browser (Playwright)
         "playwright_timeout",
         "playwright_fetch_error",
         "playwright_not_ready",
         "pipeline_degraded",
+        "browser_fetch_failed",
     }
     assert expected_codes == set(COLLECTION_ERROR_MAP.keys())

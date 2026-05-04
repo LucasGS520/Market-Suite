@@ -30,8 +30,6 @@ from market_scraper.core.config_scraper import settings
 
 logger = structlog.get_logger(__name__)
 
-_ROBOTS_REDIS_TTL = 3600
-
 _ROBOTS_HEADERS = {
     "User-Agent": "marketsuite-scraper/1.0",
     "Accept": "text/plain",
@@ -274,8 +272,8 @@ async def _get_parser(
 
     try:
         client = get_redis_operational()
-        client.setex(cache_key, _ROBOTS_REDIS_TTL, text)
-        logger.debug("robots_cache_populated", host=host, ttl=_ROBOTS_REDIS_TTL)
+        client.setex(cache_key, settings.SCRAPER_ROBOTS_CACHE_TTL, text)
+        logger.debug("robots_cache_populated", host=host, ttl=settings.SCRAPER_ROBOTS_CACHE_TTL)
     except Exception as exc:
         logger.warning("robots_cache_set_failed", host=host, error=str(exc))
 

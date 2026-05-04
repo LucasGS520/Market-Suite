@@ -17,13 +17,25 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Diagnostico
+## Resumo do Problema e Objetivo da Correção
 
-O módulo já tem pipeline, telemetria e classificação suficientes, mas ainda sofre de ambiguidade semântica entre coleta, produto, bloqueio e timeout. O ajuste prioritário agora não é ampliar a arquitetura, e sim fechar os contratos para que o sistema pare de misturar estados diferentes no mesmo retorno. 
-Os documentos-base que sustentam isso são:
-- `diagnostico_atual_scraper.md`
-- `analise_respostas_scraper.md`
-- `estrutura_coletas_ideal_scraper.md`
+- **Problema:** O `market_scraper` continua estruturalmente correto, mas operacionalmente frágil principalmente em VPS/staging, com bloqueio anti-bot terminal, fallback browser lento, ausência de proxy efetivo no ambiente e timeouts longos que degradam o endpoint síncrono.
+
+- **Sintoma observado:** Nos logs de scraper_stag.log, o fluxo ainda alterna entre `anti_bot_blocked` e `playwright_timeout`, com tentativas longas, `browser_handler_orphan`, `SessionError` 429 e respostas finais `503/504`.
+
+- **Objetivo da correção:** Transformar o módulo em scraper operacional com coleta resiliente, estados finais explícitos, falha rápida para anti-bot, política de robots clara, diferenciação semântica entre indisponibilidade e bloqueio.
+
+---
+
+## Riscos, Impacto e Decisões
+
+- **Decisão Técnica Principal:** Fechar contratos de estado e endurecer a camada de coleta para anti-bot, priorizando falha rápida e classificação correta, em vez de insistência longa com timeout genérico, passar de “fallback browser que insiste até timeout” para “coleta orientada a bloqueio terminal, identidade e falha rápida”.
+
+- **Risco Principal:** Introdução de proxy/sessão/novos estados alterar comportamento esperado por consumidores atuais da API e por automações que dependem de 422/504.
+
+- **Impacto atual:** Alto custo operacional por tentativas longas, baixa taxa de sucesso em VPS/staging, diagnóstico ambiguo em parte dos erros e baixa previsibilidade de SLA, o sistema ainda desperdiça tempo em challenge pages, produz 504 tardio e mascara bloqueio anti-bot como indisponibilidade temporária.
+
+- **Dependências:** Provedor de proxy com saída BR, variáveis de ambiente válidas por ambiente, observabilidade ativa, suite de testes de regressão e integração em staging.
 
 ---
 

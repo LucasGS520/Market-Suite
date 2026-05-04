@@ -74,6 +74,8 @@ def build_no_result_response(
         "error_code": "no_result",
         "trace_id": trace_id,
     }
+    if reason_code is not None:
+        content["reason_code"] = reason_code
     if classification_reason is not None:
         content["classification_reason"] = classification_reason
     return JSONResponse(

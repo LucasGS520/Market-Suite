@@ -107,6 +107,20 @@ def test_build_no_result_response_handles_none_reason_code():
     )
     body = json.loads(response.body)
     assert body["error_code"] == "no_result"
+    assert "reason_code" not in body
+
+
+def test_build_no_result_response_exposes_reason_code_in_body():
+    """reason_code exposto no body permite distinguir extraction_empty de no_result genérico."""
+    import json
+    response = build_no_result_response(
+        reason_code="extraction_empty",
+        trace_id="trace-reason",
+        request_logger=_silent_logger(),
+    )
+    body = json.loads(response.body)
+    assert body["error_code"] == "no_result"
+    assert body["reason_code"] == "extraction_empty"
 
 
 # ── build_parser_response / alias ────────────────────────────────────────────

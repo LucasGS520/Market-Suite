@@ -90,6 +90,7 @@ class PlaywrightBrowserCollector:
         self._attempts: dict[str, int] = {}      # request_id → nº de tentativas de navegação
         self._nav_starts: dict[str, float] = {}  # request_id → time.monotonic() do início de nav
         self._seen_sessions: set[str] = set()    # session IDs já observados (para lifecycle log)
+        self._orphan_count: int = 0              # handlers que chegaram após timeout da requisição
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -182,67 +183,66 @@ class PlaywrightBrowserCollector:
                     #Aguardar pequeno delay para React/Vue renderizar componentes iniciais
                     await asyncio.sleep(0.3)
                     html = await context.page.content()
-                except Exception as exc:
-                    logger.debug("early_exit_get_content_failed", error=str(exc))
-                    return
 
-                future = collector._pending.get(request_id)
-                if not future or future.done():
-                    return
+                    future = collector._pending.get(request_id)
+                    if not future or future.done():
+                        return
 
-                html_size = len(html)
+                    html_size = len(html)
 
-                #Caminho 1: 2+ sinais fortes de produto → early success (evita falso-positivo em challenge pages)
-                signal_count = count_product_signals(html)
-                if html_size >= min_bytes and signal_count >= 2:
-                    logger.debug(
-                        "browser_early_exit",
-                        reason="product_signals_found",
-                        url=sanitize_log_data(context.request.url),
-                        html_size=html_size,
-                        signal_count=signal_count,
-                    )
-                    future.set_result(html)
-                    await _cancel_navigation(context)
-                    return
+                    #Caminho 1: 2+ sinais fortes de produto → early success (evita falso-positivo em challenge pages)
+                    signal_count = count_product_signals(html)
+                    if html_size >= min_bytes and signal_count >= 2:
+                        logger.debug(
+                            "browser_early_exit",
+                            reason="product_signals_found",
+                            url=sanitize_log_data(context.request.url),
+                            html_size=html_size,
+                            signal_count=signal_count,
+                        )
+                        future.set_result(html)
+                        await _cancel_navigation(context)
+                        return
 
-                #Caminho 2: challenge anti-bot sem produto → fast-fail + aposentar sessão
-                anti_bot = detect_anti_bot_pattern(html)
-                if anti_bot:
-                    session_id = context.session.id if context.session else "none"
-                    if context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
-                        context.session.retire()
-                        logger.info(
-                            "browser_session_retired",
-                            session_id=session_id,
-                            reason="anti_bot_detected",
+                    #Caminho 2: challenge anti-bot sem produto → fast-fail + aposentar sessão
+                    anti_bot = detect_anti_bot_pattern(html)
+                    if anti_bot:
+                        session_id = context.session.id if context.session else "none"
+                        if context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
+                            context.session.retire()
+                            logger.info(
+                                "browser_session_retired",
+                                session_id=session_id,
+                                reason="anti_bot_detected",
+                                pattern=anti_bot,
+                            )
+                        logger.debug(
+                            "browser_early_exit_anti_bot",
+                            url=sanitize_log_data(context.request.url),
                             pattern=anti_bot,
+                            html_size=html_size,
+                            session_id=session_id,
                         )
-                    logger.debug(
-                        "browser_early_exit_anti_bot",
-                        url=sanitize_log_data(context.request.url),
-                        pattern=anti_bot,
-                        html_size=html_size,
-                        session_id=session_id,
-                    )
-                    if _DEBUG_SCREENSHOTS:
-                        await collector._maybe_screenshot(
-                            context.page,
-                            url=context.request.url,
-                            reason="anti_bot",
-                        )
-                    future.set_result(html)
-                    await _cancel_navigation(context)
-                    return
+                        if _DEBUG_SCREENSHOTS:
+                            await collector._maybe_screenshot(
+                                context.page,
+                                url=context.request.url,
+                                reason="anti_bot",
+                            )
+                        future.set_result(html)
+                        await _cancel_navigation(context)
+                        return
 
-                #Se nenhuma condição de early-exit, deixa navegação continuar
-                logger.debug(
-                    "early_exit_not_triggered",
-                    reason="html_too_small_and_no_signals",
-                    html_size=html_size,
-                    min_bytes=min_bytes,
-                    url=sanitize_log_data(context.request.url),
-                )
+                    #Se nenhuma condição de early-exit, deixa navegação continuar
+                    logger.debug(
+                        "early_exit_not_triggered",
+                        reason="html_too_small_and_no_signals",
+                        html_size=html_size,
+                        min_bytes=min_bytes,
+                        url=sanitize_log_data(context.request.url),
+                    )
+                except Exception as exc:
+                    logger.debug("early_exit_internal_error", error=str(exc))
 
             context.page.once(
                 "domcontentloaded",
@@ -264,19 +264,23 @@ class PlaywrightBrowserCollector:
             session_id = context.session.id if context.session else "none"
             status = context.response.status if context.response else 0
 
-            was_pending = request_id in collector._pending
-            if not was_pending:
-                logger.warning(
-                    "browser_handler_orphan",
-                    request_id=request_id,
-                    url=sanitize_log_data(context.request.url),
-                    # Future já removido: handler chegou depois do timeout em fetch()
-                )
-
             nav_duration_ms: float | None = None
             t_nav = collector._nav_starts.get(request_id)
             if t_nav is not None:
                 nav_duration_ms = round((time.monotonic() - t_nav) * 1000, 1)
+
+            future = collector._pending.get(request_id)
+            if future is None:
+                # Handler tardio: requisição já encerrou por timeout em fetch()
+                collector._orphan_count += 1
+                logger.warning(
+                    "browser_handler_orphan",
+                    request_id=request_id,
+                    url=sanitize_log_data(context.request.url),
+                    nav_duration_ms=nav_duration_ms,
+                    orphan_count=collector._orphan_count,
+                )
+                return
 
             if status in (403, 429) and context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
                 context.session.retire()
@@ -285,7 +289,6 @@ class PlaywrightBrowserCollector:
                     session_id=session_id,
                     reason=f"http_{status}",
                 )
-            future = collector._pending.get(request_id)
             html = await context.page.content()
             logger.debug(
                 "browser_fetch_success",
@@ -295,9 +298,8 @@ class PlaywrightBrowserCollector:
                 status=status,
                 html_size=len(html),
                 nav_duration_ms=nav_duration_ms,
-                was_pending=was_pending,
             )
-            if future and not future.done():
+            if not future.done():
                 future.set_result(html)
 
         @self._crawler.failed_request_handler
@@ -348,6 +350,10 @@ class PlaywrightBrowserCollector:
 
     async def shutdown(self) -> None:
         """Para o PlaywrightCrawler persistente e aguarda encerramento."""
+        # Cancela futures pendentes para liberar fetch() calls ainda aguardando
+        for fut in list(self._pending.values()):
+            if not fut.done():
+                fut.cancel()
         if self._crawler is not None:
             self._crawler.stop()
         if self._run_task is not None:
@@ -360,6 +366,7 @@ class PlaywrightBrowserCollector:
         self._attempts.clear()
         self._nav_starts.clear()
         self._seen_sessions.clear()
+        self._orphan_count = 0
         logger.info("browser_collector_stopped")
 
     @property

@@ -41,9 +41,13 @@ class Settings(ConfigBase):
 
     # --- Política de robots.txt ---
     SCRAPER_ROBOTS_MODE: str = os.getenv("SCRAPER_ROBOTS_MODE", "warn").lower()
-    #"warn" (padrão): verifica robots.txt, loga se disallowed, prossegue sem bloquear.
-    #"strict": bloqueia imediatamente com ROBOTS_BLOCKED se can_fetch=false.
+    #"warn" (padrão local/dev): verifica robots.txt, loga se disallowed, prossegue sem bloquear.
+    #"strict" (staging/production): bloqueia imediatamente com 403 se can_fetch=false.
     #"ignore": não verifica robots.txt; sem interferência na execução.
+
+    SCRAPER_ROBOTS_CACHE_TTL: int = int(os.getenv("SCRAPER_ROBOTS_CACHE_TTL", "3600"))
+    #TTL do cache Redis para robots.txt (segundos). Padrão 1h (3600s).
+    #Reduza para domínios com políticas voláteis; aumente para reduzir requisições de rede.
 
     # --- Orçamentos de aquisição (HTTP e browser) ---
     #Dois orçamentos independentes substituem o timeout único de aquisição, eliminando a variabilidade causada por microetapas e interrupções prematuras.
@@ -57,8 +61,8 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS", "10.0")
     ) #Timeout de navegação por tentativa reduzido; deve ser < SCRAPER_BROWSER_BUDGET_SECONDS
     SCRAPER_BROWSER_MAX_RETRIES: int = int(
-        os.getenv("SCRAPER_BROWSER_MAX_RETRIES", "2")
-    ) #Tentativas extras de browser com backoff (2 retries para máximo de 3 tentativas totais)
+        os.getenv("SCRAPER_BROWSER_MAX_RETRIES", "1")
+    ) #Tentativas extras de browser com backoff (1 retry = máximo 2 tentativas totais; sem retry em anti-bot)
     SCRAPER_BROWSER_EARLY_EXIT_ENABLED: bool = os.getenv(
         "SCRAPER_BROWSER_EARLY_EXIT_ENABLED", "True"
     ).lower() in {"1", "true", "on", "yes"}

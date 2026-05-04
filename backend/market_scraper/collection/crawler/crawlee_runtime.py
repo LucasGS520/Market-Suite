@@ -307,10 +307,13 @@ class CrawleeRuntime:
         residual_pattern: str | None = browser_classification["anti_bot_pattern"]
         browser_anti_bot: bool = browser_classification["anti_bot_detected"]
 
-        #Padrão terminal detectado no browser → descarta HTML, impede extração inútil
-        if not doc_error_code and is_terminal_anti_bot_pattern(residual_pattern):
+        #Padrão terminal no browser → descarta HTML e sobrescreve qualquer erro anterior
+        if is_terminal_anti_bot_pattern(residual_pattern):
             doc_error_code = "anti_bot_blocked"
             html_browser = None
+        elif doc_error_code == "playwright_timeout" and anti_bot_detected:
+            #Timeout em challenge page já detectada pelo HTTP — bloqueio, não timeout genérico
+            doc_error_code = "anti_bot_blocked"
 
         browser_succeeded = html_browser is not None and not doc_error_code
         anti_bot_bypassed = browser_succeeded and not browser_anti_bot

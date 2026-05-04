@@ -28,6 +28,9 @@ class AcquisitionTelemetry:
     anti_bot_pattern: str | None
     anti_bot_bypassed: bool
     is_degraded: bool = False
+    robots_policy_decision: str | None = None
+    #"warn_proceed": robots.txt disallowed mas pipeline continuou (modo warn).
+    #None: robots não interferiu (allowed, strict-blocked retorna erro antes, ou ignore).
 
     @property
     def data_quality(self) -> str:
@@ -40,7 +43,7 @@ class AcquisitionTelemetry:
 
     def to_payload(self) -> dict[str, Any]:
         """ Serializa para o formato esperado em ParserResponse.payload.acquisition."""
-        return {
+        payload: dict[str, Any] = {
             "layer_used": self.layer_used,
             "fallback_taken": self.fallback_taken,
             "classification_reason": self.classification_reason,
@@ -51,9 +54,17 @@ class AcquisitionTelemetry:
             "data_quality": self.data_quality,
             "is_degraded": self.is_degraded,
         }
+        if self.robots_policy_decision is not None:
+            payload["robots_policy_decision"] = self.robots_policy_decision
+        return payload
 
     @classmethod
-    def from_collected_document(cls, doc: Any) -> "AcquisitionTelemetry":
+    def from_collected_document(
+        cls,
+        doc: Any,
+        *,
+        robots_policy_decision: str | None = None,
+    ) -> "AcquisitionTelemetry":
         """Constrói a partir de um CollectedDocument (camada de coleta canônica)."""
         return cls(
             layer_used=doc.layer_used,
@@ -64,6 +75,7 @@ class AcquisitionTelemetry:
             anti_bot_pattern=doc.anti_bot_pattern,
             anti_bot_bypassed=doc.anti_bot_bypassed,
             is_degraded=getattr(doc, "is_degraded", False),
+            robots_policy_decision=robots_policy_decision,
         )
 
 

@@ -84,17 +84,28 @@ class HttpCollector:
         async def _handler(context: HttpCrawlingContext) -> None:
             request_id: str = context.request.user_data.get("_request_id", "")
             session_id = context.session.id if context.session else "none"
+            status = context.http_response.status_code
+
+            #Aposentar sessão em bloqueio ou rate limit — impede reuso de identidade comprometida
+            if status in (403, 429) and context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
+                context.session.retire()
+                logger.info(
+                    "http_session_retired",
+                    session_id=session_id,
+                    reason=f"http_{status}",
+                )
+
             future = collector._pending.get(request_id)
             if future and not future.done():
                 body = await context.http_response.read()
                 html = body[:_MAX_CONTENT_BYTES].decode("utf-8", errors="replace")
-                future.set_result((html, context.http_response.status_code))
+                future.set_result((html, status))
                 logger.debug(
                     "http_collect",
                     request_id=request_id,
                     session_id=session_id,
                     url=context.request.url,
-                    status=context.http_response.status_code,
+                    status=status,
                     html_size=len(html),
                 )
 
@@ -102,6 +113,17 @@ class HttpCollector:
         async def _failed(context: Any, error: Exception) -> None:
             request_id: str = context.request.user_data.get("_request_id", "")
             session_id = context.session.id if context.session else "none"
+
+            #Aposentar sessão quando o proxy falhou — marca identidade como ruim
+            if isinstance(error, ProxyError) and context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
+                context.session.retire()
+                logger.info(
+                    "http_session_retired",
+                    session_id=session_id,
+                    reason="proxy_error",
+                    error=type(error).__name__,
+                )
+
             future = collector._pending.get(request_id)
             if future and not future.done():
                 future.set_exception(error)
