@@ -62,6 +62,8 @@ def test_map_collection_error_returns_issue_with_message():
 def test_collection_error_map_covers_all_expected_codes():
     """Garante que a taxonomia não perde entradas silenciosamente."""
     expected_codes = {
+        "missing_proxy_config",
+        "anti_bot_blocked",
         "anti_bot_page",
         "rate_limiter_cooldown",
         "too_many_redirects",

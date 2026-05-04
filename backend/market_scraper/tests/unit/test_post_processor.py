@@ -63,3 +63,54 @@ def test_post_processor_infers_unavailable_when_payload_has_no_availability():
     assert result.current_price is None
     assert result.is_useful is True
     assert result.extra_fields["acquisition"]["data_quality"] == "normal"
+
+
+def _no_acquisition() -> AcquisitionTelemetry:
+    return AcquisitionTelemetry(
+        layer_used="curl_cffi",
+        fallback_taken=False,
+        classification_reason="html_valid",
+        http_status=200,
+        anti_bot_detected=False,
+        anti_bot_pattern=None,
+        anti_bot_bypassed=False,
+    )
+
+
+def test_post_processor_price_zero_produces_price_unavailable():
+    """Preço <= 0 é descartado e sinaliza PRICE_UNAVAILABLE."""
+    result = PostProcessor().run(
+        {"name": "Produto X", "current_price": "0"},
+        _no_acquisition(),
+        "https://example.com/p",
+        "example.com",
+    )
+    assert result.current_price is None
+    assert result.last_status == "price_unavailable"
+    assert result.is_useful is True
+
+
+
+def test_post_processor_outofstock_clears_price():
+    """OutOfStock: preço extraído é descartado — não é confiável para produto indisponível."""
+    result = PostProcessor().run(
+        {"name": "TV", "current_price": "2999.90", "availability": False},
+        _no_acquisition(),
+        "https://example.com/p",
+        "example.com",
+    )
+    assert result.availability is False
+    assert result.current_price is None
+    assert result.last_status is None
+    assert result.is_useful is True
+
+
+def test_post_processor_outofstock_does_not_set_price_unavailable():
+    """OutOfStock com preço descartado NÃO gera price_unavailable — contexto é OOS."""
+    result = PostProcessor().run(
+        {"name": "TV", "current_price": "2999.90", "availability": False},
+        _no_acquisition(),
+        "https://example.com/p",
+        "example.com",
+    )
+    assert result.last_status is None  # não é "price_unavailable", é OOS

@@ -133,8 +133,10 @@ class PostProcessResult:
 
     @property
     def is_useful(self) -> bool:
-        """ Critério canônico: availability=False OU (name + price)."""
+        """ Critério canônico: availability=False OU (name + price) OU PRICE_UNAVAILABLE."""
         if self.availability is False:
+            return True
+        if bool(self.name) and self.last_status == "price_unavailable":
             return True
         return bool(self.name) and self.current_price is not None
 

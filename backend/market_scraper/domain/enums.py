@@ -40,6 +40,7 @@ class ClassificationReason(str, Enum):
     # ── Anti-bot ───────────────────────────────────────────────────────────
     ANTI_BOT_PAGE = "anti_bot_page"
     ANTI_BOT_DEGRADED = "anti_bot_degraded"
+    ANTI_BOT_BLOCKED = "anti_bot_blocked"   # bloqueio terminal — sem retry com mesma identidade
 
     # ── Browser outcomes ───────────────────────────────────────────────────
     BROWSER_TIMEOUT = "browser_timeout"

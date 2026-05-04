@@ -33,14 +33,22 @@ _HTML_EMPTY_THRESHOLD_BYTES = 1 * 1024       # 1 KB
 
 #Padrões de anti-bot inspecionados pelo classificador e pelo fluxo de fetch
 _ANTI_BOT_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("suspicious-traffic-frontend", "mercadolivre_challenge"),
-    ("challenges.cloudflare.com",   "cloudflare_challenge"),
-    ("__cf_chl",                    "cloudflare_challenge"),
-    ("__cf_bm",                     "cloudflare_challenge"),
-    ("recaptcha/api.js",            "captcha_challenge"),
-    ("recaptcha",                   "captcha_challenge"),
-    ("_pxcaptcha",                  "perimeterx_challenge"),
+    ("suspicious-traffic-frontend",  "mercadolivre_challenge"),
+    ("/gz/account-verification",     "mercadolivre_account_verification"),
+    ("challenges.cloudflare.com",    "cloudflare_challenge"),
+    ("__cf_chl",                     "cloudflare_challenge"),
+    ("__cf_bm",                      "cloudflare_challenge"),
+    ("recaptcha/api.js",             "captcha_challenge"),
+    ("recaptcha",                    "captcha_challenge"),
+    ("_pxcaptcha",                   "perimeterx_challenge"),
 )
+
+#Padrões que indicam bloqueio terminal — sem retry útil possível com a mesma identidade.
+#Browser deve aposentar sessão e o pipeline deve retornar ANTI_BOT_BLOCKED imediatamente.
+_TERMINAL_ANTI_BOT_PATTERN_TYPES: frozenset[str] = frozenset({
+    "mercadolivre_challenge",
+    "mercadolivre_account_verification",
+})
 
 #Status HTTP que indicam rejeição final (nunca escalar)
 _FINAL_REJECT_STATUSES: frozenset[int] = frozenset({404, 410})
@@ -136,6 +144,11 @@ def count_product_signals(html: str) -> int:
     """Retorna quantos padrões distintos de produto foram encontrados no HTML."""
     html_lower = html.lower()
     return sum(1 for p in _PRODUCT_SIGNAL_PATTERNS if p.lower() in html_lower)
+
+
+def is_terminal_anti_bot_pattern(pattern_type: str | None) -> bool:
+    """ Retorna True se o tipo de padrão anti-bot não admite retry com a mesma identidade."""
+    return pattern_type in _TERMINAL_ANTI_BOT_PATTERN_TYPES
 
 
 def detect_anti_bot_pattern(html: str) -> str | None:
@@ -329,4 +342,5 @@ __all__ = [
     "detect_anti_bot_pattern",
     "has_product_signals",
     "count_product_signals",
+    "is_terminal_anti_bot_pattern",
 ]

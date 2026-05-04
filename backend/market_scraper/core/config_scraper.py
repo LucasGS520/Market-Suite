@@ -15,10 +15,22 @@ from pydantic import model_validator
 from shared.core.config_base import ConfigBase, PYTEST_RUNNING
 
 
+#Domínios que exigem proxy em staging/production para evitar bloqueio anti-bot.
+#Checagem via substring case-insensitive do hostname.
+_PROXY_REQUIRED_DOMAIN_FRAGMENTS: frozenset[str] = frozenset({
+    "mercadolivre",
+    "mercadolibre",
+})
+
 __all__ = ["Settings", "settings"]
 
 class Settings(ConfigBase):
     """ Organiza configurações essenciais expostas ao MarketScraper """
+
+    # --- Ambiente de execução ---
+    SCRAPER_ENV: str = os.getenv("SCRAPER_ENV", "local").lower()
+    #"local" (padrão): proxy opcional, sem fail-fast de configuração.
+    #"staging" ou "production": proxy obrigatório para domínios sensíveis (ex.: Mercado Livre).
 
     # --- Rate limiter por histórico ---
     SCRAPER_RATE_LIMITER_BLOCK_ENABLED: bool = os.getenv(
@@ -28,9 +40,10 @@ class Settings(ConfigBase):
     #Defina True em produção para bloquear domínios em cooldown severo.
 
     # --- Política de robots.txt ---
-    SCRAPER_ROBOTS_MODE: str = os.getenv("SCRAPER_ROBOTS_MODE", "audit").lower()
-    #Padrão "audit": robots.txt é sinal observável; pipeline prossegue e context.data["robots_disallowed"] é marcado para telemetria.
-    #Defina "block" em produção para interromper a coleta em URLs disallowed.
+    SCRAPER_ROBOTS_MODE: str = os.getenv("SCRAPER_ROBOTS_MODE", "warn").lower()
+    #"warn" (padrão): verifica robots.txt, loga se disallowed, prossegue sem bloquear.
+    #"strict": bloqueia imediatamente com ROBOTS_BLOCKED se can_fetch=false.
+    #"ignore": não verifica robots.txt; sem interferência na execução.
 
     # --- Orçamentos de aquisição (HTTP e browser) ---
     #Dois orçamentos independentes substituem o timeout único de aquisição, eliminando a variabilidade causada por microetapas e interrupções prematuras.
@@ -38,8 +51,8 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_HTTP_BUDGET_SECONDS", "10.0")
     ) #Orçamento para curl_cffi, incluindo retries configurados
     SCRAPER_BROWSER_BUDGET_SECONDS: float = float(
-        os.getenv("SCRAPER_BROWSER_BUDGET_SECONDS", "40.0")
-    ) #Orçamento para fallback Playwright (navegação + renderização); aumentado para retries
+        os.getenv("SCRAPER_BROWSER_BUDGET_SECONDS", "20.0")
+    ) #Orçamento para fallback Playwright (navegação + renderização); compatível com endpoint síncrono ≤35s
     SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS: float = float(
         os.getenv("SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS", "10.0")
     ) #Timeout de navegação por tentativa reduzido; deve ser < SCRAPER_BROWSER_BUDGET_SECONDS
@@ -77,8 +90,8 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_STEP_TIMEOUT_SECONDS", "15.0")
     ) #Timeout para etapas de parsing; coleta usa os orçamentos acima
     SCRAPER_PIPELINE_TIMEOUT_SECONDS: float = float(
-        os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "50.0")
-    ) #Segurança global: deve ser >= HTTP_BUDGET + BROWSER_BUDGET + 5s (validado no startup)
+        os.getenv("SCRAPER_PIPELINE_TIMEOUT_SECONDS", "35.0")
+    ) #Segurança global: endpoint síncrono ≤35s; deve ser >= HTTP_BUDGET + BROWSER_BUDGET + 5s (validado no startup)
 
     SCRAPER_SINGLEFLIGHT_LOCK_TTL: float = float(
         os.getenv("SCRAPER_SINGLEFLIGHT_LOCK_TTL", "15.0")
@@ -234,6 +247,21 @@ class Settings(ConfigBase):
         "SCRAPER_HTTP_DOMAIN_TIMEOUTS",
         "",
     ) #Permite sobreescrever timeout total por domínio
+
+    def proxy_required_for(self, domain: str) -> bool:
+        """ True se o domínio exige proxy no ambiente atual e SCRAPER_PROXY_URLS está vazio.
+
+        Em "local" o proxy é opcional — retorna sempre False.
+        Em "staging" e "production", domínios da lista _PROXY_REQUIRED_DOMAIN_FRAGMENTS
+        exigem proxy ativo; sem ele a coleta seria tentada com identidade única,
+        o que resulta em bloqueio anti-bot previsível.
+        """
+        if self.SCRAPER_ENV not in {"staging", "production"}:
+            return False
+        if self.SCRAPER_PROXY_URLS.strip():
+            return False
+        domain_lower = domain.lower()
+        return any(frag in domain_lower for frag in _PROXY_REQUIRED_DOMAIN_FRAGMENTS)
 
     @model_validator(mode="after")
     def _validate_timeout_hierarchy(self) -> "Settings":

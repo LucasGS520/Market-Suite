@@ -3,8 +3,9 @@
 Cobre os critérios canônicos implementados em PostProcessResult.is_useful:
   1. availability=False → True (indisponibilidade explícita é útil)
   2. name + current_price → True
-  3. apenas name ou apenas price → False
-  4. resultado completamente vazio → False
+  3. name + last_status="price_unavailable" → True (produto existe, preço não confiável)
+  4. apenas name ou apenas price → False
+  5. resultado completamente vazio → False
 """
 
 from __future__ import annotations
@@ -49,6 +50,25 @@ def test_name_price_and_availability_true_is_useful():
 def test_name_availability_false_is_useful():
     result = _result(name="TV", availability=False)
     assert result.is_useful is True
+
+
+# ── PRICE_UNAVAILABLE ────────────────────────────────────────────────────────
+
+def test_name_with_price_unavailable_is_useful():
+    result = _result(name="Notebook", last_status="price_unavailable")
+    assert result.is_useful is True
+
+
+def test_name_price_unavailable_ignores_price_field():
+    """PRICE_UNAVAILABLE não depende de current_price — price já foi descartado."""
+    result = _result(name="Notebook", current_price=None, last_status="price_unavailable")
+    assert result.is_useful is True
+
+
+def test_no_name_price_unavailable_not_useful():
+    """Sem nome, price_unavailable sozinho não é útil."""
+    result = _result(last_status="price_unavailable")
+    assert result.is_useful is False
 
 
 # ── Casos negativos ───────────────────────────────────────────────────────────

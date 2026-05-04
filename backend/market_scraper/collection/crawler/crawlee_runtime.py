@@ -28,6 +28,7 @@ from market_scraper.collection.dto.collection_attempt import CollectionAttempt
 from market_scraper.collection.policy import CollectionPolicyAction, ResponseClassifierPolicy
 from market_scraper.core.config_scraper import settings
 from market_scraper.domain.enums import ClassificationReason
+from market_scraper.services.response_classifier import is_terminal_anti_bot_pattern
 
 if TYPE_CHECKING:
     from market_scraper.collection.collectors.protocols import BrowserCollector
@@ -305,12 +306,20 @@ class CrawleeRuntime:
         browser_classification = self._policy.classify_browser_result(html_browser)
         residual_pattern: str | None = browser_classification["anti_bot_pattern"]
         browser_anti_bot: bool = browser_classification["anti_bot_detected"]
-        browser_succeeded = html_browser is not None and not browser_error_code
+
+        #Padrão terminal detectado no browser → descarta HTML, impede extração inútil
+        if not doc_error_code and is_terminal_anti_bot_pattern(residual_pattern):
+            doc_error_code = "anti_bot_blocked"
+            html_browser = None
+
+        browser_succeeded = html_browser is not None and not doc_error_code
         anti_bot_bypassed = browser_succeeded and not browser_anti_bot
 
-        # Razão final reflete o que o browser encontrou, não a razão de escalamento HTTP
-        if doc_error_code == "playwright_timeout":
-            final_reason: str | None = ClassificationReason.BROWSER_TIMEOUT
+        #Razão final reflete o que o browser encontrou, não a razão de escalamento HTTP
+        if doc_error_code == "anti_bot_blocked":
+            final_reason: str | None = ClassificationReason.ANTI_BOT_BLOCKED
+        elif doc_error_code == "playwright_timeout":
+            final_reason = ClassificationReason.BROWSER_TIMEOUT
         elif doc_error_code == "playwright_not_ready":
             final_reason = ClassificationReason.BROWSER_NOT_AVAILABLE
         elif doc_error_code:

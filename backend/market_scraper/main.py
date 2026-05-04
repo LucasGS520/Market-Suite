@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from .routes import routes_health, routes_scraper
 from .collection import crawlee_runtime
+from .core.config_scraper import settings as scraper_settings
 
 
 logger = structlog.get_logger("market_scraper.main")
@@ -23,6 +24,13 @@ async def _lifespan(app: FastAPI):
     """ Gerencia recursos de longa duração da aplicação."""
     # ── Startup ──────────────────────────────────────────────────────────
     await crawlee_runtime.startup()
+
+    if scraper_settings.SCRAPER_ENV in {"staging", "production"} and not scraper_settings.SCRAPER_PROXY_URLS.strip():
+        logger.warning(
+            "proxy_config_incomplete",
+            env=scraper_settings.SCRAPER_ENV,
+            message="SCRAPER_PROXY_URLS vazio; coleta de domínios sensíveis (ex.: Mercado Livre) será bloqueada",
+        )
 
     yield
 

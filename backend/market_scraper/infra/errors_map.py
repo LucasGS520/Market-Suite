@@ -24,7 +24,18 @@ from shared.utils.url_validation import UrlIssue
 # Valor  = (error_code_externo, mensagem, http_status)
 
 COLLECTION_ERROR_MAP: dict[str, tuple[str, str, int]] = {
+    # ── Configuração incompleta ──────────────────────────────────────────
+    "missing_proxy_config": (
+        "missing_proxy_config",
+        "Coleta requer proxy ativo neste ambiente; configure SCRAPER_PROXY_URLS",
+        http_status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
     # ── Anti-bot / rate limit ────────────────────────────────────────────
+    "anti_bot_blocked": (
+        "anti_bot_blocked",
+        "Bloqueio anti-bot terminal detectado; troque de identidade antes de nova tentativa",
+        http_status.HTTP_503_SERVICE_UNAVAILABLE,
+    ),
     "anti_bot_page": (
         "anti_bot_page",
         "Página de proteção anti-bot detectada; tente novamente mais tarde",

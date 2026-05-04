@@ -383,18 +383,73 @@ def test_parse_product_maps_collection_errors(monkeypatch, error_code, expected_
 
 # ── Robots bloqueado ──────────────────────────────────────────────────────────
 
-def test_parse_product_robots_block(monkeypatch):
+def test_parse_product_robots_strict(monkeypatch):
     async def fake_is_allowed(url, timeout):
         return False
 
     monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product._robots.is_allowed", fake_is_allowed)
-    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_ROBOTS_MODE", "block")
+    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_ROBOTS_MODE", "strict")
 
     result = asyncio.run(ParseProduct().execute(_URL, request_logger=_LOG))
 
     assert isinstance(result, ParseProductError)
     assert result.http_status == 403
     assert result.issue.code == "robots_disallowed"
+
+
+# ── Proxy config (contrato de ambiente) ──────────────────────────────────────
+
+def test_parse_product_proxy_required_staging_no_proxy(monkeypatch):
+    """staging + domínio Mercado Livre + sem proxy → 503 missing_proxy_config."""
+    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_ENV", "staging")
+    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_PROXY_URLS", "")
+
+    url = "https://www.mercadolivre.com.br/produto/123"
+    result = asyncio.run(ParseProduct().execute(url, request_logger=_LOG))
+
+    assert isinstance(result, ParseProductError)
+    assert result.http_status == 503
+    assert result.issue.code == "missing_proxy_config"
+
+
+def test_parse_product_proxy_required_production_no_proxy(monkeypatch):
+    """production + domínio Mercado Livre + sem proxy → 503."""
+    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_ENV", "production")
+    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_PROXY_URLS", "")
+
+    url = "https://www.mercadolivre.com.br/produto/123"
+    result = asyncio.run(ParseProduct().execute(url, request_logger=_LOG))
+
+    assert isinstance(result, ParseProductError)
+    assert result.http_status == 503
+    assert result.issue.code == "missing_proxy_config"
+
+
+def test_parse_product_proxy_not_required_local(monkeypatch):
+    """Em local, Mercado Livre sem proxy não bloqueia — continua coleta normal."""
+    _patch_full_flow(monkeypatch)
+    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_ENV", "local")
+    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_PROXY_URLS", "")
+
+    url = "https://www.mercadolivre.com.br/produto/123"
+    result = asyncio.run(ParseProduct().execute(url, request_logger=_LOG))
+
+    assert isinstance(result, ParseProductSuccess)
+
+
+def test_parse_product_proxy_not_required_when_proxy_configured(monkeypatch):
+    """staging + proxy configurado → não bloqueia."""
+    _patch_full_flow(monkeypatch)
+    monkeypatch.setattr("market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_ENV", "staging")
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product.settings.SCRAPER_PROXY_URLS",
+        "http://proxy:8080",
+    )
+
+    url = "https://www.mercadolivre.com.br/produto/123"
+    result = asyncio.run(ParseProduct().execute(url, request_logger=_LOG))
+
+    assert isinstance(result, ParseProductSuccess)
 
 
 # ── Stage timings ─────────────────────────────────────────────────────────────

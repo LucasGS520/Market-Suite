@@ -76,6 +76,15 @@ class PostProcessor:
         availability = self._resolve_availability(payload, acquisition)
         last_status = self._resolve_last_status(payload)
 
+        # ── 2a. OutOfStock: descarta preço — valor não é confiável para OOS ──
+        if availability is False:
+            current_price = None
+
+        # ── 2b. Nome sem preço confiável → PRICE_UNAVAILABLE ─────────────────
+        name = payload.get("name") or None
+        if bool(name) and current_price is None and availability is not False and last_status is None:
+            last_status = "price_unavailable"
+
         # ── 3. Source: payload > argumento externo ────────────────────────────
         resolved_source = (
             payload.get("source")
@@ -113,11 +122,19 @@ class PostProcessor:
     # ── Helpers privados ──────────────────────────────────────────────────────
 
     def _parse_price(self, raw: Any, url: str) -> Decimal | None:
-        """Converte valor bruto de preço em Decimal; retorna None em falha."""
+        """ Converte valor bruto de preço em Decimal; retorna None em falha ou preço <= 0."""
         if raw is None:
             return None
         try:
-            return parse_price_str(raw, url)
+            price = parse_price_str(raw, url)
+            if price is not None and price <= 0:
+                logger.debug(
+                    "post_processor_price_nonpositive",
+                    raw_price=sanitize_log_data(str(raw)),
+                    url=sanitize_log_data(url),
+                )
+                return None
+            return price
         except (ValueError, Exception):
             logger.warning(
                 "post_processor_price_parse_failed",

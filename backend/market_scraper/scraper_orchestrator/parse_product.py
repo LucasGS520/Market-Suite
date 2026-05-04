@@ -1,7 +1,7 @@
 """ ParseProduct canônico — fluxo determinístico sem feature flags.
 
 Sequência fixa e sem ramificações:
-    1. robots check (mode=audit: observa; mode=block: rejeita)
+    1. robots check (mode=warn: observa e loga; mode=strict: rejeita; mode=ignore: ignora)
     2. rate limiter pre-check (bloqueia domínios em cooldown quando habilitado)
     3. collect  → CrawleeRuntime.fetch_with_fallback → CollectedDocument
     4. extract  → ExtractionChain.run               → ParseResult
@@ -123,10 +123,8 @@ class ParseProduct:
         t = perf_counter()
         telemetry.collection_started(url=url)
 
-        robots_allowed = await _robots.is_allowed(
-            url, timeout=settings.SCRAPER_STEP_TIMEOUT_SECONDS
-        )
-        if not robots_allowed and settings.SCRAPER_ROBOTS_MODE == "block":
+        #Fail-fast de configuração: domínio exige proxy em staging/production
+        if settings.proxy_required_for(domain):
             stage_timings["collect"] = perf_counter() - t
             telemetry.collection_completed(
                 layer=None,
@@ -135,17 +133,53 @@ class ParseProduct:
             telemetry.pipeline_completed(
                 outcome="error",
                 total_duration_ms=int((perf_counter() - pipeline_started) * 1000),
-                extra={"reason": "robots_disallowed"},
+                extra={"reason": "missing_proxy_config"},
+            )
+            request_logger.warning(
+                "proxy_config_required",
+                domain=domain,
+                env=settings.SCRAPER_ENV,
             )
             return ParseProductError(
                 kind="error",
                 issue=UrlIssue(
-                    code="robots_disallowed",
-                    message="O acesso à URL foi bloqueado pelas regras de robots.txt",
+                    code="missing_proxy_config",
+                    message="Coleta requer proxy ativo neste ambiente; configure SCRAPER_PROXY_URLS",
                 ),
-                http_status=http_status.HTTP_403_FORBIDDEN,
+                http_status=http_status.HTTP_503_SERVICE_UNAVAILABLE,
                 stage_timings=stage_timings,
             )
+
+        if settings.SCRAPER_ROBOTS_MODE != "ignore":
+            robots_allowed = await _robots.is_allowed(
+                url, timeout=settings.SCRAPER_STEP_TIMEOUT_SECONDS
+            )
+            if not robots_allowed:
+                if settings.SCRAPER_ROBOTS_MODE == "strict":
+                    stage_timings["collect"] = perf_counter() - t
+                    telemetry.collection_completed(
+                        layer=None,
+                        duration_ms=int(stage_timings["collect"] * 1000),
+                    )
+                    telemetry.pipeline_completed(
+                        outcome="error",
+                        total_duration_ms=int((perf_counter() - pipeline_started) * 1000),
+                        extra={"reason": "robots_disallowed"},
+                    )
+                    return ParseProductError(
+                        kind="error",
+                        issue=UrlIssue(
+                            code="robots_disallowed",
+                            message="O acesso à URL foi bloqueado pelas regras de robots.txt",
+                        ),
+                        http_status=http_status.HTTP_403_FORBIDDEN,
+                        stage_timings=stage_timings,
+                    )
+                else:
+                    request_logger.warning(
+                        "robots_disallowed_warn",
+                        url=sanitize_log_data(url),
+                    )
 
         #Rate limiter pre-check
         allowed, _ = await adaptive_rate_limiter.should_allow(domain)
