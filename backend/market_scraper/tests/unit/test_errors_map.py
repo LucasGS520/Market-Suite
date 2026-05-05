@@ -9,7 +9,12 @@ from __future__ import annotations
 import pytest
 from fastapi import status as http_status
 
-from market_scraper.infra.errors_map import COLLECTION_ERROR_MAP, map_collection_error
+from market_scraper.infra.errors_map import (
+    CACHE_INVALIDATING_ERROR_CODES,
+    COLLECTION_ERROR_MAP,
+    HTTP_TIMEOUT_ORIGIN_OVERRIDES,
+    map_collection_error,
+)
 
 
 # ── Cobertura dos mapeamentos conhecidos ──────────────────────────────────────
@@ -101,3 +106,42 @@ def test_collection_error_map_covers_all_expected_codes():
         "browser_fetch_failed",
     }
     assert expected_codes == set(COLLECTION_ERROR_MAP.keys())
+
+
+# ── CACHE_INVALIDATING_ERROR_CODES ───────────────────────────────────────────
+
+
+def test_anti_bot_blocked_invalidates_cache():
+    """anti_bot_blocked deve invalidar cache — bloqueio terminal vem do HTTP após Fase 1."""
+    assert "anti_bot_blocked" in CACHE_INVALIDATING_ERROR_CODES
+
+
+def test_anti_bot_page_invalidates_cache():
+    """anti_bot_page (não-terminal) também invalida cache."""
+    assert "anti_bot_page" in CACHE_INVALIDATING_ERROR_CODES
+
+
+def test_transitoria_nao_invalida_cache():
+    """Erros de infra transitória não devem invalidar cache."""
+    assert "timeout" not in CACHE_INVALIDATING_ERROR_CODES
+    assert "network_error" not in CACHE_INVALIDATING_ERROR_CODES
+    assert "playwright_timeout" not in CACHE_INVALIDATING_ERROR_CODES
+
+
+# ── HTTP_TIMEOUT_ORIGIN_OVERRIDES ────────────────────────────────────────────
+
+
+def test_http_timeout_origin_overrides_contem_origens_semanticas():
+    """Origens HTTP com causa conhecida devem estar no conjunto de override."""
+    assert "server_error" in HTTP_TIMEOUT_ORIGIN_OVERRIDES
+    assert "access_denied" in HTTP_TIMEOUT_ORIGIN_OVERRIDES
+    assert "html_empty" in HTTP_TIMEOUT_ORIGIN_OVERRIDES
+    assert "rate_limited" in HTTP_TIMEOUT_ORIGIN_OVERRIDES
+    assert "anti_bot_page" in HTTP_TIMEOUT_ORIGIN_OVERRIDES
+
+
+def test_http_timeout_origin_overrides_nao_contem_browser_errors():
+    """Erros próprios do browser não devem estar no conjunto de override."""
+    assert "playwright_timeout" not in HTTP_TIMEOUT_ORIGIN_OVERRIDES
+    assert "playwright_fetch_error" not in HTTP_TIMEOUT_ORIGIN_OVERRIDES
+    assert "browser_fetch_failed" not in HTTP_TIMEOUT_ORIGIN_OVERRIDES

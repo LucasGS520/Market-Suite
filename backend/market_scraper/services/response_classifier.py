@@ -246,10 +246,11 @@ class ResponseClassifier:
                 telemetry={"error_type": type(error).__name__},
             )
 
-        #Qualquer outro erro de rede → escala por precaução
+        #Erro de transporte desconhecido: não identificado como timeout nem connection_error.
+        #Browser usa a mesma rede e DNS — escalar não recupera. Falha definitiva.
         return ClassificationResult(
-            action=ClassificationAction.SCALE,
-            next_layer=3,
+            action=ClassificationAction.REJECT,
+            next_layer=None,
             reason="network_error",
             telemetry={"error_type": type(error).__name__},
         )
@@ -308,6 +309,15 @@ class ResponseClassifier:
                     action=ClassificationAction.SUCCESS,
                     next_layer=None,
                     reason="anti_bot_degraded",
+                    telemetry={"anti_bot_pattern": anti_bot},
+                )
+            #Padrão terminal: identidade já comprometida, browser não vai recuperar.
+            #Falha rápida sem escalar — evita consumir budget de browser em vão.
+            if is_terminal_anti_bot_pattern(anti_bot):
+                return ClassificationResult(
+                    action=ClassificationAction.REJECT,
+                    next_layer=None,
+                    reason="anti_bot_blocked",
                     telemetry={"anti_bot_pattern": anti_bot},
                 )
             return ClassificationResult(

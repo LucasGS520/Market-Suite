@@ -136,13 +136,18 @@ def test_classify_scale_when_recaptcha_detected(classifier):
     assert result.telemetry.get("anti_bot_pattern") == "captcha_challenge"
 
 
-def test_classify_scale_when_mercadolivre_challenge_detected(classifier):
-    """200 + suspicious-traffic-frontend (Mercado Livre) → SCALE."""
+def test_classify_reject_when_mercadolivre_terminal_challenge_detected(classifier):
+    """200 + suspicious-traffic-frontend (Mercado Livre, padrão terminal) → REJECT imediato.
+
+    Padrão terminal não admite recuperação via browser com a mesma identidade.
+    Fail-fast preserva o budget de browser para URLs recuperáveis.
+    """
     html = _NORMAL_HTML + '<div id="suspicious-traffic-frontend"></div>'
     result = classifier.classify(http_status=200, html=html, error=None)
 
-    assert result.action == ClassificationAction.SCALE
-    assert result.next_layer == 3
+    assert result.action == ClassificationAction.REJECT
+    assert result.next_layer is None
+    assert result.reason == "anti_bot_blocked"
     assert result.telemetry.get("anti_bot_pattern") == "mercadolivre_challenge"
 
 
@@ -249,8 +254,12 @@ def test_classify_connect_timeout_escalates(classifier):
     assert result.reason == "timeout"
 
 
-def test_classify_unknown_network_error_escalates(classifier):
-    """Erro de rede genérico → SCALE defensivo para Camada 3."""
+def test_classify_remote_protocol_error_escalates(classifier):
+    """RemoteProtocolError → connection_error → SCALE para browser.
+
+    Servidor fechou a conexão inesperadamente — pode ser TLS fingerprinting.
+    Browser com fingerprint diferente pode contornar; escalamento é defensivo.
+    """
     req = httpx.Request("GET", "https://example.com")
     error = httpx.RemoteProtocolError("unexpected disconnect", request=req)
 
@@ -258,6 +267,22 @@ def test_classify_unknown_network_error_escalates(classifier):
 
     assert result.action == ClassificationAction.SCALE
     assert result.next_layer == 3
+    assert result.reason == "connection_error"
+
+
+def test_classify_unknown_network_error_rejects(classifier):
+    """Erro de transporte desconhecido (catch-all) → REJECT definitivo.
+
+    Exceções não identificadas como timeout nem connection_error usam a mesma
+    rede e DNS que o browser — escalar não recupera. Falha rápida.
+    """
+    error = OSError("network failure")  # não é httpx — cai no catch-all
+
+    result = classifier.classify(http_status=None, html=None, error=error)
+
+    assert result.action == ClassificationAction.REJECT
+    assert result.next_layer is None
+    assert result.reason == "network_error"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

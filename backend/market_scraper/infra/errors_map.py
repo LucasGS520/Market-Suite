@@ -152,13 +152,33 @@ def map_collection_error(error_code: str | None) -> tuple[UrlIssue, int]:
 
 
 #Erros que indicam problema de conteúdo (não infra transitória) → invalidam cache.
-CACHE_INVALIDATING_ERROR_CODES: frozenset[str] = frozenset(
-    {"anti_bot_page", "too_many_redirects", "invalid_url"}
-)
+CACHE_INVALIDATING_ERROR_CODES: frozenset[str] = frozenset({
+    "anti_bot_page",        # challenge não-terminal: conteúdo protegido
+    "anti_bot_blocked",     # bloqueio terminal: identidade identificada (após Fase 1, vem do HTTP)
+    "too_many_redirects",   # URL em loop de redirect
+    "invalid_url",          # URL inválida ou protocolo não suportado
+})
+
+# Quando o browser atinge playwright_timeout, o código HTTP 504 é impreciso se a causa real
+# veio de um erro já conhecido na camada HTTP. Para essas origens, o error_code da camada HTTP
+# é substituído no lugar de playwright_timeout, preservando semântica de status de resposta:
+#   server_error  → 503 (origem com 5xx, não lentidão do nosso gateway)
+#   access_denied → 503 (servidor bloqueou, não timeout de renderização)
+#   html_empty    → 422 (URL sem conteúdo; browser confirmou)
+#   rate_limited  → 429 (rate-limit confirmado pelas duas camadas)
+#   anti_bot_page → 429 (challenge não-terminal; browser também bloqueado)
+HTTP_TIMEOUT_ORIGIN_OVERRIDES: frozenset[str] = frozenset({
+    "server_error",
+    "access_denied",
+    "html_empty",
+    "rate_limited",
+    "anti_bot_page",
+})
 
 
 __all__ = [
     "CACHE_INVALIDATING_ERROR_CODES",
     "COLLECTION_ERROR_MAP",
+    "HTTP_TIMEOUT_ORIGIN_OVERRIDES",
     "map_collection_error",
 ]

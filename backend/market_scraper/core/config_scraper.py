@@ -177,6 +177,18 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_DEBUG_HTML_MAX_BYTES", "8192")
     ) #Tamanho máximo da amostra de HTML registrada no dump (bytes)
 
+    # --- Opções de runtime do browser (Playwright) ---
+    SCRAPER_BROWSER_DISABLE_DEV_SHM: bool = os.getenv(
+        "PLAYWRIGHT_DISABLE_DEV_SHM", "true"
+    ).lower() in {"1", "true", "on", "yes"}
+    #Passa --disable-dev-shm-usage ao Chromium. Necessário em containers com /dev/shm pequeno.
+    #Padrão True (seguro em VPS/staging). Desabilite apenas em dev-local com /dev/shm grande.
+    SCRAPER_BROWSER_DEBUG_SCREENSHOTS: bool = os.getenv(
+        "PLAYWRIGHT_DEBUG_SCREENSHOTS", "false"
+    ).lower() in {"1", "true", "on", "yes"}
+    #Salva screenshot em tests/debug/ quando anti-bot é detectado. Padrão False.
+    #Ative apenas localmente para diagnóstico — não usar em staging/produção.
+
     SCRAPER_HTTP_FOLLOW_REDIRECTS: bool = os.getenv(
         "SCRAPER_HTTP_FOLLOW_REDIRECTS",
         "true",

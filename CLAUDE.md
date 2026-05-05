@@ -19,27 +19,23 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Resumo do Problema e Objetivo da Correção
 
-- **Problema:** O `market_scraper` está arquiteturalmente organizado, mas ainda opera com desalinhamentos práticos em coleta anti-bot, tempo de falha, identidade de sessão e coerência de headers, o que leva a timeouts longos e respostas `503/504` quando o alvo está hostil.
+- **Problema:** o `market_scraper` operacionalmente degrada em cenários reais: a coleta entra em anti-bot, o fallback para browser consome orçamento excessivo, a política de escalonamento não falha rápido o bastante e as respostas finais ficam tardias e pouco claras.
 
-- **Sintoma observado:** Em VPS/staging, o fluxo entra em challenge anti-bot, o browser permanece por tempo excessivo, aparecem `browser_handler_orphan` e o endpoint encerra em `503/504` sem HTML confiável para a extração. Isso está documentado no diagnóstico atual em diagnostico_atual_scraper.md e nos logs em scraper_stag.log.
+- **Sintoma observado:** páginas públicas válidas às vezes viram `html_empty` e escalam desnecessariamente; páginas bloqueadas retornam `200` com challenge HTML e ainda assim gastam até o budget completo de browser; aparecem `browser_handler_orphan`, `playwright_timeout`, `503` e `504` tardios em staging/VPS.
 
-- **Objetivo da correção:** Alinhar o módulo ao comportamento ideal descrito em regras_scraper_ideal.md e estrutura_ideal_sessao_headers_scraper.md, mantendo os serviços e camadas existentes, com foco em falha rápida, sessões consistentes, headers coerentes e operação legítima em dados públicos.
+- **Objetivo da correção:** tornar o fluxo previsível, com fail-fast para bloqueio terminal, budgets coerentes, sessão/headers/proxy tratados como uma unidade e contratos de erro mais explícitos para coleta, escalonamento e resposta HTTP.
 
 ---
 
 ## Riscos, Impacto e Decisões
 
-- **Decisão Técnica Principal:** Manter a arquitetura atual e ajustar o comportamento operacional para tratar anti-bot, sessão e headers como política de execução, não como lógica manual espalhada. A identidade deve continuar centralizada no runtime/Crawlee, com coerência entre camada HTTP e browser, sem inventar gerenciadores próprios de fingerprint, cookies ou headers.
+- **Decisão Técnica Principal:** reduzir a coleta a uma política objetiva de aquisição com falha rápida, em vez de deixar o browser consumir o timeout global quando já há sinal suficiente de bloqueio ou HTML inútil.
 
-- **Risco Principal:** Ajustar sessão, headers e budgets pode alterar a taxa de sucesso, os códigos retornados e a semântica de alguns erros já consumidos por integrações existentes.
+- **Risco Principal:** apertar budgets e endurecer a política de escalonamento pode alterar códigos de retorno e a taxa de sucesso percebida em alguns domínios.
 
-- **Impacto atual:** Alto custo de tempo por tentativa, 504 tardio, pouca previsibilidade em VPS/staging, desperdício de recurso em challenge pages e diagnóstico ambíguo entre bloqueio terminal e lentidão legítima.
+- **Impacto atual:** alto tempo de resposta em falhas, `503`/`504` tardios, sessões desperdiçadas, dificuldade de diagnosticar bloqueio terminal versus lentidão legítima e baixa previsibilidade em staging/VPS.
 
-- **Dependências**
-  - Propriedades já existentes em config_scraper.py para budgets, policy e sessão.
-  - Runtime atual em crawlee_runtime.py, http_collector.py e browser_collector.py.
-  - Taxonomia de erro em errors_map.py.
-  - Regras idealizadas em regras_scraper_ideal.md e estrutura_ideal_sessao_headers_scraper.md.
+- **Dependências:** `CrawleeRuntime`, coletores HTTP e browser, `config_scraper`, `response_classifier`, `errors_map`, `robots`, `telemetry_service`, configuração de ambiente e documentação operacional.
 
 ---
 

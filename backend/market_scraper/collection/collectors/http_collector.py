@@ -17,6 +17,7 @@ from curl_cffi.requests.exceptions import RequestException as CurlRequestError
 from crawlee.errors import ProxyError
 
 from market_scraper.core.config_scraper import settings
+from market_scraper.services.response_classifier import detect_anti_bot_pattern
 
 logger = structlog.get_logger("http_collector")
 
@@ -99,6 +100,21 @@ class HttpCollector:
             if future and not future.done():
                 body = await context.http_response.read()
                 html = body[:_MAX_CONTENT_BYTES].decode("utf-8", errors="replace")
+
+                #Aposentar sessão em resposta 2xx com HTML de challenge anti-bot.
+                #O servidor identificou esta identidade como bot — reutilizá-la produziria
+                #mais challenges. Sessão é marcada como ruim antes de entregar o resultado.
+                if status < 400 and context.session:
+                    anti_bot = detect_anti_bot_pattern(html)
+                    if anti_bot:
+                        context.session.retire()
+                        logger.info(
+                            "http_session_retired",
+                            session_id=session_id,
+                            reason="anti_bot_html",
+                            pattern=anti_bot,
+                        )
+
                 future.set_result((html, status))
                 logger.debug(
                     "http_collect",
@@ -127,7 +143,7 @@ class HttpCollector:
             future = collector._pending.get(request_id)
             if future and not future.done():
                 future.set_exception(error)
-                logger.debug(
+                logger.info(
                     "http_collect_failed",
                     request_id=request_id,
                     session_id=session_id,

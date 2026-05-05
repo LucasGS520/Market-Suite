@@ -28,6 +28,7 @@ from market_scraper.collection.dto.collection_attempt import CollectionAttempt
 from market_scraper.collection.policy import CollectionPolicyAction, ResponseClassifierPolicy
 from market_scraper.core.config_scraper import settings
 from market_scraper.domain.enums import ClassificationReason
+from market_scraper.infra.errors_map import HTTP_TIMEOUT_ORIGIN_OVERRIDES
 from market_scraper.services.response_classifier import is_terminal_anti_bot_pattern
 
 if TYPE_CHECKING:
@@ -314,6 +315,10 @@ class CrawleeRuntime:
         elif doc_error_code == "playwright_timeout" and anti_bot_detected:
             #Timeout em challenge page já detectada pelo HTTP — bloqueio, não timeout genérico
             doc_error_code = "anti_bot_blocked"
+        elif doc_error_code == "playwright_timeout" and decision.reason in HTTP_TIMEOUT_ORIGIN_OVERRIDES:
+            #Timeout de browser em origem com causa conhecida → preservar código HTTP semântico.
+            #playwright_timeout (504) seria impreciso; o erro real vem da origem, não do nosso gateway.
+            doc_error_code = decision.reason
 
         browser_succeeded = html_browser is not None and not doc_error_code
         anti_bot_bypassed = browser_succeeded and not browser_anti_bot
@@ -325,6 +330,9 @@ class CrawleeRuntime:
             final_reason = ClassificationReason.BROWSER_TIMEOUT
         elif doc_error_code == "playwright_not_ready":
             final_reason = ClassificationReason.BROWSER_NOT_AVAILABLE
+        elif doc_error_code in HTTP_TIMEOUT_ORIGIN_OVERRIDES:
+            #Código substituído da origem HTTP — manter a razão HTTP, não BROWSER_FETCH_FAILED
+            final_reason = doc_error_code
         elif doc_error_code:
             final_reason = ClassificationReason.BROWSER_FETCH_FAILED
         elif browser_anti_bot:

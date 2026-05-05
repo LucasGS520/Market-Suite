@@ -11,7 +11,6 @@ asyncio.Future. Concorrência controlada por ConcurrencySettings do Crawlee.
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from contextlib import suppress
 from datetime import timedelta
@@ -33,12 +32,8 @@ logger = structlog.get_logger("browser_collector")
 
 # ── Configuração ──────────────────────────────────────────────────────────────
 
-_DISABLE_DEV_SHM: bool = os.getenv("PLAYWRIGHT_DISABLE_DEV_SHM", "true").lower() in {
-    "1", "true", "on", "yes"
-}
-_DEBUG_SCREENSHOTS: bool = os.getenv("PLAYWRIGHT_DEBUG_SCREENSHOTS", "false").lower() in {
-    "1", "true", "on", "yes"
-}
+_DISABLE_DEV_SHM: bool = settings.SCRAPER_BROWSER_DISABLE_DEV_SHM
+_DEBUG_SCREENSHOTS: bool = settings.SCRAPER_BROWSER_DEBUG_SCREENSHOTS
 _DEBUG_DIR = Path("tests/debug")
 
 _BLOCKED_RESOURCE_TYPES: frozenset[str] = frozenset({
@@ -271,7 +266,9 @@ class PlaywrightBrowserCollector:
 
             future = collector._pending.get(request_id)
             if future is None:
-                # Handler tardio: requisição já encerrou por timeout em fetch()
+                #Handler tardio: future já removido pelo finally de fetch() após timeout.
+                #Indica que SCRAPER_BROWSER_MAX_RETRIES > 0 ou budget externo venceu antes
+                #do Crawlee encerrar a navegação. Não é estado normal — investigar se recorrente.
                 collector._orphan_count += 1
                 logger.warning(
                     "browser_handler_orphan",
@@ -279,6 +276,7 @@ class PlaywrightBrowserCollector:
                     url=sanitize_log_data(context.request.url),
                     nav_duration_ms=nav_duration_ms,
                     orphan_count=collector._orphan_count,
+                    anomaly_type="orphan_handler",
                 )
                 return
 
