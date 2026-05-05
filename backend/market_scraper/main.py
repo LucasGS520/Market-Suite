@@ -25,7 +25,23 @@ async def _lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────────────────
     await crawlee_runtime.startup()
 
-    if scraper_settings.SCRAPER_ENV in {"staging", "production"} and not scraper_settings.SCRAPER_PROXY_URLS.strip():
+    proxy_available = bool(scraper_settings.SCRAPER_PROXY_URLS.strip())
+    sensitive_domains_blocked = (
+        scraper_settings.SCRAPER_ENV in {"staging", "production"} and not proxy_available
+    )
+    logger.info(
+        "service_capability",
+        env=scraper_settings.SCRAPER_ENV,
+        proxy_available=proxy_available,
+        sensitive_domains_supported=not sensitive_domains_blocked,
+        browser_ready=crawlee_runtime.browser_ready,
+        robots_mode=scraper_settings.SCRAPER_ROBOTS_MODE,
+        rate_limiter_block_enabled=scraper_settings.SCRAPER_RATE_LIMITER_BLOCK_ENABLED,
+        browser_concurrency=scraper_settings.SCRAPER_BROWSER_CONCURRENCY,
+        http_budget_s=scraper_settings.SCRAPER_HTTP_BUDGET_SECONDS,
+        browser_budget_s=scraper_settings.SCRAPER_BROWSER_BUDGET_SECONDS,
+    )
+    if sensitive_domains_blocked:
         logger.warning(
             "proxy_config_incomplete",
             env=scraper_settings.SCRAPER_ENV,

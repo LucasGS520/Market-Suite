@@ -17,28 +17,6 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ---
 
-## Resumo do Problema e Objetivo da Correção
-
-- **Problema:** o `market_scraper` operacionalmente degrada em cenários reais: a coleta entra em anti-bot, o fallback para browser consome orçamento excessivo, a política de escalonamento não falha rápido o bastante e as respostas finais ficam tardias e pouco claras.
-
-- **Sintoma observado:** páginas públicas válidas às vezes viram `html_empty` e escalam desnecessariamente; páginas bloqueadas retornam `200` com challenge HTML e ainda assim gastam até o budget completo de browser; aparecem `browser_handler_orphan`, `playwright_timeout`, `503` e `504` tardios em staging/VPS.
-
-- **Objetivo da correção:** tornar o fluxo previsível, com fail-fast para bloqueio terminal, budgets coerentes, sessão/headers/proxy tratados como uma unidade e contratos de erro mais explícitos para coleta, escalonamento e resposta HTTP.
-
----
-
-## Riscos, Impacto e Decisões
-
-- **Decisão Técnica Principal:** reduzir a coleta a uma política objetiva de aquisição com falha rápida, em vez de deixar o browser consumir o timeout global quando já há sinal suficiente de bloqueio ou HTML inútil.
-
-- **Risco Principal:** apertar budgets e endurecer a política de escalonamento pode alterar códigos de retorno e a taxa de sucesso percebida em alguns domínios.
-
-- **Impacto atual:** alto tempo de resposta em falhas, `503`/`504` tardios, sessões desperdiçadas, dificuldade de diagnosticar bloqueio terminal versus lentidão legítima e baixa previsibilidade em staging/VPS.
-
-- **Dependências:** `CrawleeRuntime`, coletores HTTP e browser, `config_scraper`, `response_classifier`, `errors_map`, `robots`, `telemetry_service`, configuração de ambiente e documentação operacional.
-
----
-
 ## Regras e Instruções de Execução
 **Regras obrigatórias de economia (NÃO IGNORAR)**
 1) NÃO liste árvore inteira do projeto (evite `tree`, `ls -R`, etc.). Se precisar, liste apenas pastas-alvo da FASE.

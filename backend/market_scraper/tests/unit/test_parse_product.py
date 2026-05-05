@@ -34,12 +34,24 @@ _URL = "https://example.com/product"
 _DOMAIN = "example.com"
 _LOG = structlog.get_logger("test_parse_product")
 
+# HTML mínimo que passa is_html_useful(): ≥1200 bytes, ≥2 sinais de produto, sem marcador anti-bot.
+_VALID_PRODUCT_HTML = (
+    '<html><head><meta property="og:title" content="Produto Teste"/></head><body>'
+    '<script type="application/ld+json">'
+    '{"@context":"https://schema.org","@type":"Product","name":"Produto Teste",'
+    '"offers":{"@type":"Offer","price":199.90,"priceCurrency":"BRL",'
+    '"availability":"https://schema.org/InStock"}}'
+    "</script>"
+    + "<!-- produto teste -->" * 55
+    + "</body></html>"
+)
+
 
 # ── Factories de fixtures ─────────────────────────────────────────────────────
 
 def _make_doc(
     *,
-    html: str | None = "<html><body>produto</body></html>",
+    html: str | None = _VALID_PRODUCT_HTML,
     http_status: int | None = 200,
     layer_used: str = "http",
     fallback_taken: bool = False,
@@ -48,6 +60,8 @@ def _make_doc(
     error_code: str | None = None,
     classification_reason: str | None = "html_valid",
     anti_bot_bypassed: bool = False,
+    is_degraded: bool = False,
+    degradation_reason: str | None = None,
 ) -> CollectedDocument:
     return CollectedDocument(
         html=html,
@@ -63,6 +77,8 @@ def _make_doc(
         error_code=error_code,
         classification_reason=classification_reason,
         anti_bot_bypassed=anti_bot_bypassed,
+        is_degraded=is_degraded,
+        degradation_reason=degradation_reason,
     )
 
 
@@ -463,3 +479,54 @@ def test_parse_product_stage_timings_populated(monkeypatch):
     for stage in ("collect", "extract", "post_process", "build_response"):
         assert stage in result.stage_timings
         assert result.stage_timings[stage] >= 0
+
+
+# ── HTML quality gate ─────────────────────────────────────────────────────────
+
+def test_parse_product_html_quality_gate_blocks_extraction(monkeypatch):
+    """HTML sem sinais de produto (< limiar de qualidade) → no_result antes da extração."""
+    extraction_called: list[bool] = []
+
+    class StubChain:
+        def run(self, html, url, source, *, http_status=None):
+            extraction_called.append(True)
+            return _make_parse_result()
+
+    _patch_full_flow(monkeypatch, doc=_make_doc(html="<html><body>vazio</body></html>"))
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product.get_extraction_chain",
+        lambda: StubChain(),
+    )
+
+    result = asyncio.run(ParseProduct().execute(_URL, request_logger=_LOG))
+
+    assert isinstance(result, ParseProductNoResult)
+    assert result.reason_code == "html_quality_gate"
+    assert not extraction_called
+
+
+def test_parse_product_html_quality_gate_skips_for_degraded_doc(monkeypatch):
+    """Documento anti_bot_degraded (is_degraded=True) ignora o gate — extração prossegue."""
+    extraction_called: list[bool] = []
+
+    class StubChain:
+        def run(self, html, url, source, *, http_status=None):
+            extraction_called.append(True)
+            return _make_parse_result()
+
+    degraded_doc = _make_doc(
+        html="<html><body>vazio</body></html>",
+        is_degraded=True,
+        degradation_reason="anti_bot_degraded",
+        anti_bot_detected=True,
+    )
+    _patch_full_flow(monkeypatch, doc=degraded_doc)
+    monkeypatch.setattr(
+        "market_scraper.scraper_orchestrator.parse_product.get_extraction_chain",
+        lambda: StubChain(),
+    )
+
+    result = asyncio.run(ParseProduct().execute(_URL, request_logger=_LOG))
+
+    assert isinstance(result, ParseProductSuccess)
+    assert extraction_called

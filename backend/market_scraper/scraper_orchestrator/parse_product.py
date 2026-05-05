@@ -43,6 +43,7 @@ from market_scraper.services.availability_inference import (
     HTTP_STATUS_UNAVAILABLE,
     infer_availability_from_http_status,
 )
+from market_scraper.utils.html_quality import is_html_useful
 from market_scraper.utils.http_utils import extract_domain
 from market_scraper.utils.response_builder import build_parser_response
 from market_scraper.infra import robots as _robots
@@ -302,6 +303,30 @@ class ParseProduct:
                 http_status=status_code,
                 stage_timings=stage_timings,
                 invalidate_cache=doc.error_code in CACHE_INVALIDATING_ERROR_CODES,
+            )
+
+        # ── HTML quality gate ─────────────────────────────────────────────────
+        # Documentos anti_bot_degraded (is_degraded=True) ignoram o gate:
+        # o classificador já verificou que há sinais de produto no HTML.
+        if not doc.is_degraded and not is_html_useful(doc.html, doc.http_status):
+            stage_timings["extract"] = 0.0
+            stage_timings.setdefault("post_process", 0.0)
+            telemetry.pipeline_completed(
+                outcome="no_result",
+                total_duration_ms=int((perf_counter() - pipeline_started) * 1000),
+                extra={"reason": "html_quality_gate"},
+            )
+            request_logger.info(
+                "use_case_stage_no_result",
+                stage="html_quality_gate",
+                url=sanitize_log_data(url),
+                classification_reason=doc.classification_reason,
+            )
+            return ParseProductNoResult(
+                kind="no_result",
+                reason_code="html_quality_gate",
+                stage_timings=stage_timings,
+                classification_reason=doc.classification_reason,
             )
 
         # ── Estágio 2: extract ────────────────────────────────────────────────
