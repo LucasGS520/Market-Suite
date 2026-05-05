@@ -108,7 +108,7 @@ class PlaywrightBrowserCollector:
         from crawlee.storage_clients import MemoryStorageClient
 
         collector = self
-        args = ["--no-sandbox", "--disable-blink-features=AutomationControlled"]
+        args = ["--no-sandbox"]
         if _DISABLE_DEV_SHM:
             args.append("--disable-dev-shm-usage")
 
@@ -208,7 +208,7 @@ class PlaywrightBrowserCollector:
                     anti_bot = detect_anti_bot_pattern(html)
                     if anti_bot:
                         session_id = context.session.id if context.session else "none"
-                        if context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
+                        if context.session:
                             context.session.retire()
                             logger.info(
                                 "browser_session_retired",
@@ -282,7 +282,7 @@ class PlaywrightBrowserCollector:
                 )
                 return
 
-            if status in (403, 429) and context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
+            if status in (403, 429) and context.session:
                 context.session.retire()
                 logger.info(
                     "browser_session_retired",
@@ -315,7 +315,7 @@ class PlaywrightBrowserCollector:
                 nav_duration_ms = round((time.monotonic() - t_nav) * 1000, 1)
 
             is_timeout = isinstance(error, TimeoutError) or "timeout" in type(error).__name__.lower()
-            if is_timeout and context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
+            if is_timeout and context.session:
                 context.session.retire()
                 logger.info(
                     "browser_session_retired",
@@ -345,7 +345,6 @@ class PlaywrightBrowserCollector:
             max_concurrent=settings.SCRAPER_BROWSER_CONCURRENCY,
             proxy_enabled=proxy_cfg is not None,
             session_pool_size=settings.SCRAPER_SESSION_POOL_MAX_SIZE,
-            session_retirement_enabled=settings.SCRAPER_SESSION_POOL_ENABLED,
         )
 
     async def shutdown(self) -> None:
@@ -434,6 +433,9 @@ class PlaywrightBrowserCollector:
         except asyncio.TimeoutError as exc:
             raise PlaywrightTimeoutError(url=url, timeout=timeout) from exc
         except Exception as exc:
+            # Crawlee emite RequestHandlerTimeoutError (não asyncio.TimeoutError) no handler timeout interno.
+            if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
+                raise PlaywrightTimeoutError(url=url, timeout=timeout) from exc
             raise PlaywrightFetchError(url=url, reason=str(exc)) from exc
         finally:
             self._pending.pop(request_id, None)

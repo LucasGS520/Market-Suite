@@ -19,23 +19,27 @@ O projeto é separado por responsabilidades, em diferentes módulos:
 
 ## Resumo do Problema e Objetivo da Correção
 
-- **Problema:** O `market_scraper` continua estruturalmente correto, mas operacionalmente frágil principalmente em VPS/staging, com bloqueio anti-bot terminal, fallback browser lento, ausência de proxy efetivo no ambiente e timeouts longos que degradam o endpoint síncrono.
+- **Problema:** O `market_scraper` está arquiteturalmente organizado, mas ainda opera com desalinhamentos práticos em coleta anti-bot, tempo de falha, identidade de sessão e coerência de headers, o que leva a timeouts longos e respostas `503/504` quando o alvo está hostil.
 
-- **Sintoma observado:** Nos logs de scraper_stag.log, o fluxo ainda alterna entre `anti_bot_blocked` e `playwright_timeout`, com tentativas longas, `browser_handler_orphan`, `SessionError` 429 e respostas finais `503/504`.
+- **Sintoma observado:** Em VPS/staging, o fluxo entra em challenge anti-bot, o browser permanece por tempo excessivo, aparecem `browser_handler_orphan` e o endpoint encerra em `503/504` sem HTML confiável para a extração. Isso está documentado no diagnóstico atual em diagnostico_atual_scraper.md e nos logs em scraper_stag.log.
 
-- **Objetivo da correção:** Transformar o módulo em scraper operacional com coleta resiliente, estados finais explícitos, falha rápida para anti-bot, política de robots clara, diferenciação semântica entre indisponibilidade e bloqueio.
+- **Objetivo da correção:** Alinhar o módulo ao comportamento ideal descrito em regras_scraper_ideal.md e estrutura_ideal_sessao_headers_scraper.md, mantendo os serviços e camadas existentes, com foco em falha rápida, sessões consistentes, headers coerentes e operação legítima em dados públicos.
 
 ---
 
 ## Riscos, Impacto e Decisões
 
-- **Decisão Técnica Principal:** Fechar contratos de estado e endurecer a camada de coleta para anti-bot, priorizando falha rápida e classificação correta, em vez de insistência longa com timeout genérico, passar de “fallback browser que insiste até timeout” para “coleta orientada a bloqueio terminal, identidade e falha rápida”.
+- **Decisão Técnica Principal:** Manter a arquitetura atual e ajustar o comportamento operacional para tratar anti-bot, sessão e headers como política de execução, não como lógica manual espalhada. A identidade deve continuar centralizada no runtime/Crawlee, com coerência entre camada HTTP e browser, sem inventar gerenciadores próprios de fingerprint, cookies ou headers.
 
-- **Risco Principal:** Introdução de proxy/sessão/novos estados alterar comportamento esperado por consumidores atuais da API e por automações que dependem de 422/504.
+- **Risco Principal:** Ajustar sessão, headers e budgets pode alterar a taxa de sucesso, os códigos retornados e a semântica de alguns erros já consumidos por integrações existentes.
 
-- **Impacto atual:** Alto custo operacional por tentativas longas, baixa taxa de sucesso em VPS/staging, diagnóstico ambiguo em parte dos erros e baixa previsibilidade de SLA, o sistema ainda desperdiça tempo em challenge pages, produz 504 tardio e mascara bloqueio anti-bot como indisponibilidade temporária.
+- **Impacto atual:** Alto custo de tempo por tentativa, 504 tardio, pouca previsibilidade em VPS/staging, desperdício de recurso em challenge pages e diagnóstico ambíguo entre bloqueio terminal e lentidão legítima.
 
-- **Dependências:** Provedor de proxy com saída BR, variáveis de ambiente válidas por ambiente, observabilidade ativa, suite de testes de regressão e integração em staging.
+- **Dependências**
+  - Propriedades já existentes em config_scraper.py para budgets, policy e sessão.
+  - Runtime atual em crawlee_runtime.py, http_collector.py e browser_collector.py.
+  - Taxonomia de erro em errors_map.py.
+  - Regras idealizadas em regras_scraper_ideal.md e estrutura_ideal_sessao_headers_scraper.md.
 
 ---
 

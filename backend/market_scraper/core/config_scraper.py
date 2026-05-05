@@ -9,7 +9,7 @@ complexos que geravam ramificações de execução difíceis de auditar.
 from __future__ import annotations
 
 import os
-from typing import Dict, Tuple
+from typing import Dict
 
 from pydantic import model_validator
 from shared.core.config_base import ConfigBase, PYTEST_RUNNING
@@ -61,8 +61,8 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS", "10.0")
     ) #Timeout de navegação por tentativa reduzido; deve ser < SCRAPER_BROWSER_BUDGET_SECONDS
     SCRAPER_BROWSER_MAX_RETRIES: int = int(
-        os.getenv("SCRAPER_BROWSER_MAX_RETRIES", "1")
-    ) #Tentativas extras de browser com backoff (1 retry = máximo 2 tentativas totais; sem retry em anti-bot)
+        os.getenv("SCRAPER_BROWSER_MAX_RETRIES", "0")
+    ) #Retries extras no browser (0 = tentativa única). Retries > 0 podem gerar browser_handler_orphan quando o budget externo vence durante uma segunda tentativa do Crawlee.
     SCRAPER_BROWSER_EARLY_EXIT_ENABLED: bool = os.getenv(
         "SCRAPER_BROWSER_EARLY_EXIT_ENABLED", "True"
     ).lower() in {"1", "true", "on", "yes"}
@@ -149,79 +149,13 @@ class Settings(ConfigBase):
         os.getenv("SCRAPER_DNS_CACHE_TTL", "120.0")
     ) #Tempo em segundos que respostas DNS permanecem em cache
 
-    # --- Identidade HTTP ---
-    _DEFAULT_UA_POOL: Tuple[str, ...] = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-        "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
-        "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    )
-
-    SCRAPER_USER_AGENT_POOL: Tuple[str, ...] = tuple(
-        ua.strip()
-        for ua in os.getenv("SCRAPER_USER_AGENT_POOL", "||".join(_DEFAULT_UA_POOL)).split("||")
-        if ua.strip()
-    ) #Pool estático curado utilizado no round-robin
-    SCRAPER_DEFAULT_USER_AGENT: str = os.getenv(
-        "SCRAPER_DEFAULT_USER_AGENT",
-        SCRAPER_USER_AGENT_POOL[0] if SCRAPER_USER_AGENT_POOL else _DEFAULT_UA_POOL[0],
-    ) #Valor padrão utilizado quando o pool estiver vazio
-
-    SCRAPER_HEADERS_ACCEPT: str = os.getenv(
-        "SCRAPER_HEADERS_ACCEPT",
-        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    )  #Header Accept coerente com navegadores modernos
-    SCRAPER_HEADERS_ACCEPT_LANGUAGE: str = os.getenv(
-        "SCRAPER_HEADERS_ACCEPT_LANGUAGE",
-        "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-    )  #Header Accept-Language adotado pelo scraper
-    SCRAPER_HEADERS_CONNECTION: str = os.getenv(
-        "SCRAPER_HEADERS_CONNECTION",
-        "keep-alive",
-    )  #Header Connection padronizado
-    SCRAPER_HEADERS_CACHE_CONTROL: str = os.getenv(
-        "SCRAPER_HEADERS_CACHE_CONTROL",
-        "max-age=0",
-    )  #Header Cache-Control enviado por padrão
-    SCRAPER_HEADERS_ACCEPT_ENCODING: str = os.getenv(
-        "SCRAPER_HEADERS_ACCEPT_ENCODING",
-        "gzip, deflate, br",
-    )  #Header Accept-Encoding simples para conteúdo compactado
-    SCRAPER_HEADERS_REFERER_TEMPLATE: str | None = os.getenv(
-        "SCRAPER_HEADERS_REFERER_TEMPLATE",
-        None,
-    )  #Template opcional para construir Referer dinâmico
-    SCRAPER_HEADERS_DEFAULT_COOKIES: str = os.getenv(
-        "SCRAPER_HEADERS_DEFAULT_COOKIES",
-        "",
-    ) #Cookies opcionais enviados por padrão
-    SCRAPER_HEADERS_ADDITIONAL: str = os.getenv(
-        "SCRAPER_HEADERS_ADDITIONAL",
-        "",
-    ) #Headers adicionais enviados além do conjunto mínimo
-
     # --- Identidade operacional (proxy + sessão) ---
     SCRAPER_PROXY_URLS: str = os.getenv("SCRAPER_PROXY_URLS", "")
     #Lista de URLs de proxy separada por "||". Vazio = sem proxy (coleta sem rotação de IP).
     #Exemplo: "http://user:pass@proxy1:8080||http://user:pass@proxy2:8080"
-    SCRAPER_SESSION_POOL_ENABLED: bool = os.getenv(
-        "SCRAPER_SESSION_POOL_ENABLED", "true"
-    ).lower() in {"1", "true", "on", "yes"}
-    #Padrão True. Controla se sessões ruins são aposentadas (retire) em anti_bot/timeout/403/429.
-    #Já habilitado por padrão no Crawlee (use_session_pool=True); este flag habilita o retirement ativo nas Fases 3+.
     SCRAPER_SESSION_POOL_MAX_SIZE: int = int(
         os.getenv("SCRAPER_SESSION_POOL_MAX_SIZE", "20")
     ) #Número máximo de sessões no pool (padrão Crawlee = 1000; reduzido para scraping direcionado)
-
-    SCRAPER_DOMAIN_BOOTSTRAP_ENABLED: bool = os.getenv(
-        "SCRAPER_DOMAIN_BOOTSTRAP_ENABLED", "True"
-    ).lower() in {"1", "true", "on", "yes"}
-    #Padrão True: navega para homepage do domínio antes da primeira requisição de produto para aquecer a sessão e reduzir falsos positivos anti-bot em Mercado Livre.
 
     # --- Observabilidade ---
     SCRAPER_LOG_4XX_BODY: bool = os.getenv("SCRAPER_LOG_4XX_BODY", "True").lower() in {
@@ -286,23 +220,6 @@ class Settings(ConfigBase):
             )
         return self
 
-    def get_default_cookies(self) -> Dict[str, str]:
-        """ Retorna cookies básicos enviados em todas as requisições 
-        
-        O formato esperado é uma lista delimitada por ``||`` em que cada
-        item segue ``chave=valor``. Entradas inválidas são ignoradas para
-        manter tolerância com configurações dinâmicas.
-        """
-        return self._parse_key_value_pairs(self.SCRAPER_HEADERS_DEFAULT_COOKIES)
-
-    def get_additional_headers(self) -> Dict[str, str]:
-        """ Retorna headers complementares configurados para o scraper
-        
-        O método aplica a mesma regra de parsing dos cookies, permitindo
-        sobrescrever seletivamente headers utilizados pelo pipeline
-        """
-        return self._parse_key_value_pairs(self.SCRAPER_HEADERS_ADDITIONAL)
-    
     def resolve_domain_timeout(self, domain: str | None, fallback: float) -> float:
         """ Devolve timeout específico do domínio quando configurado 
         
@@ -315,30 +232,6 @@ class Settings(ConfigBase):
         normalized = domain.lower()
         mapping = self._parse_domain_timeouts(self.SCRAPER_HTTP_DOMAIN_TIMEOUTS)
         return mapping.get(normalized, fallback)
-    
-    @staticmethod
-    def _parse_key_value_pairs(raw: str) -> Dict[str, str]:
-        """ Converte string delimitada em dicionário ``{chave: valor}`` 
-        
-        Entradas sem ``=`` ou com chave vazia são descartadas para evitar
-        propagação de valores inconsistentes para o cliente HTTP.
-        """
-        if not raw:
-            return {}
-        
-        parsed: Dict[str, str] = {}
-        for item in raw.split("||"):
-            chunk = item.strip()
-            if not chunk or "=" not in chunk:
-                continue
-
-            key, _, value = chunk.partition("=")
-            key = key.strip()
-            if not key:
-                continue
-            parsed[key] = value.strip()
-
-        return parsed
     
     @staticmethod
     def _parse_domain_timeouts(raw: str) -> Dict[str, float]:

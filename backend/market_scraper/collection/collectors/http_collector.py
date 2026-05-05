@@ -87,7 +87,7 @@ class HttpCollector:
             status = context.http_response.status_code
 
             #Aposentar sessão em bloqueio ou rate limit — impede reuso de identidade comprometida
-            if status in (403, 429) and context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
+            if status in (403, 429) and context.session:
                 context.session.retire()
                 logger.info(
                     "http_session_retired",
@@ -115,7 +115,7 @@ class HttpCollector:
             session_id = context.session.id if context.session else "none"
 
             #Aposentar sessão quando o proxy falhou — marca identidade como ruim
-            if isinstance(error, ProxyError) and context.session and settings.SCRAPER_SESSION_POOL_ENABLED:
+            if isinstance(error, ProxyError) and context.session:
                 context.session.retire()
                 logger.info(
                     "http_session_retired",

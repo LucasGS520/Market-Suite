@@ -36,7 +36,7 @@ market_scraper/
 │   └── extraction_chain.py    #   cadeia fixa; usa ParseResult/ParseAttempt de domain.dtos
 ├── post_processing/           # Normalização e validação pós-extração
 │   ├── normalizers/           #   PriceNormalizer, ProductNormalizer
-│   └── dto/                   #   PostProcessResult
+│   └── processor.py           #   PostProcessor — orquestra normalização e validação
 ├── services/                  # Serviços de suporte compartilhados
 │   ├── availability_inference.py   # Inferência de disponibilidade por status HTTP
 │   ├── response_classifier.py      # Classificação de resposta HTTP / anti-bot
@@ -257,7 +257,7 @@ A interface pública do módulo é exposta por [`scraper_orchestrator/orchestrat
 |-----------|---------|-------|
 | `CrawleeRuntime` | [`crawler/crawlee_runtime.py`](collection/crawler/crawlee_runtime.py) | Coordena HTTP → browser com política de decisão; lifecycle via `startup()`/`shutdown()` |
 | `HttpCollector` | [`collectors/http_collector.py`](collection/collectors/http_collector.py) | Wrapper fino sobre `CurlImpersonateHttpClient` do Crawlee (curl_cffi com impersonation) |
-| `PlaywrightBrowserCollector` | [`collectors/browser_collector.py`](collection/collectors/browser_collector.py) | Fallback browser via Playwright; stealth + resource blocking |
+| `PlaywrightBrowserCollector` | [`collectors/browser_collector.py`](collection/collectors/browser_collector.py) | Fallback browser via Playwright; fingerprint delegado ao Crawlee, resource blocking habilitado |
 | `ResponseClassifierPolicy` | [`policy.py`](collection/policy.py) | Decide `ACCEPT / ESCALATE_TO_BROWSER / STOP_UNAVAILABLE / STOP_FAILURE` |
 | `CollectedDocument` | [`dto/collected_document.py`](collection/dto/collected_document.py) | DTO imutável com HTML, status e telemetria de coleta |
 
@@ -337,38 +337,6 @@ A telemetria de aquisição é consolidada em `PostProcessResult.extra_fields["a
 
 Variáveis de ambiente controladas em [`core/config_scraper.py`](core/config_scraper.py).
 
-### Aquisição e Timeouts
-
-| Variável | Padrão | Descrição |
-|----------|--------|-----------|
-| `SCRAPER_HTTP_BUDGET_SECONDS` | `10.0` | Orçamento total para coleta HTTP (curl_cffi + retries) |
-| `SCRAPER_BROWSER_BUDGET_SECONDS` | `40.0` | Orçamento para fallback Playwright (navegação + renderização) |
-| `SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS` | `10.0` | Timeout de navegação por tentativa; deve ser < BROWSER_BUDGET |
-| `SCRAPER_BROWSER_MAX_RETRIES` | `2` | Tentativas extras do browser com backoff |
-| `SCRAPER_BROWSER_CONCURRENCY` | `5` | Máximo de instâncias Playwright simultâneas (1 em staging) |
-| `SCRAPER_STEP_TIMEOUT_SECONDS` | `15.0` | Timeout para etapas de parsing (extração/pós-processamento) |
-| `SCRAPER_PIPELINE_TIMEOUT_SECONDS` | `50.0` | Timeout global do pipeline — deve ser >= HTTP_BUDGET + BROWSER_BUDGET + 5s |
-| `SCRAPER_HTTP_RETRIES` | `2` | Tentativas extras para downloads HTTP |
-| `SCRAPER_HTTP_RETRY_BACKOFF_BASE` | `0.5` | Base do backoff exponencial entre retries |
-| `SCRAPER_HTTP_MAX_REDIRECTS` | `3` | Limite de redirecionamentos seguidos |
-| `SCRAPER_HTTP_MAX_CONNECTIONS` | `10` | Conexões simultâneas no client HTTP |
-
-### Comportamento de Produção
-
-| Variável | Padrão | Descrição |
-|----------|--------|-----------|
-| `SCRAPER_ROBOTS_MODE` | `audit` | `audit` = observa e loga; `block` = rejeita com 403 |
-| `SCRAPER_RATE_LIMITER_BLOCK_ENABLED` | `False` | `True` = bloqueia domínios em cooldown severo em produção |
-| `SCRAPER_TELEMETRY_VERBOSE` | `False` | `True` = loga session_id, attempt e timestamps em cada coleta (staging/debug) |
-
-### Cache
-
-| Variável | Padrão | Descrição |
-|----------|--------|-----------|
-| `SCRAPER_CACHE_TTL_SECONDS` | `3600` | TTL padrão por URL |
-| `SCRAPER_CACHE_MAX_ENTRIES` | `5000` | Limite de entradas em memória |
-| `SCRAPER_SINGLEFLIGHT_LOCK_TTL` | `15.0` | TTL dos locks de coalesce de requisições paralelas |
-
 ---
 
 ## Como Estender
@@ -427,6 +395,7 @@ uvicorn market_scraper.main:app --reload --port 8001
 | `collection_completed` com `fallback_taken=true` | HTTP falhou e browser foi acionado | Normal em sites com proteção anti-bot |
 | `parse_no_result` | Nenhum parser extraiu dados úteis | Verificar se o HTML retornado contém a página do produto |
 | `rate_limiter_cooldown` | Domínio em cooldown por erros consecutivos | Aguardar cooldown ou revisar frequência de coleta |
+| `browser_handler_orphan` | Handler do Crawlee chegou após o budget externo já ter expirado — anomalia operacional | Investigar se SCRAPER_BROWSER_BUDGET_SECONDS está muito próximo de SCRAPER_BROWSER_NAVIGATION_TIMEOUT_SECONDS |
 | `robots_disallowed` | URL bloqueada por robots.txt | Em modo `audit` é log; em modo `block` retorna 403 |
 | `use_case_completed` | Pipeline concluído com sucesso | Monitorar `duration_collect_ms`, `duration_extract_ms` |
 
@@ -442,6 +411,8 @@ uvicorn market_scraper.main:app --reload --port 8001
 | Métrica | Limiar sugerido | Causa provável |
 |---------|-----------------|----------------|
 | Taxa `422 no_result` | > 10% | Mudança de layout no e-commerce alvo |
-| Taxa `429 anti_bot` | > 5% | Aumento de detecção; revisar headers e fingerprint |
+| Taxa `429 anti_bot` | > 5% | Aumento de detecção; revisar proxy ativo e política de sessão |
 | Taxa `503 pipeline_degraded` | > 1% | Problema no browser pool; verificar Playwright |
+| Taxa `anti_bot_blocked` | > 5% | Bloqueio terminal por IP/identidade; ativar ou rotacionar proxy |
+| Frequência `browser_handler_orphan` | crescente | Budget externo e timeout de navegação desalinhados; revisar SCRAPER_BROWSER_BUDGET_SECONDS |
 | Latência P95 | > 40s | Budget de browser sendo consumido sistematicamente |
